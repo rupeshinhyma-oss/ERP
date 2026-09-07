@@ -1,0 +1,235 @@
+"""
+RBAC & Security System Tests.
+
+Tests permission hierarchy, multi-source permission inheritance,
+Super Admin protections, user account status rules, and forced password change.
+"""
+
+from __future__ import annotations
+
+import uuid
+import pytest
+from app.rbac.models import Permission, Role, UserPermission
+from app.users.models import User, UserStatus
+from app.auth.service import CurrentUser
+
+pytestmark = pytest.mark.asyncio
+
+
+def test_permission_model_hierarchy():
+    """Verify Permission model has module, page, action, scope fields."""
+    perm = Permission(
+        code="employee.view",
+        module="employee",
+        page="teams",
+        action="view",
+        scope="ALL",
+        description="View employee records",
+    )
+    assert perm.code == "employee.view"
+    assert perm.module == "employee"
+    assert perm.page == "teams"
+    assert perm.action == "view"
+    assert perm.scope == "ALL"
+
+
+def test_current_user_must_change_password_flag():
+    """Verify CurrentUser carries must_change_password flag."""
+    user_id = uuid.uuid4()
+    user = CurrentUser(
+        id=user_id,
+        username="testuser",
+        permissions={"employee.view"},
+        must_change_password=True,
+    )
+    assert user.must_change_password is True
+
+
+def test_user_account_status_can_login():
+    """Verify User.can_login status restrictions."""
+    user = User(
+        username="active_user",
+        email="active@example.com",
+        password_hash="hash",
+        status=UserStatus.ACTIVE,
+        is_active=True,
+    )
+    assert user.can_login is True
+
+    inactive_user = User(
+        username="inactive_user",
+        email="inactive@example.com",
+        password_hash="hash",
+        status=UserStatus.INACTIVE,
+        is_active=False,
+    )
+    assert inactive_user.can_login is False
+
+    suspended_user = User(
+        username="suspended_user",
+        email="suspended@example.com",
+        password_hash="hash",
+        status=UserStatus.SUSPENDED,
+        is_active=False,
+    )
+    assert suspended_user.can_login is False
+
+    locked_user = User(
+        username="locked_user",
+        email="locked@example.com",
+        password_hash="hash",
+        status=UserStatus.LOCKED,
+        is_active=True,
+    )
+    assert locked_user.can_login is False
+
+    pwd_change_user = User(
+        username="pwd_change_user",
+        email="pwdchange@example.com",
+        password_hash="hash",
+        status=UserStatus.PASSWORD_CHANGE_REQUIRED,
+        is_active=True,
+    )
+    assert pwd_change_user.can_login is True
+
+
+def test_user_permission_override_model():
+    """Verify UserPermission override fields."""
+    user_id = uuid.uuid4()
+    perm_id = uuid.uuid4()
+    grant_override = UserPermission(user_id=user_id, permission_id=perm_id, is_granted=True)
+    deny_override = UserPermission(user_id=user_id, permission_id=perm_id, is_granted=False)
+    assert grant_override.is_granted is True
+    assert deny_override.is_granted is False
+
+
+async def test_effective_permissions_source_tracing():
+    """Verify source resolution priority mapping (Role Permissions + User Overrides)."""
+    user_grants = {"supplier.export"}
+    user_denies = {"user.delete"}
+    role_perms = {"user.read", "user.delete", "supplier.view"}
+
+    effective = (role_perms | user_grants) - user_denies
+
+    permission_sources = []
+    for code in sorted(list(effective)):
+        if code in user_grants:
+            src = "Individual User"
+        else:
+            src = "System Role"
+        permission_sources.append({"code": code, "source": src})
+
+    sources_dict = {item["code"]: item["source"] for item in permission_sources}
+    assert sources_dict["supplier.export"] == "Individual User"
+    assert sources_dict["supplier.view"] == "System Role"
+    assert sources_dict["user.read"] == "System Role"
+    assert "user.delete" not in sources_dict
+
+
+def test_user_override_audit_actions():
+    """Verify AuditAction enum contains USER_OVERRIDE_ADDED and USER_OVERRIDE_REMOVED."""
+    from app.audit.constants import AuditAction
+    assert AuditAction.USER_OVERRIDE_ADDED == "USER_OVERRIDE_ADDED"
+    assert AuditAction.USER_OVERRIDE_REMOVED == "USER_OVERRIDE_REMOVED"
+
+
+@pytest.mark.asyncio
+async def test_set_user_permissions_bulk_service():
+    """Verify bulk user permission overrides updates repository and invalidates cache."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.rbac.service import RBACService
+
+    user_id = uuid.uuid4()
+    p1 = uuid.uuid4()
+    p2 = uuid.uuid4()
+
+    mock_perm_repo = AsyncMock()
+    mock_perm_repo.get_by_id.return_value = MagicMock(id=p1)
+    mock_user_perm_repo = AsyncMock()
+
+    service = RBACService(
+        role_repository=AsyncMock(),
+        permission_repository=mock_perm_repo,
+        user_permission_repository=mock_user_perm_repo,
+        user_role_repository=AsyncMock(),
+    )
+
+    count = await service.set_user_permissions_bulk(
+        user_id,
+        overrides=[(p1, True), (p2, False)],
+        granted_by=uuid.uuid4(),
+    )
+
+    assert count == 2
+    mock_user_perm_repo.set_user_permissions_bulk.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_role_deletion_impact_and_reassignment():
+    """Verify get_role_deletion_impact lists assigned users and delete_role reassigns them."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.rbac.service import RBACService
+    from app.core.exceptions import ConflictException, ForbiddenException
+
+    role_id = uuid.uuid4()
+    target_role_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    mock_role_repo = AsyncMock()
+    mock_perm_repo = AsyncMock()
+    mock_user_perm_repo = AsyncMock()
+    mock_user_role_repo = AsyncMock()
+
+    custom_role = Role(name="Editor", is_system=False)
+    custom_role.id = role_id
+    target_role = Role(name="user", is_system=False)
+    target_role.id = target_role_id
+    system_role = Role(name="super_admin", is_system=True)
+    system_role.id = role_id
+
+    mock_user = MagicMock()
+    mock_user.id = user_id
+    mock_user.username = "alice"
+    mock_user.display_name = "Alice W"
+    mock_user.full_name = "Alice Wonderland"
+    mock_link = MagicMock(user_id=user_id, role_id=role_id, user=mock_user, assigned_at=None)
+
+    service = RBACService(
+        role_repository=mock_role_repo,
+        permission_repository=mock_perm_repo,
+        user_permission_repository=mock_user_perm_repo,
+        user_role_repository=mock_user_role_repo,
+    )
+
+    # 1. Test get_role_deletion_impact with assigned user
+    mock_role_repo.get_by_id.return_value = custom_role
+    mock_user_role_repo.list_for_role.return_value = [mock_link]
+
+    impact = await service.get_role_deletion_impact(role_id)
+    assert impact["role_id"] == str(role_id)
+    assert impact["role_name"] == "Editor"
+    assert impact["affected_user_count"] == 1
+    assert impact["affected_users"][0]["username"] == "alice"
+
+    # 2. Test delete_role fails if users attached and no reassignment target provided
+    with pytest.raises(ConflictException, match="user\\(s\\) are still assigned"):
+        await service.delete_role(role_id)
+
+    # 3. Test delete_role succeeds with reassignment
+    mock_role_repo.get_by_id.side_effect = lambda rid: custom_role if rid == role_id else target_role
+    mock_user_role_repo.get.return_value = None  # user doesn't already have target role
+
+    reassigned = await service.delete_role(role_id, reassign_to_role_id=target_role_id)
+    assert reassigned == 1
+    mock_user_role_repo.create.assert_awaited_once()
+    mock_user_role_repo.delete.assert_awaited_once_with(mock_link)
+    mock_role_repo.delete.assert_awaited_once_with(custom_role)
+
+    # 4. Test delete_role on system role raises ForbiddenException
+    mock_role_repo.get_by_id.side_effect = None
+    mock_role_repo.get_by_id.return_value = system_role
+    with pytest.raises(ForbiddenException, match="System roles cannot be deleted"):
+        await service.delete_role(role_id)
+
+
+

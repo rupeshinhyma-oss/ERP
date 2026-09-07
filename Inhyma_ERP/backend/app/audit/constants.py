@@ -1,0 +1,104 @@
+"""
+Audit Constants.
+
+Defines the closed set of audit action types (:class:`AuditAction`) and the
+list of sensitive field names that must never be persisted to the audit
+log in plain form (see :mod:`app.audit.masking`).
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+
+
+class AuditAction(str, Enum):
+    """The closed set of actions the audit log can record.
+
+    Kept as a single enum (rather than a free-text string) so that every
+    caller, the database column, and API filters agree on exactly the same
+    vocabulary -- see the Phase 3 spec's required action list.
+    """
+
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+    LOGIN = "LOGIN"
+    LOGIN_FAILED = "LOGIN_FAILED"
+    LOGOUT = "LOGOUT"
+    PASSWORD_CHANGE = "PASSWORD_CHANGE"
+    PASSWORD_RESET = "PASSWORD_RESET"
+    ROLE_ASSIGNED = "ROLE_ASSIGNED"
+    ROLE_REMOVED = "ROLE_REMOVED"
+    PERMISSION_CHANGED = "PERMISSION_CHANGED"
+    PERMISSION_ASSIGNED = "PERMISSION_ASSIGNED"
+    PERMISSION_REMOVED = "PERMISSION_REMOVED"
+    USER_PERMISSION_CHANGED = "USER_PERMISSION_CHANGED"
+    USER_OVERRIDE_ADDED = "USER_OVERRIDE_ADDED"
+    USER_OVERRIDE_REMOVED = "USER_OVERRIDE_REMOVED"
+    STATUS_CHANGED = "STATUS_CHANGED"
+    ADMIN_PROMOTION = "ADMIN_PROMOTION"
+    ADMIN_REMOVAL = "ADMIN_REMOVAL"
+    USER_LOCKED = "USER_LOCKED"
+    USER_UNLOCKED = "USER_UNLOCKED"
+    USER_ACTIVATED = "USER_ACTIVATED"
+    USER_DEACTIVATED = "USER_DEACTIVATED"
+    IMPORT = "IMPORT"
+    EXPORT = "EXPORT"
+    FILE_UPLOAD = "FILE_UPLOAD"
+    FILE_DELETE = "FILE_DELETE"
+    # --- Organization / Employee / Identity & Access upgrade (additive) -----
+    # New, purely additive action codes for the Employee/Department/Position/
+    # Reporting/Leadership modules. Existing action codes above are
+    # untouched, so every previously-recorded audit row keeps its exact
+    # meaning; this just extends the closed vocabulary going forward. Since
+    # this column uses ``native_enum=False`` (see the model docstring in
+    # app.audit.models), adding members here requires no database migration.
+    EMPLOYEE_CREATED = "EMPLOYEE_CREATED"
+    EMPLOYEE_UPDATED = "EMPLOYEE_UPDATED"
+    EMPLOYEE_DEACTIVATED = "EMPLOYEE_DEACTIVATED"
+    EMPLOYEE_LINKED_USER = "EMPLOYEE_LINKED_USER"
+    EMPLOYEE_UNLINKED_USER = "EMPLOYEE_UNLINKED_USER"
+    DEPARTMENT_ASSIGNMENT_ADDED = "DEPARTMENT_ASSIGNMENT_ADDED"
+    DEPARTMENT_ASSIGNMENT_REMOVED = "DEPARTMENT_ASSIGNMENT_REMOVED"
+    POSITION_ASSIGNMENT_ADDED = "POSITION_ASSIGNMENT_ADDED"
+    POSITION_ASSIGNMENT_REMOVED = "POSITION_ASSIGNMENT_REMOVED"
+    LEADERSHIP_ASSIGNMENT_ADDED = "LEADERSHIP_ASSIGNMENT_ADDED"
+    LEADERSHIP_ASSIGNMENT_REMOVED = "LEADERSHIP_ASSIGNMENT_REMOVED"
+    REPORTING_RELATIONSHIP_ADDED = "REPORTING_RELATIONSHIP_ADDED"
+    REPORTING_RELATIONSHIP_REMOVED = "REPORTING_RELATIONSHIP_REMOVED"
+    REPORTING_RELATIONSHIP_CHANGED = "REPORTING_RELATIONSHIP_CHANGED"
+    OTHER = "OTHER"
+
+
+# Field names (case-insensitive, matched anywhere in a nested payload) that
+# must never appear in an audit log's old/new values in plain form. Matched
+# against dict keys recursively by app.audit.masking.mask_sensitive_data.
+SENSITIVE_FIELD_NAMES: frozenset[str] = frozenset(
+    {
+        "password",
+        "current_password",
+        "new_password",
+        "confirm_password",
+        "temporary_password",
+        "password_hash",
+        "hashed_password",
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "jwt",
+        "secret",
+        "client_secret",
+        "api_key",
+        "apikey",
+        "authorization",
+        "jti",
+    }
+)
+
+MASKED_VALUE = "***MASKED***"
+
+# Hard cap on how many characters of a single field's JSON-encoded value are
+# kept, so one giant payload (e.g. a bulk import body) cannot blow up the
+# audit_logs table or the response payload of the audit list API.
+MAX_FIELD_VALUE_LENGTH = 2000

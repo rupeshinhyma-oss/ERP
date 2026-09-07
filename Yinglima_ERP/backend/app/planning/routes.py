@@ -1,0 +1,1435 @@
+"""
+Shipment Planning API Routes.
+
+Every write route records its own change-log + audit entry inside
+:class:`app.planning.service.PlanningService`, so routes here stay thin --
+they just validate permissions, call the service, and shape the response.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from typing import Any
+
+from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect, status
+
+from app.auth.dependencies import get_auth_service
+from app.auth.service import AuthService, CurrentUser
+from app.core.exceptions import UnauthorizedException
+from app.core.logging import get_logger
+from app.core.responses import build_success_response
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
+from app.planning.dependencies import get_planning_service
+from app.planning.repository import ColumnSearchFilter
+from app.planning.ws_manager import connection_manager
+from app.planning.schemas import (
+    MumColumnStatusHistoryEntry,
+    PlanningCellDescriptionUpdate,
+    PlanningCellRead,
+    PlanningCellStatusUpdate,
+    PlanningCellValueUpdate,
+    PlanningChangeLogRead,
+    PlanningColumnCreate,
+    PlanningColumnDescriptionUpdate,
+    PlanningColumnLinkRecord,
+    PlanningColumnMove,
+    PlanningColumnRead,
+    PlanningColumnRename,
+    PlanningColumnRoleLockUpdate,
+    PlanningColumnStatusColorToggle,
+    PlanningColumnSourceConfigure,
+    PlanningColumnWidthUpdate,
+    PlanningGridRead,
+    PlanningItemAutoPopulate,
+    PlanningItemDescriptionUpdate,
+    PlanningItemLinkRecord,
+    PlanningItemSourceConfigure,
+    PlanningRowCreate,
+    PlanningRowDescriptionUpdate,
+    PlanningRowMove,
+    PlanningRowRead,
+    PlanningRowRename,
+    PlanningSheetCreate,
+    PlanningSheetDuplicate,
+    PlanningSheetRead,
+    PlanningSheetRename,
+    PlanningSheetGroupLabelUpdate,
+    PlanningStatusTagCreate,
+    PlanningStatusTagRead,
+    SourceModuleInfo,
+)
+from app.planning.service import PlanningService
+from app.rbac.dependencies import require_any_permission, require_permission
+
+router = APIRouter(prefix="/planning", tags=["Shipment Planning"])
+logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Live updates (WebSocket)
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/sheets/{sheet_id}/live")
+async def sheet_live_updates(
+    websocket: WebSocket,
+    sheet_id: uuid.UUID,
+    token: str = Query(..., description="Access token (same one used for Authorization: Bearer)."),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> None:
+    """
+    Push every change made to this sheet to every other open tab, live.
+
+    Browsers can't set an ``Authorization`` header on a WebSocket
+    handshake, so the same access token normally sent as a Bearer header
+    is instead passed as ``?token=...`` here -- verified through the
+    exact same :meth:`AuthService.verify_access_token` path as every REST
+    request, so an expired/blacklisted/revoked token is rejected exactly
+    the same way.
+
+    Once connected, this socket only *receives* events (cell edits,
+    column/row changes, ...); the client keeps making its normal REST
+    calls to actually perform edits. See ``app.planning.ws_manager`` for
+    what triggers a broadcast and ``app.planning.service`` for the call
+    sites.
+    """
+    try:
+        current_user = await auth_service.verify_access_token(token)
+    except UnauthorizedException:
+        await websocket.close(code=4401, reason="Invalid or expired token.")
+        return
+
+    await connection_manager.connect(sheet_id, current_user.id, websocket)
+    try:
+        while True:
+            # This socket is push-only from the server's perspective, but we
+            # still need to await *something* on it so a client disconnect
+            # (browser tab closed, network drop) raises WebSocketDisconnect
+            # here instead of leaving a dead entry in the connection
+            # manager forever. Any inbound message is simply ignored.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:  # noqa: BLE001 - never let a socket-level error take down the process
+        logger.exception("Planning live-update socket errored.", extra={"sheet_id": str(sheet_id)})
+    finally:
+        connection_manager.disconnect(sheet_id, websocket)
+
+
+def _parse_search_query_param(search: str | None) -> list[ColumnSearchFilter] | None:
+    """
+    Parse the grid route's ``search`` query param (a JSON-encoded array)
+    into a list of :class:`ColumnSearchFilter`, or ``None`` if not given.
+
+    Malformed JSON or an unexpected shape is treated as "no search" (logs
+    a warning, doesn't 400) -- a transient frontend bug in building the
+    search payload should degrade to "show everything" rather than break
+    the whole grid load for the person searching.
+    """
+    if not search:
+        return None
+    try:
+        raw = json.loads(search)
+    except (ValueError, TypeError):
+        logger.warning("Ignoring malformed search query param (not valid JSON).", extra={"search": search})
+        return None
+    if not isinstance(raw, list):
+        logger.warning("Ignoring malformed search query param (expected a JSON array).")
+        return None
+
+    filters: list[ColumnSearchFilter] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        raw_column_id = entry.get("column_id")
+        column_id: uuid.UUID | None = None
+        if raw_column_id is not None:
+            try:
+                column_id = uuid.UUID(str(raw_column_id))
+            except (ValueError, AttributeError):
+                continue  # skip this one malformed filter entry, keep the rest
+        text_query = entry.get("text_query")
+        selected_values = entry.get("selected_values")
+        if selected_values is not None and not isinstance(selected_values, list):
+            selected_values = None
+        filters.append(
+            ColumnSearchFilter(
+                column_id=column_id,
+                text_query=str(text_query) if text_query is not None else None,
+                selected_values=[str(v) for v in selected_values] if selected_values else None,
+            )
+        )
+    return filters
+
+
+async def _broadcast(
+    sheet_id: uuid.UUID, event_type: str, payload: dict, *, current_user: CurrentUser, service: PlanningService
+) -> None:
+    """
+    Commit the write, THEN fan out a change to every other tab watching this sheet.
+
+    Phase 5 fix: this previously ran BEFORE ``get_db_session``'s own
+    commit (which only happens once the route handler returns), despite
+    this function's own docstring incorrectly treating "flushed" as
+    equivalent to "committed" -- flush makes a write visible to the
+    SAME transaction/session, not to any OTHER connection reading the
+    database, which is exactly what another tab's live-triggered grid
+    reload does. A tab that reacted to this broadcast fast enough could
+    have read stale (pre-write) data. Explicitly committing here first
+    -- via the same ``AsyncSession`` the route's own ``service`` already
+    wraps (``service.sheet_repository.session``), so no route signature
+    needs to change -- closes that window. A second, later commit from
+    ``get_db_session``'s own generator (once the route returns) is then
+    a safe no-op with nothing left pending; verified directly against
+    SQLAlchemy's ``AsyncSession`` when fixing the identical issue for
+    Buyers in Phase 4 (see ``app.buyers.routes._publish_buyer_event``).
+
+    Never raises: a broadcast failure must not turn a successful write
+    into a failed HTTP response for the user who made it.
+    """
+    try:
+        await service.sheet_repository.session.commit()
+        await connection_manager.broadcast(
+            sheet_id,
+            {"type": event_type, "payload": payload, "changed_by": str(current_user.id)},
+            exclude_user_id=current_user.id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to broadcast planning live-update event.", extra={"sheet_id": str(sheet_id), "event_type": event_type})
+
+
+async def _publish_planning_sheet_event(
+    *,
+    service: PlanningService,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    sheet_id: uuid.UUID | str,
+    version: int | None,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """
+    Commit, then publish a ``planning.*`` SHEET-LIFECYCLE event on
+    ``module:planning``.
+
+    Phase 6: thin wrapper around the shared
+    :meth:`EventDispatcher.publish_lifecycle_event` -- see that method's
+    own docstring for the full reasoning. This function used to build
+    the ``Event``/commit the session itself; that logic was identical to
+    Buyers' own ``_publish_buyer_event`` except for which session
+    accessor each had available, so it's now consolidated there and this
+    is just a short, Planning-named call site.
+
+    Deliberately separate from :func:`_broadcast` above, which is for
+    the EXISTING per-sheet grid-internals socket (cell/column/row
+    changes -- a fundamentally different granularity that the generic
+    entity-event model was never designed for; see PHASE5_PLANNING_LIVE.md
+    for the full reasoning). This is only for whole-sheet lifecycle
+    events (create/rename/delete a sheet/branch tab), which map onto the
+    generic "one record changed" model exactly like a Buyer does -- so a
+    sheet LIST view (if one is ever built) could subscribe to
+    ``module:planning`` the same way ``Buyers.tsx`` subscribes to
+    ``module:buyers``, without needing a live connection to any specific
+    sheet's grid socket at all.
+
+    Uses ``service.sheet_repository.session`` for the same reason
+    ``_broadcast`` does -- no route signature needs a ``db`` parameter.
+    """
+    await dispatcher.publish_lifecycle_event(
+        service.sheet_repository.session,
+        module="planning",
+        entity="planning",
+        entity_id=sheet_id,
+        event_type=event_type,
+        version=version,
+        user_id=user_id,
+        changes=changes,
+    )
+
+
+def _row_to_read_dict(row) -> dict:
+    """
+    Build a PlanningRowRead dict without touching ``row.cells`` directly.
+
+    ``row.cells`` is a lazy-loaded SQLAlchemy relationship. Calling
+    ``PlanningRowRead.model_validate(row)`` on a row that was created,
+    renamed, or moved (rather than fetched via ``list_for_sheet``'s
+    ``selectinload``) makes Pydantic touch that relationship outside an
+    active query context, raising ``MissingGreenlet``. A brand-new,
+    renamed, or moved row never has its cells populated by these
+    operations anyway, so building the dict explicitly with ``cells: []``
+    is both correct and avoids the lazy-load entirely.
+    """
+    return {
+        "id": row.id,
+        "sheet_id": row.sheet_id,
+        "label": row.label,
+        "position": row.position,
+        "linked_record_id": row.linked_record_id,
+        "description": row.description,
+        "created_by": row.created_by,
+        "updated_by": row.updated_by,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "cells": [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Sheets (branch tabs)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sheets", status_code=status.HTTP_201_CREATED, summary="Create a planning sheet (branch tab)")
+async def create_sheet(
+    payload: PlanningSheetCreate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    sheet = await service.create_sheet(
+        name=payload.name,
+        organization_id=payload.organization_id,
+        branch_id=payload.branch_id,
+        mum_group_label=payload.mum_group_label or "Mum",
+        description=payload.description,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    await _publish_planning_sheet_event(
+        service=service,
+        dispatcher=dispatcher,
+        event_type="planning.created",
+        sheet_id=sheet.id,
+        version=sheet.version,
+        user_id=current_user.id,
+        changes={"name": sheet.name},
+    )
+    return build_success_response(data=data, request_id=request.state.request_id, message="Sheet created.")
+
+
+@router.post(
+    "/sheets/{sheet_id}/duplicate",
+    status_code=status.HTTP_201_CREATED,
+    summary="Duplicate a sheet's exact column structure onto a new sheet, optionally renaming its group label",
+)
+async def duplicate_sheet(
+    sheet_id: uuid.UUID,
+    payload: PlanningSheetDuplicate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+) -> dict:
+    """
+    Create a new sheet that starts with the exact same columns as ``sheet_id``.
+
+    Every column (Supplier Name, City, PKG QTY, UNIT WEIGHT/PKG (KG),
+    CBM/PKG (KG), every Mum group and its fixed NO. OF PKG / TOTAL
+    WEIGHT / TOTAL CBM totals, ...) is recreated with the same data type,
+    position, and source configuration. The one thing that's allowed to
+    change is the group label -- e.g. duplicating "Mum branch" with
+    ``mum_group_label="Chen"`` gives the new sheet "Chen 1" / "Chen1
+    Remarks" / "NO. OF PKG CHEN1" instead of "Mum 1" / etc., while
+    everything else (formulas, LINKED_LOOKUP wiring to Product Master,
+    approval-date and status-color behavior) keeps working exactly the
+    same on the new sheet. Rows are never copied -- the new sheet starts
+    empty and is populated from Product Master the normal way.
+    """
+    sheet = await service.duplicate_sheet(
+        sheet_id,
+        name=payload.name,
+        mum_group_label=payload.mum_group_label,
+        description=payload.description,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Sheet duplicated.")
+
+
+@router.get("/sheets", summary="List planning sheets")
+async def list_sheets(
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    sheets = await service.list_sheets()
+    data = [PlanningSheetRead.model_validate(s).model_dump(mode="json") for s in sheets]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.patch("/sheets/{sheet_id}", summary="Rename a planning sheet")
+async def rename_sheet(
+    sheet_id: uuid.UUID,
+    payload: PlanningSheetRename,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    sheet = await service.rename_sheet(
+        sheet_id, name=payload.name, version=payload.version, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    await _publish_planning_sheet_event(
+        service=service,
+        dispatcher=dispatcher,
+        event_type="planning.updated",
+        sheet_id=sheet.id,
+        version=sheet.version,
+        user_id=current_user.id,
+        changes={"name": sheet.name},
+    )
+    return build_success_response(data=data, request_id=request.state.request_id, message="Sheet renamed.")
+
+
+@router.patch("/sheets/{sheet_id}/group-label", summary="Correct an existing sheet's group label in place")
+async def update_sheet_group_label(
+    sheet_id: uuid.UUID,
+    payload: PlanningSheetGroupLabelUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+) -> dict:
+    """
+    Fix a sheet whose group label ended up wrong (e.g. left at the
+    default "Mum" instead of what the branch actually needed), without
+    creating a new sheet or touching any row/cell data -- see
+    PlanningService.update_mum_group_label for exactly what gets renamed.
+    """
+    sheet = await service.update_mum_group_label(
+        sheet_id, mum_group_label=payload.mum_group_label, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Group label updated.")
+
+
+@router.post("/sheets/{sheet_id}/columns/normalize-order", summary="Fix an existing sheet's column order")
+async def normalize_column_order(
+    sheet_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    One-time repair for a sheet whose columns ended up in the wrong
+    order -- groups every Mum group's main+Remarks columns together
+    (ascending by group number), then the shared Supplier Name/City/PKG
+    QTY/Weight/CBM block once, then every group's NO. OF PKG/TOTAL
+    WEIGHT/TOTAL CBM totals together (also ascending). See
+    PlanningService.normalize_column_order for the full target order and
+    why some existing sheets need this. Never touches row/cell data --
+    only column `position` values.
+    """
+    columns = await service.normalize_column_order(sheet_id, user_id=current_user.id, username=current_user.username)
+    data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column order fixed.")
+
+
+@router.post("/sheets/{sheet_id}/columns/repair-fixed-formulas", summary="Fix an existing sheet's NO. OF PKG/TOTAL WEIGHT/TOTAL CBM columns that were never wired to a formula")
+async def repair_fixed_mum_formulas(
+    sheet_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    One-time repair for a sheet whose NO. OF PKG / TOTAL WEIGHT / TOTAL
+    CBM columns are stuck as plain MANUAL columns (no "ƒx" badge, no live
+    calculation) instead of the fixed FORMULA type -- caused by a
+    since-fixed frontend bug in "+Next <label>" that only ever matched
+    columns literally named "MUM<n>", so any sheet using a different
+    group label (CN, TN, etc.) never got these three wired up correctly
+    when the group was created. See
+    PlanningService.repair_fixed_mum_formulas. Never touches row/cell
+    data, and never touches a column that's already correctly wired.
+    """
+    columns = await service.repair_fixed_mum_formulas(sheet_id, user_id=current_user.id, username=current_user.username)
+    data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
+    return build_success_response(data=data, request_id=request.state.request_id, message="Formula columns repaired.")
+
+
+@router.post("/sheets/{sheet_id}/columns/next-mum-group", summary="Create next Mum column group in a single fast atomic operation")
+async def create_next_mum_group(
+    sheet_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Create the next Mum/group column set in a single fast, atomic operation.
+    """
+    columns = await service.create_next_mum_group(
+        sheet_id, user_id=current_user.id, username=current_user.username
+    )
+    data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
+    await _broadcast(sheet_id, "columns_updated", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Next column group created.")
+
+
+@router.delete("/sheets/{sheet_id}", summary="Delete a planning sheet")
+async def delete_sheet(
+    sheet_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    await service.delete_sheet(sheet_id, user_id=current_user.id, username=current_user.username)
+    await _publish_planning_sheet_event(
+        service=service,
+        dispatcher=dispatcher,
+        event_type="planning.deleted",
+        sheet_id=sheet_id,
+        version=None,
+        user_id=current_user.id,
+        changes={},
+    )
+    return build_success_response(data=None, request_id=request.state.request_id, message="Sheet deleted.")
+
+
+# ---------------------------------------------------------------------------
+# Grid (columns + rows + cells for one sheet, in one call)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sheets/{sheet_id}/grid", summary="Get one page of a sheet's grid (columns, rows, cells)")
+async def get_grid(
+    sheet_id: uuid.UUID,
+    request: Request,
+    offset: int = Query(0, ge=0, description="Row offset for pagination."),
+    limit: int | None = Query(
+        50, ge=1, le=500, description="Rows per page. Omit/null to fetch every row (slow on large sheets)."
+    ),
+    organization_id: uuid.UUID | None = Query(
+        None,
+        description="Optional Organization filter (from Master Data > Organization List). "
+        "Restricts the page to rows whose linked Product Master record belongs to this "
+        "organization; applied server-side so it covers the whole sheet, not just the "
+        "currently-loaded page.",
+    ),
+    search: str | None = Query(
+        None,
+        description="Optional JSON-encoded array of per-column search filters, e.g. "
+        '\'[{"column_id": "<uuid-or-null-for-ITEM>", "text_query": "abc", '
+        '"selected_values": ["X", "Y"]}]\'. Searches the WHOLE sheet server-side (every '
+        "row, not just the currently-loaded page) -- see "
+        "PlanningRowRepository._apply_search_column_filters for exactly how each filter "
+        "is matched. Kept as a single JSON-encoded query param (rather than one query "
+        "param per column) since the number of filtered columns is unbounded and this "
+        "keeps the route a real GET.",
+    ),
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    search_column_filters = _parse_search_query_param(search)
+    grid = await service.get_grid(
+        sheet_id,
+        offset=offset,
+        limit=limit,
+        organization_id=organization_id,
+        search_column_filters=search_column_filters,
+    )
+    columns = grid["columns"]
+    rows = grid["rows"]
+    sheet = grid["sheet"]
+    total_rows = grid["total_rows"]
+
+    approval_date_column_id = next(
+        (c.id for c in columns if c.name.strip().lower() == "approval date"), None
+    )
+
+    # Computed ONCE for the whole sheet -- this is a per-VIEWER display
+    # overlay (which Mum groups the current browser has hidden), not a
+    # stored value, so it's the one piece of per-request computation left
+    # here on purpose. See get_mum_group_approval_dates_for_all_rows's own
+    # docstring for why this was never a candidate for store-on-write:
+    # there is no single correct stored answer to persist, since it
+    # depends on which columns THIS viewer currently has hidden.
+    mum_approval_dates_by_row = await service.get_mum_group_approval_dates_for_all_rows(
+        sheet_id, columns=columns, rows=rows
+    )
+
+    row_reads = []
+    for row in rows:
+        cells_by_column_id = {cell.column_id: cell for cell in row.cells}
+        cell_reads = []
+        mum_approval_dates = mum_approval_dates_by_row.get(row.id, {})
+        # Iterate every column, not just columns with a stored cell: a
+        # LINKED_LOOKUP/AGGREGATE/FORMULA column whose computed value is
+        # None (e.g. an unlinked row, or a formula referencing a still-
+        # empty sibling) has no PlanningCell row at all -- the frontend
+        # still needs one grid entry per (row, column) to render an empty
+        # cell.
+        for column in columns:
+            cell = cells_by_column_id.get(column.id)
+            # Everything is already computed and stored -- see
+            # PlanningService.recompute_and_store_cell and every write
+            # path that calls it (set_cell_value, link_row_to_*,
+            # configure_column_source, auto_populate_rows_from_item_source,
+            # and the cross-module hooks in
+            # app.masters.products/suppliers/buyers' own update() methods
+            # via app.planning.ws_manager.refresh_planning_cells_for_record).
+            # Reading the grid is now a plain read of already-stored
+            # values: no recomputation of any kind happens here, which is
+            # the entire point of the store-on-write architecture -- a
+            # sheet with 10,000+ rows costs exactly the same per-row work
+            # to display as one with 10.
+            display_value = cell.value if cell is not None else None
+            # Document: "the Approval column should show over the cell the
+            # date ... when that Mum ... got the blue number". The Approval
+            # Date column stays MANUAL (admins can still type over it), but
+            # when nobody has typed a value for this row, auto-show the
+            # earliest-numbered Mum group's approval date instead of a
+            # blank cell -- see this function's own note above on why this
+            # one piece stays a per-request overlay rather than a stored
+            # value.
+            auto_approval_date: str | None = None
+            if column.id == approval_date_column_id and not display_value and mum_approval_dates:
+                auto_approval_date = mum_approval_dates[min(mum_approval_dates.keys())]
+                display_value = auto_approval_date
+            if cell is not None:
+                cell_data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+            else:
+                cell_data = {
+                    "id": None,
+                    "row_id": str(row.id),
+                    "column_id": str(column.id),
+                    "value": None,
+                    "status_color": None,
+                    "custom_status_tag_id": None,
+                    "linked_record_id": None,
+                    "description": None,
+                    "updated_by": None,
+                    "updated_at": None,
+                }
+            cell_data["display_value"] = display_value
+            # The frontend's grid cell renders MANUAL columns from `value`,
+            # not `display_value` -- the Approval Date column is MANUAL, so
+            # the auto-computed date must also be surfaced as `value`, or it
+            # silently never renders even though it was computed correctly.
+            # Real typed-in values (the `cell is not None` case above)
+            # already have their own `value` from the DB and are left untouched.
+            is_auto_filled = auto_approval_date is not None and cell_data.get("value") in (None, "")
+            if is_auto_filled:
+                cell_data["value"] = auto_approval_date
+            # Explicit flag rather than making the frontend infer "was this
+            # auto-filled?" by comparing strings (a manually-typed date
+            # that happens to coincide with a Mum group's date would be
+            # misread as auto-filled and get overwritten by the hidden-aware
+            # recompute) -- unset entirely for every other column, so it
+            # never leaks into unrelated cells' shape.
+            if column.id == approval_date_column_id:
+                cell_data["is_auto_approval_date"] = is_auto_filled
+            cell_reads.append(cell_data)
+        row_data = PlanningRowRead.model_validate(row).model_dump(mode="json")
+        row_data["cells"] = cell_reads
+        row_data["mum_approval_dates"] = {str(k): v for k, v in mum_approval_dates.items()}
+        # ITEM's stored label is already correct -- see
+        # PlanningService.recompute_and_store_row (called from every row-
+        # affecting write path) and configure_item_source, both of which
+        # keep PlanningRow.label current whenever the ITEM configuration
+        # or its linked record could have changed it. No per-row
+        # computation happens here anymore.
+        row_data["label"] = row.label
+        row_reads.append(row_data)
+
+    data = {
+        "sheet": PlanningSheetRead.model_validate(grid["sheet"]).model_dump(mode="json"),
+        "columns": [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns],
+        "rows": row_reads,
+        "total_rows": total_rows,
+        "offset": offset,
+        "limit": limit,
+    }
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/sheets/{sheet_id}/filter-values", summary="Get distinct values and counts for a column filter popover")
+async def get_filter_values(
+    sheet_id: uuid.UUID,
+    request: Request,
+    column_id: uuid.UUID | None = Query(None, description="Column ID or null for ITEM column"),
+    search: str | None = Query(None, description="Optional search term to filter unique values"),
+    organization_id: uuid.UUID | None = Query(None, description="Optional organization ID override"),
+    limit: int = Query(500, ge=1, le=2000, description="Max unique values to return"),
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    data = await service.get_filter_values(
+        sheet_id,
+        column_id,
+        search=search,
+        organization_id=organization_id,
+        limit=limit,
+    )
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/organization-search", summary="Search items across all branch sheets of an organization")
+async def organization_search(
+    request: Request,
+    query: str = Query(..., min_length=1, description="Search query string"),
+    organization_id: uuid.UUID | None = Query(None, description="Optional organization ID to scope branch search"),
+    limit_per_branch: int = Query(5, ge=1, le=50, description="Max matching items to return per branch"),
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    data = await service.search_organization_branches(
+        query,
+        organization_id=organization_id,
+        limit_per_branch=limit_per_branch,
+    )
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+# ---------------------------------------------------------------------------
+# Columns (admin-defined, unlimited, insertable at any position)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sheets/{sheet_id}/columns", status_code=status.HTTP_201_CREATED, summary="Add a column")
+async def add_column(
+    sheet_id: uuid.UUID,
+    payload: PlanningColumnCreate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Add a new, admin-named column to this sheet, at any position.
+
+    There is no limit on how many columns can exist -- keep calling this
+    to add "Mum 43", "Mum 44", or anything else the admin wants to track.
+    """
+    column = await service.add_column(
+        sheet_id,
+        name=payload.name,
+        data_type=payload.data_type,
+        position=payload.position,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_added", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column added.")
+
+
+@router.patch("/sheets/{sheet_id}/columns/{column_id}", summary="Rename a column")
+async def rename_column(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnRename,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    column = await service.rename_column(
+        sheet_id, column_id, name=payload.name, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_renamed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column renamed.")
+
+
+@router.patch(
+    "/sheets/{sheet_id}/columns/{column_id}/width",
+    summary="Set (or clear) a column's server-persisted display width",
+)
+async def set_column_width(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnWidthUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Drag-to-resize a column. Shared across every user viewing the sheet
+    (unlike Hide/Freeze, which stay local to each browser) -- see
+    PlanningColumn.width_px's docstring. Not logged to the sheet's change
+    history: resizing is a cosmetic preference, not a data edit.
+    """
+    column = await service.set_column_width(sheet_id, column_id, width_px=payload.width_px)
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_width_changed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column width updated.")
+
+
+@router.post("/sheets/{sheet_id}/columns/{column_id}/move", summary="Move a column to a new position")
+async def move_column(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnMove,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    column = await service.move_column(
+        sheet_id, column_id, new_position=payload.position, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_moved", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column moved.")
+
+
+@router.delete("/sheets/{sheet_id}/columns/{column_id}", summary="Delete a column")
+async def delete_column(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    await service.delete_column(sheet_id, column_id, user_id=current_user.id, username=current_user.username)
+    await _broadcast(sheet_id, "column_deleted", {"column_id": str(column_id)}, current_user=current_user, service=service)
+    return build_success_response(data=None, request_id=request.state.request_id, message="Column deleted.")
+
+
+@router.get("/sheets/{sheet_id}/columns/{column_id}/history", summary="Get a column's change history")
+async def get_column_history(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    entries = await service.get_column_history(sheet_id, column_id)
+    data = [PlanningChangeLogRead.model_validate(e).model_dump(mode="json") for e in entries]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic column sourcing: linked lookup / aggregate / formula
+# ---------------------------------------------------------------------------
+
+
+@router.get("/source-modules", summary="List modules/fields available for linked-lookup and aggregate columns")
+async def list_source_modules(
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Document: "if i wanted to extract data or certain data from Product
+    master i can select and extract" -- this is the admin UI's dropdown
+    source for which modules/fields are available to pull from.
+    """
+    data = [SourceModuleInfo(**m).model_dump(mode="json") for m in service.list_available_source_modules()]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.put("/sheets/{sheet_id}/columns/{column_id}/source", summary="Configure a column's data source or formula")
+async def configure_column_source(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnSourceConfigure,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Turn a column MANUAL / LINKED_LOOKUP / AGGREGATE / FORMULA, or edit its config.
+
+    Document: "each column or row new created i can extract data from
+    other parts too ... also if i want i can add any calculation
+    manually". Subject to the column's optional per-column role lock, on
+    top of the ``planning.column.manage`` permission checked above.
+    """
+    column = await service.configure_column_source(
+        sheet_id,
+        column_id,
+        source_type=payload.source_type,
+        source_module=payload.source_module,
+        source_field=payload.source_field,
+        source_aggregate_fn=payload.source_aggregate_fn,
+        source_aggregate_filters=payload.source_aggregate_filters,
+        formula_expression=payload.formula_expression,
+        enable_description=payload.enable_description,
+        auto_populate_enabled=payload.auto_populate_enabled,
+        auto_populate_limit=payload.auto_populate_limit,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_source_configured", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column source configured.")
+
+
+@router.put("/sheets/{sheet_id}/item-source", summary="Configure the sheet's built-in ITEM column data source")
+async def configure_item_source(
+    sheet_id: uuid.UUID,
+    payload: PlanningItemSourceConfigure,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Turn the ITEM column MANUAL / LINKED_LOOKUP / FORMULA, or edit its config.
+
+    The ITEM column is the sheet's built-in first column (row identity),
+    not an entry in ``planning_columns``, so it gets its own endpoint
+    mirroring ``configure_column_source`` above.
+    """
+    sheet = await service.configure_item_source(
+        sheet_id,
+        source_type=payload.source_type,
+        source_module=payload.source_module,
+        source_field=payload.source_field,
+        formula_expression=payload.formula_expression,
+        item_enable_description=payload.item_enable_description,
+        item_auto_populate_enabled=payload.item_auto_populate_enabled,
+        item_auto_populate_limit=payload.item_auto_populate_limit,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="ITEM column source configured.")
+
+
+@router.put(
+    "/sheets/{sheet_id}/rows/{row_id}/item-link",
+    summary="Link a row's ITEM cell to a record in the sheet's item_source_module",
+)
+async def link_row_to_item_source_record(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    payload: PlanningItemLinkRecord,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """Pick, per row, which record (e.g. which Product) the ITEM column pulls its name from."""
+    # Only the sheet object is needed here (for its item_source_* config),
+    # not any rows -- fetch it directly instead of paying for a row page
+    # via get_grid just to reach into grid["sheet"].
+    sheet = await service.get_sheet_or_raise(sheet_id)
+    row = await service.link_row_to_item_source_record(
+        sheet_id, row_id, record_id=payload.record_id, user_id=current_user.id, username=current_user.username
+    )
+    display_value = await service.compute_row_item_display(sheet, row)
+    data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    data["label"] = display_value
+    return build_success_response(data=data, request_id=request.state.request_id, message="Row linked.")
+
+
+@router.post(
+    "/sheets/{sheet_id}/item-source/auto-populate",
+    status_code=status.HTTP_201_CREATED,
+    summary="Bulk-create rows straight from the ITEM source module, one row per record",
+)
+async def auto_populate_rows_from_item_source(
+    sheet_id: uuid.UUID,
+    payload: PlanningItemAutoPopulate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+) -> dict:
+    """
+    "Load everything from that field's data automatically" -- the checkbox
+    next to the manual per-row 🔗 flow. Pulls up to ``limit`` records
+    (25/50/100, or every record when ``limit`` is omitted/null) from the
+    sheet's configured ITEM source module and creates one already-linked
+    row per record, skipping any record already represented by an
+    existing row.
+    """
+    # Only the sheet object is needed here (for its item_source_* config),
+    # not any rows -- fetch it directly instead of paying for a row page
+    # via get_grid just to reach into grid["sheet"].
+    sheet = await service.get_sheet_or_raise(sheet_id)
+    # A branch-linked sheet's own organization/branch always wins over
+    # whatever the request happens to pass -- see get_grid's identical
+    # rule and its docstring for why. Only a legacy, never-linked sheet
+    # falls back to the payload's organization_id.
+    effective_organization_id = sheet.organization_id if sheet.organization_id is not None else payload.organization_id
+    effective_branch_id = sheet.branch_id if sheet.organization_id is not None else None
+    rows = await service.auto_populate_rows_from_item_source(
+        sheet_id,
+        limit=payload.limit,
+        user_id=current_user.id,
+        username=current_user.username,
+        organization_id=effective_organization_id,
+        branch_id=effective_branch_id,
+    )
+    # Batched the same way as get_grid -- one query for every linked
+    # record just created, not one per row. This route creates up to
+    # `limit` (often 50) rows in a single call, so the old per-row
+    # compute_row_item_display here was just as much a hang risk as the
+    # one in get_grid was.
+    item_display_by_row = await service.compute_row_item_displays_for_all_rows(sheet, rows)
+    data = []
+    for row in rows:
+        row_data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+        row_data["label"] = item_display_by_row.get(row.id, row.label)
+        data.append(row_data)
+    return build_success_response(
+        data=data, request_id=request.state.request_id, message=f"Added {len(rows)} row(s)."
+    )
+
+
+@router.put(
+    "/sheets/{sheet_id}/rows/{row_id}/columns/{column_id}/link",
+    summary="Link a row's cell (under a linked-lookup column) to a record in the source module",
+)
+async def link_row_to_source_record(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnLinkRecord,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """Document: admin picks, per row, which record (e.g. which Product) that row's linked-lookup column pulls from."""
+    cell = await service.link_row_to_source_record(
+        sheet_id, row_id, column_id, record_id=payload.record_id, user_id=current_user.id, username=current_user.username
+    )
+    display_value = await service.compute_cell_display_value(
+        await service.get_column(sheet_id, column_id), cell, row_id=row_id
+    )
+    data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+    data["display_value"] = display_value
+    return build_success_response(data=data, request_id=request.state.request_id, message="Row linked.")
+
+
+@router.post(
+    "/sheets/{sheet_id}/columns/{column_id}/auto-link",
+    status_code=status.HTTP_200_OK,
+    summary="Bulk-link every row's cell under this column to the record its ITEM is already linked to",
+)
+async def auto_link_column_to_item_records(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """
+    "Load everything from that field's data automatically" for a regular
+    linked-lookup column: instead of clicking 🔗 once per row for this
+    column too, reuse whatever record each row's ITEM is already linked
+    to (only valid when this column and ITEM share the same source
+    module).
+    """
+    cells = await service.auto_link_column_to_item_records(
+        sheet_id, column_id, user_id=current_user.id, username=current_user.username
+    )
+    column = await service.get_column(sheet_id, column_id)
+    data = []
+    for cell in cells:
+        display_value = await service.compute_cell_display_value(column, cell, row_id=cell.row_id)
+        cell_data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+        cell_data["display_value"] = display_value
+        data.append(cell_data)
+    return build_success_response(
+        data=data, request_id=request.state.request_id, message=f"Linked {len(cells)} row(s)."
+    )
+
+
+
+
+
+@router.get(
+    "/sheets/{sheet_id}/columns/{column_id}/role-lock",
+    summary="Get the roles (if any) a column is restricted to",
+)
+async def get_column_role_lock(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    role_ids = await service.get_column_role_lock_ids(sheet_id, column_id)
+    data = {"role_ids": [str(r) for r in role_ids]}
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.put(
+    "/sheets/{sheet_id}/columns/{column_id}/role-lock",
+    summary="Restrict a column's editing to specific roles (empty list clears the restriction)",
+)
+async def set_column_role_lock(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnRoleLockUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Document: "admin can also give access based on permission too ...
+    keep it flexible" -- an admin with planning.column.manage can lock
+    any individual column to one or more roles, on top of the sheet-level
+    permission. Passing an empty role_ids list clears the restriction.
+    """
+    column = await service.set_column_role_lock(
+        sheet_id, column_id, role_ids=payload.role_ids, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_role_lock_changed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column role lock updated.")
+
+
+@router.put(
+    "/sheets/{sheet_id}/columns/{column_id}/status-color-enabled",
+    summary="Opt a column in/out of carrying CRM-style cell status colors",
+)
+async def set_column_status_color_enabled(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnStatusColorToggle,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Controlled from the Columns panel, alongside Visible/Frozen -- unlike
+    those two (per-user local display prefs), this is a real structural
+    property of the column itself, so it's backend-persisted and visible
+    to every user, not just the one who set it.
+    """
+    column = await service.set_column_status_color_enabled(
+        sheet_id, column_id, enabled=payload.enable_status_color, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_status_color_toggled", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column status-color setting updated.")
+
+
+@router.put(
+    "/sheets/{sheet_id}/columns/{column_id}/description",
+    summary="Set/clear a column's single header-level free-text note",
+)
+async def set_column_description(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnDescriptionUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Set or clear the column header's description note.
+
+    One note per column (edited via the pencil icon on the column
+    header), not per cell -- distinct from the older per-cell
+    ``.../columns/{column_id}/value``-adjacent description mechanism,
+    which the frontend no longer surfaces in the UI but which still
+    exists for any note already written into a specific cell.
+    """
+    column = await service.set_column_description(
+        sheet_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_description_changed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column description updated.")
+
+
+@router.put(
+    "/sheets/{sheet_id}/item-description",
+    summary="Set/clear the sheet's built-in ITEM column header-level free-text note",
+)
+async def set_item_column_description(
+    sheet_id: uuid.UUID,
+    payload: PlanningItemDescriptionUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    sheet = await service.set_item_column_description(
+        sheet_id, description=payload.description, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    await _broadcast(sheet_id, "item_description_changed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="ITEM column description updated.")
+
+
+# ---------------------------------------------------------------------------
+# Rows (item lines, unlimited)
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/sheets/{sheet_id}/rows/{row_id}", summary="Rename a row")
+async def rename_row(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    payload: PlanningRowRename,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+) -> dict:
+    row = await service.rename_row(sheet_id, row_id, label=payload.label, user_id=current_user.id, username=current_user.username)
+    data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    await _broadcast(sheet_id, "row_renamed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Row renamed.")
+
+
+@router.put("/sheets/{sheet_id}/rows/{row_id}/description", summary="Set/clear a row's ITEM-cell free-text description")
+async def set_row_description(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    payload: PlanningRowDescriptionUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """
+    Set or clear a row's ITEM-cell free-text description.
+
+    Mirrors set_cell_description for the built-in ITEM column, which
+    lives directly on the row rather than as a separate cell.
+    """
+    row = await service.set_row_description(
+        sheet_id, row_id, description=payload.description, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    await _broadcast(sheet_id, "row_description_changed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Row description updated.")
+
+
+@router.post("/sheets/{sheet_id}/rows/{row_id}/move", summary="Move a row to a new position")
+async def move_row(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    payload: PlanningRowMove,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+) -> dict:
+    row = await service.move_row(
+        sheet_id, row_id, new_position=payload.position, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    await _broadcast(sheet_id, "row_moved", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Row moved.")
+
+
+@router.delete("/sheets/{sheet_id}/rows/{row_id}", summary="Delete a row")
+async def delete_row(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+) -> dict:
+    await service.delete_row(sheet_id, row_id, user_id=current_user.id, username=current_user.username)
+    await _broadcast(sheet_id, "row_deleted", {"row_id": str(row_id)}, current_user=current_user, service=service)
+    return build_success_response(data=None, request_id=request.state.request_id, message="Row deleted.")
+
+
+@router.get("/sheets/{sheet_id}/rows/{row_id}/history", summary="Get a row's change history")
+async def get_row_history(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    entries = await service.get_row_history(sheet_id, row_id)
+    data = [PlanningChangeLogRead.model_validate(e).model_dump(mode="json") for e in entries]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get(
+    "/sheets/{sheet_id}/rows/{row_id}/mum-status-history",
+    summary="Get the Approval Date hover feed: every status-color change on this row's Mum-series columns",
+)
+async def get_mum_column_status_history(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    """
+    Document: "When Mum 45 was blue and when Mum 46 was blue and other
+    color too" -- powers the eye/history icon on the Approval Date cell.
+    """
+    entries = await service.get_mum_column_status_history_for_row(sheet_id, row_id)
+    data = [MumColumnStatusHistoryEntry(**e).model_dump(mode="json") for e in entries]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+# ---------------------------------------------------------------------------
+# Cells (value + CRM-style status color, on any cell)
+# ---------------------------------------------------------------------------
+
+
+@router.put("/sheets/{sheet_id}/rows/{row_id}/columns/{column_id}/value", summary="Set a cell's value")
+async def set_cell_value(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningCellValueUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    # Coarse gate: let through anyone with the general planning.cell.edit
+    # OR either of the two column-specific permissions. The FINE-GRAINED
+    # decision -- which permission actually covers THIS column -- happens
+    # in service.set_cell_value once the target column is resolved; e.g. a
+    # user with only planning.textyn.edit passes this gate but still gets
+    # rejected there if they try to edit a column that isn't TEST(Y/N).
+    current_user: CurrentUser = Depends(
+        require_any_permission("planning.cell.edit", "planning.textyn.edit", "planning.approvaldate.edit")
+    ),
+) -> dict:
+    cell = await service.set_cell_value(
+        sheet_id, row_id, column_id, value=payload.value, user_id=current_user.id, username=current_user.username,
+        user_permissions=current_user.permissions,
+    )
+    data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+    data["display_value"] = cell.value  # only MANUAL columns reach here; locked columns are rejected earlier
+    # This is a real, directly-typed value (this endpoint IS the "someone
+    # typed into a cell" path), never a backend auto-fill -- explicit
+    # False so the frontend's hidden-column-aware Approval Date override
+    # never mistakes a value the person just typed for an auto-computed one.
+    data["is_auto_approval_date"] = False
+    # Recompute every FORMULA column on this row (e.g. NO. OF PKG / TOTAL
+    # WEIGHT / TOTAL CBM columns that reference the Mum column just typed
+    # into), plus the Approval Date column's auto-computed date. Included
+    # in BOTH the broadcast to other tabs AND this response: the acting
+    # user's own tab is deliberately excluded from receiving its own
+    # broadcast (see _broadcast's exclude_user_id), so without this in the
+    # direct response, the person who actually typed the value would see
+    # their own derived columns (Approval Date, formula totals) go stale
+    # until their next manual reload -- everyone else gets it live via
+    # the socket, but the actor themselves would not.
+    #
+    # The cell's own write above has ALREADY COMMITTED by this point, so a
+    # failure recomputing these secondary display values must not turn a
+    # successful save into a failed response -- that would make the
+    # frontend's optimistic-save retry logic think the value never
+    # reached the server (and retry) when it actually did. Degrade to "no
+    # derived values this round-trip" instead; the next full grid load (or
+    # another tab's own edit) recomputes them correctly regardless, since
+    # nothing here is ever persisted from this dict -- it's a live,
+    # recompute-on-every-read value same as everywhere else in this file.
+    try:
+        derived = await service.get_row_formula_display_values(sheet_id, row_id)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to recompute derived cell values after a successful write; the write itself is unaffected.",
+            extra={"sheet_id": str(sheet_id), "row_id": str(row_id), "column_id": str(column_id)},
+        )
+        derived = {}
+    payload_out = {"cell": data, "row_id": str(row_id), "derived_values": derived}
+    await _broadcast(sheet_id, "cell_value_changed", payload_out, current_user=current_user, service=service)
+    return build_success_response(
+        data={"cell": data, "derived_values": derived}, request_id=request.state.request_id, message="Cell updated."
+    )
+
+
+@router.put("/sheets/{sheet_id}/rows/{row_id}/columns/{column_id}/status", summary="Set/clear a cell's CRM-style status tag")
+async def set_cell_status(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningCellStatusUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    # Coarse gate: let through anyone with the general planning.cell.edit OR
+    # either color-specific permission. Which color the request is actually
+    # setting is only known once payload.status_color is inspected, so the
+    # real, specific check happens in service.set_cell_status -- e.g. a user
+    # with only planning.colorstatusred.edit passes this gate but is still
+    # rejected there if they try to set Green.
+    current_user: CurrentUser = Depends(
+        require_any_permission(
+            "planning.cell.edit", "planning.colorstatusred.edit", "planning.colorstatusgreen.edit"
+        )
+    ),
+) -> dict:
+    """
+    Attach a status tag to any cell: red (requirement), blue (ordered to
+    manufacturer), green (purchased), or a custom admin-defined color.
+    Send ``status_color: null`` to clear the tag.
+    """
+    cell = await service.set_cell_status(
+        sheet_id,
+        row_id,
+        column_id,
+        status_color=payload.status_color,
+        custom_status_tag_id=payload.custom_status_tag_id,
+        user_id=current_user.id,
+        username=current_user.username,
+        user_permissions=current_user.permissions,
+    )
+    data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+    await _broadcast(sheet_id, "cell_status_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Cell status updated.")
+
+
+@router.put("/sheets/{sheet_id}/rows/{row_id}/columns/{column_id}/description", summary="Set/clear a cell's free-text description")
+async def set_cell_description(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningCellDescriptionUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """
+    Set or clear a cell's free-text description note.
+
+    Independent of the cell's value/status; the description button only
+    appears in the UI when the cell's column has enable_description set,
+    but this write endpoint itself doesn't require that -- a description
+    written while the setting was on is preserved if it's later turned off.
+    """
+    cell = await service.set_cell_description(
+        sheet_id, row_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+    await _broadcast(sheet_id, "cell_description_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Cell description updated.")
+
+
+# ---------------------------------------------------------------------------
+# Status tags (admin-defined custom colors beyond the 3 built-ins)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/status-tags", status_code=status.HTTP_201_CREATED, summary="Create a custom status tag/color")
+async def create_status_tag(
+    payload: PlanningStatusTagCreate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+) -> dict:
+    tag = await service.create_status_tag(label=payload.label, hex_color=payload.hex_color, user_id=current_user.id)
+    data = PlanningStatusTagRead.model_validate(tag).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Status tag created.")
+
+
+@router.get("/status-tags", summary="List custom status tags/colors")
+async def list_status_tags(
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    tags = await service.list_status_tags()
+    data = [PlanningStatusTagRead.model_validate(t).model_dump(mode="json") for t in tags]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+# ---------------------------------------------------------------------------
+# Sheet-level change history (who added/changed what, and when)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sheets/{sheet_id}/history", summary="Get a sheet's full change history")
+async def get_sheet_history(
+    sheet_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    entries = await service.get_sheet_history(sheet_id)
+    data = [PlanningChangeLogRead.model_validate(e).model_dump(mode="json") for e in entries]
+    return build_success_response(data=data, request_id=request.state.request_id)

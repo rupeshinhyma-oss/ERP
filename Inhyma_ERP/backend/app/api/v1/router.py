@@ -1,0 +1,127 @@
+"""
+API v1 Router Aggregation.
+
+Collects every feature module's router into a single ``api_router`` that
+``app.main`` mounts once under the versioned prefix. Adding a new module in
+a later phase means adding one ``include_router`` line here -- no changes
+to ``app.main`` are needed.
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
+
+from app.api.v1.health import router as health_router
+from app.audit.routes import router as audit_router
+from app.auth.routes import router as auth_router
+from app.buyers.routes import router as buyers_router
+from app.cache.routes import router as cache_router
+from app.core.responses import build_success_response
+from app.events.routes import router as events_router
+from app.inquiries.public_quotes import router as public_quotes_router
+from app.inquiries.routes import router as inquiries_router
+from app.masters.brands.routes import router as brands_router
+from app.masters.cities.routes import router as cities_router
+from app.masters.company_list.routes import router as company_list_router
+from app.masters.countries.routes import router as countries_router
+from app.masters.currencies.routes import router as currencies_router
+from app.masters.hsn.routes import router as hsn_router
+from app.masters.product_categories.routes import router as product_categories_router
+from app.masters.product_sub_categories.routes import router as product_sub_categories_router
+from app.masters.products.routes import router as products_router
+from app.masters.states.routes import router as states_router
+from app.masters.buyer_types.routes import router as buyer_types_router
+from app.masters.supplier_types.routes import router as supplier_types_router
+from app.masters.uom.routes import router as uom_router
+from app.organizations.routes import router as organizations_router
+from app.org_structure.leadership_routes import router as leadership_router
+from app.org_structure.position_routes import router as positions_router
+from app.org_structure.reporting_routes import router as reporting_router
+from app.planning.routes import router as planning_router
+from app.queue.routes import router as queue_router
+from app.rbac.routes import router as rbac_router
+from app.search.routes import router as search_router
+from app.suppliers.routes import router as suppliers_router
+from app.notifications.routes import router as notifications_router
+from app.tasks.routes import router as tasks_router
+from app.trash.routes import router as trash_router
+from app.users.routes import router as users_router
+
+api_router = APIRouter()
+
+api_router.include_router(health_router)
+api_router.include_router(auth_router)
+api_router.include_router(users_router)
+api_router.include_router(rbac_router)
+
+# Positions/Designations, and the employee Reporting Structure / dynamic
+# Org Chart. Department was merged into Role (app.rbac) -- department/
+# organizational management now happens through the existing
+# "Departments & Permissions" routes (rbac_router) above, which now also
+# accept the code/parent_department_id fields. See app/rbac/models.py
+# (Role docstring) for the full merge rationale.
+api_router.include_router(positions_router)
+api_router.include_router(reporting_router)
+api_router.include_router(leadership_router)
+
+api_router.include_router(queue_router)
+api_router.include_router(cache_router)
+api_router.include_router(audit_router)
+api_router.include_router(trash_router)
+
+# Universal Search (topbar): searches across every major entity type in
+# one call. Restored 2026-08-14 after being accidentally deleted in a
+# frontend-migration commit -- see app/search/service.py's module
+# docstring for the full history, including the 2026-08-17 update
+# removing Departments/Designations from its search scope after that
+# module was removed from the app entirely.
+api_router.include_router(search_router)
+
+# Phase 6: Core Organization & User Management.
+api_router.include_router(organizations_router)
+
+# Phase 7: Master Data Management.
+api_router.include_router(countries_router)
+api_router.include_router(states_router)
+api_router.include_router(cities_router)
+api_router.include_router(currencies_router)
+api_router.include_router(uom_router)
+api_router.include_router(hsn_router)
+api_router.include_router(brands_router)
+api_router.include_router(product_categories_router)
+api_router.include_router(product_sub_categories_router)
+api_router.include_router(products_router)
+api_router.include_router(company_list_router)
+api_router.include_router(supplier_types_router)
+api_router.include_router(buyer_types_router)
+
+# Phase 8: Supplier Management.
+api_router.include_router(suppliers_router)
+
+# Buyers (Client) Management.
+api_router.include_router(buyers_router)
+
+# Inquiries (Requirement) workflow -- two-layer consignment planning.
+api_router.include_router(inquiries_router)
+api_router.include_router(public_quotes_router)
+
+# Shipment Planning: dynamic branch-sheet grid (Mum Branch, MP Branch, ...).
+api_router.include_router(planning_router)
+
+# Phase 1 (Live Events): generic real-time WebSocket infrastructure --
+# see app/events/ and doc/EVENTS_ARCHITECTURE.md. Not module-specific;
+# any future module's routes/services publish through this without
+# needing their own router entry here.
+# Standalone Task Management & In-App Notifications
+api_router.include_router(tasks_router)
+api_router.include_router(notifications_router)
+
+api_router.include_router(events_router)
+
+
+@api_router.get("/organizations/public", summary="Get public organization info for login page")
+async def get_public_org_info(request: Request) -> dict:
+    return build_success_response(
+        data={"id": "default", "name": "Yinglima ERP", "logo_url": None},
+        request_id=getattr(request.state, "request_id", "-"),
+    )

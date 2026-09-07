@@ -1,0 +1,34 @@
+# Environment files
+.env
+*.env
+!.env.example
+
+# Dependencies & Build
+node_modules/
+dist/
+dist-ssr/
+*.local
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+*.pyc
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Uploads
+backend/uploads/
+uploads/
+

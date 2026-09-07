@@ -1,0 +1,43 @@
+# Environment & Secrets
+.env
+*.env
+!.env.example
+*.env.local
+
+# Git standalone backups
+.git_standalone_backup/
+*.git_backup/
+.git_standalone_backup
+
+# Dependencies & Package Managers
+node_modules/
+dist/
+dist-ssr/
+*.local
+*.tsbuildinfo
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+ENV/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Uploads & Media
+**/uploads/*
+!**/uploads/.gitkeep
+
+# Logs & Temp
+*.log
+*.tmp
