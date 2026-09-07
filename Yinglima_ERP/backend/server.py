@@ -61,7 +61,9 @@ def main() -> None:
     """Parse CLI flags, run migrations + seed, then hand off to uvicorn."""
     parser = argparse.ArgumentParser(description="Run migrations, seed data, then start the API server.")
     parser.add_argument("--host", default="0.0.0.0", help="Host/interface to bind uvicorn to (default: 0.0.0.0).")
-    parser.add_argument("--port", type=int, default=8000, help="Port to bind uvicorn to (default: 8000).")
+    import os
+    default_port = int(os.environ.get("PORT", 8001))
+    parser.add_argument("--port", type=int, default=default_port, help=f"Port to bind uvicorn to (default: {default_port}).")
     parser.add_argument(
         "--no-reload", action="store_true", help="Disable uvicorn's auto-reload (default: reload is ON)."
     )

@@ -6,7 +6,12 @@ Run with: `python server.py` (or `uvicorn app.main:app --reload` directly).
 
 from __future__ import annotations
 
+import os
 import uvicorn
+from app.core.config import settings
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8100, reload=True)
+    host = os.environ.get("HOST", settings.HOST)
+    port = int(os.environ.get("PORT", settings.PORT))
+    print(f"\n{'=' * 70}\n>>> Starting ERP_Main Control Plane API: http://{host}:{port}\n{'=' * 70}\n")
+    uvicorn.run("app.main:app", host=host, port=port, reload=True)

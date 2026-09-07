@@ -80,10 +80,12 @@ class Settings(BaseSettings):
     FRONTEND_DIST_DIR: str | None = None
 
     # -------------------------------------------------------------------
-    # Server
+    # Server & Service URLs
     # -------------------------------------------------------------------
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = 8002
+    BACKEND_URL: str = "http://localhost:8002"
+    FRONTEND_URL: str = "http://localhost:5174"
 
     # -------------------------------------------------------------------
     # CORS
