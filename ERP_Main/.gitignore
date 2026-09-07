@@ -1,0 +1,30 @@
+# Environment & Secrets
+.env
+*.env
+!.env.example
+
+# Local SQLite databases
+*.db
+*.sqlite3
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+ENV/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs & Temp
+*.log
+*.tmp
