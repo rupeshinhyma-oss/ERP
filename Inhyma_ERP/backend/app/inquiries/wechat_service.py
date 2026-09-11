@@ -28,6 +28,8 @@ import httpx
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
+import hmac
+
 logger = logging.getLogger("wecom_service")
 
 class WeComService:
@@ -39,18 +41,21 @@ class WeComService:
         token: str | None = None,
         encoding_aes_key: str | None = None,
     ) -> None:
-        self.corp_id = corp_id or os.getenv("WECOM_CORP_ID", "ww0aafdc97cca27e0a")
-        self.secret = secret or os.getenv("WECOM_SECRET", "8kzaUnGu34Q6aelEYTaVyB9xOH7EX7MSR6tsLpiL9B8")
-        self.agent_id = agent_id or int(os.getenv("WECOM_AGENT_ID", "1000002"))
-        self.token = token or os.getenv("WECOM_TOKEN", "Nr8CIsNe")
-        self.encoding_aes_key = encoding_aes_key or os.getenv("WECOM_ENCODING_AES_KEY", "yoIVWBBr2iRASH0rIyu2H5VjsSVl1LcWAzXgwyAajLc")
+        self.corp_id = corp_id or os.getenv("WECOM_CORP_ID", "")
+        self.secret = secret or os.getenv("WECOM_SECRET", "")
+        raw_agent_id = os.getenv("WECOM_AGENT_ID")
+        self.agent_id = agent_id or (int(raw_agent_id) if raw_agent_id and raw_agent_id.isdigit() else None)
+        self.token = token or os.getenv("WECOM_TOKEN", "")
+        self.encoding_aes_key = encoding_aes_key or os.getenv("WECOM_ENCODING_AES_KEY", "")
 
         self._cached_token: str | None = None
         self._token_expires_at: float = 0
+        self._seen_nonces: dict[str, float] = {}
 
     def get_access_token(self, force_refresh: bool = False) -> str:
         """Fetch WeCom API access token with automatic in-memory TTL caching."""
-        import httpx
+        if not self.corp_id or not self.secret:
+            raise RuntimeError("WeCom credentials (WECOM_CORP_ID, WECOM_SECRET) are not configured.")
 
         now = time.time()
         if not force_refresh and self._cached_token and now < (self._token_expires_at - 300):
@@ -194,14 +199,38 @@ class WeComService:
     # --------------------------------------------------------------------------
 
     def verify_signature(self, msg_signature: str, timestamp: str, nonce: str, echostr_or_data: str) -> bool:
-        """Validate SHA1 signature for incoming WeCom callback."""
+        """Validate SHA1 signature for incoming WeCom callback using constant-time comparison."""
+        if not self.token or not msg_signature:
+            return False
         items = sorted([self.token, timestamp, nonce, echostr_or_data])
         raw_str = "".join(items)
         sha1_hash = hashlib.sha1(raw_str.encode("utf-8")).hexdigest()
-        return sha1_hash == msg_signature
+        return hmac.compare_digest(sha1_hash, msg_signature)
+
+    def validate_timestamp_and_nonce(self, timestamp: str, nonce: str, max_age_seconds: int = 300) -> bool:
+        """Enforce timestamp freshness and nonce replay protection (Section 4)."""
+        try:
+            ts = float(timestamp)
+        except (ValueError, TypeError):
+            return False
+        now = time.time()
+        if abs(now - ts) > max_age_seconds:
+            return False
+        if nonce in self._seen_nonces:
+            return False
+        self._seen_nonces[nonce] = now
+        cutoff = now - max_age_seconds
+        for k in list(self._seen_nonces.keys()):
+            if self._seen_nonces[k] < cutoff:
+                del self._seen_nonces[k]
+        return True
 
     def decrypt_echostr(self, msg_signature: str, timestamp: str, nonce: str, echostr: str) -> str:
         """Decrypt the GET verification echostr during WeCom callback setup."""
+        if not self.encoding_aes_key:
+            raise ValueError("WeCom ENCODING_AES_KEY is not configured.")
+        if not self.validate_timestamp_and_nonce(timestamp, nonce):
+            raise ValueError("WeCom URL verification failed: Stale timestamp or replayed nonce")
         if not self.verify_signature(msg_signature, timestamp, nonce, echostr):
             raise ValueError("WeCom URL verification failed: Invalid SHA1 signature")
 
@@ -224,6 +253,11 @@ class WeComService:
 
     def decrypt_message(self, msg_signature: str, timestamp: str, nonce: str, post_data: str) -> dict[str, Any]:
         """Decrypt incoming XML/JSON payload from WeChat and extract message dictionary."""
+        if not self.encoding_aes_key:
+            raise ValueError("WeCom ENCODING_AES_KEY is not configured.")
+        if not self.validate_timestamp_and_nonce(timestamp, nonce):
+            raise ValueError("WeCom message rejected: Stale timestamp or replayed nonce")
+
         root = ET.fromstring(post_data)
         encrypt_node = root.find("Encrypt")
         if encrypt_node is None or not encrypt_node.text:

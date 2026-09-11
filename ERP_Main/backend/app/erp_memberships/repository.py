@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.erp_memberships.models import ErpMembership
+from app.erp_memberships.models import ErpMembership, ErpMembershipStatus
 
 
 class ErpMembershipRepository:
@@ -49,6 +49,13 @@ class ErpMembershipRepository:
         )
         return list(result.scalars().all())
 
+    async def count_active(self) -> int:
+        """Count every ACTIVE membership across all ERPs (Phase 7 dashboard aggregate, Section 14)."""
+        result = await self.db.execute(
+            select(func.count()).select_from(ErpMembership).where(ErpMembership.status == ErpMembershipStatus.ACTIVE)
+        )
+        return result.scalar_one()
+
     async def list_for_erp(self, erp_instance_id: uuid.UUID, *, limit: int = 100, offset: int = 0) -> list[ErpMembership]:
         """List memberships for one ERP instance, paged (Phase 3 Step 35 -- never the whole table at once)."""
         result = await self.db.execute(
@@ -58,6 +65,24 @@ class ErpMembershipRepository:
             .limit(limit)
             .offset(offset)
         )
+        return list(result.scalars().all())
+
+    async def list_all(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        erp_instance_id: uuid.UUID | None = None,
+        status: ErpMembershipStatus | None = None,
+    ) -> list[ErpMembership]:
+        """List memberships across all or specific ERP instances, with optional status filter."""
+        stmt = select(ErpMembership)
+        if erp_instance_id is not None:
+            stmt = stmt.where(ErpMembership.erp_instance_id == erp_instance_id)
+        if status is not None:
+            stmt = stmt.where(ErpMembership.status == status)
+        stmt = stmt.order_by(ErpMembership.created_at.desc()).limit(limit).offset(offset)
+        result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
     async def create(self, membership: ErpMembership) -> ErpMembership:

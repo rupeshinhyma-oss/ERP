@@ -1,6 +1,6 @@
 # Yinglima ERP — Master Project Context & Handover Documentation
 
-**Last Updated:** September 7, 2026 (11:05 IST)  
+**Last Updated:** September 7, 2026 (17:05 IST)  
 **Repository:** `https://github.com/rupeshinhyma-oss/Yinglima_ERP.git` (`d:\OM work\ERP_Main_Claude-main`)  
 **Target Audience:** Antigravity AI Agent & Human Developers (Comprehensive onboarding & resume document)
 
@@ -82,16 +82,16 @@ Organized as a structured **3-Layer Procurement Hierarchy**:
 - *Note: All persistent business data is in the cloud; local laptops only connect via credentials in `backend/.env`.*
 
 ### B. Tencent WeCom (企业微信) Configuration
-- **Corp ID (`CorpId`):** `ww0aafdc97cca27e0a`
-- **Agent ID (`AgentId`):** `1000002` (*Yinglima ERP Bot*)
-- **Secret:** `8kzaUnGu34Q6aelEYTaVyB9xOH7EX7MSR6tsLpiL9B8`
-- **Token:** `Nr8CIsNe`
-- **EncodingAESKey:** `yoIVWBBr2iRASH0rIyu2H5VjsSVl1LcWAzXgwyAajLc`
+- **Corp ID (`CorpId`):** Configured via `WECOM_CORP_ID` in `.env`
+- **Agent ID (`AgentId`):** Configured via `WECOM_AGENT_ID` in `.env`
+- **Secret:** Configured via `WECOM_SECRET` in `.env` (Must be rotated externally if exposed)
+- **Token:** Configured via `WECOM_TOKEN` in `.env`
+- **EncodingAESKey:** Configured via `WECOM_ENCODING_AES_KEY` in `.env`
 - **API Endpoint:** `https://qyapi.weixin.qq.com`
 - **Callback Inbound Path:** `/api/v1/inquiries/wechat/callback`
 - **Whitelisted Enterprise IPs (Cloudflare Egress):**
   `104.28.232.96;104.28.232.97;104.28.200.92;104.28.200.96;104.28.200.97`
-- **Admin Group:** `ERP Admins` (Paws / `paws` / `+91 8108294930` configured with full management rights).
+- **Admin Group:** `ERP Admins` (Managed via WeCom enterprise console).
 
 ### C. Mail Servers
 - **SMTP Host:** `smtp.gmail.com` (Port `587`, TLS)

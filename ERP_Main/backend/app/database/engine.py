@@ -26,10 +26,27 @@ def get_engine() -> AsyncEngine:
             # SQLite's default driver rejects cross-thread/task use of the
             # same connection; async SQLite access needs this relaxed.
             connect_args["check_same_thread"] = False
+        elif getattr(settings, "DATABASE_DISABLE_STATEMENT_CACHE", False):
+            # Required when connecting through a transaction-mode PgBouncer / Supabase pooler
+            connect_args["statement_cache_size"] = 0
+            connect_args["prepared_statement_name_func"] = lambda: ""
+        engine_kwargs = {
+            "echo": settings.DATABASE_ECHO,
+            "connect_args": connect_args,
+        }
+        if not settings.DATABASE_URL.startswith("sqlite"):
+            from sqlalchemy.pool import AsyncAdaptedQueuePool
+            engine_kwargs.update({
+                "poolclass": AsyncAdaptedQueuePool,
+                "pool_size": getattr(settings, "DATABASE_POOL_SIZE", 10),
+                "max_overflow": getattr(settings, "DATABASE_MAX_OVERFLOW", 20),
+                "pool_timeout": getattr(settings, "DATABASE_POOL_TIMEOUT_SECONDS", 30),
+                "pool_recycle": getattr(settings, "DATABASE_POOL_RECYCLE_SECONDS", 1800),
+                "pool_pre_ping": True,
+            })
         _engine = create_async_engine(
             settings.DATABASE_URL,
-            echo=settings.DATABASE_ECHO,
-            connect_args=connect_args,
+            **engine_kwargs,
         )
     return _engine
 

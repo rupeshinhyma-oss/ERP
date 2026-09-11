@@ -91,7 +91,7 @@ class QueueService:
             extra={
                 "job_id": str(job.id),
                 "job_name": job_name,
-                "module": module,
+                "job_module": module,
                 "priority": priority.name,
                 "run_at": (run_at or now).isoformat(),
             },

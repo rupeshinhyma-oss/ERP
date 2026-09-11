@@ -10,7 +10,25 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet" />
-  <title>Inhyma ERP</title>
+  <title>Dashboard - Inhyma</title>
+  <script>
+    (function() {
+      try {
+        var c = localStorage.getItem("erp_org_company_name") || localStorage.getItem("erp_brand_name") || sessionStorage.getItem("erp_org_company_name") || "Inhyma";
+        var company = c.trim();
+        var path = window.location.pathname.replace(/^\/|\/$/g, "");
+        var page = "Dashboard";
+        if (path === "buyers") page = "Buyers";
+        else if (path === "suppliers") page = "Suppliers";
+        else if (path === "inquiries") page = "Inquiries";
+        else if (path === "organization") page = "Organization Settings";
+        else if (path && path !== "dashboard" && path !== "login") {
+          page = path.charAt(0).toUpperCase() + path.slice(1).replace(/[-_]/g, " ");
+        }
+        document.title = page + " - " + company;
+      } catch (e) {}
+    })();
+  </script>
 </head>
 
 <body>

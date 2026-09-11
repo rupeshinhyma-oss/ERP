@@ -44,7 +44,7 @@ def upgrade() -> None:
     if 'date_of_birth' not in user_cols:
         op.add_column('users', sa.Column('date_of_birth', sa.Date(), nullable=True))
     if 'gender' not in user_cols:
-        op.add_column('users', sa.Column('gender', sa.Enum('MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY', name='user_gender', native_enum=False, length=20), nullable=True))
+        op.add_column('users', sa.Column('gender', sa.Enum('MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY', name='user_gender', native_enum=False, length=50), nullable=True))
     if 'date_of_joining' not in user_cols:
         op.add_column('users', sa.Column('date_of_joining', sa.Date(), nullable=True))
     if 'employment_type' not in user_cols:

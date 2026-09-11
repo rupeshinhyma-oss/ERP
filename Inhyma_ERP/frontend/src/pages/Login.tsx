@@ -70,7 +70,7 @@ export function LoginPage() {
 
   useEffect(() => {
     let cancelled = false;
-    document.title = `Sign In — ${brand}`;
+    document.title = `Sign In - ${brand}`;
 
     // Fast background pre-warm & brand check
     (async () => {
@@ -84,7 +84,7 @@ export function LoginPage() {
         } catch {
           /* ignore */
         }
-        document.title = `Sign In — ${data.company_name}`;
+        document.title = `Sign In - ${data.company_name}`;
       } catch {
         /* fallback to default */
       }

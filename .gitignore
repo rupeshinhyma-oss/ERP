@@ -4,6 +4,19 @@
 !.env.example
 *.env.local
 
+# Federation keys & private credentials
+federation_keys/
+**/federation_keys/
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+!**/certifi/cacert.pem
+*.zip
+app/reporting/exports/
+**/reporting/exports/*
+
 # Git standalone backups
 .git_standalone_backup/
 *.git_backup/

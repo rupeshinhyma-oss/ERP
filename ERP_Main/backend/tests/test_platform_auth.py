@@ -32,6 +32,24 @@ async def test_login_fails_with_wrong_password(client):
 
 
 @pytest.mark.asyncio
+async def test_failed_login_is_actually_audited(client, super_admin_client):
+    """
+    Regression test for a Phase 4 finding: a failed login's audit entry
+    used to be silently rolled back (the audit write was only flushed,
+    not committed, and the `raise` immediately after it made
+    `get_db_session()` roll back the whole request). Fixed in
+    `app.platform_auth.service.PlatformAuthService.login`.
+    """
+    await client.post("/api/v1/global/auth/login", json={"email": "nobody@platform.example", "password": "wrong"})
+
+    resp = await super_admin_client.get(
+        "/api/v1/global/audit", params={"event_type": "PLATFORM_ADMIN_LOGIN_FAILED"}
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()["data"]) >= 1
+
+
+@pytest.mark.asyncio
 async def test_me_rejects_missing_token(client):
     """GET /auth/me without any Authorization header is rejected."""
     resp = await client.get("/api/v1/global/auth/me")

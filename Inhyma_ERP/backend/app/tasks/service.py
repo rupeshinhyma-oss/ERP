@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -127,6 +127,12 @@ class TaskService:
         escalations = state.dict.get("escalations", []) if state else []
         attachments = state.dict.get("attachments", []) if state else []
         voice_notes = state.dict.get("voice_notes", []) if state else []
+        dependencies = state.dict.get("dependencies", []) if state else []
+        depends_on_ids = [
+            d.depends_on_task_id
+            for d in dependencies
+            if hasattr(d, "depends_on_task_id") and d.depends_on_task_id is not None
+        ]
 
         issue_type_val = getattr(task, "issue_type", "TASK")
         if hasattr(issue_type_val, "value"):
@@ -168,6 +174,7 @@ class TaskService:
             escalation_count=len(escalations),
             attachment_count=len(attachments),
             voice_note_count=len(voice_notes),
+            depends_on_task_ids=depends_on_ids,
         )
 
     async def _broadcast_task_event(
@@ -391,7 +398,7 @@ class TaskService:
                     type="task_escalated",
                     title="Task Escalated",
                     message=f"Task '{task.title}' was escalated to you during creation: {init_esc.reason}",
-                    link=f"/tasks?id={task.id}",
+                    link=f"/tasks?id={task.id}&drawerTab=escalations",
                 )
 
         # Add initial attachments if supplied
@@ -649,6 +656,121 @@ class TaskService:
                 notified_count += 1
             await self._broadcast_task_event("TASK_HOLD_EXPIRED", task)
         return len(tasks)
+
+    async def check_task_deadlines(self, user_id: uuid.UUID | None = None) -> int:
+        """
+        Check for approaching or overdue task deadlines and escalation targets.
+        Alerts users strictly for tasks assigned to them (or created by them)
+        and escalations assigned to them.
+        """
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        notified_count = 0
+
+        # 1. Fetch active tasks with deadlines
+        stmt = (
+            select(Task)
+            .where(
+                Task.deleted_at.is_(None),
+                Task.status != TaskStatus.DONE,
+                Task.due_date.is_not(None),
+            )
+        )
+        res = await self.repository.session.execute(stmt)
+        tasks = list(res.scalars().all())
+
+        for task in tasks:
+            await self.repository.session.refresh(task, ["assignees", "escalations"])
+
+            # Determine relevant users: assignees and creator
+            task_users = {a.user_id for a in task.assignees if a.assignment_role != "WATCHER"}
+            if task.created_by:
+                task_users.add(task.created_by)
+
+            # If user_id is specified, filter to strictly that user (themself)
+            if user_id is not None:
+                if user_id not in task_users:
+                    task_users = set()
+                else:
+                    task_users = {user_id}
+
+            if task.due_date:
+                link_url = f"/tasks?id={task.id}"
+                # Overdue
+                if task.due_date < today:
+                    notif_type = "task_overdue"
+                    title = "⚠️ Task Overdue"
+                    message = f"Task '{task.title}' was due on {task.due_date} and is overdue."
+                # Due today
+                elif task.due_date == today:
+                    notif_type = "task_deadline_today"
+                    title = "📅 Task Due Today"
+                    message = f"Task '{task.title}' is due today ({today})."
+                # Due tomorrow
+                elif task.due_date == tomorrow:
+                    notif_type = "task_deadline_approaching"
+                    title = "⏰ Task Due Tomorrow"
+                    message = f"Task '{task.title}' is due tomorrow ({task.due_date})."
+                else:
+                    notif_type = None
+                    title = None
+                    message = None
+
+                if notif_type and title and message:
+                    for uid in task_users:
+                        # Deduplicate within 20 hours to prevent repetitive spam
+                        already_sent = await self.notification_service.has_recent_notification(
+                            uid, notif_type, link_url, within_hours=20
+                        )
+                        if not already_sent:
+                            await self.notification_service.notify_user(
+                                user_id=uid,
+                                type=notif_type,
+                                title=title,
+                                message=message,
+                                link=link_url,
+                            )
+                            notified_count += 1
+
+            # 2. Check escalations assigned to user(s)
+            for esc in (task.escalations or []):
+                esc_target = esc.to_user
+                if not esc_target:
+                    continue
+                # Only notify if they were assigned for escalation
+                if user_id is not None and esc_target != user_id:
+                    continue
+
+                esc_link = f"/tasks?id={task.id}&drawerTab=escalations"
+                if esc.due_date:
+                    if esc.due_date < today:
+                        esc_type = "escalation_overdue"
+                        esc_title = "🚨 Escalation Resolution Overdue"
+                        esc_msg = f"Escalation on task '{task.title}' assigned to you was due on {esc.due_date}."
+                    elif esc.due_date == today:
+                        esc_type = "escalation_deadline"
+                        esc_title = "⚡ Escalation Due Today"
+                        esc_msg = f"Escalation on task '{task.title}' assigned to you is due today ({today})."
+                    else:
+                        esc_type = None
+                        esc_title = None
+                        esc_msg = None
+
+                    if esc_type and esc_title and esc_msg:
+                        already_sent = await self.notification_service.has_recent_notification(
+                            esc_target, esc_type, esc_link, within_hours=20
+                        )
+                        if not already_sent:
+                            await self.notification_service.notify_user(
+                                user_id=esc_target,
+                                type=esc_type,
+                                title=esc_title,
+                                message=esc_msg,
+                                link=esc_link,
+                            )
+                            notified_count += 1
+
+        return notified_count
 
     async def assign_task(
         self,
@@ -1124,7 +1246,7 @@ class TaskService:
             type="task_escalated",
             title="Task Escalated to You",
             message=f"Task '{task.title}' was escalated to you by {current_user.username}: {reason}",
-            link=f"/tasks?id={task.id}",
+            link=f"/tasks?id={task.id}&drawerTab=escalations",
         )
 
         await self._broadcast_task_event(

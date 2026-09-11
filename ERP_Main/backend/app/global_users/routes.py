@@ -6,6 +6,13 @@ Step 19/32). Read routes require it too, unlike the ERP Registry's -- a
 Global User's email/metadata is personal information about a real human,
 not public registry topology, so it does not get the same "open reads"
 treatment `erp_registry` gets.
+
+Phase 5 (Section 22): every route now uses
+`require_platform_permission(...)` instead of `require_platform_admin`
+directly. Additive, not a narrowing -- a PlatformAdmin still satisfies
+every check exactly as before. `AuthorizedPrincipal` exposes `.id`/
+`.email` aliases so it can be passed straight into `service.create(...,
+actor=...)` etc. without changing any service signature.
 """
 
 from __future__ import annotations
@@ -18,8 +25,7 @@ from app.core.responses import build_success_response
 from app.global_users.dependencies import get_global_user_service
 from app.global_users.schemas import GlobalUserCreate, GlobalUserRead, GlobalUserStatusUpdate, GlobalUserUpdate
 from app.global_users.service import GlobalUserService
-from app.platform_auth.dependencies import require_platform_admin
-from app.platform_auth.models import PlatformAdmin
+from app.platform_authz.dependencies import AuthorizedPrincipal, require_platform_permission
 
 router = APIRouter(prefix="/global/users", tags=["Global Users"])
 
@@ -33,11 +39,11 @@ def _request_id(request: Request) -> str:
 async def create_global_user(
     request: Request,
     payload: GlobalUserCreate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.create")),
     service: GlobalUserService = Depends(get_global_user_service),
 ) -> dict:
-    """Create a new Global User. Requires an authenticated platform admin."""
-    user = await service.create(payload, actor=admin)
+    """Create a new Global User. Requires platform.user.create (or PlatformAdmin)."""
+    user = await service.create(payload, actor=principal)
     return build_success_response(
         GlobalUserRead.model_validate(user).model_dump(mode="json", by_alias=True),
         request_id=_request_id(request),
@@ -50,7 +56,7 @@ async def list_global_users(
     request: Request,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    _admin: PlatformAdmin = Depends(require_platform_admin),
+    _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.read")),
     service: GlobalUserService = Depends(get_global_user_service),
 ) -> dict:
     """List Global Users, paged."""
@@ -63,7 +69,7 @@ async def list_global_users(
 async def get_global_user(
     request: Request,
     user_id: uuid.UUID,
-    _admin: PlatformAdmin = Depends(require_platform_admin),
+    _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.read")),
     service: GlobalUserService = Depends(get_global_user_service),
 ) -> dict:
     """Fetch a single Global User by internal id."""
@@ -78,11 +84,11 @@ async def update_global_user(
     request: Request,
     user_id: uuid.UUID,
     payload: GlobalUserUpdate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.update")),
     service: GlobalUserService = Depends(get_global_user_service),
 ) -> dict:
     """Update a Global User's display name, email, or metadata. Status is changed via the dedicated endpoint."""
-    user = await service.update(user_id, payload, actor=admin)
+    user = await service.update(user_id, payload, actor=principal)
     return build_success_response(
         GlobalUserRead.model_validate(user).model_dump(mode="json", by_alias=True),
         request_id=_request_id(request),
@@ -95,11 +101,11 @@ async def change_global_user_status(
     request: Request,
     user_id: uuid.UUID,
     payload: GlobalUserStatusUpdate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.disable")),
     service: GlobalUserService = Depends(get_global_user_service),
 ) -> dict:
     """Change a Global User's status (ACTIVE/SUSPENDED/DISABLED). Never affects any local ERP account."""
-    user = await service.set_status(user_id, payload.status, actor=admin)
+    user = await service.set_status(user_id, payload.status, actor=principal)
     return build_success_response(
         GlobalUserRead.model_validate(user).model_dump(mode="json", by_alias=True),
         request_id=_request_id(request),

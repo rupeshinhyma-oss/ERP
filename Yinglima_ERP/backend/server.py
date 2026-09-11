@@ -1,3 +1,4 @@
+
 """
 One-command backend startup.
 
@@ -57,8 +58,26 @@ def _check_env_file() -> None:
         )
 
 
+def _ensure_venv() -> None:
+    """If running outside a virtual environment, re-exec with local venv python if found."""
+    if sys.prefix != sys.base_prefix or hasattr(sys, "real_prefix"):
+        return
+
+    for venv_name in ("venv", ".venv", "env"):
+        candidate = (
+            BACKEND_DIR / venv_name / "Scripts" / "python.exe"
+            if sys.platform == "win32"
+            else BACKEND_DIR / venv_name / "bin" / "python"
+        )
+        if candidate.is_file():
+            print(f"[server.py] Auto-switching to detected virtual environment at '{venv_name}':\n  {candidate}\n")
+            result = subprocess.run([str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=BACKEND_DIR)
+            sys.exit(result.returncode)
+
+
 def main() -> None:
     """Parse CLI flags, run migrations + seed, then hand off to uvicorn."""
+    _ensure_venv()
     parser = argparse.ArgumentParser(description="Run migrations, seed data, then start the API server.")
     parser.add_argument("--host", default="0.0.0.0", help="Host/interface to bind uvicorn to (default: 0.0.0.0).")
     import os

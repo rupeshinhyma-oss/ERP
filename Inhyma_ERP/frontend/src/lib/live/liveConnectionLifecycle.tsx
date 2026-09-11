@@ -36,8 +36,16 @@ export function LiveConnectionLifecycle(): null {
       }
     });
 
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted && Auth.isLoggedIn()) {
+        liveClient.connect();
+      }
+    };
+    window.addEventListener("pageshow", onPageShow);
+
     return () => {
       unsubscribe();
+      window.removeEventListener("pageshow", onPageShow);
       // Intentionally does NOT call liveClient.disconnect() here: this
       // component is mounted once for the app's entire lifetime (see
       // App.tsx), so its cleanup only runs on a real unmount (hot reload

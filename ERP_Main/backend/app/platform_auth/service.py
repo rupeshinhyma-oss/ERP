@@ -51,6 +51,15 @@ class PlatformAuthService:
                 actor_type=AuditActorType.HUMAN_ADMIN,
                 actor_label=email,
             )
+            # Explicitly commit here: the exception raised immediately
+            # below would otherwise make `get_db_session()`'s dependency
+            # roll back this whole request's session on the way out,
+            # silently discarding the audit entry just written above.
+            # Discovered as a real, pre-existing bug during Phase 4
+            # (the identical pattern in app.global_auth.service.login
+            # surfaced it first) -- failed platform-admin logins were
+            # never actually reaching the audit log before this fix.
+            await self.repository.db.commit()
             raise UnauthorizedException("Invalid email or password.")
 
         issued = create_platform_access_token(admin.id, role=admin.role.value)

@@ -415,8 +415,12 @@ export function ProductGalleryPage() {
         const quoteRes = await apiGet<QuotationDocument[]>("/inquiries/quotation-documents");
         const quoteItems = Array.isArray(quoteRes.data) ? quoteRes.data : [];
         setQuotationDocs(quoteItems);
-      } catch (qErr) {
-        console.warn("Failed to fetch quotation documents for gallery:", qErr);
+      } catch (qErr: any) {
+        if (qErr?.status === 403) {
+          setQuotationDocs([]);
+        } else {
+          console.warn("Failed to fetch quotation documents for gallery:", qErr);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch gallery data:", err);

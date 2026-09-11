@@ -47,9 +47,36 @@ from app.suppliers.schemas import (
     SupplierUpdate,
 )
 from app.suppliers.service import SupplierService
+from app.integration.jobs import enqueue_dispatch
+from app.integration.repository import IntegrationOutboxRepository
+from app.integration.service import IntegrationService
+from app.queue.service import QueueService
 
 router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
 logger = get_logger(__name__)
+
+
+async def _publish_supplier_integration_event(
+    *,
+    db: AsyncSession,
+    event_type: str,
+    supplier_id: uuid.UUID,
+    user_id: uuid.UUID,
+    payload: dict,
+) -> None:
+    """Write one Phase 6 cross-ERP integration outbox row for a supplier."""
+    service = IntegrationService(IntegrationOutboxRepository(db))
+    outbox_event = service.publish_event(
+        event_type=event_type,
+        aggregate_type="supplier",
+        aggregate_id=supplier_id,
+        payload=payload,
+        actor_type="user",
+        actor_id=user_id,
+    )
+    await db.flush()
+    queue_service = QueueService(db)
+    await enqueue_dispatch(queue_service, outbox_event_id=outbox_event.id)
 
 
 async def _publish_supplier_event(
@@ -201,6 +228,19 @@ async def create_supplier(
         entity_id=supplier.id,
         description=f"Created supplier {supplier.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_supplier_integration_event(
+        db=db,
+        event_type="supplier.created",
+        supplier_id=supplier.id,
+        user_id=current_user.id,
+        payload={
+            "supplier_id": str(supplier.id),
+            "supplier_code": getattr(supplier, "supplier_code", None),
+            "company_name": supplier.company_name,
+            "status": supplier.current_status.value if getattr(supplier, "current_status", None) else None,
+            "version": getattr(supplier, "version", 1),
+        },
     )
     await _publish_supplier_event(
         db=db,
@@ -360,6 +400,19 @@ async def update_supplier(
         entity_id=supplier.id,
         description=f"Updated supplier {supplier.company_name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
+    )
+    await _publish_supplier_integration_event(
+        db=db,
+        event_type="supplier.updated",
+        supplier_id=supplier.id,
+        user_id=current_user.id,
+        payload={
+            "supplier_id": str(supplier.id),
+            "supplier_code": getattr(supplier, "supplier_code", None),
+            "company_name": supplier.company_name,
+            "status": supplier.current_status.value if getattr(supplier, "current_status", None) else None,
+            "version": getattr(supplier, "version", 1),
+        },
     )
     await _publish_supplier_event(
         db=db,

@@ -11,18 +11,40 @@
  * continuous drill-down rather than distinct pages.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
-import { apiDelete, apiGet, apiPatch, apiPost, toQueryString } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLiveModule } from "@/lib/live/useLive";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { autoTitleCase } from "@/utils/text";
+import { TrashConflictModal, type TrashConflictInfo } from "@/components/TrashConflictModal";
+import {
+  BulkActionsDropdown,
+  ImpExpDropdown,
+  ImportSummaryPanel,
+  downloadSampleCsv,
+  parseFile,
+  WizardModal,
+  type ImportHeader,
+  type ImportSummary,
+  type SheetRow,
+} from "@/components/ImportWizard";
 import type { Buyer } from "@/types/buyers";
 import type { CompanySummary, ConsignmentCode, Inquiry, InquiryItem, InquiryListItem, Quotation } from "@/types/inquiries";
+
+const INQUIRY_ITEM_IMPORT_HEADERS: ImportHeader[] = [
+  { key: "Product Name", label: "Product Name", required: true },
+  { key: "Product Code", label: "Product Code" },
+  { key: "Quantity", label: "Quantity", required: true },
+  { key: "UOM", label: "UOM" },
+  { key: "Brand Preference", label: "Brand Preference" },
+  { key: "Product Specs / Remarks", label: "Product Specs / Remarks" },
+  { key: "Status", label: "Status" },
+];
 
 type View =
   | { layer: "companies" }
@@ -158,6 +180,8 @@ export function InquiriesPage() {
   const [codeNames, setCodeNames] = useState<Record<string, string>>({});
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [uomNames, setUomNames] = useState<Record<string, string>>({});
+  type CompanyStatusTab = "all" | "pending" | "ongoing" | "approved" | "completed";
+  const [companyStatusTab, setCompanyStatusTab] = useState<CompanyStatusTab>("all");
   const [stats, setStats] = useState({ pending: 0, approved: 0, ongoing: 0, completed: 0, total_order: 0 });
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -254,29 +278,9 @@ export function InquiriesPage() {
                   Dashboard / Sales / Inquiries
                 </div>
               </div>
-
-              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                <button
-                  type="button"
-                  onClick={() => { setQuickAddInitialBuyerId(""); setQuickAddOpen(true); }}
-                  style={{
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "6px",
-                    padding: "8px 16px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
-                  }}
-                >
-                  + ADD NEW
-                </button>
-              </div>
             </div>
 
-            {/* Top 5 KPI Cards matching Figma prototype for Company Dashboard */}
+            {/* Top 5 KPI Cards matching Figma prototype for Company Dashboard - Clickable filters */}
             <div
               style={{
                 display: "grid",
@@ -286,17 +290,20 @@ export function InquiriesPage() {
               }}
             >
               <div
+                onClick={() => setCompanyStatusTab("pending")}
                 style={{
-                  background: "#ffffff",
-                  border: "1px solid #e2e8f0",
+                  background: companyStatusTab === "pending" ? "#fffbeb" : "#ffffff",
+                  border: companyStatusTab === "pending" ? "2px solid #f59e0b" : "1px solid #e2e8f0",
                   borderRadius: "10px",
                   padding: "16px",
                   display: "flex",
                   alignItems: "center",
                   gap: "14px",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  boxShadow: companyStatusTab === "pending" ? "0 4px 12px rgba(245,158,11,0.15)" : "0 1px 3px rgba(0,0,0,0.04)",
                   transition: "all 0.15s ease",
+                  cursor: "pointer",
                 }}
+                title="Filter by Pending Inquiries"
               >
                 <div
                   style={{
@@ -326,17 +333,20 @@ export function InquiriesPage() {
               </div>
 
               <div
+                onClick={() => setCompanyStatusTab("approved")}
                 style={{
-                  background: "#ffffff",
-                  border: "1px solid #e2e8f0",
+                  background: companyStatusTab === "approved" ? "#ecfdf5" : "#ffffff",
+                  border: companyStatusTab === "approved" ? "2px solid #10b981" : "1px solid #e2e8f0",
                   borderRadius: "10px",
                   padding: "16px",
                   display: "flex",
                   alignItems: "center",
                   gap: "14px",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  boxShadow: companyStatusTab === "approved" ? "0 4px 12px rgba(16,185,129,0.15)" : "0 1px 3px rgba(0,0,0,0.04)",
                   transition: "all 0.15s ease",
+                  cursor: "pointer",
                 }}
+                title="Filter by Approved Inquiries"
               >
                 <div
                   style={{
@@ -366,17 +376,20 @@ export function InquiriesPage() {
               </div>
 
               <div
+                onClick={() => setCompanyStatusTab("ongoing")}
                 style={{
-                  background: "#ffffff",
-                  border: "1px solid #e2e8f0",
+                  background: companyStatusTab === "ongoing" ? "#eff6ff" : "#ffffff",
+                  border: companyStatusTab === "ongoing" ? "2px solid #3b82f6" : "1px solid #e2e8f0",
                   borderRadius: "10px",
                   padding: "16px",
                   display: "flex",
                   alignItems: "center",
                   gap: "14px",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  boxShadow: companyStatusTab === "ongoing" ? "0 4px 12px rgba(59,130,246,0.15)" : "0 1px 3px rgba(0,0,0,0.04)",
                   transition: "all 0.15s ease",
+                  cursor: "pointer",
                 }}
+                title="Filter by Ongoing Inquiries"
               >
                 <div
                   style={{
@@ -405,17 +418,20 @@ export function InquiriesPage() {
               </div>
 
               <div
+                onClick={() => setCompanyStatusTab("completed")}
                 style={{
-                  background: "#ffffff",
-                  border: "1px solid #e2e8f0",
+                  background: companyStatusTab === "completed" ? "#f0fdfa" : "#ffffff",
+                  border: companyStatusTab === "completed" ? "2px solid #14b8a6" : "1px solid #e2e8f0",
                   borderRadius: "10px",
                   padding: "16px",
                   display: "flex",
                   alignItems: "center",
                   gap: "14px",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  boxShadow: companyStatusTab === "completed" ? "0 4px 12px rgba(20,184,166,0.15)" : "0 1px 3px rgba(0,0,0,0.04)",
                   transition: "all 0.15s ease",
+                  cursor: "pointer",
                 }}
+                title="Filter by Completed Inquiries"
               >
                 <div
                   style={{
@@ -445,17 +461,20 @@ export function InquiriesPage() {
               </div>
 
               <div
+                onClick={() => setCompanyStatusTab("all")}
                 style={{
-                  background: "#ffffff",
-                  border: "1px solid #e2e8f0",
+                  background: companyStatusTab === "all" ? "#f5f3ff" : "#ffffff",
+                  border: companyStatusTab === "all" ? "2px solid #8b5cf6" : "1px solid #e2e8f0",
                   borderRadius: "10px",
                   padding: "16px",
                   display: "flex",
                   alignItems: "center",
                   gap: "14px",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  boxShadow: companyStatusTab === "all" ? "0 4px 12px rgba(139,92,246,0.15)" : "0 1px 3px rgba(0,0,0,0.04)",
                   transition: "all 0.15s ease",
+                  cursor: "pointer",
                 }}
+                title="Show All Inquiries"
               >
                 <div
                   style={{
@@ -498,6 +517,8 @@ export function InquiriesPage() {
             onError={setError}
             refreshKey={refreshTrigger}
             onOpenQuickAdd={(buyerId) => { setQuickAddInitialBuyerId(buyerId || ""); setQuickAddOpen(true); }}
+            activeStatusTab={companyStatusTab}
+            onTabChange={setCompanyStatusTab}
           />
         )}
         {view.layer === "consignments" && (
@@ -555,6 +576,8 @@ function CompaniesView({
   onError,
   refreshKey,
   onOpenQuickAdd,
+  activeStatusTab,
+  onTabChange,
 }: {
   onOpenCompany: (buyerId: string) => void;
   resolveBuyerName: (buyerId: string) => Promise<void>;
@@ -562,10 +585,16 @@ function CompaniesView({
   onError: (err: unknown) => void;
   refreshKey: number;
   onOpenQuickAdd: (buyerId?: string) => void;
+  activeStatusTab?: "all" | "pending" | "ongoing" | "approved" | "completed";
+  onTabChange?: (tab: "all" | "pending" | "ongoing" | "approved" | "completed") => void;
 }) {
   const [summaries, setSummaries] = useState<CompanySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedBuyerIds, setSelectedBuyerIds] = useState<string[]>([]);
+  const [localStatusTab, setLocalStatusTab] = useState<"all" | "pending" | "ongoing" | "approved" | "completed">("all");
+
+  const statusTab = activeStatusTab !== undefined ? activeStatusTab : localStatusTab;
+  const setStatusTab = onTabChange || setLocalStatusTab;
 
   const loadSummaries = useCallback(async () => {
     setLoading(true);
@@ -589,11 +618,47 @@ function CompaniesView({
     void loadSummaries();
   }, [loadSummaries, refreshKey]);
 
+  // Tab counts based on all loaded company summaries
+  const tabCounts = useMemo(() => {
+    let pending = 0;
+    let ongoing = 0;
+    let approved = 0;
+    let completed = 0;
+    summaries.forEach((s) => {
+      const st = s.consignment_status;
+      if (st === "proposed") {
+        pending++;
+        ongoing++;
+      } else if (st === "partial_approved") {
+        ongoing++;
+        pending++;
+        approved++;
+      } else if (st === "fully_approved") {
+        approved++;
+        completed++;
+      }
+    });
+    return { all: summaries.length, pending, ongoing, approved, completed };
+  }, [summaries]);
+
+  // Filter company summaries according to active lifecycle tab
+  const filteredSummaries = useMemo(() => {
+    if (statusTab === "all") return summaries;
+    return summaries.filter((s) => {
+      const st = s.consignment_status;
+      if (statusTab === "pending") return st === "proposed" || (s.proposed_count || 0) > 0;
+      if (statusTab === "ongoing") return st === "partial_approved" || st === "proposed";
+      if (statusTab === "approved") return st === "fully_approved" || st === "partial_approved" || (s.approved_count || 0) > 0;
+      if (statusTab === "completed") return st === "fully_approved";
+      return true;
+    });
+  }, [summaries, statusTab]);
+
   const toggleSelectAll = () => {
-    if (selectedBuyerIds.length === summaries.length) {
+    if (selectedBuyerIds.length === filteredSummaries.length && filteredSummaries.length > 0) {
       setSelectedBuyerIds([]);
     } else {
-      setSelectedBuyerIds(summaries.map((s) => s.buyer_id));
+      setSelectedBuyerIds(filteredSummaries.map((s) => s.buyer_id));
     }
   };
 
@@ -614,16 +679,122 @@ function CompaniesView({
     }
   }
 
+  async function handleBulkDeleteCompanies() {
+    if (!selectedBuyerIds.length) return;
+    if (!window.confirm(`Delete all consignments for the ${selectedBuyerIds.length} selected buyer company(ies)? This will safely move them to Trash.`)) return;
+    try {
+      setLoading(true);
+      for (const buyerId of selectedBuyerIds) {
+        const { data: consignments } = await apiGet<InquiryListItem[]>(`/inquiries/companies/${buyerId}`);
+        await Promise.all(consignments.map((c) => apiDelete(`/inquiries/${c.id}`)));
+      }
+      setSelectedBuyerIds([]);
+      void loadSummaries();
+    } catch (err) {
+      onError(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: "10px" }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 600, color: "#0F172A", margin: 0 }}>Inquiries — Company Wise</h1>
           <p className="muted" style={{ margin: "4px 0 0 0" }}>
             Select a buyer company to see its consignments (e.g. FB1, FB2, ING1…).
           </p>
         </div>
+
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <Can permission="inquiry.delete">
+            <BulkActionsDropdown
+              selectedCount={selectedBuyerIds.length}
+              onBulkDelete={handleBulkDeleteCompanies}
+            />
+          </Can>
+          <Can permission="inquiry.create">
+            <button
+              type="button"
+              onClick={() => onOpenQuickAdd()}
+              style={{
+                background: "#0061f2",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "6px",
+                padding: "8px 16px",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
+              }}
+            >
+              + ADD NEW
+            </button>
+          </Can>
+        </div>
       </div>
+
+      {/* Lifecycle Filter Tabs matching Product Master Active/Inactive tabs style */}
+      <div
+        style={{
+          display: "flex",
+          gap: "24px",
+          borderBottom: "1px solid #E2E8F0",
+          marginBottom: "14px",
+          paddingLeft: "4px",
+        }}
+      >
+        {(
+          [
+            { key: "all", label: "All" },
+            { key: "pending", label: "Pending" },
+            { key: "ongoing", label: "Ongoing" },
+            { key: "approved", label: "Approved" },
+            { key: "completed", label: "Completed" },
+          ] as const
+        ).map((t) => {
+          const isActive = statusTab === t.key;
+          const count = tabCounts[t.key];
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setStatusTab(t.key)}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: isActive ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: isActive ? "#0061f2" : "#64748b",
+                fontWeight: isActive ? 700 : 600,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span>{t.label}</span>
+              <span
+                style={{
+                  background: isActive ? "#e0f2fe" : "#f1f5f9",
+                  color: isActive ? "#0284c7" : "#64748b",
+                  padding: "1px 6px",
+                  borderRadius: "10px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                }}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       <div style={{ overflowX: "auto", border: "1px solid #E2E8F0", borderRadius: 8 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
           <thead>
@@ -631,7 +802,7 @@ function CompaniesView({
               <th style={{ ...thStyle, width: "40px" }}>
                 <input
                   type="checkbox"
-                  checked={summaries.length > 0 && selectedBuyerIds.length === summaries.length}
+                  checked={filteredSummaries.length > 0 && selectedBuyerIds.length === filteredSummaries.length}
                   onChange={toggleSelectAll}
                 />
               </th>
@@ -647,10 +818,14 @@ function CompaniesView({
           <tbody>
             {loading ? (
               <InquiriesBuyerSummarySkeletonRows count={6} />
-            ) : summaries.length === 0 ? (
-              <TableMessageRow colSpan={8}>No inquiries yet. Add an item from a consignment to get started.</TableMessageRow>
+            ) : filteredSummaries.length === 0 ? (
+              <TableMessageRow colSpan={8}>
+                {statusTab === "all"
+                  ? "No inquiries yet. Add an item from a consignment to get started."
+                  : `No ${statusTab} inquiries found.`}
+              </TableMessageRow>
             ) : (
-              summaries.map((s) => (
+              filteredSummaries.map((s) => (
                 <tr key={s.buyer_id}>
                   <td style={tdStyle}>
                     <input
@@ -762,6 +937,9 @@ function ConsignmentsView({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [selectedInquiryIds, setSelectedInquiryIds] = useState<string[]>([]);
+  const [statusTab, setStatusTab] = useState<"all" | "proposed" | "partial_approved" | "fully_approved">("all");
+
   // Phase 7: keyed so deleting one row never disables another row's button.
   const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
 
@@ -781,17 +959,66 @@ function ConsignmentsView({
     void load();
   }, [load]);
 
+  // Tab counts based on all loaded consignments for this company
+  const tabCounts = useMemo(() => {
+    let proposed = 0;
+    let partial_approved = 0;
+    let fully_approved = 0;
+    rows.forEach((r) => {
+      if (r.consignment_status === "proposed") proposed++;
+      else if (r.consignment_status === "partial_approved") partial_approved++;
+      else if (r.consignment_status === "fully_approved") fully_approved++;
+    });
+    return { all: rows.length, proposed, partial_approved, fully_approved };
+  }, [rows]);
+
+  // Filtered consignments by tab and search keyword
   const filtered = useMemo(() => {
-    if (!search.trim()) return rows;
-    const q = search.toLowerCase();
-    return rows.filter((r) => (r.consignment_code || codeNames[r.consignment_code_id] || "").toLowerCase().includes(q));
-  }, [rows, search, codeNames]);
+    let list = rows;
+    if (statusTab !== "all") {
+      list = list.filter((r) => r.consignment_status === statusTab);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((r) => (r.consignment_code || codeNames[r.consignment_code_id] || "").toLowerCase().includes(q));
+    }
+    return list;
+  }, [rows, statusTab, search, codeNames]);
+
+  const toggleSelectAll = () => {
+    if (selectedInquiryIds.length === filtered.length && filtered.length > 0) {
+      setSelectedInquiryIds([]);
+    } else {
+      setSelectedInquiryIds(filtered.map((r) => r.id));
+    }
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedInquiryIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
 
   async function handleDelete(inquiryId: string) {
     if (!window.confirm("Delete this consignment and all its items?")) return;
     await guardRowAction(`delete:${inquiryId}`, async () => {
       try {
         await apiDelete(`/inquiries/${inquiryId}`);
+        setSelectedInquiryIds((prev) => prev.filter((id) => id !== inquiryId));
+        void load();
+      } catch (err) {
+        onError(err);
+      }
+    });
+  }
+
+  async function handleBulkDelete() {
+    if (!selectedInquiryIds.length) return;
+    if (!window.confirm(`Delete ${selectedInquiryIds.length} selected consignment(s) and all their items? They can be restored from Trash.`)) return;
+    await guardRowAction("bulk-delete", async () => {
+      try {
+        await Promise.all(selectedInquiryIds.map((id) => apiDelete(`/inquiries/${id}`)));
+        setSelectedInquiryIds([]);
         void load();
       } catch (err) {
         onError(err);
@@ -801,12 +1028,18 @@ function ConsignmentsView({
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: "10px" }}>
         <h1 style={{ fontSize: 20, fontWeight: 600, color: "#0F172A", margin: 0 }}>{buyerName || "…"} — Consignments</h1>
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <button type="button" onClick={onBack} className="btn btn-outline" style={{ background: "#ffffff", border: "1px solid #cbd5e1", color: "#475569", fontWeight: 600, fontSize: "13px", padding: "6px 14px", borderRadius: "6px", cursor: "pointer" }}>
             ← All Companies
           </button>
+          <Can permission="inquiry.delete">
+            <BulkActionsDropdown
+              selectedCount={selectedInquiryIds.length}
+              onBulkDelete={handleBulkDelete}
+            />
+          </Can>
           <Can permission="inquiry.create">
             <button type="button" className="btn btn-primary" onClick={() => setAddOpen(true)}>
               + Add Inquiry Item
@@ -815,18 +1048,83 @@ function ConsignmentsView({
         </div>
       </div>
 
-      <input
-        placeholder="Search consignment code…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        style={{ padding: 8, border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 13, marginBottom: 12, width: 260 }}
-      />
+      {/* Lifecycle Filter Tabs and Search Bar matching Product Master style */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: "12px" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "20px",
+            borderBottom: "1px solid #E2E8F0",
+            paddingLeft: "4px",
+          }}
+        >
+          {(
+            [
+              { key: "all", label: "All" },
+              { key: "proposed", label: "Proposed" },
+              { key: "partial_approved", label: "Partial Approved" },
+              { key: "fully_approved", label: "Fully Approved" },
+            ] as const
+          ).map((t) => {
+            const isActive = statusTab === t.key;
+            const count = tabCounts[t.key];
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setStatusTab(t.key)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: isActive ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                  color: isActive ? "#0061f2" : "#64748b",
+                  fontWeight: isActive ? 700 : 600,
+                  fontSize: "13px",
+                  paddingBottom: "8px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <span>{t.label}</span>
+                <span
+                  style={{
+                    background: isActive ? "#e0f2fe" : "#f1f5f9",
+                    color: isActive ? "#0284c7" : "#64748b",
+                    padding: "1px 6px",
+                    borderRadius: "10px",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                  }}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <input
+          placeholder="Search consignment code…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ padding: "6px 12px", border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 13, width: 220 }}
+        />
+      </div>
 
       <div style={{ overflowX: "auto", border: "1px solid #E2E8F0", borderRadius: 8 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "#F8FAFC" }}>
-              <th style={thStyle}></th>
+              <th style={{ ...thStyle, width: "40px" }}>
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && selectedInquiryIds.length === filtered.length}
+                  onChange={toggleSelectAll}
+                />
+              </th>
               <th style={thStyle}>Consignment Code</th>
               <th style={thStyle}>Status</th>
               <th style={thStyle}>Total CBM</th>
@@ -839,11 +1137,19 @@ function ConsignmentsView({
             {loading ? (
               <InquiriesConsignmentSkeletonRows count={5} />
             ) : filtered.length === 0 ? (
-              <TableMessageRow colSpan={7}>No consignments for this company yet.</TableMessageRow>
+              <TableMessageRow colSpan={7}>
+                {statusTab === "all" ? "No consignments for this company yet." : `No ${statusLabel(statusTab)} consignments found.`}
+              </TableMessageRow>
             ) : (
               filtered.map((r) => (
                 <tr key={r.id}>
-                  <td style={tdStyle}><input type="checkbox" /></td>
+                  <td style={tdStyle}>
+                    <input
+                      type="checkbox"
+                      checked={selectedInquiryIds.includes(r.id)}
+                      onChange={() => toggleSelectOne(r.id)}
+                    />
+                  </td>
                   <td style={tdStyle}>
                     <button type="button" onClick={() => onOpenConsignment(r.id)} className="btn-link">
                       {r.consignment_code || codeNames[r.consignment_code_id] || "…"}
@@ -949,6 +1255,13 @@ function ItemsView({
   const [composerStatus, setComposerStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [composerOpen, setComposerOpen] = useState(true);
 
+  // Inline WeChat Composer state
+  const [wechatComposerTo, setWechatComposerTo] = useState("");
+  const [wechatComposerBody, setWechatComposerBody] = useState("");
+  const [sendingWechat, setSendingWechat] = useState(false);
+  const [wechatComposerStatus, setWechatComposerStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [wechatComposerOpen, setWechatComposerOpen] = useState(true);
+
   // Modals & Drawers state
   const [addOpen, setAddOpen] = useState(false);
   const [shiftTarget, setShiftTarget] = useState<InquiryItem | null>(null);
@@ -961,6 +1274,42 @@ function ItemsView({
   const [productInfoTarget, setProductInfoTarget] = useState<InquiryItem | null>(null);
   const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
   const [editQtyItem, setEditQtyItem] = useState<{ id: string; qty: number } | null>(null);
+
+  // Import state variables (modeled on Supplier Import)
+  const [isImportPageOpen, setIsImportPageOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [wizardPending, setWizardPending] = useState<{
+    file: File;
+    rows: SheetRow[];
+    sheetColumns: string[];
+  } | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportSubmit = useCallback(async () => {
+    if (!importFile || importLoading) return;
+    setImportLoading(true);
+    setImportError(null);
+
+    try {
+      const rows = await parseFile(importFile);
+      if (!rows.length) {
+        throw new Error("The file appears to be empty or has no data rows.");
+      }
+      setWizardPending({
+        file: importFile,
+        rows,
+        sheetColumns: Object.keys(rows[0]),
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setImportError(msg || "Failed to read file. Please check file format and try again.");
+    } finally {
+      setImportLoading(false);
+    }
+  }, [importFile, importLoading]);
 
   const { guard: guardRowAction } = usePendingGuard<string>();
 
@@ -1010,6 +1359,21 @@ function ItemsView({
 
   const items = inquiry?.items ?? [];
 
+  const handleExport = useCallback(
+    async (format: "xlsx" | "csv" = "xlsx") => {
+      try {
+        const code = inquiry?.consignment_code || codeNames[inquiry?.consignment_code_id || ""] || "Consignment";
+        const safeCode = code.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const today = new Date().toISOString().slice(0, 10);
+        const fileBaseName = `Inquiry_${safeCode}_${today}`;
+        await downloadExport(`/inquiries/${inquiryId}`, format, fileBaseName);
+      } catch (err) {
+        onError(err);
+      }
+    },
+    [inquiry, codeNames, inquiryId, onError]
+  );
+
   // Selected item reference
   const selectedItem = useMemo(() => {
     return items.find((i) => i.id === selectedItemId) || items[0] || null;
@@ -1038,15 +1402,29 @@ function ItemsView({
     }
   }, [selectedItem?.id, loadQuotations]);
 
-  // Seamless dynamic live sync every 2.5 seconds: ensures newly arriving quotes and emails appear immediately without manual refresh
+  // Smart hybrid sync: Primary real-time updates arrive instantly via WebSocket (useLiveModule above).
+  // This gentle fallback sync (every 15s) guarantees data freshness if WebSocket reconnects,
+  // automatically pausing when the tab is hidden and instantly refreshing upon window focus.
   useEffect(() => {
     const activeId = selectedItem?.id || selectedItemId;
     if (!activeId) return;
-    const interval = setInterval(() => {
-      void loadQuotations(activeId, true);
-      void loadMessages(true);
-    }, 2500);
-    return () => clearInterval(interval);
+
+    const syncIfVisible = () => {
+      if (document.visibilityState === "visible") {
+        void loadQuotations(activeId, true);
+        void loadMessages(true);
+      }
+    };
+
+    const interval = setInterval(syncIfVisible, 15000);
+    window.addEventListener("focus", syncIfVisible);
+    document.addEventListener("visibilitychange", syncIfVisible);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", syncIfVisible);
+      document.removeEventListener("visibilitychange", syncIfVisible);
+    };
   }, [selectedItem?.id, selectedItemId, loadQuotations, loadMessages]);
 
   // Filtered products on left
@@ -1264,6 +1642,344 @@ function ItemsView({
     }
   }
 
+  // Pre-fill WeChat composer recipient with latest WeChat sender or contact from conversation
+  useEffect(() => {
+    if (wechatComposerTo) return;
+    const wechatMsgs = inquiryMessages.filter((m: any) => m.channel === "wechat");
+    if (wechatMsgs.length > 0) {
+      // Prioritize latest inbound sender contact (e.g. ChenXianNing or phone number)
+      const latestInbound = [...wechatMsgs].reverse().find((m: any) => m.direction === "inbound" && m.sender_contact);
+      if (latestInbound && latestInbound.sender_contact) {
+        setWechatComposerTo(latestInbound.sender_contact);
+        return;
+      }
+      const latestOutbound = [...wechatMsgs].reverse().find((m: any) => m.direction === "outbound" && m.recipient_contact);
+      if (latestOutbound && latestOutbound.recipient_contact) {
+        setWechatComposerTo(latestOutbound.recipient_contact);
+        return;
+      }
+    }
+  }, [inquiryMessages, wechatComposerTo]);
+
+  async function handleSendWeChatMessage(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanRecipients = wechatComposerTo
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    if (cleanRecipients.length === 0) {
+      setWechatComposerStatus({ type: "error", message: "Please provide at least one valid recipient WeChat number or UserID." });
+      return;
+    }
+    if (!wechatComposerBody.trim()) {
+      setWechatComposerStatus({ type: "error", message: "Please type your message to the supplier." });
+      return;
+    }
+
+    setSendingWechat(true);
+    setWechatComposerStatus(null);
+    try {
+      const payload: any = {
+        to_wechat: cleanRecipients,
+        message: wechatComposerBody.trim(),
+        inquiry_item_id: selectedItem?.id || null,
+      };
+
+      const targetInquiryId = inquiry?.id || inquiryId;
+      const res = await apiPost<any>(`/inquiries/${targetInquiryId}/send-wechat-message`, payload);
+      const newMsgData = res.data?.data || res.data;
+
+      if (newMsgData) {
+        setInquiryMessages((prev) => [...prev, newMsgData]);
+      }
+
+      setWechatComposerBody("");
+      setWechatComposerStatus({ type: "success", message: `Message delivered to WeChat (${cleanRecipients.join(", ")}).` });
+      void loadMessages(true);
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.message || err?.response?.data?.detail || err?.message || "Failed to send WeChat message.";
+      setWechatComposerStatus({ type: "error", message: errMsg });
+    } finally {
+      setSendingWechat(false);
+    }
+  }
+
+  if (isImportPageOpen) {
+    const code = inquiry?.consignment_code || (inquiry ? codeNames[inquiry.consignment_code_id] || "Consignment" : "Consignment");
+    return (
+      <div style={{ padding: "0 4px" }}>
+        {/* Breadcrumb & Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+          <div>
+            <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 600, marginBottom: "4px" }}>
+              Inquiries &gt; {_buyerName || "Buyer"} &gt; #{code} &gt; Import Products
+            </div>
+            <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+              Import Inquiry Products (#{code})
+            </h1>
+            <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+              Upload bulk product line items, quantities, brand preferences, and specifications from Excel (.xlsx, .xls) or CSV.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setIsImportPageOpen(false);
+              setImportFile(null);
+              setImportError(null);
+            }}
+            style={{
+              padding: "8px 16px",
+              borderRadius: "6px",
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              color: "#1e293b",
+              fontWeight: 600,
+              fontSize: "13px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            ← BACK
+          </button>
+        </div>
+
+        <Banner error={importError} />
+
+        {/* Import Summary Results Panel if completed */}
+        {importSummary && (
+          <div style={{ marginBottom: "20px" }}>
+            <ImportSummaryPanel summary={importSummary} error={importError} />
+          </div>
+        )}
+
+        {/* Main Workspace Card */}
+        <div
+          style={{
+            background: "#ffffff",
+            borderRadius: "8px",
+            border: "1px solid #e2e8f0",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+            padding: "28px 36px",
+          }}
+        >
+          {/* Import File Section */}
+          <div style={{ marginBottom: "24px" }}>
+            <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
+              Import File
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "6px",
+                  background: "#f8fafc",
+                  padding: "4px 8px",
+                  minWidth: "320px",
+                  maxWidth: "500px",
+                  flex: 1,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => importFileInputRef.current?.click()}
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "4px",
+                    padding: "6px 14px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: "#334155",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Choose File
+                </button>
+                <span
+                  style={{
+                    paddingLeft: "12px",
+                    fontSize: "13px",
+                    color: importFile ? "#0f172a" : "#64748b",
+                    fontWeight: importFile ? 600 : 400,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    flex: 1,
+                  }}
+                >
+                  {importFile ? importFile.name : "No file chosen"}
+                </span>
+                {importFile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportFile(null);
+                      if (importFileInputRef.current) importFileInputRef.current.value = "";
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#ef4444",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                      padding: "4px 8px",
+                    }}
+                    title="Clear selected file"
+                  >
+                    ✕
+                  </button>
+                )}
+                <input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      setImportFile(f);
+                      setImportError(null);
+                    }
+                  }}
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => downloadSampleCsv("inquiry", INQUIRY_ITEM_IMPORT_HEADERS)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "#f8fafc",
+                  border: "1px dashed #94a3b8",
+                  borderRadius: "6px",
+                  padding: "8px 14px",
+                  color: "#475569",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                📥 Download Sample CSV Template
+              </button>
+            </div>
+            <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+              Only CSV, XLS, And XLSX Files Are Allowed. Maximum File Size: 8MB.
+            </div>
+          </div>
+
+          {/* Notes Section */}
+          <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "20px" }}>
+            <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "12px" }}>
+              Notes:
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                paddingLeft: "20px",
+                fontSize: "13px",
+                lineHeight: "1.9",
+                color: "#334155",
+              }}
+            >
+              <li>Upload Up To <strong>5,000 Rows</strong> Per File.</li>
+              <li>Avoid Special Characters (Like @ # $ % ^ & * ( ) ) In Text Fields.</li>
+              <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
+              <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
+              <li>Mandatory Columns: <strong>Product Name</strong> (or <strong>Product Code</strong>) and <strong>Quantity</strong>.</li>
+              <li><strong>Product Name</strong> or <strong>Product Code</strong> must already exist in Product Master.</li>
+              <li><strong>Quantity</strong> must be a positive number greater than 0.</li>
+              <li><strong>UOM</strong> is automatically assigned from the Product Master based on the matched product.</li>
+              <li>Products requiring a <strong>License / Certificate</strong> will be automatically flagged and highlighted in red.</li>
+              <li><strong>Status</strong> can be <em>Proposed</em> or <em>Approved</em> (defaults to <em>Proposed</em>).</li>
+              <li>Optional Columns: <strong>Product Code</strong>, <strong>Brand Preference</strong>, <strong>Product Specs / Remarks</strong>, and <strong>Status</strong>.</li>
+              <li>No Blank Rows, Merged Cells, Or Excel Formulas Allowed.</li>
+              <li>Inquiry Product Import May Take <strong>Several Seconds</strong> Depending On The Number Of Rows. Please Do Not Refresh The Page During Import.</li>
+            </ul>
+          </div>
+
+          {/* Action Buttons */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "32px", borderTop: "1px solid #f1f5f9", paddingTop: "20px", gap: "12px" }}>
+            <button
+              type="button"
+              onClick={() => {
+                setIsImportPageOpen(false);
+                setImportFile(null);
+                setImportError(null);
+              }}
+              style={{
+                padding: "9px 20px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#475569",
+                fontWeight: 600,
+                fontSize: "13.5px",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!importFile || importLoading}
+              onClick={handleImportSubmit}
+              style={{
+                padding: "9px 28px",
+                borderRadius: "6px",
+                border: "none",
+                background: !importFile || importLoading ? "#94a3b8" : "#2563eb",
+                color: "#ffffff",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                cursor: !importFile || importLoading ? "not-allowed" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
+              }}
+            >
+              {importLoading ? "Importing..." : "Import"}
+            </button>
+          </div>
+        </div>
+
+        {/* Column Mapping Wizard Modal */}
+        {wizardPending && (
+          <WizardModal
+            file={wizardPending.file}
+            rows={wizardPending.rows}
+            sheetColumns={wizardPending.sheetColumns}
+            apiBase={`/inquiries/${inquiryId}/items`}
+            entityName="inquiry"
+            importHeaders={INQUIRY_ITEM_IMPORT_HEADERS}
+            onClose={() => setWizardPending(null)}
+            onComplete={(summary) => {
+              setWizardPending(null);
+              setImportFile(null);
+              if (importFileInputRef.current) importFileInputRef.current.value = "";
+              if (summary) {
+                setImportSummary(summary);
+              }
+              void load(false);
+            }}
+            onError={(msg) => {
+              setImportError(msg);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
       {/* ---------------- Top Consignment Header & Actions ---------------- */}
@@ -1358,6 +2074,25 @@ function ItemsView({
           >
             ← Back
           </button>
+
+          {/* Imp / Exp Dropdown (Sample File, Import, Export) */}
+          <ImpExpDropdown
+            apiBase={`/inquiries/${inquiryId}/items`}
+            entityName="inquiry"
+            importHeaders={INQUIRY_ITEM_IMPORT_HEADERS}
+            onSummary={(s) => setImportSummary(s)}
+            onError={(msg) => setImportError(msg)}
+            onComplete={() => void load(false)}
+            onExportCsv={() => void handleExport("xlsx")}
+            showImport={true}
+            showExport={items.length > 0}
+            onOpenImportPage={() => {
+              setImportError(null);
+              setImportSummary(null);
+              setImportFile(null);
+              setIsImportPageOpen(true);
+            }}
+          />
           <Can permission="inquiry.create">
             <button
               type="button"
@@ -1379,6 +2114,13 @@ function ItemsView({
           </Can>
         </div>
       </div>
+
+      {/* Import Summary Results Panel if completed */}
+      {importSummary && (
+        <div style={{ marginBottom: "8px" }}>
+          <ImportSummaryPanel summary={importSummary} error={importError} />
+        </div>
+      )}
 
       {/* ---------------- 3 KPI Summary Cards ---------------- */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
@@ -1944,6 +2686,18 @@ function ItemsView({
                 return false;
               };
               const wechatList = inquiryMessages.filter((m: any) => m.channel === "wechat" && isRelevantMessage(m));
+
+              // Pre-build unique WeChat suppliers list for quick dropdown
+              const uniqueSuppliersInWechat: { contact: string; name: string }[] = [];
+              const seenWechatContacts = new Set<string>();
+              for (const m of wechatList) {
+                const contact = (m.direction === "inbound" ? m.sender_contact : m.recipient_contact) || "";
+                if (contact && !seenWechatContacts.has(contact)) {
+                  seenWechatContacts.add(contact);
+                  const name = m.supplier_name || (!m.direction?.includes("outbound") && m.sender_name && m.sender_name !== "Yinglima ERP Bot" ? m.sender_name : null) || contact;
+                  uniqueSuppliersInWechat.push({ contact, name });
+                }
+              }
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", background: "#f0fdf4", padding: "12px 16px", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
@@ -2123,6 +2877,194 @@ function ItemsView({
                       })}
                     </div>
                   )}
+
+                  {/* Interactive WeChat Inline Composer */}
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1.5px solid #86efac",
+                      borderRadius: "12px",
+                      boxShadow: "0 4px 12px rgba(22, 163, 74, 0.06)",
+                      overflow: "hidden",
+                      marginTop: "14px",
+                    }}
+                  >
+                    {/* Composer Header Bar */}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "10px 16px",
+                        background: "#f0fdf4",
+                        borderBottom: "1px solid #bbf7d0",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => setWechatComposerOpen((v) => !v)}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "#166534" }}>
+                        <span>💬</span>
+                        <span>Send Direct WeChat / Reply to Supplier</span>
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#15803d", fontWeight: 600 }}>
+                        {wechatComposerOpen ? "▲ Minimize" : "▼ Open Composer"}
+                      </div>
+                    </div>
+
+                    {wechatComposerOpen && (
+                      <form onSubmit={handleSendWeChatMessage} style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                        {wechatComposerStatus && (
+                          <div
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: "6px",
+                              fontSize: "12.5px",
+                              fontWeight: 600,
+                              background: wechatComposerStatus.type === "success" ? "#dcfce7" : "#fee2e2",
+                              color: wechatComposerStatus.type === "success" ? "#166534" : "#991b1b",
+                              border: `1px solid ${wechatComposerStatus.type === "success" ? "#bbf7d0" : "#fecaca"}`,
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <span>{wechatComposerStatus.type === "success" ? "✓ " : "⚠️ "}{wechatComposerStatus.message}</span>
+                            <button type="button" onClick={() => setWechatComposerStatus(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 700 }}>✕</button>
+                          </div>
+                        )}
+
+                        {/* Recipient Field (To:) */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                          <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#64748b", width: "40px" }}>To:</span>
+                          <div style={{ flex: 1, display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                            <input
+                              type="text"
+                              placeholder="WeChat Mobile (e.g. 13736331731) or UserID (e.g. ChenXianNing)"
+                              value={wechatComposerTo}
+                              onChange={(e) => setWechatComposerTo(e.target.value)}
+                              required
+                              style={{
+                                flex: 1,
+                                minWidth: "220px",
+                                padding: "6px 10px",
+                                border: "1px solid #86efac",
+                                borderRadius: "6px",
+                                fontSize: "13px",
+                              }}
+                            />
+                            {/* Quick Supplier Picker if known WeChat contacts exist */}
+                            {uniqueSuppliersInWechat.length > 0 && (
+                              <select
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    setWechatComposerTo(e.target.value);
+                                  }
+                                }}
+                                style={{
+                                  padding: "6px 10px",
+                                  border: "1px solid #86efac",
+                                  borderRadius: "6px",
+                                  fontSize: "12px",
+                                  color: "#166534",
+                                  background: "#f0fdf4",
+                                  cursor: "pointer",
+                                  fontWeight: 600,
+                                }}
+                                defaultValue=""
+                              >
+                                <option value="" disabled>-- Pick Chatted Supplier --</option>
+                                {uniqueSuppliersInWechat.map((s, idx) => (
+                                  <option key={idx} value={s.contact}>
+                                    {s.name} ({s.contact})
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Quick Reply / Prompt Pills */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b" }}>Quick Prompts:</span>
+                          {[
+                            "Can you offer a discount for bulk quantity? / 请问大批量是否有折扣？",
+                            "Please confirm the earliest delivery lead time. / 请确认最快交期。",
+                            "Please confirm shipping terms and packing dimensions. / 请确认价格条款和包装尺寸。",
+                            "Could you send the official Proforma Invoice (PI)? / 请提供正式形式发票(PI)。",
+                          ].map((promptText, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setWechatComposerBody((prev) => (prev ? `${prev}\n${promptText}` : promptText))}
+                              style={{
+                                padding: "2px 8px",
+                                background: "#f0fdf4",
+                                border: "1px solid #bbf7d0",
+                                borderRadius: "12px",
+                                fontSize: "11px",
+                                color: "#166534",
+                                cursor: "pointer",
+                                transition: "all 0.1s ease",
+                              }}
+                            >
+                              + {promptText.split("/")[0].trim()}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Message Body Field */}
+                        <div>
+                          <textarea
+                            placeholder="Type your message or negotiation reply to the supplier on WeChat (supports Chinese and English)..."
+                            rows={3}
+                            value={wechatComposerBody}
+                            onChange={(e) => setWechatComposerBody(e.target.value)}
+                            required
+                            style={{
+                              width: "100%",
+                              padding: "10px 12px",
+                              border: "1px solid #86efac",
+                              borderRadius: "8px",
+                              fontSize: "13px",
+                              lineHeight: 1.5,
+                              resize: "vertical",
+                              fontFamily: "inherit",
+                              color: "#0f172a",
+                            }}
+                          />
+                        </div>
+
+                        {/* Footer & Send Action */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ fontSize: "11.5px", color: "#64748b" }}>
+                            ⚡ Messages are dispatched live to supplier WeChat / WeCom app via Tencent API.
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={sendingWechat}
+                            style={{
+                              padding: "8px 20px",
+                              background: "#16a34a",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "6px",
+                              fontSize: "13px",
+                              fontWeight: 700,
+                              cursor: sendingWechat ? "not-allowed" : "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              boxShadow: "0 1px 3px rgba(22, 163, 74, 0.3)",
+                              opacity: sendingWechat ? 0.7 : 1,
+                            }}
+                          >
+                            <span>{sendingWechat ? "⏳" : "💬"}</span>
+                            <span>{sendingWechat ? "Sending..." : "Send to WeChat"}</span>
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
                 </div>
               );
             })()
@@ -3296,6 +4238,31 @@ function ItemsView({
             void load();
           }}
           onError={onError}
+        />
+      )}
+
+      {/* 9. Column Mapping Wizard Modal (from ImpExpDropdown) */}
+      {wizardPending && (
+        <WizardModal
+          file={wizardPending.file}
+          rows={wizardPending.rows}
+          sheetColumns={wizardPending.sheetColumns}
+          apiBase={`/inquiries/${inquiryId}/items`}
+          entityName="inquiry"
+          importHeaders={INQUIRY_ITEM_IMPORT_HEADERS}
+          onClose={() => setWizardPending(null)}
+          onComplete={(summary) => {
+            setWizardPending(null);
+            setImportFile(null);
+            if (importFileInputRef.current) importFileInputRef.current.value = "";
+            if (summary) {
+              setImportSummary(summary);
+            }
+            void load(false);
+          }}
+          onError={(msg) => {
+            setImportError(msg);
+          }}
         />
       )}
     </div>
@@ -6235,6 +7202,7 @@ function QuickInquiryDrawer({
 
   const [saving, setSaving] = useState(false);
   const [drawerError, setDrawerError] = useState<string | null>(null);
+  const [trashConflict, setTrashConflict] = useState<TrashConflictInfo | null>(null);
 
   const stampedDateStr = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
   const stampedUserName = String(profile?.full_name || profile?.username || "Rahul Patel");
@@ -6669,12 +7637,24 @@ function QuickInquiryDrawer({
 
       onSaved();
     } catch (err: any) {
+      if (err?.details?.in_trash) {
+        setTrashConflict({
+          ...err.details,
+          custom_action_label: "Restore & Append My Items",
+        });
+        return;
+      }
       const msg = err?.response?.data?.message || err?.message || "Failed to save inquiry. Please check the inputs.";
       setDrawerError(msg);
       onError(err);
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleTrashRestored = async () => {
+    setTrashConflict(null);
+    await handleSubmit("proposed");
   };
 
   return (
@@ -6956,6 +7936,13 @@ function QuickInquiryDrawer({
           </div>
         </div>
       </div>
+
+      <TrashConflictModal
+        isOpen={Boolean(trashConflict)}
+        conflictInfo={trashConflict}
+        onClose={() => setTrashConflict(null)}
+        onRestored={handleTrashRestored}
+      />
     </>
   );
 }

@@ -22,27 +22,41 @@ export function subscribeBrandName(listener: Listener): () => void {
 }
 
 export function getCachedBrandName(): string {
-  return sessionStorage.getItem(CACHE_KEY) || DEFAULT_BRAND_NAME;
+  const stored =
+    sessionStorage.getItem(CACHE_KEY) ||
+    localStorage.getItem(CACHE_KEY) ||
+    localStorage.getItem("erp_brand_name");
+  return (stored && stored.trim()) || DEFAULT_BRAND_NAME;
 }
 
 export function setBrandName(name: string): void {
-  sessionStorage.setItem(CACHE_KEY, name);
-  listeners.forEach((listener) => listener(name));
+  const cleanName = (name || "").trim() || DEFAULT_BRAND_NAME;
+  sessionStorage.setItem(CACHE_KEY, cleanName);
+  localStorage.setItem(CACHE_KEY, cleanName);
+  localStorage.setItem("erp_brand_name", cleanName);
+  listeners.forEach((listener) => listener(cleanName));
 }
 
 export function invalidateBrandNameCache(): void {
   sessionStorage.removeItem(CACHE_KEY);
+  localStorage.removeItem(CACHE_KEY);
+  localStorage.removeItem("erp_brand_name");
 }
 
 export async function resolveBrandName(): Promise<string> {
-  const cached = sessionStorage.getItem(CACHE_KEY);
-  if (cached) return cached;
+  // Directly fetch company name from Organization Settings
   try {
     const { data } = await apiGet<Organization>("/organizations");
-    const name = (data && data.company_name) || DEFAULT_BRAND_NAME;
-    setBrandName(name);
-    return name;
+    if (data?.company_name) {
+      const name = data.company_name.trim();
+      setBrandName(name);
+      return name;
+    }
   } catch {
-    return DEFAULT_BRAND_NAME;
+    // Non-blocking fallback to cached or default
   }
+
+  const fallback = getCachedBrandName();
+  setBrandName(fallback);
+  return fallback;
 }

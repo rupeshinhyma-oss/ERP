@@ -79,3 +79,10 @@ class NotificationService:
 
     async def mark_all_read(self, user_id: uuid.UUID) -> int:
         return await self.repository.mark_all_as_read(user_id)
+
+    async def has_recent_notification(
+        self, user_id: uuid.UUID, type: str, link: str | None = None, *, within_hours: int = 24
+    ) -> bool:
+        return await self.repository.has_recent_notification(
+            user_id, type, link, within_hours=within_hours
+        )

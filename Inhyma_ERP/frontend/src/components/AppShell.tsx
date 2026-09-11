@@ -31,6 +31,7 @@ import { ICONS, IconBell } from "./icons";
 import { UniversalSearch } from "./UniversalSearch";
 import { ErrorBanner } from "./ui";
 import type { Profile } from "@/types";
+import { tasksApi } from "@/lib/tasksApi";
 
 const NAV_SCROLL_KEY = "erp_sidebar_nav_scroll";
 
@@ -48,16 +49,117 @@ interface InAppNotification {
   created_at: string;
 }
 
+type NotificationCategory = "all" | "deadlines" | "escalations" | "team";
+
+function getNotificationCategoryMeta(n: InAppNotification) {
+  const type = (n.type || "").toLowerCase();
+  const title = (n.title || "").toLowerCase();
+
+  const isOverdue = type.includes("overdue") || title.includes("overdue");
+  const isDeadlineToday = type.includes("deadline_today") || title.includes("due today");
+  const isDeadlineSoon = type.includes("approaching") || title.includes("due tomorrow") || title.includes("due soon");
+  const isEscalation = type.includes("escalat") || title.includes("escalat");
+  const isDeadline = isOverdue || isDeadlineToday || isDeadlineSoon || type.includes("deadline") || title.includes("deadline");
+  const isMention = type.includes("mention") || title.includes("mention");
+  const isAssigned = type.includes("assigned") || title.includes("assigned");
+  const isSubtask = type.includes("subtask") || title.includes("subtask");
+  const isHold = type.includes("hold") || title.includes("hold");
+  const isCompleted = type.includes("completed") || title.includes("completed") || type.includes("done");
+
+  const isTeam = isMention || isAssigned || isSubtask || type.includes("watcher") || isHold || isCompleted || (!isDeadline && !isEscalation);
+
+  let badgeLabel = "TASK";
+  let badgeBg = "#f1f5f9";
+  let badgeColor = "#475569";
+  let badgeBorder = "#cbd5e1";
+
+  if (isOverdue) {
+    badgeLabel = "⚠️ OVERDUE";
+    badgeBg = "#fef2f2";
+    badgeColor = "#dc2626";
+    badgeBorder = "#fecaca";
+  } else if (isDeadlineToday) {
+    badgeLabel = "📅 DUE TODAY";
+    badgeBg = "#fffbeb";
+    badgeColor = "#d97706";
+    badgeBorder = "#fde68a";
+  } else if (isDeadlineSoon) {
+    badgeLabel = "⏰ DUE SOON";
+    badgeBg = "#fef3c7";
+    badgeColor = "#b45309";
+    badgeBorder = "#fcd34d";
+  } else if (isEscalation) {
+    badgeLabel = "⚡ ESCALATION";
+    badgeBg = "#fff1f2";
+    badgeColor = "#e11d48";
+    badgeBorder = "#fecdd3";
+  } else if (isMention) {
+    badgeLabel = "💬 MENTION";
+    badgeBg = "#f5f3ff";
+    badgeColor = "#7c3aed";
+    badgeBorder = "#ddd6fe";
+  } else if (isAssigned) {
+    badgeLabel = "👤 ASSIGNED";
+    badgeBg = "#eff6ff";
+    badgeColor = "#2563eb";
+    badgeBorder = "#bfdbfe";
+  } else if (isCompleted) {
+    badgeLabel = "✓ DONE";
+    badgeBg = "#f0fdf4";
+    badgeColor = "#16a34a";
+    badgeBorder = "#bbf7d0";
+  } else if (isHold) {
+    badgeLabel = "⏸️ ON HOLD";
+    badgeBg = "#fff7ed";
+    badgeColor = "#ea580c";
+    badgeBorder = "#fed7aa";
+  }
+
+  return {
+    isDeadline,
+    isEscalation,
+    isTeam,
+    badgeLabel,
+    badgeBg,
+    badgeColor,
+    badgeBorder,
+  };
+}
+
+function formatRelativeTime(dateStr: string): string {
+  if (!dateStr) return "";
+  try {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) return "just now";
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 60) return "just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays === 1) return "yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
 function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [activeCategory, setActiveCategory] = useState<NotificationCategory>("all");
+  const [isChecking, setIsChecking] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   const loadNotifications = useCallback(async () => {
     try {
-      const res = await apiGet<{ items: InAppNotification[]; unread_count: number }>("/notifications?limit=30");
+      const res = await apiGet<{ items: InAppNotification[]; unread_count: number }>("/notifications?limit=40");
       if (res.data) {
         setNotifications(res.data.items || []);
         setUnreadCount(res.data.unread_count ?? 0);
@@ -67,8 +169,22 @@ function NotificationBell() {
     }
   }, []);
 
+  const handleSyncDeadlines = useCallback(async () => {
+    setIsChecking(true);
+    try {
+      await tasksApi.checkTaskDeadlines();
+      await loadNotifications();
+    } catch {
+      // Non-fatal
+    } finally {
+      setIsChecking(false);
+    }
+  }, [loadNotifications]);
+
   useEffect(() => {
     loadNotifications();
+    // Run deadline checks for current user on mount
+    tasksApi.checkTaskDeadlines().then(() => loadNotifications()).catch(() => {});
   }, [loadNotifications]);
 
   // Live WebSocket updates
@@ -129,6 +245,44 @@ function NotificationBell() {
     }
   };
 
+  // Enriched notifications with category tags
+  const enrichedNotifications = useMemo(() => {
+    return notifications.map((n) => ({
+      ...n,
+      meta: getNotificationCategoryMeta(n),
+    }));
+  }, [notifications]);
+
+  const filteredNotifications = useMemo(() => {
+    if (activeCategory === "deadlines") {
+      return enrichedNotifications.filter((n) => n.meta.isDeadline);
+    }
+    if (activeCategory === "escalations") {
+      return enrichedNotifications.filter((n) => n.meta.isEscalation);
+    }
+    if (activeCategory === "team") {
+      return enrichedNotifications.filter((n) => n.meta.isTeam);
+    }
+    return enrichedNotifications;
+  }, [enrichedNotifications, activeCategory]);
+
+  const categoryCounts = useMemo(() => {
+    let deadlines = 0;
+    let escalations = 0;
+    let team = 0;
+    for (const n of enrichedNotifications) {
+      if (n.meta.isDeadline) deadlines++;
+      if (n.meta.isEscalation) escalations++;
+      if (n.meta.isTeam) team++;
+    }
+    return {
+      all: enrichedNotifications.length,
+      deadlines,
+      escalations,
+      team,
+    };
+  }, [enrichedNotifications]);
+
   return (
     <div style={{ position: "relative" }} ref={wrapperRef}>
       <button
@@ -169,29 +323,69 @@ function NotificationBell() {
           position: "absolute",
           right: 0,
           top: "42px",
-          width: "360px",
+          width: "420px",
+          maxWidth: "calc(100vw - 24px)",
           background: "#ffffff",
           border: "1px solid #cbd5e1",
-          borderRadius: "10px",
-          boxShadow: "0 12px 28px rgba(0,0,0,0.15)",
+          borderRadius: "12px",
+          boxShadow: "0 16px 36px rgba(15, 23, 42, 0.16)",
           zIndex: 99999,
           overflow: "hidden",
         }}
       >
+        {/* Header */}
         <div
           style={{
             padding: "12px 16px",
             borderBottom: "1px solid #e2e8f0",
-            fontWeight: 700,
-            fontSize: "13.5px",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             background: "#f8fafc",
           }}
         >
-          <span style={{ color: "#1e293b" }}>Notifications</span>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ color: "#0f172a", fontWeight: 700, fontSize: "14px" }}>Notifications</span>
+            {unreadCount > 0 && (
+              <span
+                style={{
+                  fontSize: "11px",
+                  background: "#fee2e2",
+                  color: "#dc2626",
+                  padding: "1px 7px",
+                  fontWeight: 700,
+                  borderRadius: "10px",
+                }}
+              >
+                {unreadCount} unread
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <button
+              type="button"
+              onClick={handleSyncDeadlines}
+              disabled={isChecking}
+              title="Check deadlines for tasks and escalations assigned to you"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: isChecking ? "#94a3b8" : "#2563eb",
+                fontSize: "11px",
+                fontWeight: 600,
+                cursor: isChecking ? "wait" : "pointer",
+                padding: "3px 6px",
+                borderRadius: "4px",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              <span style={{ display: "inline-block", transform: isChecking ? "rotate(180deg)" : "none", transition: "transform 0.5s ease" }}>
+                🔄
+              </span>
+              {isChecking ? "Checking..." : "Sync"}
+            </button>
             {unreadCount > 0 && (
               <button
                 type="button"
@@ -199,84 +393,234 @@ function NotificationBell() {
                 style={{
                   background: "transparent",
                   border: "none",
-                  color: "#2563eb",
+                  color: "#64748b",
                   fontSize: "11px",
                   fontWeight: 600,
                   cursor: "pointer",
-                  padding: "2px 4px",
+                  padding: "3px 6px",
                 }}
               >
                 Mark all read
               </button>
             )}
-            <span
-              style={{
-                fontSize: "11px",
-                background: unreadCount > 0 ? "#fee2e2" : "#e0e7ff",
-                color: unreadCount > 0 ? "#dc2626" : "#2563eb",
-                padding: "2px 8px",
-                fontWeight: 700,
-                borderRadius: "10px",
-              }}
-            >
-              {unreadCount} unread
-            </span>
           </div>
         </div>
-        <div style={{ maxHeight: "360px", overflowY: "auto", padding: "4px 0" }}>
-          {notifications.length === 0 ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
-              No notifications yet
+
+        {/* Category Tabs */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
+            padding: "8px 12px",
+            background: "#ffffff",
+            borderBottom: "1px solid #f1f5f9",
+            overflowX: "auto",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveCategory("all")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: activeCategory === "all" ? "1px solid #2563eb" : "1px solid #e2e8f0",
+              background: activeCategory === "all" ? "#eff6ff" : "#ffffff",
+              color: activeCategory === "all" ? "#1d4ed8" : "#64748b",
+              fontSize: "11.5px",
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            All ({categoryCounts.all})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveCategory("deadlines")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: activeCategory === "deadlines" ? "1px solid #d97706" : "1px solid #e2e8f0",
+              background: activeCategory === "deadlines" ? "#fffbeb" : "#ffffff",
+              color: activeCategory === "deadlines" ? "#b45309" : "#64748b",
+              fontSize: "11.5px",
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ⏰ Deadlines ({categoryCounts.deadlines})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveCategory("escalations")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: activeCategory === "escalations" ? "1px solid #e11d48" : "1px solid #e2e8f0",
+              background: activeCategory === "escalations" ? "#fff1f2" : "#ffffff",
+              color: activeCategory === "escalations" ? "#be123c" : "#64748b",
+              fontSize: "11.5px",
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ⚡ Escalations ({categoryCounts.escalations})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveCategory("team")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: activeCategory === "team" ? "1px solid #7c3aed" : "1px solid #e2e8f0",
+              background: activeCategory === "team" ? "#f5f3ff" : "#ffffff",
+              color: activeCategory === "team" ? "#6d28d9" : "#64748b",
+              fontSize: "11.5px",
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            👤 Team ({categoryCounts.team})
+          </button>
+        </div>
+
+        {/* Notifications List */}
+        <div style={{ maxHeight: "380px", overflowY: "auto" }}>
+          {filteredNotifications.length === 0 ? (
+            <div style={{ padding: "36px 20px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
+              <div style={{ fontSize: "24px", marginBottom: "8px" }}>
+                {activeCategory === "deadlines" ? "⏰" : activeCategory === "escalations" ? "⚡" : activeCategory === "team" ? "👥" : "🔔"}
+              </div>
+              <div style={{ fontWeight: 600, color: "#334155" }}>
+                {activeCategory === "deadlines"
+                  ? "No task deadlines"
+                  : activeCategory === "escalations"
+                  ? "No escalation notifications"
+                  : activeCategory === "team"
+                  ? "No team activity"
+                  : "No notifications yet"}
+              </div>
+              <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "4px" }}>
+                {activeCategory === "deadlines"
+                  ? "Approaching or overdue tasks assigned to you will appear here."
+                  : activeCategory === "escalations"
+                  ? "Escalations assigned to you will trigger alerts here."
+                  : "You are all caught up!"}
+              </div>
             </div>
           ) : (
-            notifications.map((n) => (
+            filteredNotifications.map((n) => (
               <div
                 key={n.id}
                 style={{
-                  padding: "12px 16px",
+                  padding: "11px 14px",
                   borderBottom: "1px solid #f1f5f9",
                   cursor: "pointer",
-                  background: n.is_read ? "#ffffff" : "#f0fdf4",
+                  background: n.is_read ? "#ffffff" : "#f8faff",
                   transition: "background 0.15s ease",
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "flex-start",
                 }}
                 onMouseOver={(e) => {
-                  e.currentTarget.style.background = "#f8fafc";
+                  e.currentTarget.style.background = "#f1f5f9";
                 }}
                 onMouseOut={(e) => {
-                  e.currentTarget.style.background = n.is_read ? "#ffffff" : "#f0fdf4";
+                  e.currentTarget.style.background = n.is_read ? "#ffffff" : "#f8faff";
                 }}
                 onClick={() => handleNotificationClick(n)}
               >
-                <div
-                  style={{
-                    fontSize: "13px",
-                    fontWeight: n.is_read ? 600 : 700,
-                    color: n.is_read ? "#475569" : "#0f172a",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    {!n.is_read && (
+                {/* Unread indicator */}
+                <div style={{ paddingTop: "4px", width: "8px", flexShrink: 0 }}>
+                  {!n.is_read ? (
+                    <span
+                      style={{
+                        width: "8px",
+                        height: "8px",
+                        borderRadius: "50%",
+                        background: "#2563eb",
+                        display: "inline-block",
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        width: "6px",
+                        height: "6px",
+                        borderRadius: "50%",
+                        background: "#cbd5e1",
+                        display: "inline-block",
+                      }}
+                    />
+                  )}
+                </div>
+
+                {/* Content */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "8px",
+                      marginBottom: "3px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", overflow: "hidden" }}>
                       <span
                         style={{
-                          width: "7px",
-                          height: "7px",
-                          borderRadius: "50%",
-                          background: "#2563eb",
-                          display: "inline-block",
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          padding: "1.5px 5px",
+                          borderRadius: "4px",
+                          background: n.meta.badgeBg,
+                          color: n.meta.badgeColor,
+                          border: `1px solid ${n.meta.badgeBorder}`,
+                          whiteSpace: "nowrap",
                         }}
-                      />
-                    )}
-                    {n.title}
-                  </span>
-                  <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 400 }}>
-                    {n.created_at ? new Date(n.created_at).toLocaleDateString([], { month: "short", day: "numeric" }) : ""}
-                  </span>
-                </div>
-                <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px", lineHeight: "1.4" }}>
-                  {n.message}
+                      >
+                        {n.meta.badgeLabel}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "12.5px",
+                          fontWeight: n.is_read ? 600 : 700,
+                          color: n.is_read ? "#334155" : "#0f172a",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={n.title}
+                      >
+                        {n.title}
+                      </span>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: "10.5px",
+                        color: "#94a3b8",
+                        fontWeight: 400,
+                        whiteSpace: "nowrap",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {formatRelativeTime(n.created_at)}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "#475569",
+                      lineHeight: "1.4",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {n.message}
+                  </div>
                 </div>
               </div>
             ))
@@ -286,6 +630,7 @@ function NotificationBell() {
     </div>
   );
 }
+
 
 /* ------------------------------------------------------------------ */
 /* Forced password change                                             */

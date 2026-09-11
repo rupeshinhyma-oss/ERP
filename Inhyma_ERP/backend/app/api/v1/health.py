@@ -66,3 +66,50 @@ async def readiness(
         return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=payload)
 
     return payload
+
+
+@router.get("/integration", summary="Cross-ERP integration health probe (Phase 8F)")
+async def integration_health(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """
+    Integration subsystem health probe (Phase 8F Section 22).
+    A remote peer being unavailable degrades integration health, but does NOT make local ERP dead.
+    """
+    from sqlalchemy import func, select
+
+    from app.integration.models import IntegrationOutboxDelivery
+    from app.integration.reliability import PeerCircuitBreakerService
+
+    circuit_service = PeerCircuitBreakerService(db)
+    peer_states = await circuit_service.list_all_states()
+
+    status_counts_stmt = select(
+        IntegrationOutboxDelivery.status,
+        func.count(IntegrationOutboxDelivery.id),
+    ).group_by(IntegrationOutboxDelivery.status)
+    rows = (await db.execute(status_counts_stmt)).all()
+    counts = {s.value if hasattr(s, "value") else str(s): cnt for s, cnt in rows}
+
+    has_open_circuit = any(p.circuit_state == "OPEN" for p in peer_states)
+    dead_letters = counts.get("DEAD_LETTER", 0)
+
+    overall_status = "healthy"
+    if has_open_circuit or dead_letters > 10:
+        overall_status = "degraded"
+
+    data = {
+        "status": overall_status,
+        "liveness": "healthy",
+        "peer_circuits": {p.peer_id: p.circuit_state for p in peer_states},
+        "deliveries": {
+            "pending": counts.get("PENDING", 0),
+            "processing": counts.get("PROCESSING", 0),
+            "retrying": counts.get("RETRYING", 0),
+            "delivered": counts.get("DELIVERED", 0),
+            "dead_letter": counts.get("DEAD_LETTER", 0),
+        },
+    }
+    return build_success_response(data=data, request_id=getattr(request.state, "request_id", "-"))
+

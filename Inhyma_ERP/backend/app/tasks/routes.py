@@ -752,6 +752,19 @@ async def check_expired_holds(
     )
 
 
+@router.post("/check-deadlines", summary="Check approaching & overdue deadlines for self and assigned escalations")
+async def check_task_deadlines(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    count = await service.check_task_deadlines(user_id=current_user.id)
+    return build_success_response(
+        data={"notifications_sent": count},
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
 # --- V2.0 Task Operations (Duplicate, Dependencies, Reactions, Approvals) ---
 @router.post("/{id}/duplicate", summary="Duplicate an existing task")
 async def duplicate_task(

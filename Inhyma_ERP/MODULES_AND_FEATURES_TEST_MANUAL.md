@@ -1018,7 +1018,6 @@ Manage complete vendor team directory:
 - **Single Navigation Rule:** Retains only ONE sidebar navigation entry (`Tasks`). Legacy/direct sub-routes (`/tasks/my`, `/tasks/kanban`, `/tasks/calendar`) automatically redirect to `/tasks?tab=...` preventing bookmark breakages.
 - **Architectural Rules:**
   - Standard ERP page pattern strictly matching `Users.tsx` layout and aesthetics.
-  - Strictly standalone without foreign keys to RFQs, Products, Planning Sheets, or Tally.
   - Reuses existing Users, Roles (Departments), RBAC engine, Bell Notifications, WebSocket manager, Audit Log, and Soft-delete patterns.
 
 ### 32.2. Page Layout & Standard Controls (Matches `Users.tsx`)
@@ -1028,103 +1027,80 @@ Manage complete vendor team directory:
 - **Page Title & Subtitle:** `Tasks — Manage team tasks, assignments, subtasks, and track project deadlines.`
 - **Header Actions:**
   - `+ New Task` primary action button (opens `CreateTaskModal`).
+- **Permission Scope Banner & Segmented View Switcher:**
+  - Segmented control beside permission status dynamically tailored to authenticated role:
+    - `Super Administrator`: Can switch between `👤 My Tasks`, `🏛️ Department View`, and `🏢 Organization View`.
+    - `Director`: Can switch between `👤 My Tasks`, `🏛️ Department View`, and `🏢 Organization View` (if permitted).
+    - `Department Manager`: Can switch between `👤 My Tasks` and `🏛️ Department View`.
+    - `Employee / Standard User`: Scoped to `👤 My Tasks`.
+  - **Permission Scope Banner:** Displays Role badge (`roleDisplayName`), Access scope breakdown (`accessScopeDisplayName`), and current view scope.
+  - **Department Switcher Dropdown (`Department: [Frontend ▼]`):** Embedded in Department View allowing authorized managers to toggle between departments immediately.
+  - **Organization View Accordions:** Displays enterprise-wide grouped overview with collapsible accordion cards per department, showing task counts (`Frontend (12)`), department color badges, and `▼ Expand All` / `▶ Collapse All` actions.
+- **Quick Views Bar:**
+  - Fast single-click filter pills:
+    - `All`: Resets all quick filters.
+    - `⚠️ Overdue`: Filters tasks with due date prior to today that are incomplete.
+    - `📅 Due Today`: Filters tasks whose due date equals today.
+    - `📆 Due This Week`: Filters tasks whose due date falls within current week.
+    - Saved filter chips with deletion action.
 - **Unified Toolbar & Filter Bar:**
   - **Search Input:** `Search tasks by title, description, or id...` (real-time debounced query).
-  - **Issue Type Filter Dropdown:** `All Issue Types`, `TASK`, `BUG`, `IMPROVEMENT`, `STORY`, `EPIC`, `APPROVAL`.
-  - **Status Filter Dropdown:** `All Statuses`, `To Do`, `In Progress`, `On Hold`, `Done`.
+  - **Department Filter:** Universal department selector.
+  - **Status Filter Dropdown:** `All Statuses`, `To Do`, `In Progress`, `On Hold`, `Completed`.
+  - **Issue Type Filter Dropdown:** `All Issue Types`, `TASK`, `BUG`, `IMPROVEMENT`, `STORY`, `EPIC`.
   - **Priority Filter Dropdown:** `All Priorities`, `Low`, `Medium`, `High`, `Critical`.
-  - **Labels Filter Bar:** Color-coded label chips for instant multi-tag filtering.
-  - **Saved Filters Quick Bar:**
-    - Quick-pill selector chips: `All Tasks`, `My High Priority`, `Reported by Me`, `Recently Updated`.
-    - `+ Save Filter` button to persist active query parameters into `task_saved_filters`.
+  - **Labels Filter Dropdown:** Color-coded label multi-select.
+  - **Assignee Filter Dropdown:** Filter by any team member.
+  - **Due Date Picker:** Date-based deadline filtering.
+  - **Reset Button:** Clears all active filters.
 - **Floating Bulk Action Bar (`BulkActionBar.tsx`):**
   - Renders dynamically at bottom-center when one or more tasks are checked via row checkboxes.
   - **Selected Counter:** `X tasks selected`.
   - **Bulk Status Selector:** Instantly update status (`TODO`, `IN_PROGRESS`, `ON_HOLD`, `DONE`) across all selected tasks.
   - **Bulk Priority Selector:** Instantly update priority (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
-  - **Bulk Move to Sprint:** Move selected items to an active/future sprint or send to Backlog (`sprint_id = null`).
   - **Bulk Delete Action:** Prompts confirmation dialog and batch soft-deletes selected tasks.
   - **Deselect All Button (`✕`):** Clears multi-selection.
 
-#### 2. Primary Navigation Tabs (10 Primary Views)
+#### 2. Primary Navigation Tabs (7 Primary Views)
 1. **My Tasks Tab (`tab=my`):**
    - Accessible to all authenticated users.
-   - Shows tasks where the current logged-in user is an Assignee, Watcher, or Owner/Creator.
-   - Quick-toggle completion checkbox: Check off directly in table row to flip status between `DONE` and `TODO`.
+   - Shows tasks where the current logged-in user is an Assignee or Owner/Creator.
+   - Dedicated Empty State: "You're all caught up. No tasks assigned to you with the current filters." + `+ New Task` button.
 2. **Department Tab (`tab=department`):**
    - Accessible to users with `task.department_view` or `task.organization_view`.
-   - Displays tasks belonging to the user's department(s) or filtered by department.
-   - **Sub-View Navigation:** Allows toggling between 4 specialized department sub-views:
-     - `📋 List`: Standard paginated table view.
-     - `📊 Kanban`: 4-column board scoped to the department.
-     - `📅 Calendar`: Monthly calendar matrix scoped to the department.
-     - `📈 Analytics`: Department command center displaying:
-       - 5 metric cards: Total Department Tasks, In Progress, On Hold, Completed, Overdue.
-       - Department Completion Rate progress bar with percentage indicator.
-       - Team Member Workload & Delivery Table: Lists team members with total assigned, in progress, on hold, completed, and individual completion progress bar.
+   - Displays tasks belonging to the selected department via `Department: [Frontend ▼]` dropdown (for Super Admin and Director).
+   - Dedicated Empty State: "No tasks in this department. Try changing filters or create a new task." + `+ New Task` button.
+   - Clean tabular display with 10 reordered columns, colored Department badges, progress bars, quick actions, and pagination.
 3. **Organization Tab (`tab=organization`):**
    - Accessible to users with `task.organization_view` or super-admin role.
-   - Displays organization-wide task catalog across all departments.
-4. **Kanban Tab (`tab=kanban`):**
-   - Interactive 4-column drag-and-drop workflow board:
-     - `To Do` (`TODO`, slate theme)
-     - `In Progress` (`IN_PROGRESS`, blue theme)
-     - `On Hold` (`ON_HOLD`, amber theme with hold reason and hold until date)
-     - `Completed` (`DONE`, emerald green theme)
-   - Column headers with task counter pills and quick `+` add task button.
-   - Cards display issue type badge, priority badge, quick move status dropdown, overdue tag, title, hold badge (if on hold), subtask progress meter (`X/Y`), due date, and assignee avatar initials.
-   - Clicking card opens `TaskDrawer`.
-5. **Calendar Tab (`tab=calendar`):**
-   - Monthly calendar grid mapping tasks to start/due deadlines and hold expiration dates.
-   - Month navigation: `< Prev`, `Next >`, and `Today` quick jump button.
-   - 7 day-of-week columns (`Sun` through `Sat`).
-   - Legend: `🟢 Start Date • 🔴 Due Date • ⏸️ Hold Until`.
-   - Day cells render scheduled task pills:
-     - `🟢 {title}`: Task start date event.
-     - `🔴 {title}`: Task due date deadline event.
-     - `⏸️ {title}`: Hold until deadline event (amber tag).
-   - Clicking a task pill opens `TaskDrawer`.
-6. **Backlog Tab (`tab=backlog`):**
-   - Repository of unassigned work items (`sprint_id IS NULL`).
-   - Displays backlog item list with issue type icon, key, title, priority, epic link tag, and assignees.
-   - Drag-and-drop or quick-action move to assign backlog tasks into active or upcoming sprints.
-7. **Current Sprint Tab (`tab=current_sprint`):**
-   - Focused execution board for the currently active sprint (`status = ACTIVE`).
-   - Displays sprint header with sprint name, goal, start/end dates, and remaining days indicator.
-   - Filterable sprint task board with interactive status columns.
-   - Sprint completion workflow button ("Complete Sprint") moving incomplete items to Backlog or Next Sprint.
-8. **Future Sprints Tab (`tab=future_sprints`):**
-   - Planning view for upcoming iterations (`status = PLANNED` or `status = FUTURE`).
-   - Allows sprint creation modal (Name, Goal, Start Date, End Date).
-   - Allows activating a planned sprint when the current sprint completes.
-9. **Gantt Timeline Tab (`tab=gantt`):**
-   - Interactive SVG horizontal timeline chart (`TaskGanttView.tsx`).
-   - Groups tasks by Epic parent or Sprint milestone.
-   - View zoom modes: Month view and Quarter view.
-   - Visual dependency arrows connecting blockers and dependents.
-   - Progress bar rendering completion percentage rollup on epic parent rows.
-   - Clickable bars to immediately inspect tasks in `TaskDrawer`.
-10. **Team Workload Tab (`tab=workload`):**
-    - Workload & Capacity command center (`TaskWorkloadDashboard.tsx`).
-    - **Header Metrics:** Total Assigned Tasks, Total In Progress, Total Overdue Tasks across the team.
-    - **Team Capacity Table:** Lists each team member, assigned task count, in-progress count, overdue count, and capacity percentage bar.
-    - **Workload Calendar Matrix:** Visual day-by-day distribution of tasks per team member to identify resource bottlenecks.
+   - Grouped by department into collapsible accordion cards showing department badge, name, task count `(${deptTasks.length})`, and quick Expand/Collapse all buttons.
+   - Dedicated Empty State: "No organization tasks match these filters." + `+ New Task` button.
+4. **Backlog Tab (`tab=backlog`):**
+   - Repository of work items pending sprint or scheduling assignment (`sprint_id IS NULL`).
+5. **Kanban Tab (`tab=kanban`):**
+   - Interactive 4-column drag-and-drop workflow board (`To Do`, `In Progress`, `On Hold`, `Completed`).
+   - Cards display issue type badge, priority badge, **colored Department badge**, overdue tag, title, hold badge (if on hold), subtask progress meter, due date, and assignee avatars.
+6. **Calendar Tab (`tab=calendar`):**
+   - Monthly calendar grid mapping tasks to start/due deadlines and hold expiration dates with status-colored pills.
+7. **Gantt Tab (`tab=gantt`):**
+   - Interactive SVG horizontal timeline chart (`TaskGanttView.tsx`) with department color-coding in Organization scope.
 
-#### 3. Standard Table View (Used in My Tasks, Department List, and Organization tabs)
+#### 3. Standard Table View (Reordered 10 Columns)
 - **Columns:**
   1. `SELECT`: Row selection checkbox for bulk operations.
-  2. `TYPE`: Color-coded issue type badge (`TASK` blue, `BUG` red, `IMPROVEMENT` amber, `STORY` green, `EPIC` purple, `APPROVAL` indigo).
+  2. `TYPE`: Color-coded issue type badge (`TASK` blue, `BUG` red, `IMPROVEMENT` emerald, `STORY` purple, `EPIC` amber).
   3. `TASK`: Code/Key, Title, description snippet, parent Epic badge (if linked), and label chips. Clicking opens `TaskDrawer`.
   4. `PRIORITY`: Color-coded priority badge (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
   5. `STATUS`: Color-coded status badge (`TODO`, `IN_PROGRESS`, `⏸️ On Hold`, `DONE`). If on hold, displays `hold_reason` and `hold_until`.
-  6. `ASSIGNEES & WATCHERS`: Stacked avatar chips displaying user initials and watcher count.
-  7. `START DATE`: Task planned start date or `—`.
+  6. `ASSIGNEE`: Stacked avatar chips displaying user initials (Watchers managed cleanly inside `TaskDrawer`).
+  7. `DEPARTMENT`: Color-coded department badge (`<DepartmentBadge />`) resolving assignees or task creator's department.
   8. `DUE DATE`: Deadline date with red `OVERDUE` highlight if past deadline.
-  9. `SUBTASK PROGRESS`: Progress counter badge (`X/Y Done`) with visual progress bar.
-  10. `ROW QUICK ACTIONS`:
+  9. `PROGRESS`: Progress counter badge (`X/Y Done`) with visual progress bar.
+  10. `ACTIONS`:
       - `+Me`: Instant one-click self-assign.
       - `✓`: One-click status toggle between `TODO` and `DONE`.
       - `📄`: Instant clone / duplicate task.
+      - `👁️`: Open TaskDrawer details.
       - `⚡`: Instant escalation modal.
       - `🗑️`: Delete task with confirmation dialog.
 - **Pagination Controls:** "Showing X to Y of Z tasks", page size selector, Previous / Next page navigation.
@@ -1142,7 +1118,7 @@ Manage complete vendor team directory:
 #### 2. Create Task Modal (`CreateTaskModal.tsx`)
 - **Fields:**
   - `Template Selector`: Reusable template dropdown (`Bug Report`, `Feature Story`, `Production Release`, `Standard Task`) prefilling fields, subtasks, and labels.
-  - `Issue Type`: Selectable badge selector (`TASK`, `BUG`, `IMPROVEMENT`, `STORY`, `EPIC`, `APPROVAL`).
+  - `Issue Type`: Selectable badge selector (`TASK`, `BUG`, `IMPROVEMENT`, `STORY`, `EPIC`).
   - `Parent Epic`: Dropdown to associate task with an existing Epic (hidden when Issue Type is `EPIC`).
   - `Sprint`: Dropdown assigning task to Backlog or an Active/Planned sprint.
   - `Title` (*Required*, max 255 characters).
@@ -1180,10 +1156,6 @@ Manage complete vendor team directory:
   - **Emoji Reaction Bar (`ReactionPicker.tsx`):**
     - Displays active reactions (`👍`, `❤️`, `🎉`, `🚀`, `👀`, `👎`) with counter chips.
     - Quick "+ Add Reaction" picker allowing any team member to react.
-  - **Approval Workflow Banner (for `APPROVAL` Issue Type):**
-    - When status is `PENDING_APPROVAL`, approver action buttons appear:
-      - `✓ Approve`: Opens decision modal with optional approval notes.
-      - `✕ Reject`: Opens decision modal with rejection reason (*Required*).
   - **Epic Progress Rollup Banner (for `EPIC` Issue Type):**
     - Visual progress bar calculated dynamically from child tasks: `progress_percent = (completed_children / total_children) * 100`.
   - **On Hold Modal & Controls:**
@@ -1227,7 +1199,7 @@ Manage complete vendor team directory:
        - Chronological message stream rendering avatar initials, author name, timestamp, message body, interactive `<audio controls>` voice note player (when audio is attached), `AttachmentList` file cards, and emoji reactions bar (`ReactionPicker`).
     6. **Activity Timeline Tab:**
        - Vertical timeline synthesized dynamically via `GET /api/v1/tasks/{id}/timeline`.
-       - Chronological events: `TASK_CREATED`, `USER_ASSIGNED`, `SUBTASK_CREATED`, `SUBTASK_COMPLETED`, `TASK_ESCALATED`, `DEPENDENCY_ADDED`, `SPRINT_CHANGED`, `APPROVAL_GRANTED`, `APPROVAL_REJECTED`, `COMMENT_ADDED`, `ATTACHMENT_ADDED`, `VOICE_NOTE_ADDED`.
+       - Chronological events: `TASK_CREATED`, `USER_ASSIGNED`, `SUBTASK_CREATED`, `SUBTASK_COMPLETED`, `TASK_ESCALATED`, `DEPENDENCY_ADDED`, `SPRINT_CHANGED`, `COMMENT_ADDED`, `ATTACHMENT_ADDED`, `VOICE_NOTE_ADDED`.
 
 #### 4. Escalate Task Modal (`EscalateTaskModal.tsx`)
 - **Escalation Target Category Selection:** `Reporting Manager`, `Department Manager`, or `Organization User`.
@@ -1236,10 +1208,24 @@ Manage complete vendor team directory:
 - **Target Due Date:** Optional date picker specifying an urgent turnaround deadline.
 - **Actions:** "Cancel" button, "⚡ Escalate Task" warning button.
 
-#### 5. Live Notification Bell (`AppShell.tsx`)
-- Topbar bell icon with red unread counter badge.
-- Real-time WebSocket connection listener auto-incrementing badge on `NOTIFICATION_RECEIVED`, `TASK_ASSIGNED`, `TASK_ESCALATED`, `TASK_MENTION`, `TASK_HOLD_EXPIRED`, `TASK_ATTACHMENT_ADDED`, `TASK_VOICE_NOTE_ADDED`.
-- Dropdown panel showing notification title, body preview, relative timestamp, individual mark-as-read, and "Mark all as read" button.
+#### 5. Live Categorized Notification Bell (`AppShell.tsx`)
+- **Topbar Bell Icon & Badge:**
+  - Dynamic red unread pill badge (`99+` ceiling) visible on topbar.
+  - Live WebSocket listener updating instantly on `NOTIFICATION_RECEIVED`, `TASK_ASSIGNED`, `TASK_ESCALATED`, `TASK_MENTION`, `TASK_HOLD_EXPIRED`, `TASK_ATTACHMENT_ADDED`, `TASK_VOICE_NOTE_ADDED`, and status transitions.
+- **Category Filter Tabs:**
+  - `All (count)`: Comprehensive stream of all in-app notifications.
+  - `⏰ Deadlines (count)`: Strictly filters approaching deadlines (`⏰ DUE SOON`), due today (`📅 DUE TODAY`), and overdue alerts (`⚠️ OVERDUE`) for tasks assigned to the user or created by them.
+  - `⚡ Escalations (count)`: Strictly filters escalation alerts where the user is the designated assignee (`to_user`) or recipient of escalation thread replies (`⚡ ESCALATION`).
+  - `👤 Team (count)`: Filters assignment notices (`👤 ASSIGNED`), subtasks, completions (`✓ DONE`), on-hold alerts (`⏸️ ON HOLD`), and mentions (`💬 MENTION`).
+- **Interactive Notification Cards:**
+  - Unread blue indicator dot for unread items.
+  - Color-coded category badge chip: `⚠️ OVERDUE` (red), `📅 DUE TODAY` (amber), `⏰ DUE SOON` (yellow), `⚡ ESCALATION` (rose), `💬 MENTION` (purple), `👤 ASSIGNED` (blue), `✓ DONE` (emerald), `⏸️ ON HOLD` (orange).
+  - Relative timestamp (`just now`, `5m ago`, `2h ago`, `yesterday`).
+  - One-click direct deep-linking: Clicking any notification marks it as read and navigates to the task, immediately opening the `TaskDrawer` (and activating the `escalations` tab if linked with `drawerTab=escalations`).
+- **Action Toolbar:**
+  - `🔄 Sync / Check Deadlines`: Triggers `POST /api/v1/tasks/check-deadlines` to recheck upcoming and overdue deadlines for the current user and their assigned escalations.
+  - `Mark all read`: Marks all in-app notifications as read via `POST /api/v1/notifications/read-all`.
+  - Empty state displays contextual icons and advice per category (`⏰`, `⚡`, `👥`, `🔔`).
 
 ### 32.4. Test Checklist & Acceptance Criteria
 1. **Autocomplete Search & Close:** In Create Task modal, type an employee's name into Assignees -> list filters instantly; clicking employee closes dropdown immediately and renders removable chip `[ Name (Dept) ✕ ]`.
@@ -1253,34 +1239,35 @@ Manage complete vendor team directory:
 9. **Independent Subtask Collaboration:** Expand `Subtask Collaboration` under a mini-task -> upload file and post comment -> updates only that mini-task's comments and attachments.
 10. **On Hold Workflow:** In Task Drawer, select status `ON_HOLD` -> modal opens requesting `hold_reason` and `hold_until`; upon submitting, amber On Hold banner renders with `▶️ Resume Task` and `✏️ Edit Hold`.
 11. **Hold Expiry Background Worker:** Run `POST /api/v1/tasks/check-holds` -> detects tasks whose `hold_until` has passed and generates notification alerts.
-12. **Department Command Center & Analytics:** Switch to Department tab -> click `Analytics` sub-view -> verifies 5 metric cards (Total, In Progress, On Hold, Completed, Overdue), Completion Rate progress bar, and Team Member Workload table.
-13. **Permission Scope Bar:** Toggle Permission Scope between `Own Tasks`, `Selected Department`, `Multiple Departments`, and `Entire Organization` -> view updates accordingly.
-14. **Kanban Board:** Verify 4 columns (`To Do`, `In Progress`, `On Hold`, `Completed`). Move task between columns via quick status dropdown or drag-and-drop.
+12. **Department Filtering & Management:** Switch to Department tab -> select department from dropdown (for Super Admin / Director) -> verifies tasks are filtered strictly by that department in the table.
+13. **Permission-Based View Switcher & Scope Banner:** Verify segmented control `[ 👤 My Tasks | 🏛️ Department | 🏢 Organization ]` shows options based on role. In Department view, switching `Department: [Frontend ▼]` filters tasks immediately. In Organization view, tasks group into collapsible department accordions with counts and Expand/Collapse All controls.
+14. **Kanban Board with Department Badges:** Verify 4 columns (`To Do`, `In Progress`, `On Hold`, `Completed`). Each task card renders a colored `<DepartmentBadge />` identifying its department. Move task between columns via quick status dropdown or drag-and-drop.
 15. **Calendar Deadlines:** In Calendar tab, verify task start date (🟢), due date (🔴), and hold until (⏸️) display on corresponding calendar days.
 16. **Subtask Usability:** Add subtasks with `SearchableUserSelect` assignees; toggle completion -> flips status, updates progress bar, and logs timeline event.
 17. **Soft-Delete & Audit:** Delete task -> soft-deleted from active views, recorded in audit log under module `tasks`.
-18. **Issue Type Badges & Filtering:** Verify tasks render distinct color-coded issue type badges (`TASK`, `BUG`, `IMPROVEMENT`, `STORY`, `EPIC`, `APPROVAL`). Filter by `BUG` -> only bug issues render in the table.
+18. **Issue Type Badges & Filtering:** Verify tasks render distinct color-coded issue type badges (`TASK`, `BUG`, `IMPROVEMENT`, `STORY`, `EPIC`). Filter by `BUG` -> only bug issues render in the table.
 19. **Epic Hierarchy & Progress Rollup:** Create an `EPIC` task. Create child tasks with `parent_task_id` pointing to the Epic. Complete a child task -> Epic's `progress_percent` recalculates automatically.
 20. **Color-Coded Labels (Create, Assign, Filter):** Create a new label (e.g. `Frontend` with color `#3B82F6`). Attach label to tasks. Click label filter pill -> only tasks with that label render.
 21. **Sprint Lifecycle:** Create a sprint in `PLANNED` status. Start sprint -> flips to `ACTIVE`. Complete sprint -> flips to `COMPLETED` and incomplete tasks route to Backlog or Next Sprint.
-22. **Backlog to Sprint Transition:** View Backlog tab -> items display with `sprint_id = null`. Move backlog task into active sprint -> task appears on Current Sprint board.
+22. **Backlog Transition:** View Backlog tab -> items display with `sprint_id = null`.
 23. **Task Templates:** Open Create Task Modal -> select `Bug Report` template -> Title, Description markdown structure, Priority `HIGH`, and default labels prefill automatically.
 24. **Row Quick Actions:** On standard table view:
     - Click `+Me` -> logged-in user is added to assignees.
     - Click `✓` -> flips status to `DONE` (or `TODO` if already done).
     - Click `📄` -> clones task with prefix `[Copy]`.
+    - Click `👁️` -> opens TaskDrawer.
     - Click `⚡` -> opens instant escalation modal.
     - Click `🗑️` -> opens soft-delete confirmation.
 25. **Floating Bulk Action Bar:** Select multiple task checkboxes -> floating `<BulkActionBar>` appears. Change status to `DONE` -> all selected tasks update atomically. Change priority to `CRITICAL` -> all selected tasks update.
 26. **Dependency Linking & Blocker Detection:** In Task Drawer Dependencies tab, link Task A as `BLOCKS` Task B. Task B displays `BLOCKED` indicator until Task A is marked `DONE`.
 27. **Circular Dependency Prevention:** Attempt to link Task B as `BLOCKS` Task A when Task A already blocks Task B -> server rejects with HTTP 400 Bad Request and error message `Dependency cycle detected`.
-28. **Approval Workflow:** Create task with issue type `APPROVAL` -> status enters `PENDING_APPROVAL`. Authorized approver clicks `✓ Approve` with note -> task transitions to `APPROVED` and logs decision in timeline.
-29. **Interactive Gantt Timeline View:** Switch to `Gantt Timeline` tab -> tasks render as horizontal SVG timeline bars grouped by Epic. Switching between Month and Quarter zoom updates grid scaling cleanly.
-30. **Team Workload Dashboard & Capacity Matrix:** Switch to `Team Workload` tab -> verify Total, In Progress, and Overdue metric cards render with real-time statistics. Team capacity table displays each member's workload and completion rate.
+28. **Streamlined ERP Task Flow:** Tasks transition seamlessly across `TODO`, `IN_PROGRESS`, `ON_HOLD`, and `DONE` without cumbersome approval queues.
+29. **Interactive Gantt Timeline View:** Switch to `Gantt` tab -> tasks render as horizontal SVG timeline bars color-coded by department in Organization scope.
+30. **Department Task Switcher & Isolation:** In Department view, select different departments from the dropdown -> verify the table updates immediately to show only tasks belonging to the selected department.
 31. **At-Mentions & Notifications:** Post a comment or task description containing `@username` -> mentioned user receives topbar bell notification and WebSocket message of type `TASK_MENTION`.
 32. **Emoji Reactions on Tasks & Comments:** Click emoji picker on task header or comment card -> select `🚀` -> reaction count increments to 1; clicking again decrements/removes reaction.
 33. **Drag-and-Drop & Clipboard Paste Attachments:** In Task Drawer or Create Task modal, paste a screenshot using `Ctrl+V` -> image file is captured from clipboard and uploaded as an attachment automatically.
-34. **Saved Filters Quick Bar:** Apply custom search query, status, and priority filters. Click `+ Save Filter` -> saved filter chip appears in topbar. Clicking chip instantly restores saved search criteria.
+34. **Quick Views Bar:** Click `⚠️ Overdue` -> filters overdue tasks. Click `📅 Due Today` and `📆 Due This Week` -> filters by today and current week. Click `All` -> restores full view.
 35. **Universal Search Integration:** In topbar search bar, type a task keyword -> tasks matching title, description, or labels appear in search dropdown under `Tasks` category and deep-link directly to `/tasks?tab=my&taskId={id}`.
 36. **Modal Lifecycle & Framework Dismissal:** Open `CreateTaskModal`:
     - Click `✕` button -> modal completely unmounts, backdrop blur disappears, and body scroll is restored.
@@ -1296,6 +1283,24 @@ Manage complete vendor team directory:
 39. **Interactive Attachment Preview Modal:**
     - In `AttachmentList` (Task Drawer or comments), click on an image, video, audio file, or PDF -> Attachment Preview Modal opens with centered viewport, file metadata, and direct download shortcut.
     - Pressing `Escape`, clicking `✕`, or clicking outside closes the preview cleanly and restores body scrolling.
+40. **Task Deadline, Team & Escalation Notifications:**
+    - **Self-Scoped Task Deadlines:** Create a task assigned to current user with `due_date` set to today or past due -> click `🔄 Sync` in Notification Bell -> notification appears under `All` and `⏰ Deadlines` with badge `📅 DUE TODAY` or `⚠️ OVERDUE`.
+    - **Other Users' Deadlines Not Leaked:** Tasks assigned solely to other users do NOT trigger deadline alerts for the current user.
+    - **Targeted Escalation Alerts:** When a task is escalated to the current user -> notification appears under `All` and `⚡ Escalations` with badge `⚡ ESCALATION`. Clicking the notification immediately opens `TaskDrawer` with the `Escalations` tab pre-selected.
+    - **Team Mentions & Assignments:** Assigning a task/subtask to a user or mentioning `@username` in a comment produces alerts under `👤 Team` with `👤 ASSIGNED` or `💬 MENTION`.
+    - **Deduplication:** Subsequent syncs or page loads within 20 hours do not generate redundant duplicate notifications for the same deadline or escalation.
+    - **Tab Switching & Filtering:** Clicking `All`, `⏰ Deadlines`, `⚡ Escalations`, and `👤 Team` accurately filters items and displays badge counts. Empty tabs render friendly empty state illustrations.
+41. **Automated Frontend Component & Lifecycle Test Suite (`npm run test`):**
+    - `TaskNotificationsAndDrawer.test.tsx` verifies all 8 notification badge classifications (`⚠️ OVERDUE`, `📅 DUE TODAY`, `⏰ DUE SOON`, `⚡ ESCALATION`, `💬 MENTION`, `👤 ASSIGNED`, `✓ DONE`, `⏸️ ON HOLD`), category filtering (`deadlines`, `escalations`, `team`, `all`), `ReactionPicker` active chips & popover toggle, and `EscalateTaskModal` validation & category selectors.
+    - `CreateTaskModal.test.tsx` verifies unmount/mount lifecycle, modal dismissal (✕, Cancel, Escape), and date validation rules.
+    - `AttachmentList.test.tsx` verifies file rendering, format icons, preview modal launch, and Escape key dismissal.
+    - All 23 vitest component tests pass cleanly with 100% assertions.
+42. **Aggressive Stress, Speed Benchmarking & Accuracy Suite (`task_stress_and_accuracy_test.py`):**
+    - **Burst Concurrency:** 20 simultaneous task creations across parallel async database sessions complete without pool exhaustion or deadlocks (N=20, 100% success rate).
+    - **High-Volume Atomic Bulk Updates:** 20 items status/priority updated atomically (latency ~321ms).
+    - **Parallel Collaboration Under Load:** 10 parallel comments with `@mentions` committed concurrently at ~8.9 comments/sec without race conditions.
+    - **Strict Accuracy Verification:** User scoping isolation (User B receives assignment alert, User C receives 0 leaks), targeted escalations (deep-link directly to `drawerTab=escalations`), 20-hour deduplication window (run 1 generates alerts, run 2 generates 0 duplicate spam), Epic progress rollup math (0/4=0%, 2/4=50%, 4/4=100%), and 3-tier circular blocker cycle prevention (A->B->C->A rejected with HTTP 400).
+    - **Speed & Latency Benchmarks:** Profiles min, avg, p50, p95, and max operations latency across task creation, list filtering, detail fetch, timeline synthesis, and notification retrieval.
 
 ---
 
@@ -1310,22 +1315,24 @@ Your task is to verify that all modules and features described in MODULES_AND_FE
 Checklist to execute:
 1. Compile backend: Run `python -m compileall backend/app` -> must return 0 errors.
 2. Build frontend: Run `npm run build` in /frontend -> must compile cleanly with 0 TypeScript/Vite errors.
-3. Run backend empirical test suite: Run `python backend/scripts/empirical_test.py` -> all 37 Enterprise Task V2.0 checks must pass with exit code 0.
-4. Run full pytest suite: Run `pytest backend/tests/ -v` -> all tests must pass with 0 failures.
-5. Verify module routes in frontend/src/App.tsx and frontend/src/lib/nav.ts match the sitemap in Section 2, and all navigation items possess distinct icons.
-6. Verify the Work Management module:
+3. Run frontend unit test suite: Run `npm run test` in /frontend -> all 23 vitest tests across CreateTaskModal, AttachmentList, and TaskNotificationsAndDrawer must pass.
+4. Run backend unit tests: Run `pytest backend/tests/test_task_deadlines_notifications.py backend/tests/test_tasks_validation.py -v` -> must pass with 0 failures.
+5. Run backend empirical test suite: Run `python backend/scripts/empirical_test.py` -> all 37 Enterprise Task V2.0 checks must pass with exit code 0.
+6. Run aggressive stress, speed & accuracy suite: Run `python backend/scripts/task_stress_and_accuracy_test.py` -> all burst concurrency, speed profiling, deduplication, and accuracy tests must pass.
+7. Verify module routes in frontend/src/App.tsx and frontend/src/lib/nav.ts match the sitemap in Section 2, and all navigation items possess distinct icons.
+8. Verify the Work Management module:
    - Sidebar displays single item WORK MANAGEMENT -> Tasks (/tasks).
    - Tasks (/tasks) layout matches Users.tsx (breadcrumbs, title, subtitle, + New Task, filter toolbar, permission scope bar).
-   - 10 Navigation Tabs render cleanly: My Tasks, Department (with List/Kanban/Calendar/Analytics), Organization, Kanban, Calendar, Backlog, Current Sprint, Future Sprints, Gantt Timeline, and Team Workload.
+   - 7 Navigation Tabs render cleanly: My Tasks, Department (with List/Kanban/Calendar/Analytics), Organization, Backlog, Kanban, Calendar, and Gantt.
    - Universal Searchable Dropdowns (SearchableUserSelect.tsx) filter on keystroke, auto-close on selection, and render removable chips.
-   - Issue types render distinct badges: TASK, BUG, IMPROVEMENT, STORY, EPIC, APPROVAL.
+   - Issue types render distinct badges: TASK, BUG, IMPROVEMENT, STORY, EPIC.
    - CreateTaskModal supports templates, issue types, parent epic, sprint, color labels, drag-and-drop, clipboard screenshot paste (Ctrl+V), mini-tasks, and initial escalations.
    - TaskDrawer renders 6 tabs: Overview (with Attachments, Voice Notes, and On Hold controls), Mini-Tasks (with independent subtask discussions), Dependencies (with blocker detection and cycle prevention), Escalations (with unlimited history and persistent + New Escalation button), Comments (with rich CommentComposer, @mentions, and emoji reactions), and Activity Timeline.
    - Row Quick Actions (+Me, Complete, Duplicate, Escalate, Delete) and Floating BulkActionBar function seamlessly.
-   - Interactive Gantt Timeline (TaskGanttView.tsx) and Team Workload Dashboard (TaskWorkloadDashboard.tsx) render live data.
+   - Interactive Gantt Timeline (TaskGanttView.tsx) renders live data with department color-coding in Organization scope.
    - Universal search (/api/v1/search?q=) indexes tasks by title, description, and labels.
-7. Report any missing fields, broken endpoints, or regressions.
+9. Report any missing fields, broken endpoints, or regressions.
 ```
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 7, 2026 (Enterprise Task Module V2.0 Jira-Inspired Work Management Upgrade).*
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 8, 2026 (Task Module Aggressive Stress, Speed Latency Profiling, Notification Isolation Matrix & Dual Junior/Senior QA Verification).*

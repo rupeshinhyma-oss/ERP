@@ -38,6 +38,7 @@ from app.auth.security import InvalidTokenError, TokenType, decode_token
 from app.auth.service import AuthService, CurrentUser, LoginContext
 from app.core.config import settings
 from app.core.exceptions import UnauthorizedException
+from app.common.rate_limit import enforce_rate_limit, forgot_password_limiter
 from app.core.responses import build_success_response
 from app.rbac.dependencies import get_rbac_service
 from app.rbac.service import RBACService
@@ -223,6 +224,7 @@ async def forgot_password(
     ``POST /users/{id}/reset-password``); this endpoint only flags the
     account and notifies administrators out-of-band.
     """
+    enforce_rate_limit(forgot_password_limiter, request, key_suffix=payload.identifier)
     await auth_service.forgot_password(payload.identifier)
     return build_success_response(
         data={

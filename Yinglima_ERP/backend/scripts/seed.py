@@ -234,6 +234,15 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("planning.approvaldate.edit", "planning", "planning", "update", "ALL", "Edit the APPROVAL DATE column specifically, independent of planning.cell.edit."),
     ("planning.colorstatusred.edit", "planning", "planning", "update", "ALL", "Set a cell's status color to Red (Requirement), independent of planning.cell.edit."),
     ("planning.colorstatusgreen.edit", "planning", "planning", "update", "ALL", "Set a cell's status color to Green (Purchased), independent of planning.cell.edit."),
+    # Inquiries & Quotations (Sale > Inquiries)
+    ("inquiry.view", "inquiry", "inquiries", "view", "ALL", "View inquiries and consignment lists."),
+    ("inquiry.create", "inquiry", "inquiries", "create", "ALL", "Create new inquiries and consignments."),
+    ("inquiry.update", "inquiry", "inquiries", "update", "ALL", "Edit inquiries, items, statuses, and send messages."),
+    ("inquiry.delete", "inquiry", "inquiries", "delete", "ALL", "Delete inquiries and consignment items."),
+    ("inquiry.approve", "inquiry", "inquiries", "manage", "ALL", "Approve inquiry quotes and confirm consignments."),
+    ("quotation.create", "inquiry", "inquiries", "create", "ALL", "Add and upload quotations for inquiry items."),
+    ("quotation.approve", "inquiry", "inquiries", "manage", "ALL", "Approve quotations for inquiry items."),
+    ("quotation.delete", "inquiry", "inquiries", "delete", "ALL", "Delete quotations and quotation attachments."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
@@ -259,8 +268,10 @@ USER_ROLE_PERMISSION_CODES: list[str] = [
     "category.view",
     "subcategory.view",
     "product.view",
+    "productgallery.view",
     "supplier.view",
     "buyer.view",
+    "inquiry.view",
     "planning.view",
 ]
 

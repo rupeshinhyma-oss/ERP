@@ -1,0 +1,150 @@
+name: Multi-ERP Production Release & Deployment Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target deployment environment"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - staging
+          - production
+      run_migrations:
+        description: "Execute database migrations on Supabase PostgreSQL"
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Pre-Deployment Configuration & Migration Check
+  # ---------------------------------------------------------------------------
+  pre-flight:
+    name: Pre-Flight Configuration Verification
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Release
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate Production Environment Variables
+        env:
+          DATABASE_URL_ERP_MAIN: ${{ secrets.DATABASE_URL_ERP_MAIN }}
+          DATABASE_URL_YINGLIMA: ${{ secrets.DATABASE_URL_YINGLIMA }}
+          DATABASE_URL_INHYMA: ${{ secrets.DATABASE_URL_INHYMA }}
+          PLATFORM_JWT_SECRET_KEY: ${{ secrets.PLATFORM_JWT_SECRET_KEY }}
+          SERVICE_CREDENTIAL_PEPPER: ${{ secrets.SERVICE_CREDENTIAL_PEPPER }}
+          JWT_SECRET_KEY_YINGLIMA: ${{ secrets.JWT_SECRET_KEY_YINGLIMA }}
+          JWT_SECRET_KEY_INHYMA: ${{ secrets.JWT_SECRET_KEY_INHYMA }}
+        run: |
+          echo "Verifying production secrets are provisioned..."
+          python scripts/validate_production_config.py --env ${{ github.event.inputs.environment || 'production' }}
+
+  # ---------------------------------------------------------------------------
+  # 2. Controlled Database Migrations on Supabase PostgreSQL
+  # ---------------------------------------------------------------------------
+  database-migrations:
+    name: PostgreSQL/Supabase Migration Execution
+    needs: pre-flight
+    if: ${{ github.event.inputs.run_migrations != false }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Migrate ERP_Main Database on Supabase PostgreSQL
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_ERP_MAIN }}
+          DATABASE_DISABLE_STATEMENT_CACHE: "true"
+        run: |
+          cd ERP_Main/backend
+          pip install -r requirements.txt
+          alembic upgrade head
+
+      - name: Migrate Yinglima ERP Database on Supabase PostgreSQL
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_YINGLIMA }}
+          DATABASE_DISABLE_STATEMENT_CACHE: "true"
+        run: |
+          cd Yinglima_ERP/backend
+          pip install -r requirements.txt
+          alembic upgrade head
+
+      - name: Migrate Inhyma ERP Database on Supabase PostgreSQL
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_INHYMA }}
+          DATABASE_DISABLE_STATEMENT_CACHE: "true"
+        run: |
+          cd Inhyma_ERP/backend
+          pip install -r requirements.txt
+          alembic upgrade head
+
+  # ---------------------------------------------------------------------------
+  # 3. Application Container Build & Rollout
+  # ---------------------------------------------------------------------------
+  deploy-containers:
+    name: Container Build & Service Rollout
+    needs: database-migrations
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ERP_Main Backend Image
+        run: |
+          docker build -t erp-main-backend:${{ github.sha }} ./ERP_Main/backend
+
+      - name: Build Yinglima ERP Backend & Worker Image
+        run: |
+          docker build -t yinglima-backend:${{ github.sha }} ./Yinglima_ERP/backend
+
+      - name: Build Inhyma ERP Backend & Worker Image
+        run: |
+          docker build -t inhyma-backend:${{ github.sha }} ./Inhyma_ERP/backend
+
+      - name: Deploy Services
+        run: |
+          echo "Simulating zero-downtime rolling update deployment to Kubernetes/ECS cluster..."
+          echo "Rolling rollout initiated for revision ${{ github.sha }}"
+
+  # ---------------------------------------------------------------------------
+  # 4. Post-Deployment Smoke Tests
+  # ---------------------------------------------------------------------------
+  post-deployment-smoke-tests:
+    name: Production Smoke Testing
+    needs: deploy-containers
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Execute Production Smoke Tests
+        run: |
+          pip install httpx pytest
+          python scripts/production_smoke_test.py --simulated

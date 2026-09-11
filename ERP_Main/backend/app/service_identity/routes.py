@@ -5,12 +5,21 @@ Two distinct trust boundaries in this one file, matching Phase 3 Step 22
 ("humans and ERP servers are different security principals"):
 
 - Credential issuance/rotation/revocation/listing: gated by
-  `require_platform_admin` -- a human decides when an ERP gets a new
-  credential.
+  `require_platform_permission(...)` (Phase 5) -- a human, or a
+  GlobalUser holding the matching permission, decides when an ERP gets a
+  new credential. Additive over Phase 3's `require_platform_admin`: a
+  PlatformAdmin still satisfies every one of these checks exactly as
+  before.
 - The heartbeat endpoint: gated by `require_erp_service` -- only a
   caller presenting a valid service credential can post a heartbeat, and
   the ERP identity is derived entirely from that credential, never from
-  the `{erp_id}` path parameter alone (Step 26).
+  the `{erp_id}` path parameter alone (Step 26). Untouched by Phase 5 --
+  this is a machine-to-machine credential, not a human/GlobalUser check.
+
+Every `require_platform_permission(...)` call below passes
+`erp_scope_param="erp_id"` so a GlobalUser holding an ERP-SCOPED grant
+(rather than a GLOBAL one) is correctly recognized for the specific ERP
+named in the path, matching Phase 5 Section 9/28's scoping rules.
 """
 
 from __future__ import annotations
@@ -21,8 +30,7 @@ from fastapi import APIRouter, Depends, Request, status
 
 from app.core.exceptions import ForbiddenException
 from app.core.responses import build_success_response
-from app.platform_auth.dependencies import require_platform_admin
-from app.platform_auth.models import PlatformAdmin
+from app.platform_authz.dependencies import AuthorizedPrincipal, require_platform_permission
 from app.service_identity.dependencies import get_service_identity_service, require_erp_service
 from app.service_identity.models import ErpServiceCredential
 from app.service_identity.schemas import (
@@ -49,11 +57,13 @@ async def issue_credential(
     request: Request,
     erp_id: uuid.UUID,
     payload: ErpServiceCredentialCreate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(
+        require_platform_permission("platform.service_identity.create", erp_scope_param="erp_id")
+    ),
     service: ErpServiceIdentityService = Depends(get_service_identity_service),
 ) -> dict:
     """Issue a brand-new service credential for an ERP instance. The plaintext token is shown only once."""
-    credential, bearer_token = await service.issue(erp_id, payload, actor=admin)
+    credential, bearer_token = await service.issue(erp_id, payload, actor=principal)
     response = ErpServiceCredentialIssued(
         id=credential.id,
         credential_identifier=credential.credential_identifier,
@@ -73,7 +83,9 @@ async def rotate_credential(
     request: Request,
     erp_id: uuid.UUID,
     payload: ErpServiceCredentialCreate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(
+        require_platform_permission("platform.service_identity.rotate", erp_scope_param="erp_id")
+    ),
     service: ErpServiceIdentityService = Depends(get_service_identity_service),
 ) -> dict:
     """
@@ -83,7 +95,7 @@ async def rotate_credential(
     `POST /credentials/{credential_id}/revoke` on the old one -- see
     Phase 3 Step 25's rotation flow.
     """
-    credential, bearer_token = await service.rotate(erp_id, payload, actor=admin)
+    credential, bearer_token = await service.rotate(erp_id, payload, actor=principal)
     response = ErpServiceCredentialIssued(
         id=credential.id,
         credential_identifier=credential.credential_identifier,
@@ -102,7 +114,9 @@ async def rotate_credential(
 async def list_credentials(
     request: Request,
     erp_id: uuid.UUID,
-    _admin: PlatformAdmin = Depends(require_platform_admin),
+    _principal: AuthorizedPrincipal = Depends(
+        require_platform_permission("platform.service_identity.read", erp_scope_param="erp_id")
+    ),
     service: ErpServiceIdentityService = Depends(get_service_identity_service),
 ) -> dict:
     """List every service credential (active or not) for an ERP instance. Never includes secrets or hashes."""
@@ -116,11 +130,13 @@ async def revoke_credential(
     request: Request,
     erp_id: uuid.UUID,
     credential_id: uuid.UUID,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(
+        require_platform_permission("platform.service_identity.revoke", erp_scope_param="erp_id")
+    ),
     service: ErpServiceIdentityService = Depends(get_service_identity_service),
 ) -> dict:
     """Revoke a service credential. The row remains for audit history; only `revoked_at` is set."""
-    credential = await service.revoke(credential_id, actor=admin)
+    credential = await service.revoke(credential_id, actor=principal)
     return build_success_response(
         ErpServiceCredentialRead.model_validate(credential).model_dump(mode="json"),
         request_id=_request_id(request),

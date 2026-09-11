@@ -7,11 +7,15 @@ import { ToastProvider } from "./lib/toast";
 import "./styles/style.css";
 import "./styles/pages.css";
 import "./styles/tasks.css";
+import { initDataLayer } from "./lib/dataLayer";
+
+// Initialize Inhyma Browser Data Layer (Phase 8C)
+initDataLayer("inhyma");
 
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <ErrorBoundary title="The application failed to load.">
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ToastProvider>
           <App />
         </ToastProvider>

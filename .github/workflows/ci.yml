@@ -1,0 +1,146 @@
+name: Multi-ERP Ecosystem CI Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Configuration & Security Audits
+  # ---------------------------------------------------------------------------
+  config-and-security:
+    name: Configuration & Secret Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Validate Staging/Production Configurations
+        run: |
+          python scripts/validate_production_config.py --env staging
+
+      - name: Check for Accidentally Committed Secrets
+        run: |
+          echo "Scanning repository for plain production secrets and private keys..."
+          python scripts/scan_repository_secrets.py
+
+  # ---------------------------------------------------------------------------
+  # 2. Database Migration Chain Validation
+  # ---------------------------------------------------------------------------
+  migration-integrity:
+    name: Alembic Migration Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify ERP_Main Alembic Head
+        run: |
+          cd ERP_Main/backend
+          pip install -r requirements.txt
+          alembic heads
+          HEADS=$(alembic heads | wc -l)
+          if [ "$HEADS" -ne 1 ]; then
+            echo "ERROR: ERP_Main has multiple migration heads!"
+            exit 1
+          fi
+
+      - name: Verify Yinglima_ERP Alembic Head
+        run: |
+          cd Yinglima_ERP/backend
+          pip install -r requirements.txt
+          alembic heads
+          HEADS=$(alembic heads | wc -l)
+          if [ "$HEADS" -ne 1 ]; then
+            echo "ERROR: Yinglima_ERP has multiple migration heads!"
+            exit 1
+          fi
+
+      - name: Verify Inhyma_ERP Alembic Head
+        run: |
+          cd Inhyma_ERP/backend
+          pip install -r requirements.txt
+          alembic heads
+          HEADS=$(alembic heads | wc -l)
+          if [ "$HEADS" -ne 1 ]; then
+            echo "ERROR: Inhyma_ERP has multiple migration heads!"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 3. Backend Test Suites (Matrix Execution)
+  # ---------------------------------------------------------------------------
+  backend-tests:
+    name: Backend Test Suite (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [ERP_Main, Yinglima_ERP, Inhyma_ERP]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          cd ${{ matrix.project }}/backend
+          pip install --upgrade pip
+          pip install -r requirements.txt pytest-asyncio
+
+      - name: Run Pytest
+        run: |
+          cd ${{ matrix.project }}/backend
+          pytest -v
+
+  # ---------------------------------------------------------------------------
+  # 4. Frontend Production Builds (Matrix Execution)
+  # ---------------------------------------------------------------------------
+  frontend-builds:
+    name: Frontend Production Build (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [ERP_Main, Yinglima_ERP, Inhyma_ERP]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd ${{ matrix.project }}/frontend
+          npm ci || npm install
+
+      - name: Run Frontend Tests
+        run: |
+          cd ${{ matrix.project }}/frontend
+          npm test -- --run
+
+      - name: Build Production Assets
+        run: |
+          cd ${{ matrix.project }}/frontend
+          npm run build

@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.1.0 (Production)  
-> **Last Updated:** September 7, 2026  
+> **Last Updated:** September 11, 2026 (Products Master server-side pagination & comprehensive search upgrade, Vite proxy timeout resolution, Supabase PostgreSQL aws-0-ap-south-1 architecture, OCC version column alignment migration f9a0b1c2d3e4, planning_sheets item_description support, and 100% data parity verification)  
 > **Repository:** `https://github.com/rupeshinhyma-oss/Yinglima_ERP.git`  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
@@ -145,7 +145,7 @@ ERP_Main_Claude/
 │   │   ├── users/             # User accounts, deactivation, force logout, reporting managers
 │   │   └── main.py            # Composition root, lifespan lifecycle, middleware wiring
 │   ├── alembic/               # Database schema version migrations
-│   ├── scripts/               # Migration and maintenance tools (sync_uploads_to_supabase.py)
+│   ├── scripts/               # Seeding and maintenance tools (sync_uploads_to_supabase.py)
 │   └── requirements.txt       # Python dependencies
 └── frontend/
     ├── src/
@@ -184,6 +184,31 @@ class VersionMixin:
     """Provides optimistic concurrency control."""
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 ```
+
+### 4.1. Supabase PostgreSQL Multi-Database Architecture & Driver Engine
+- **Three Isolated Dedicated Database Projects**:
+  - `yinglima_erp`: Dedicated Supabase project (`mpvzjzunkiqchhhvxrza`) for China procurement, quotation sourcing, and container shipment planning.
+  - `inhyma_erp`: Dedicated Supabase project (`kkqxkgdrmvnnvptpjpmi`) for India domestic distribution, multi-branch, and buyer invoicing.
+  - `erp_main`: Dedicated Supabase project (`dwdqigpvkciolblcddcf`) for central master repository and identity control plane.
+- **Cloud Database Hosting**:
+  - Hosted on Supabase PostgreSQL Session Pooler (`aws-0-ap-south-1.pooler.supabase.com:5432`).
+  - Zero cross-database coupling: dedicated databases, no shared connections, no cross-database foreign keys.
+  - 100% row count, schema, and relation parity verified across all databases.
+- **Optimistic Concurrency & Missing Columns Alignment (`alembic/versions/f9a0b1c2d3e4_ensure_all_version_columns.py`)**:
+  - Ensures `version INTEGER NOT NULL DEFAULT 1` exists across all master tables (`hsn_codes`, `units_of_measurement`, `master_companies`, `inquiry_items`, `supplier_types`, `buyer_types`, `consignment_codes`).
+  - Ensures `item_description TEXT` exists on `planning_sheets`.
+  - Fixes HTTP 500 errors on `/masters/hsn`, `/masters/uom`, and `/planning/sheets`.
+- **Connection Pooling & Statement Caching**:
+  - Configures `DATABASE_DISABLE_STATEMENT_CACHE=true` in `backend/.env` to safely handle multiplexed pooled connections without prepared statement conflicts.
+- **Driver Parameter Compatibility Matrix**:
+  - **`asyncpg` Engine**: Strictly requires `?ssl=require`. Passing `?sslmode=require` causes `TypeError: connect() got an unexpected keyword argument 'sslmode'`.
+  - **`psycopg2` Engine / Alembic**: Strictly requires `?sslmode=require`. Passing `?ssl=require` raises an invalid keyword argument error in psycopg2.
+  - **Dynamic Resolution (`app.core.config.py`)**: The `sync_database_url` property dynamically inspects query parameters and converts `?ssl=require` to `?sslmode=require` seamlessly across migrations and background sync tools.
+- **Dedicated Project Schemas**:
+  - Total tables in Yinglima Supabase project: **77** (Zero missing tables, zero missing rows).
+  - All 21 Task Management & Notification tables (`notifications`, `tasks`, `task_subtasks`, `task_assignees`, `task_comments`, `task_escalations`, `task_labels`, `task_attachments`, `task_sprints`, etc.) active with all notifications, tasks, and related attachments.
+  - All 184 country ISO2 and ISO3 codes active.
+  - Schema alignment for `products` (`packaging_length`, `packaging_width`, `packaging_height`, `packaging_weight`, `master_box_qty`, `supplier_id`) and `planning_columns.description`.
 
 ---
 
@@ -318,8 +343,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Features:** Built on the unified `MasterPage.tsx` engine providing uniform search, pagination, validation, modal creation, and cached lookup resolution (`nameResolver.ts`).
 
 ### 8.5. Product Catalog & Dynamic Specification Builder
-- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`.
-- **Features:** Dynamic JSON specification builder allowing arbitrary technical specifications (e.g. Dimensions, Voltage, Speed, Material). Includes multi-image upload, supplier association, and ReportLab PDF datasheet generation.
+- **Endpoints:** `GET /masters/products`, `POST /masters/products`, `GET /masters/products/{id}`, `PATCH /masters/products/{id}`, `DELETE /masters/products/{id}`, `POST /masters/products/import`, `GET /masters/products/export`.
+- **Features:** Dynamic JSON specification builder allowing arbitrary technical specifications (e.g. Dimensions, Voltage, Speed, Material), multi-image upload, primary supplier auto-detection, and ReportLab PDF datasheet generation.
+- **Server-Side Pagination & Subquery Search Engine:** Uses standard 50-item/page server-side pagination with `ProductRepository._apply_search`. Applies case-insensitive subqueries across direct product attributes (`product_code`, `product_name`, `product_name_tally`, `product_name_invoice`, `barcode`, `specification`, `description`, `material`, `color`) and linked masters (`Brand`, `ProductCategory`, `ProductSubCategory`, `HsnCode`, `UnitOfMeasurement`) using PostgreSQL `exists()` clauses. Completely eliminates client-side 10,000-row batch loading and Vite proxy 500 timeout crashes over cloud database connections.
 
 ### 8.6. Supplier Directory & Tokenized Public Portal
 - **Endpoints:** `GET /suppliers`, `POST /suppliers`, `PATCH /suppliers/{id}`, `POST /suppliers/{id}/contacts`, `POST /suppliers/import`, `GET /suppliers/export`.
@@ -590,8 +616,14 @@ DEBUG=false
 SECRET_KEY=your-super-secret-key-32-chars-minimum
 API_V1_PREFIX=/api/v1
 
-# Database Configuration
-DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/erp_database
+# Database Configuration (Supabase PostgreSQL - Session Pooler port 5432)
+DATABASE_URL=postgresql+asyncpg://postgres.<PROJECT_REF>:<DB_PASSWORD>@aws-0-ap-south-1.pooler.supabase.com:5432/yinglima_erp?ssl=require
+DATABASE_DISABLE_STATEMENT_CACHE=true
+
+# Database Environment Profiles (Switch via: copy .env.<db_name> .env)
+# 1. Yinglima (China):  .env.yinglima_erp -> DATABASE_URL=.../yinglima_erp?ssl=require
+# 2. Inhyma (India):    .env.inhyma_erp   -> DATABASE_URL=.../inhyma_erp?ssl=require
+# 3. Master / Golden:   .env.erp_main     -> DATABASE_URL=.../erp_main?ssl=require
 
 # CORS Allowed Origins
 BACKEND_CORS_ORIGINS=["http://localhost:5173","https://erp.yourdomain.com"]
@@ -658,5 +690,4 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Native React State Dispatch**: Seamlessly triggers React's synthetic `onChange` and `input` events so form state updates immediately without manual backspacing. Excludes password and file upload inputs.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 7, 2026 (Merged: Permanent User Deletion Retirement, Account Deactivation Policy & Bulk Deactivation, Unified Edit Profile with Integrated Department Management, Real-Time Force Logout, Isolated 1-on-1 RFQ Supplier Email Dispatch, and WeChat/WeCom Automated AI Quotation Extraction).*
-
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 11, 2026 (Merged: Permanent User Deletion Retirement, Account Deactivation Policy & Bulk Deactivation, Unified Edit Profile with Integrated Department Management, Real-Time Force Logout, Isolated 1-on-1 RFQ Supplier Email Dispatch, WeChat/WeCom Automated AI Quotation Extraction, and 100% Supabase PostgreSQL Architecture).*

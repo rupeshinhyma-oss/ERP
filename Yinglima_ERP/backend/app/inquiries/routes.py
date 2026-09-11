@@ -26,7 +26,8 @@ from datetime import datetime
 
 logger = logging.getLogger("inquiry_routes")
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
+import re
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,7 @@ from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
+from app.rbac.dependencies import require_any_permission, require_permission
 from app.core.config import settings
 from app.core.responses import build_success_response
 from app.common.email import send_bulk_rfq_email, send_rfq_email, send_email_async
@@ -48,8 +50,9 @@ from app.inquiries.ai_extractor import extract_supplier_quotation
 from app.inquiries.dependencies import get_inquiry_service
 from app.inquiries.public_quotes import generate_rfq_token
 from app.masters.products.models import Product
-from app.suppliers.models import Supplier, SupplierCategoryLink, SupplierSubCategoryLink
+from app.suppliers.models import Supplier, SupplierContact, SupplierCategoryLink, SupplierSubCategoryLink
 from app.inquiries.schemas import (
+    SendInquiryWeChatMessagePayload,
     BulkRFQCreate,
     BulkTallyPostRequest,
     BulkInquiryItemCreate,
@@ -75,8 +78,35 @@ from app.inquiries.schemas import (
 from app.inquiries.models import Inquiry, InquiryItem, InquiryMessage, Quotation, RFQ
 from app.inquiries.wechat_service import get_wecom_service
 from app.inquiries.service import InquiryService
+from app.integration.jobs import enqueue_dispatch
+from app.integration.repository import IntegrationOutboxRepository
+from app.integration.service import IntegrationService
+from app.queue.service import QueueService
 
 router = APIRouter(prefix="/inquiries", tags=["Inquiries"])
+
+
+async def _publish_inquiry_integration_event(
+    *,
+    db: AsyncSession,
+    event_type: str,
+    inquiry_id: uuid.UUID,
+    user_id: uuid.UUID,
+    payload: dict,
+) -> None:
+    """Write one Phase 6 cross-ERP integration outbox row for an inquiry consignment."""
+    service = IntegrationService(IntegrationOutboxRepository(db))
+    outbox_event = service.publish_event(
+        event_type=event_type,
+        aggregate_type="inquiry",
+        aggregate_id=inquiry_id,
+        payload=payload,
+        actor_type="user",
+        actor_id=user_id,
+    )
+    await db.flush()
+    queue_service = QueueService(db)
+    await enqueue_dispatch(queue_service, outbox_event_id=outbox_event.id)
 
 
 async def _publish_inquiry_event(
@@ -108,6 +138,60 @@ async def _publish_inquiry_event(
         version=None,
         user_id=user_id,
         changes=changes,
+    )
+
+
+async def _publish_inquiry_message_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    inquiry_id: uuid.UUID | str,
+) -> None:
+    """
+    Durably record + broadcast an ``inquiry.message.created`` event, WITHOUT an extra commit.
+
+    Phase 5: the two call sites for this event (WeChat/RFQ dispatch
+    logging and inbound email/webhook message ingestion) already call
+    ``db.commit()``/``session.commit()`` themselves just above, once,
+    after adding potentially several ``InquiryMessage`` rows in a loop
+    -- unlike every other inquiry event, which routes through
+    ``_publish_inquiry_event``'s own commit-then-publish contract. This
+    helper matches that existing shape (no second commit) while still
+    giving this specific event type the same durability
+    ``publish_lifecycle_event`` gives every other inquiry event, closing
+    the one gap where a previously-existing call site bypassed
+    durability by calling ``dispatcher.publish()`` directly.
+
+    Because the business write already committed by the time this
+    runs, durability here is best-effort rather than atomic with that
+    write (the same honest limitation Phase 4's own docstring accepts
+    for a failed durable-event write -- it never blocks the caller);
+    see the Phase 5 delivery report for the full reasoning on why this
+    was not restructured to move the commit later instead.
+    """
+    if settings.DURABLE_EVENTS_ENABLED:
+        try:
+            from app.durable_events.service import DurableEventService
+
+            await DurableEventService(db).publish_durable_event(
+                event_type="inquiry.message.created",
+                source=settings.ERP_KEY,
+                entity="inquiry",
+                entity_id=str(inquiry_id),
+                payload={"inquiry_id": str(inquiry_id)},
+            )
+            await db.commit()
+        except Exception:  # noqa: BLE001 - durability is additive; never blocks the (already-committed) business write
+            logger.exception("Failed to write durable event for inquiry.message.created.")
+
+    await dispatcher.publish(
+        module_channel("inquiries"),
+        Event(
+            entity="inquiry",
+            entity_id=str(inquiry_id),
+            event_type="inquiry.message.created",
+            changes={"inquiry_id": str(inquiry_id)},
+        ),
     )
 
 
@@ -150,7 +234,9 @@ async def _record_action(
 async def get_all_quotation_documents(
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(
+        require_any_permission("inquiry.view", "inquiry.read", "productgallery.view", "product.view")
+    ),
 ) -> dict:
     """Fetch all quotations with product and supplier metadata for the Product & Supplier Gallery."""
     docs = await service.quotation_repository.get_all_quotation_documents()
@@ -170,7 +256,7 @@ async def create_consignment_code(
     payload: ConsignmentCodeCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Document: "Master to create and choose from dropdown menu"."""
@@ -195,7 +281,7 @@ async def list_consignment_codes(
     request: Request,
     buyer_id: uuid.UUID | None = None,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_any_permission("inquiry.view", "inquiry.read")),
 ) -> dict:
     """
     List consignment codes, optionally scoped to one buyer (for the create-inquiry dropdown).
@@ -210,7 +296,7 @@ async def deactivate_consignment_code(
     consignment_code_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     code = await service.deactivate_consignment_code(consignment_code_id)
@@ -235,7 +321,7 @@ async def deactivate_consignment_code(
 async def list_companies_summary(
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_any_permission("inquiry.view", "inquiry.read")),
 ) -> dict:
     """Document: "1st layer summary is company wise (for example, F&B, One Stop, Inhyma etc)"."""
     summaries = await service.list_companies_summary()
@@ -248,7 +334,7 @@ async def list_consignments_for_buyer(
     buyer_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_any_permission("inquiry.view", "inquiry.read")),
 ) -> dict:
     """Document: "once we click company, then it opens ... with all columns" (FB1, FB2, ...)."""
     inquiries = await service.list_consignments_for_buyer(buyer_id)
@@ -261,7 +347,7 @@ async def delete_consignment(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.delete")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -297,7 +383,7 @@ async def create_item(
     payload: InquiryItemCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.create")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -329,6 +415,20 @@ async def create_item(
         description="Added inquiry item.",
         new_values=payload.model_dump(mode="json"),
     )
+    inq_id = getattr(item, "inquiry_id", item.id)
+    await _publish_inquiry_integration_event(
+        db=db,
+        event_type="inquiry.created",
+        inquiry_id=inq_id,
+        user_id=current_user.id,
+        payload={
+            "inquiry_id": str(inq_id),
+            "item_id": str(item.id),
+            "inquiry_number": f"INQ-{str(inq_id)[:8]}",
+            "status": item.status.value if hasattr(item.status, "value") else str(item.status),
+            "version": getattr(item, "version", 1),
+        },
+    )
     await _publish_inquiry_event(
         db=db,
         dispatcher=dispatcher,
@@ -345,7 +445,7 @@ async def create_items_bulk(
     payload: BulkInquiryItemCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.create")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -369,12 +469,27 @@ async def create_items_bulk(
     return build_success_response(data=data, request_id=request.state.request_id, message=f"Added {len(items)} inquiry items.")
 
 
+@router.get("/sample-template", summary="Download inquiry product items CSV template")
+async def download_sample_template() -> Response:
+    """Download standard CSV template for importing inquiry product items."""
+    content = (
+        "Product Name,Product Code,Quantity,UOM,Brand Preference,Product Specs / Remarks,Status\r\n"
+        "FR900 Continuous Band Sealer,PC10956df,10,Sets,Yinglima,220V 50Hz with Teflon belts,Proposed\r\n"
+        "Ink Cup Set 90mm,,25,PCS,Brother,Ceramic ring standard cup,Proposed\r\n"
+    )
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="Sample_Inquiry_Items_Template.csv"'},
+    )
+
+
 @router.get("/{inquiry_id}/items", summary="Layer 2: list items in a consignment")
 async def list_items(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_any_permission("inquiry.view", "inquiry.read")),
 ) -> dict:
     """Document: "go inside and see all items of that consignment with details"."""
     items = await service.list_items(inquiry_id)
@@ -387,13 +502,104 @@ async def get_inquiry(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_any_permission("inquiry.view", "inquiry.read")),
 ) -> dict:
     inquiry_data = await service.get_inquiry_with_details(inquiry_id)
     data = InquiryRead.model_validate(inquiry_data).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+
+
+@router.get("/{inquiry_id}/export", summary="Export inquiry consignment line items to Excel/CSV")
+async def export_consignment(
+    inquiry_id: uuid.UUID,
+    request: Request,
+    format: str = "xlsx",
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> Response:
+    """Export all line items for an inquiry consignment as an Excel (.xlsx) or CSV file."""
+    file_format = format.lower()
+    if file_format not in ("csv", "xlsx"):
+        file_format = "xlsx"
+
+    inquiry_data = await service.get_inquiry_with_details(inquiry_id)
+    consignment_code = inquiry_data.get("consignment_code") or "Inquiry"
+    safe_code = "".join(c for c in consignment_code if c.isalnum() or c in ("-", "_")).strip() or "Inquiry"
+
+    content = await service.export_consignment(inquiry_id, file_format)
+
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.EXPORT,
+        actor=current_user,
+        entity_id=inquiry_id,
+        description=f"Exported consignment {consignment_code!r} line items as {file_format}.",
+    )
+
+    media_type = (
+        "text/csv"
+        if file_format == "csv"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    today_str = datetime.now().strftime("%d-%m-%Y")
+    filename = f"Inquiry_{safe_code}_{today_str}.{file_format}"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.post("/{inquiry_id}/items/import", summary="Import inquiry line items from CSV/Excel")
+async def import_inquiry_items(
+    inquiry_id: uuid.UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """
+    Import multiple product items into an inquiry consignment from an uploaded CSV or XLSX file.
+
+    Validates every row against the Product Master by Product Code or Product Name.
+    Assigns UOM automatically and flags any products requiring licenses.
+    """
+    raw_bytes = await file.read()
+    summary = await service.import_items(
+        inquiry_id=inquiry_id,
+        filename=file.filename or "import.csv",
+        raw_bytes=raw_bytes,
+        user_id=current_user.id,
+    )
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.IMPORT,
+        actor=current_user,
+        entity_id=inquiry_id,
+        description=f"Imported inquiry items: {summary.created} created, {summary.failed} failed.",
+        new_values=summary.as_dict(),
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.updated",
+        entity_id=inquiry_id,
+        user_id=current_user.id,
+        changes={"imported_created": summary.created, "imported_failed": summary.failed},
+    )
+    return build_success_response(
+        data=summary.as_dict(),
+        request_id=request.state.request_id,
+        message=f"Imported {summary.created} item(s)." if summary.created else "Import completed.",
+    )
 @router.patch("/{inquiry_id}/items/{item_id}", summary="Update an inquiry item (quantity, brand pref, specs)")
 async def update_item(
     inquiry_id: uuid.UUID,
@@ -401,7 +607,7 @@ async def update_item(
     payload: InquiryItemUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -436,7 +642,7 @@ async def shift_item(
     payload: InquiryItemShift,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -471,7 +677,7 @@ async def approve_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("inquiry.approve", "inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -504,7 +710,7 @@ async def revert_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("inquiry.approve", "inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -537,7 +743,7 @@ async def set_procurement_remarks(
     payload: InquiryItemProcurementRemarksUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -571,7 +777,7 @@ async def delete_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.delete")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -606,7 +812,7 @@ async def bulk_mark_tally_posted(
     payload: BulkTallyPostRequest,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -653,7 +859,7 @@ async def get_product_last_purchase(
     product_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("inquiry.view", "inquiry.read")),
 ) -> dict:
     """Return latest approved purchase or quote details for a product."""
     data = await service.get_last_purchase_for_product(product_id)
@@ -665,7 +871,7 @@ async def list_item_quotations(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("inquiry.view", "inquiry.read")),
 ) -> dict:
     """Return all supplier quotations received for a specific inquiry line item."""
     quotes = await service.list_quotations_for_item(item_id)
@@ -678,7 +884,7 @@ async def create_item_quotation(
     payload: QuotationCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("quotation.create", "inquiry.create", "inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -715,7 +921,7 @@ async def update_quotation_status(
     payload: QuotationStatusUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("quotation.approve", "inquiry.approve", "inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -752,7 +958,7 @@ async def update_quotation_details(
     payload: QuotationUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("quotation.create", "inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -788,7 +994,7 @@ async def delete_quotation(
     quotation_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("quotation.delete", "inquiry.delete")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -824,7 +1030,7 @@ async def create_item_rfq(
     payload: RFQCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("quotation.create", "inquiry.create", "inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -950,7 +1156,7 @@ class RFQManualEmailSendPayload(BaseModel):
 async def send_rfq_email_manual(
     payload: RFQManualEmailSendPayload,
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("quotation.create", "inquiry.update")),
 ) -> dict:
     """Send an automated RFQ email with the quotation link to a supplier via SMTP."""
     success = await send_rfq_email(
@@ -984,7 +1190,7 @@ async def create_bulk_rfqs(
     payload: BulkRFQCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("quotation.create", "inquiry.create", "inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -1267,16 +1473,8 @@ async def create_bulk_rfqs(
 
     await db.commit()
 
-    # Broadcast Live WebSocket update for Messages Tab
-    await dispatcher.publish(
-        module_channel("inquiries"),
-        Event(
-            entity="inquiry",
-            entity_id=str(inquiry_id),
-            event_type="inquiry.message.created",
-            changes={"inquiry_id": str(inquiry_id)},
-        ),
-    )
+    # Broadcast Live WebSocket update for Messages Tab (Phase 5: now durable too)
+    await _publish_inquiry_message_event(db=db, dispatcher=dispatcher, inquiry_id=inquiry_id)
 
     return build_success_response(
         data={
@@ -1394,16 +1592,8 @@ async def inbound_quotation_webhook(
     session.add(inbound_msg)
     await session.commit()
 
-    # Broadcast Live WebSocket update for Messages/Emails Tab
-    await event_dispatcher.publish(
-        module_channel("inquiries"),
-        Event(
-            entity="inquiry",
-            entity_id=str(item.inquiry_id),
-            event_type="inquiry.message.created",
-            changes={"inquiry_id": str(item.inquiry_id)},
-        ),
-    )
+    # Broadcast Live WebSocket update for Messages/Emails Tab (Phase 5: now durable too)
+    await _publish_inquiry_message_event(db=session, dispatcher=event_dispatcher, inquiry_id=item.inquiry_id)
 
     # 2. Resolve Supplier ID properly
     quote_supplier_id = supplier.id if supplier else None
@@ -1526,7 +1716,7 @@ async def get_inquiry_messages(
     inquiry_id: uuid.UUID,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("inquiry.view", "inquiry.read")),
 ) -> dict:
     """Returns chronological communication messages (WeChat, Email, System) for the Messages tab."""
     stmt = (
@@ -1601,7 +1791,7 @@ async def send_inquiry_email_message(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
     event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
 ) -> dict:
     """Dispatches a direct email to recipient suppliers via SMTP and records it in the communication timeline."""
     clean_recipients = [e.strip() for e in payload.to_emails if e and "@" in e]
@@ -1746,19 +1936,156 @@ async def send_inquiry_email_message(
 # WeCom (WeChat Work) Callback URL Handshake & Decryption (Doc 90556)
 # ---------------------------------------------------------------------------
 
+
+
+@router.post("/{inquiry_id}/send-wechat-message", summary="Send a direct WeChat message to supplier from within the Inquiries WeChat Messages tab")
+async def send_inquiry_wechat_message(
+    inquiry_id: uuid.UUID,
+    payload: SendInquiryWeChatMessagePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Dispatches a direct chat message to recipient supplier(s) via Tencent WeCom API and records it in the communication timeline."""
+    clean_recipients = [w.strip() for w in payload.to_wechat if w and w.strip()]
+    if not clean_recipients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one valid recipient WeChat number or UserID is required.",
+        )
+    if not payload.message.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message content cannot be empty.",
+        )
+
+    # Verify inquiry exists
+    inquiry = await db.get(Inquiry, inquiry_id)
+    if not inquiry or inquiry.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Inquiry not found.",
+        )
+
+    # Dispatch text message to WeCom
+    wecom = get_wecom_service()
+    wecom_res = wecom.send_text_message(
+        to_users=clean_recipients,
+        content=payload.message.strip(),
+    )
+    err_code = wecom_res.get("errcode") if isinstance(wecom_res, dict) else -1
+    err_msg = wecom_res.get("errmsg", "Unknown error") if isinstance(wecom_res, dict) else str(wecom_res)
+
+    if err_code != 0:
+        logger.error("WeCom dispatch error: %s (code: %s)", err_msg, err_code)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"WeCom dispatch failed: {err_msg} (errcode: {err_code})",
+        )
+
+    # Validate item ID if provided
+    valid_item_id = payload.inquiry_item_id
+    if valid_item_id:
+        item_check = await db.get(InquiryItem, valid_item_id)
+        if not item_check or item_check.inquiry_id != inquiry_id or item_check.deleted_at is not None:
+            valid_item_id = None
+
+    # Resolve supplier if passed or by wechat phone/contact
+    supplier_id = payload.supplier_id
+    if supplier_id:
+        supp_check = await db.get(Supplier, supplier_id)
+        if not supp_check or supp_check.deleted_at is not None:
+            supplier_id = None
+    if not supplier_id:
+        for rec in clean_recipients:
+            digits = re.sub(r"\D", "", rec)
+            if digits:
+                s_res = await db.execute(
+                    select(Supplier.id)
+                    .outerjoin(SupplierContact, SupplierContact.supplier_id == Supplier.id)
+                    .where(
+                        (Supplier.contact_wechat_number.contains(digits))
+                        | (Supplier.contact_calling_number.contains(digits))
+                        | (SupplierContact.wechat_number.contains(digits))
+                        | (SupplierContact.calling_number.contains(digits))
+                    )
+                    .limit(1)
+                )
+                supp_match = s_res.scalar_one_or_none()
+                if supp_match:
+                    supplier_id = supp_match
+                    break
+
+    sender_display = getattr(current_user, "full_name", None) or current_user.username or "Salesperson"
+
+    # Log outbound message in InquiryMessage table
+    new_msg = InquiryMessage(
+        id=uuid.uuid4(),
+        inquiry_id=inquiry_id,
+        inquiry_item_id=valid_item_id,
+        supplier_id=supplier_id,
+        channel="wechat",
+        direction="outbound",
+        sender_name=f"{sender_display} (ERP)",
+        sender_contact="Yinglima ERP Bot",
+        recipient_contact=", ".join(clean_recipients),
+        message_text=payload.message.strip(),
+    )
+    db.add(new_msg)
+    await db.commit()
+
+    # Broadcast Live WebSocket update
+    await event_dispatcher.publish(
+        module_channel("inquiries"),
+        Event(
+            entity="inquiry",
+            entity_id=str(inquiry_id),
+            event_type="inquiry.message.created",
+            changes={"inquiry_id": str(inquiry_id), "item_id": str(valid_item_id) if valid_item_id else None},
+        ),
+    )
+
+    return build_success_response(
+        data={
+            "id": str(new_msg.id),
+            "inquiry_id": str(new_msg.inquiry_id),
+            "inquiry_item_id": str(new_msg.inquiry_item_id) if new_msg.inquiry_item_id else None,
+            "supplier_id": str(new_msg.supplier_id) if new_msg.supplier_id else None,
+            "channel": "wechat",
+            "direction": "outbound",
+            "sender_name": new_msg.sender_name,
+            "sender_contact": new_msg.sender_contact,
+            "recipient_contact": new_msg.recipient_contact,
+            "message_text": new_msg.message_text,
+            "created_at": new_msg.created_at.isoformat() if new_msg.created_at else None,
+            "wecom_res": wecom_res,
+        },
+        request_id=request.state.request_id,
+        message=f"WeChat message successfully dispatched to {len(clean_recipients)} recipient(s).",
+    )
+
+
+
+# ---------------------------------------------------------------------------
+# WeCom (WeChat Work) Callback URL Handshake & Decryption (Doc 90556)
+# ---------------------------------------------------------------------------
 @router.get("/wechat/callback", summary="WeCom Callback URL verification handshake")
 async def wechat_callback_handshake(
     msg_signature: str,
     timestamp: str,
     nonce: str,
     echostr: str,
+    request: Request,
 ):
     """
     Handles GET verification from Tencent WeCom servers per Doc 90556.
     Decrypts echostr and returns plaintext to confirm callback validity.
     """
     from fastapi.responses import PlainTextResponse
+    from app.common.rate_limit import enforce_rate_limit, webhook_limiter
 
+    enforce_rate_limit(webhook_limiter, request)
     wecom = get_wecom_service()
     try:
         decrypted_echo = wecom.decrypt_echostr(msg_signature, timestamp, nonce, echostr)
@@ -1782,11 +2109,13 @@ async def wechat_inbound_message_callback(
     Decrypts XML -> records message in timeline -> runs conversational AI quotation extraction.
     """
     from fastapi.responses import PlainTextResponse
+    from app.common.rate_limit import enforce_rate_limit, webhook_limiter
     import re
     from app.inquiries.models import Inquiry, InquiryItem, Quotation, QuotationStatus, ConsignmentCode
     from app.suppliers.models import Supplier, SupplierContact
     from app.users.models import User
 
+    enforce_rate_limit(webhook_limiter, request)
     body_bytes = await request.body()
     post_xml = body_bytes.decode("utf-8")
 
@@ -1795,7 +2124,7 @@ async def wechat_inbound_message_callback(
         msg_dict = wecom.decrypt_message(msg_signature, timestamp, nonce, post_xml)
     except Exception as err:
         logger.error("Failed to decrypt incoming WeCom message: %s", str(err))
-        return PlainTextResponse(content="success", status_code=200)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="WeCom Signature Verification Failed")
 
     from_user = msg_dict.get("FromUserName", "")  # WeCom UserID / External UserID
     msg_type = msg_dict.get("MsgType", "")

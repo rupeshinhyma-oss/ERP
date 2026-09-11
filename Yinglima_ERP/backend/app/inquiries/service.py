@@ -94,7 +94,26 @@ class InquiryService:
             raise BadRequestException("Consignment code is required.")
         if await self.buyer_repository.get_by_id(buyer_id) is None:
             raise BadRequestException("The specified buyer does not exist.")
-        if await self.consignment_code_repository.get_by_code(code):
+        existing_code = await self.consignment_code_repository.get_any_by_code(code)
+        if existing_code is not None:
+            if existing_code.deleted_at is not None:
+                if existing_code.buyer_id == buyer_id:
+                    # Same buyer owns this deleted code: restore it and update label if needed!
+                    existing_code.deleted_at = None
+                    if label:
+                        existing_code.label = label
+                    await self.consignment_code_repository.update(existing_code)
+                    return existing_code
+                else:
+                    raise ConflictException(
+                        f"Consignment code {code!r} exists in Trash and belongs to another buyer.",
+                        details={
+                            "in_trash": True,
+                            "trash_id": str(existing_code.id),
+                            "entity_type": "Consignment Code",
+                            "code": existing_code.code,
+                        },
+                    )
             raise ConflictException(f"Consignment code {code!r} already exists.")
         return await self.consignment_code_repository.create(code=code, label=label, buyer_id=buyer_id, branch_id=branch_id)
 
@@ -137,12 +156,22 @@ class InquiryService:
             raise BadRequestException("The specified buyer does not exist.")
         code = await self.consignment_code_repository.get_by_id(consignment_code_id)
         if code is None:
-            raise BadRequestException("The specified consignment code does not exist.")
+            # Check if it was in trash
+            code = await self.consignment_code_repository.get_any_by_code(str(consignment_code_id))
+            if code and code.deleted_at is not None:
+                code.deleted_at = None
+                await self.consignment_code_repository.update(code)
+            else:
+                raise BadRequestException("The specified consignment code does not exist.")
         if code.buyer_id != buyer_id:
             raise BadRequestException("This consignment code does not belong to the specified buyer.")
 
-        existing = await self.inquiry_repository.get_by_buyer_and_code(buyer_id, consignment_code_id)
+        existing = await self.inquiry_repository.get_any_by_buyer_and_code(buyer_id, consignment_code_id)
         if existing is not None:
+            if existing.deleted_at is not None:
+                # Consignment is in Trash! Revive it so new items are attached seamlessly!
+                existing.deleted_at = None
+                await self.inquiry_repository.update(existing)
             return existing
         return await self.inquiry_repository.create(
             buyer_id=buyer_id, consignment_code_id=consignment_code_id, created_by=user_id
@@ -169,6 +198,105 @@ class InquiryService:
         items = await self.item_repository.list_for_inquiry_with_details(inquiry_id)
         inquiry_dict["items"] = items
         return inquiry_dict
+
+    async def export_consignment(self, inquiry_id: uuid.UUID, file_format: str = "xlsx") -> bytes:
+        """
+        Export all line items for a specific consignment to CSV or XLSX
+        with enriched product, UOM, and supplier quotation details.
+        """
+        from app.masters.import_export import build_csv_export, build_excel_export
+
+        inquiry_data = await self.get_inquiry_with_details(inquiry_id)
+        consignment_code = inquiry_data.get("consignment_code") or "N/A"
+        buyer_name = inquiry_data.get("buyer_name") or "N/A"
+        items = inquiry_data.get("items") or []
+
+        headers = [
+            "Sr No",
+            "Consignment Code",
+            "Buyer Company",
+            "Product Code",
+            "Product Name",
+            "Quantity",
+            "UOM",
+            "Brand Preference",
+            "Product Specs / Remarks",
+            "License Required",
+            "Item Status",
+            "Tally Entry Posted",
+            "Quotation Count",
+            "Best Quote Price",
+            "Best Quote Currency",
+            "Selected Supplier",
+            "Procurement Remarks",
+        ]
+
+        rows: list[dict[str, Any]] = []
+        for idx, item in enumerate(items, start=1):
+            item_id = item.get("id")
+            best_quote_price = ""
+            best_quote_currency = ""
+            selected_supplier = ""
+
+            if self.quotation_repository and item_id:
+                try:
+                    quotes = await self.quotation_repository.list_for_item_with_details(item_id)
+                    if quotes:
+                        # Prioritize approved quotation, otherwise lowest unit price
+                        approved_quotes = [
+                            q for q in quotes if q.get("status") in (QuotationStatus.APPROVED.value, "approved")
+                        ]
+                        target_quote = (
+                            approved_quotes[0]
+                            if approved_quotes
+                            else min(
+                                quotes,
+                                key=lambda q: float(q.get("unit_price") or float("inf")),
+                            )
+                        )
+                        if target_quote:
+                            u_price = target_quote.get("unit_price")
+                            if u_price is not None:
+                                best_quote_price = f"{float(u_price):,.2f}"
+                            best_quote_currency = target_quote.get("currency") or "CNY"
+                            selected_supplier = target_quote.get("supplier_name") or ""
+                except Exception:
+                    pass
+
+            status_val = item.get("status")
+            status_str = (
+                status_val.value
+                if hasattr(status_val, "value")
+                else str(status_val or "proposed").capitalize()
+            )
+
+            rows.append(
+                {
+                    "Sr No": idx,
+                    "Consignment Code": consignment_code,
+                    "Buyer Company": buyer_name,
+                    "Product Code": item.get("product_code") or "",
+                    "Product Name": item.get("product_name") or item.get("product_name_tally") or "",
+                    "Quantity": item.get("quantity") if item.get("quantity") is not None else "",
+                    "UOM": item.get("uom_name") or item.get("uom_code") or "",
+                    "Brand Preference": item.get("brand_preference") or "",
+                    "Product Specs / Remarks": item.get("product_specs_remarks") or "",
+                    "License Required": "Yes" if item.get("requires_license") else "No",
+                    "Item Status": status_str,
+                    "Tally Entry Posted": "Yes" if item.get("tally_entry_posted") else "No",
+                    "Quotation Count": item.get("quotation_count") or 0,
+                    "Best Quote Price": best_quote_price,
+                    "Best Quote Currency": best_quote_currency,
+                    "Selected Supplier": selected_supplier,
+                    "Procurement Remarks": item.get("procurement_remarks") or "",
+                }
+            )
+
+        sheet_title = f"{consignment_code} Items"[:31]
+        if file_format.lower() == "csv":
+            return build_csv_export(headers, rows)
+        return build_excel_export(headers, rows, sheet_title=sheet_title)
+
 
     async def _refresh_rollup(self, inquiry_id: uuid.UUID) -> Inquiry:
         """Recompute and persist one consignment's Layer-1 rollup fields from its current items."""
@@ -293,6 +421,129 @@ class InquiryService:
 
         await self._refresh_rollup(inquiry.id)
         return created_items
+
+    async def import_items(
+        self,
+        inquiry_id: uuid.UUID,
+        filename: str,
+        raw_bytes: bytes,
+        user_id: uuid.UUID,
+    ) -> Any:
+        """
+        Validate and import product line items from an uploaded CSV/XLSX file into a consignment.
+
+        Matches each row's product by Product Code or Product Name against Product Master,
+        copies UOM and license flags automatically, and updates consignment rollups.
+        """
+        from app.masters.import_export import parse_rows_from_file, ImportSummary
+
+        inquiry = await self.get_inquiry_or_raise(inquiry_id)
+        rows = parse_rows_from_file(filename, raw_bytes)
+
+        # Pre-fetch all active products for fast lookup
+        all_products = await self.product_repository.list(limit=None)
+        product_by_code = {p.product_code.strip().lower(): p for p in all_products if p.product_code}
+        product_by_name = {p.product_name.strip().lower(): p for p in all_products if p.product_name}
+        product_by_tally = {
+            getattr(p, "product_name_tally", "").strip().lower(): p
+            for p in all_products
+            if getattr(p, "product_name_tally", None)
+        }
+
+        summary = ImportSummary(total_rows=len(rows))
+        now = _utcnow()
+
+        for idx, row in enumerate(rows):
+            row_num = idx + 2  # Excel row 2 is first data row after header
+
+            # Extract fields with flexible key names (human-readable or snake_case)
+            def _val(*keys: str) -> str:
+                for k in keys:
+                    v = row.get(k)
+                    if v is not None:
+                        s = f"{v}".strip()
+                        if s:
+                            return s
+                return ""
+
+            raw_code = _val("Product Code", "product_code", "SKU", "Item Code", "item_code")
+            raw_name = _val("Product Name", "product_name", "Item Name", "item_name", "Title")
+            raw_qty = _val("Quantity", "quantity", "Qty", "qty")
+            brand_pref = _val("Brand Preference", "brand_preference", "Brand", "brand") or None
+            specs_remarks = _val("Product Specs / Remarks", "product_specs_remarks", "Remarks", "remarks", "Specifications") or None
+            raw_status = _val("Status", "status").lower()
+
+            # 1. Resolve Product
+            product = None
+            if raw_code and raw_code.lower() in product_by_code:
+                product = product_by_code[raw_code.lower()]
+            elif raw_name and raw_name.lower() in product_by_name:
+                product = product_by_name[raw_name.lower()]
+            elif raw_name and raw_name.lower() in product_by_tally:
+                product = product_by_tally[raw_name.lower()]
+
+            if not product:
+                search_term = raw_name or raw_code or "Unknown"
+                summary.failed += 1
+                summary.errors.append({
+                    "row": row_num,
+                    "error": f"Product '{search_term}' not found in Product Master. Please ensure product exists.",
+                    "row_data": row,
+                })
+                continue
+
+            # 2. Validate Quantity
+            try:
+                clean_qty = raw_qty.replace(",", "")
+                qty = float(clean_qty)
+                if qty <= 0:
+                    raise ValueError("Quantity must be greater than zero.")
+            except (ValueError, TypeError):
+                summary.failed += 1
+                summary.errors.append({
+                    "row": row_num,
+                    "error": f"Invalid quantity '{raw_qty}'. Must be a positive number.",
+                    "row_data": row,
+                })
+                continue
+
+            # 3. Determine Status
+            st = (
+                InquiryItemStatus.APPROVED
+                if raw_status in ("approved", "yes", "true", "1")
+                else InquiryItemStatus.PROPOSED
+            )
+
+            # 4. Create InquiryItem
+            try:
+                await self.item_repository.create(
+                    inquiry_id=inquiry.id,
+                    product_id=product.id,
+                    uom_id=product.uom_id,
+                    quantity=qty,
+                    brand_preference=brand_pref,
+                    product_specs_remarks=specs_remarks,
+                    status=st,
+                    proposed_at=now,
+                    proposed_by=user_id,
+                    approved_at=now if st == InquiryItemStatus.APPROVED else None,
+                    approved_by=user_id if st == InquiryItemStatus.APPROVED else None,
+                    tally_entry_posted=False,
+                    requires_license=bool(getattr(product, "license_certificate_required", None)),
+                )
+                summary.created += 1
+            except Exception as ex:
+                summary.failed += 1
+                summary.errors.append({
+                    "row": row_num,
+                    "error": f"Failed to save item: {ex}",
+                    "row_data": row,
+                })
+
+        if summary.created > 0:
+            await self._refresh_rollup(inquiry.id)
+
+        return summary
 
     async def update_item(self, inquiry_id: uuid.UUID, item_id: uuid.UUID, **field_values: Any) -> InquiryItem:
         """

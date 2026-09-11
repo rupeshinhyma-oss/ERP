@@ -131,7 +131,8 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
   unauthorizedHandler = handler;
 }
 
-export function handleSessionExpired(): void {
+export function handleSessionExpired(force = true): void {
+  if (!force) return;
   Auth.clear();
   if (unauthorizedHandler) unauthorizedHandler();
   else window.location.assign("/login");
@@ -278,7 +279,7 @@ async function waitForCrossTabRefreshLock(): Promise<void> {
 // with an already-about-to-be-rotated token.
 let refreshInFlight: Promise<boolean> | null = null;
 
-async function tryRefresh(): Promise<boolean> {
+export async function tryRefresh(): Promise<boolean> {
   if (refreshInFlight) {
     return refreshInFlight;
   }

@@ -108,6 +108,7 @@ async def live_events(
     try:
         current_user = await auth_service.verify_access_token(token)
     except UnauthorizedException:
+        await websocket.accept()
         await websocket.close(code=4401, reason="Invalid or expired token.")
         return
 

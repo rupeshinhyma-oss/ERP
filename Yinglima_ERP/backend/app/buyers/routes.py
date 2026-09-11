@@ -33,15 +33,65 @@ from app.buyers.schemas import (
     BuyerUpdate,
 )
 from app.buyers.service import BuyerService
+from app.masters.countries.repository import CountryRepository
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
+from app.integration.jobs import enqueue_dispatch
+from app.integration.repository import IntegrationOutboxRepository
+from app.integration.service import IntegrationService
+from app.queue.service import QueueService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/buyers", tags=["Buyers"])
+
+
+async def _publish_buyer_integration_event(
+    *,
+    db: AsyncSession,
+    event_type: str,
+    buyer_id: uuid.UUID,
+    user_id: uuid.UUID,
+    payload: dict,
+    event_version: int = 1,
+) -> None:
+    """
+    Write one Phase 6 cross-ERP integration outbox row -- NOT a commit point.
+
+    Deliberately called BEFORE `_publish_buyer_event` (which commits
+    `db` for the WebSocket live-update event, an entirely separate,
+    in-process mechanism -- see `app.events`, not this module). Calling
+    this first means the outbox row lands in the SAME transaction as
+    `service.create(...)`'s own business write (Phase 6 Section 9: the
+    transactional outbox pattern requires exactly this ordering -- if
+    this were called after a commit already happened, the outbox write
+    would be a separate, non-atomic transaction).
+
+    Data-minimized payload only (Section 41) -- never the full internal
+    Buyer ORM record.
+
+    `event_version` defaults to 1 (every pre-existing call site's
+    behavior, completely unchanged) -- only the `buyer.created` call
+    site now passes 2, for the new `country_code` field added to
+    support a real synchronization consumer (see that call site's own
+    comment).
+    """
+    service = IntegrationService(IntegrationOutboxRepository(db))
+    outbox_event = service.publish_event(
+        event_type=event_type,
+        aggregate_type="buyer",
+        aggregate_id=buyer_id,
+        payload=payload,
+        event_version=event_version,
+        actor_type="user",
+        actor_id=user_id,
+    )
+    await db.flush()  # assigns outbox_event.id without committing anything
+    queue_service = QueueService(db)
+    await enqueue_dispatch(queue_service, outbox_event_id=outbox_event.id)
 
 
 async def _publish_buyer_event(
@@ -213,6 +263,31 @@ async def create_buyer(
         description=f"Created buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
     )
+    country = await CountryRepository(db).get_by_id(buyer.country_id)
+    await _publish_buyer_integration_event(
+        db=db,
+        event_type="buyer.created",
+        buyer_id=buyer.id,
+        user_id=current_user.id,
+        payload={
+            "buyer_id": str(buyer.id),
+            "company_name": buyer.company_name,
+            "status": buyer.current_status.value if buyer.current_status else None,
+            "version": getattr(buyer, "version", 1),
+            # v2 additions (Phase 6): a stable, cross-system-comparable
+            # country reference. The event_version bump below signals
+            # that a v1-only consumer safely ignores this new field
+            # (Section 12: "do not silently change the meaning of an
+            # existing contract") while a v2-aware consumer (see
+            # Inhyma's app/integration/handlers.py) can now resolve a
+            # real BuyerCreate.country_id from country_code, which is
+            # what actually made completing this pilot's synchronization
+            # possible -- see PHASE6_INTEGRATION.md for the full
+            # reasoning on why v1's payload could not safely do this.
+            "country_code": country.code if country else None,
+        },
+        event_version=2,
+    )
     await _publish_buyer_event(
         db=db,
         dispatcher=dispatcher,
@@ -340,6 +415,18 @@ async def update_buyer(
         entity_id=buyer.id,
         description=f"Updated buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
+    )
+    await _publish_buyer_integration_event(
+        db=db,
+        event_type="buyer.updated",
+        buyer_id=buyer.id,
+        user_id=current_user.id,
+        payload={
+            "buyer_id": str(buyer.id),
+            "company_name": buyer.company_name,
+            "status": buyer.current_status.value if buyer.current_status else None,
+            "version": getattr(buyer, "version", 1),
+        },
     )
     await _publish_buyer_event(
         db=db,

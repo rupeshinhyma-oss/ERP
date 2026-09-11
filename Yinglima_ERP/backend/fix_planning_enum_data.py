@@ -59,12 +59,18 @@ FIXES: list[tuple[str, str, dict[str, str]]] = [
 ]
 
 
+ALLOWED_TABLES = {"planning_columns", "planning_cells"}
+ALLOWED_COLUMNS = {"data_type", "source_type", "status_color"}
+
+
 async def main() -> None:
     engine = create_async_engine(str(settings.DATABASE_URL))
     total_fixed = 0
 
     async with engine.begin() as conn:
         for table, column, mapping in FIXES:
+            if table not in ALLOWED_TABLES or column not in ALLOWED_COLUMNS:
+                raise ValueError(f"Disallowed table or column: {table}.{column}")
             for wrong_value, correct_value in mapping.items():
                 result = await conn.execute(
                     text(f"UPDATE {table} SET {column} = :correct WHERE {column} = :wrong"),

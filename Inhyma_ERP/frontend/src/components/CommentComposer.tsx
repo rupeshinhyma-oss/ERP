@@ -257,11 +257,7 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative flex flex-col gap-2 bg-white dark:bg-slate-900 border rounded-xl p-3 shadow-sm transition-all ${
-        isDragging
-          ? "border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900 bg-indigo-50/20"
-          : "border-slate-200 dark:border-slate-800"
-      }`}
+      className={`task-comment-composer ${isDragging ? "is-dragging" : ""}`}
     >
       {/* Hidden file input */}
       <input
@@ -274,7 +270,7 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
 
       {/* Upload error banner */}
       {uploadError && (
-        <div className="text-xs text-rose-600 bg-rose-50 dark:bg-rose-950/40 p-2 rounded-md">
+        <div style={{ fontSize: "12px", color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", padding: "8px 10px", borderRadius: "6px" }}>
           {uploadError}
         </div>
       )}
@@ -287,15 +283,15 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
         placeholder={placeholder}
-        rows={2}
+        rows={3}
         disabled={isSubmitting || isUploading}
-        className="w-full resize-y min-h-[48px] max-h-[180px] border-none outline-none text-xs text-slate-800 dark:text-slate-100 bg-transparent p-1 focus:ring-0"
+        className="task-comment-textarea"
       />
 
       {/* Mention Popup */}
       {mentionQuery !== null && filteredUsers.length > 0 && (
-        <div className="absolute left-3 bottom-12 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 max-w-[260px] w-full divide-y divide-slate-100 dark:divide-slate-800">
-          <div className="px-2.5 py-1 text-[10px] uppercase font-semibold text-slate-400">
+        <div className="task-mention-popup">
+          <div className="task-mention-header">
             Mention Team Member
           </div>
           {filteredUsers.map((u, idx) => (
@@ -303,16 +299,14 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
               key={u.id}
               type="button"
               onClick={() => insertMention(u)}
-              className={`w-full text-left px-2.5 py-1.5 flex items-center gap-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs transition-colors ${
-                idx === mentionIndex ? "bg-indigo-50 dark:bg-indigo-950/40 font-semibold text-indigo-600" : "text-slate-700 dark:text-slate-200"
-              }`}
+              className={`task-mention-item ${idx === mentionIndex ? "active" : ""}`}
             >
-              <div className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold">
+              <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: 700 }}>
                 {u.full_name.charAt(0)}
               </div>
-              <div className="truncate">
-                <div>{u.full_name}</div>
-                {u.username && <div className="text-[10px] text-slate-400">@{u.username}</div>}
+              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span style={{ fontWeight: 600 }}>{u.full_name}</span>
+                {u.username && <span style={{ fontSize: "10.5px", color: "#94a3b8", marginLeft: "6px" }}>@{u.username}</span>}
               </div>
             </button>
           ))}
@@ -321,13 +315,13 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
 
       {/* Attached Voice Note Preview Chip */}
       {audioUrl && (
-        <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg w-fit">
-          <audio src={audioUrl} controls className="h-6 max-w-[200px]" />
+        <div className="task-attachment-chip" style={{ maxWidth: "fit-content", background: "#eff6ff", borderColor: "#bfdbfe" }}>
+          <audio src={audioUrl} controls style={{ height: "24px", maxWidth: "200px" }} />
           <button
             type="button"
             onClick={removeAudio}
             title="Remove voice note"
-            className="text-slate-400 hover:text-rose-500"
+            className="task-attachment-chip-remove"
           >
             &times;
           </button>
@@ -336,17 +330,14 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
 
       {/* Attached Files Chips */}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
           {attachments.map((att, idx) => (
-            <div
-              key={idx}
-              className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-xs max-w-[220px]"
-            >
-              <span className="truncate text-slate-700 dark:text-slate-200">{att.file_name}</span>
+            <div key={idx} className="task-attachment-chip">
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.file_name}</span>
               <button
                 type="button"
                 onClick={() => removeAttachment(idx)}
-                className="text-slate-400 hover:text-rose-500 font-bold ml-1"
+                className="task-attachment-chip-remove"
               >
                 &times;
               </button>
@@ -357,7 +348,7 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
 
       {/* Voice Recorder Inline Component */}
       {showRecorder && (
-        <div className="my-1">
+        <div style={{ margin: "4px 0" }}>
           <VoiceNoteRecorder
             onRecordingComplete={handleVoiceRecordingComplete}
             onCancel={() => setShowRecorder(false)}
@@ -367,15 +358,15 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
       )}
 
       {/* Action Bar */}
-      <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 pt-2 text-xs">
-        <div className="flex items-center gap-2">
+      <div className="task-comment-toolbar">
+        <div className="task-composer-actions">
           {/* Attach file button */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={isSubmitting || isUploading}
             title="Attach file (or drag & drop)"
-            className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="task-composer-btn"
           >
             <span>📎 Attach</span>
           </button>
@@ -386,16 +377,12 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
             onClick={() => setShowRecorder((prev) => !prev)}
             disabled={isSubmitting || isUploading || !!audioUrl}
             title="Record voice note"
-            className={`inline-flex items-center gap-1 px-2 py-1 rounded transition-colors ${
-              showRecorder
-                ? "bg-rose-50 text-rose-600 dark:bg-rose-950/40"
-                : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-            }`}
+            className={`task-composer-btn ${showRecorder ? "active" : ""}`}
           >
             <span>🎙️ Voice</span>
           </button>
 
-          <span className="text-[11px] text-slate-400 hidden sm:inline">
+          <span className="task-composer-hint">
             Paste screenshot directly with Ctrl+V
           </span>
         </div>
@@ -405,11 +392,7 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
           type="button"
           onClick={() => handleSubmit()}
           disabled={!hasContent || isSubmitting || isUploading}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg text-white transition-colors ${
-            hasContent && !isSubmitting && !isUploading
-              ? "bg-indigo-600 hover:bg-indigo-700 shadow-sm"
-              : "bg-slate-300 dark:bg-slate-700 cursor-not-allowed"
-          }`}
+          className={`task-composer-submit-btn ${hasContent && !isSubmitting && !isUploading ? "ready" : "disabled"}`}
         >
           {isSubmitting || isUploading ? "Sending..." : buttonLabel}
         </button>

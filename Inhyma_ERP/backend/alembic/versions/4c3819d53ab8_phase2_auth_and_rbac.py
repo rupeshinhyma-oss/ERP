@@ -47,7 +47,7 @@ def upgrade() -> None:
     sa.Column('email', sa.String(length=255), nullable=False),
     sa.Column('phone', sa.String(length=30), nullable=True),
     sa.Column('password_hash', sa.String(length=255), nullable=False),
-    sa.Column('status', sa.Enum('PENDING', 'ACTIVE', 'INACTIVE', 'SUSPENDED', name='user_status', native_enum=False, length=20), nullable=False),
+    sa.Column('status', sa.Enum('PENDING', 'ACTIVE', 'INACTIVE', 'SUSPENDED', 'LOCKED', 'PASSWORD_CHANGE_REQUIRED', name='user_status', native_enum=False, length=50), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('must_change_password', sa.Boolean(), nullable=False),
     sa.Column('last_login_at', sa.DateTime(timezone=True), nullable=True),

@@ -13,6 +13,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.url_validator import validate_external_url
 from app.erp_registry.models import ErpStatus
 
 _KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -62,6 +63,14 @@ class ErpInstanceCreate(BaseModel):
             )
         return value
 
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, value: str | None) -> str | None:
+        """Reject invalid URLs or SSRF targets for base_url."""
+        if value is None:
+            return None
+        return validate_external_url(value)
+
 
 class ErpInstanceUpdate(BaseModel):
     """
@@ -79,6 +88,14 @@ class ErpInstanceUpdate(BaseModel):
     environment: str | None = Field(default=None, max_length=50)
     version: str | None = Field(default=None, max_length=50)
     last_seen_at: datetime | None = None
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, value: str | None) -> str | None:
+        """Reject invalid URLs or SSRF targets for base_url."""
+        if value is None:
+            return None
+        return validate_external_url(value)
 
 
 class ErpStatusUpdate(BaseModel):

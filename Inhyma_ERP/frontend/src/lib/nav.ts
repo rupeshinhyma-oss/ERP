@@ -146,7 +146,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "tasks-calendar": "Tasks Calendar",
 };
 
-export const DEFAULT_BRAND_NAME = "YINGLIMA";
+export const DEFAULT_BRAND_NAME = "Inhyma";
 
 /** Flat lookup of every nav item by key, for the page-access check. */
 export const NAV_ITEMS_BY_KEY: Record<string, NavItem> = NAV_SECTIONS.reduce(

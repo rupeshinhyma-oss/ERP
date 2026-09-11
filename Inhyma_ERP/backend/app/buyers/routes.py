@@ -8,7 +8,7 @@ mirroring :mod:`app.suppliers.routes`.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
@@ -33,15 +33,68 @@ from app.buyers.schemas import (
     BuyerUpdate,
 )
 from app.buyers.service import BuyerService
+from app.masters.countries.repository import CountryRepository
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
+from app.durable_events.models import DurableEvent
+from app.durable_events.repository import DurableEventRepository
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
+from app.integration.jobs import enqueue_dispatch
+from app.integration.repository import IntegrationOutboxRepository
+from app.integration.service import IntegrationService
+from app.queue.service import QueueService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/buyers", tags=["Buyers"])
+
+
+async def _publish_buyer_integration_event(
+    *,
+    db: AsyncSession,
+    event_type: str,
+    buyer_id: uuid.UUID,
+    user_id: uuid.UUID,
+    payload: dict,
+    event_version: int = 1,
+) -> None:
+    """
+    Write one Phase 6 cross-ERP integration outbox row -- NOT a commit point.
+
+    Deliberately called BEFORE `_publish_buyer_event` (which commits
+    `db` for the WebSocket live-update event, an entirely separate,
+    in-process mechanism -- see `app.events`, not this module). Calling
+    this first means the outbox row lands in the SAME transaction as
+    `service.create(...)`'s own business write (Phase 6 Section 9: the
+    transactional outbox pattern requires exactly this ordering -- if
+    this were called after a commit already happened, the outbox write
+    would be a separate, non-atomic transaction).
+
+    Data-minimized payload only (Section 41) -- never the full internal
+    Buyer ORM record.
+
+    `event_version` defaults to 1 (unchanged for every other call
+    site) -- only the `buyer.created` call site now passes 2, for the
+    new `country_code` field this Phase 7 bidirectional expansion adds
+    (mirroring the exact v2 contract Yinglima's own producer already
+    uses -- see that repo's own `app/buyers/routes.py` for the original
+    Phase 6 rationale).
+    """
+    service = IntegrationService(IntegrationOutboxRepository(db))
+    outbox_event = service.publish_event(
+        event_type=event_type,
+        aggregate_type="buyer",
+        aggregate_id=buyer_id,
+        payload=payload,
+        event_version=event_version,
+        actor_type="user",
+        actor_id=user_id,
+    )
+    await db.flush()  # assigns outbox_event.id without committing anything
+    queue_service = QueueService(db)
+    await enqueue_dispatch(queue_service, outbox_event_id=outbox_event.id)
 
 
 async def _publish_buyer_event(
@@ -201,7 +254,22 @@ async def create_buyer(
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
-    """Create a new buyer (client) profile."""
+    """Create a new buyer (client) profile with Idempotency-Key support."""
+    idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get("idempotency-key")
+    if idempotency_key:
+        existing_event = await DurableEventRepository(db).get_by_idempotency_key(idempotency_key)
+        if existing_event and existing_event.entity_id:
+            try:
+                existing_buyer = await service.get_by_id_or_raise(uuid.UUID(existing_event.entity_id))
+                existing_data = await _to_buyer_read(service, existing_buyer)
+                return build_success_response(
+                    data=existing_data,
+                    request_id=request.state.request_id,
+                    message="Resource already created (idempotent replay).",
+                )
+            except Exception:
+                pass
+
     buyer = await service.create(**payload.model_dump())
     data = await _to_buyer_read(service, buyer)
     await _record_action(
@@ -212,6 +280,41 @@ async def create_buyer(
         entity_id=buyer.id,
         description=f"Created buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
+    )
+    if idempotency_key:
+        durable_event = DurableEvent(
+            event_type="buyer.created",
+            source="inhyma",
+            entity="buyer",
+            entity_id=str(buyer.id),
+            entity_version=getattr(buyer, "version", 1),
+            payload="{}",
+            event_metadata="{}",
+            idempotency_key=idempotency_key,
+            correlation_id=uuid.uuid4(),
+            user_id=str(current_user.id),
+            occurred_at=datetime.now(timezone.utc),
+        )
+        db.add(durable_event)
+
+    country = await CountryRepository(db).get_by_id(buyer.country_id)
+    await _publish_buyer_integration_event(
+        db=db,
+        event_type="buyer.created",
+        buyer_id=buyer.id,
+        user_id=current_user.id,
+        payload={
+            "buyer_id": str(buyer.id),
+            "company_name": buyer.company_name,
+            "status": buyer.current_status.value if buyer.current_status else None,
+            "version": getattr(buyer, "version", 1),
+            # v2 (Phase 7): mirrors Yinglima's own producer contract
+            # exactly, so a single consumer implementation on either
+            # side can handle events from either source without a
+            # separate code path per direction.
+            "country_code": country.code if country else None,
+        },
+        event_version=2,
     )
     await _publish_buyer_event(
         db=db,
@@ -340,6 +443,18 @@ async def update_buyer(
         entity_id=buyer.id,
         description=f"Updated buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
+    )
+    await _publish_buyer_integration_event(
+        db=db,
+        event_type="buyer.updated",
+        buyer_id=buyer.id,
+        user_id=current_user.id,
+        payload={
+            "buyer_id": str(buyer.id),
+            "company_name": buyer.company_name,
+            "status": buyer.current_status.value if buyer.current_status else None,
+            "version": getattr(buyer, "version", 1),
+        },
     )
     await _publish_buyer_event(
         db=db,

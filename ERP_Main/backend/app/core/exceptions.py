@@ -39,6 +39,17 @@ class NotFoundException(AppException):
         super().__init__(message, **kwargs)
 
 
+class BadRequestException(AppException):
+    """Raised when a request is malformed or violates preconditions."""
+
+    status_code = 400
+    error_code = "BAD_REQUEST"
+
+    def __init__(self, message: str = "Bad request.", **kwargs: Any) -> None:
+        """Initialize with a default bad-request message."""
+        super().__init__(message, **kwargs)
+
+
 class ValidationException(AppException):
     """Raised when input fails business-level validation rules."""
 

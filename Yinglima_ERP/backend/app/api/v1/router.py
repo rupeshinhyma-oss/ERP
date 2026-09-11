@@ -9,15 +9,18 @@ to ``app.main`` are needed.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from app.api.v1.health import router as health_router
+from app.api.v1.internal_users import router as internal_users_router
 from app.audit.routes import router as audit_router
 from app.auth.routes import router as auth_router
 from app.buyers.routes import router as buyers_router
 from app.cache.routes import router as cache_router
 from app.core.responses import build_success_response
 from app.events.routes import router as events_router
+from app.federation.routes import router as federation_router
+from app.integration.routes import router as integration_router
 from app.inquiries.public_quotes import router as public_quotes_router
 from app.inquiries.routes import router as inquiries_router
 from app.masters.brands.routes import router as brands_router
@@ -27,13 +30,16 @@ from app.masters.countries.routes import router as countries_router
 from app.masters.currencies.routes import router as currencies_router
 from app.masters.hsn.routes import router as hsn_router
 from app.masters.product_categories.routes import router as product_categories_router
+from app.masters.product_prices.routes import router as product_prices_router
 from app.masters.product_sub_categories.routes import router as product_sub_categories_router
 from app.masters.products.routes import router as products_router
 from app.masters.states.routes import router as states_router
 from app.masters.buyer_types.routes import router as buyer_types_router
 from app.masters.supplier_types.routes import router as supplier_types_router
 from app.masters.uom.routes import router as uom_router
+from app.organizations.dependencies import get_organization_service
 from app.organizations.routes import router as organizations_router
+from app.organizations.service import OrganizationService
 from app.org_structure.leadership_routes import router as leadership_router
 from app.org_structure.position_routes import router as positions_router
 from app.org_structure.reporting_routes import router as reporting_router
@@ -89,6 +95,7 @@ api_router.include_router(brands_router)
 api_router.include_router(product_categories_router)
 api_router.include_router(product_sub_categories_router)
 api_router.include_router(products_router)
+api_router.include_router(product_prices_router)
 api_router.include_router(company_list_router)
 api_router.include_router(supplier_types_router)
 api_router.include_router(buyer_types_router)
@@ -111,11 +118,27 @@ api_router.include_router(planning_router)
 # any future module's routes/services publish through this without
 # needing their own router entry here.
 api_router.include_router(events_router)
+api_router.include_router(federation_router)
+api_router.include_router(internal_users_router)
+api_router.include_router(integration_router)
+
+from app.durable_events.routes import router as durable_events_router  # noqa: E402
+
+api_router.include_router(durable_events_router)
 
 
 @api_router.get("/organizations/public", summary="Get public organization info for login page")
-async def get_public_org_info(request: Request) -> dict:
+async def get_public_org_info(
+    request: Request,
+    organization_service: OrganizationService = Depends(get_organization_service),
+) -> dict:
+    try:
+        org = await organization_service.repository.get_singleton()
+    except Exception:
+        org = None
+    name = (org.company_name.strip() if org and org.company_name else "Yinglima")
+    logo = org.logo_url if org else None
     return build_success_response(
-        data={"id": "default", "name": "Yinglima ERP", "logo_url": None},
+        data={"id": str(org.id) if org else "default", "name": name, "company_name": name, "logo_url": logo},
         request_id=getattr(request.state, "request_id", "-"),
     )

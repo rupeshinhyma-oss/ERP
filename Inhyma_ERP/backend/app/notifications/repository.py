@@ -5,6 +5,7 @@ Notifications Repository.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,3 +85,23 @@ class NotificationRepository:
         res = await self.session.execute(stmt)
         await self.session.flush()
         return int(res.rowcount)
+
+    async def has_recent_notification(
+        self,
+        user_id: uuid.UUID,
+        type: str,
+        link: str | None = None,
+        *,
+        within_hours: int = 24,
+    ) -> bool:
+        """Check if user was already notified with the same type and link recently (deduplication)."""
+        since = datetime.now(timezone.utc) - timedelta(hours=within_hours)
+        stmt = select(func.count(Notification.id)).where(
+            Notification.user_id == user_id,
+            Notification.type == type,
+            Notification.created_at >= since,
+        )
+        if link:
+            stmt = stmt.where(Notification.link == link)
+        res = await self.session.execute(stmt)
+        return int(res.scalar() or 0) > 0

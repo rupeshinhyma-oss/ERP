@@ -252,3 +252,91 @@ async def test_unauthorized_linking_rejected(admin_client, client):
         f"/api/v1/global/users/{user_id}/memberships/{erp_id}", json={"local_user_id": "local-12"}
     )
     assert resp.status_code in (401, 403)
+
+
+# --------------------------------------------------------------------
+# Phase 4: internal, service-credential-gated membership lookup
+# (Step 24/36/58) -- used by each ERP's own federation adapter to
+# resolve a GlobalUser id into ITS OWN local_user_id.
+# --------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_internal_lookup_resolves_own_membership(admin_client):
+    """An ERP's own service credential resolves its own membership for a given GlobalUser."""
+    user_id, erp_id = await _create_user_and_erp(admin_client, email="internal1@example.com", erp_key="erp_int1")
+    await admin_client.post(
+        f"/api/v1/global/users/{user_id}/memberships/{erp_id}", json={"local_user_id": "local-int-1"}
+    )
+    credential_resp = await admin_client.post(f"/api/v1/global/erps/{erp_id}/credentials", json={})
+    token = credential_resp.json()["data"]["bearer_token"]
+
+    resp = await admin_client.get(
+        f"/api/v1/internal/federation/memberships/{user_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["local_user_id"] == "local-int-1"
+    assert data["status"] == "PENDING"
+
+
+@pytest.mark.asyncio
+async def test_internal_lookup_cannot_see_other_erps_membership(admin_client):
+    """An ERP's service credential can only resolve ITS OWN membership, never another ERP's (Step 58)."""
+    user_id, erp_a_id = await _create_user_and_erp(admin_client, email="internal2@example.com", erp_key="erp_int_a")
+    erp_b_resp = await admin_client.post(
+        "/api/v1/global/erps", json={"key": "erp_int_b", "name": "b", "display_name": "b", "status": "ACTIVE"}
+    )
+    erp_b_id = erp_b_resp.json()["data"]["id"]
+
+    # User has a membership in ERP A only.
+    await admin_client.post(
+        f"/api/v1/global/users/{user_id}/memberships/{erp_a_id}", json={"local_user_id": "local-a-only"}
+    )
+
+    # ERP B's own service credential asks about this GlobalUser.
+    credential_b_resp = await admin_client.post(f"/api/v1/global/erps/{erp_b_id}/credentials", json={})
+    token_b = credential_b_resp.json()["data"]["bearer_token"]
+
+    resp = await admin_client.get(
+        f"/api/v1/internal/federation/memberships/{user_id}",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+    assert resp.status_code == 404  # ERP B has no membership for this user -- never sees ERP A's
+
+
+@pytest.mark.asyncio
+async def test_internal_lookup_requires_service_credential(client):
+    """The internal lookup endpoint rejects a caller with no service credential at all."""
+    resp = await client.get(f"/api/v1/internal/federation/memberships/{uuid.uuid4()}")
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_list_all_memberships_with_filtering(admin_client):
+    """GET /global/memberships lists memberships with optional ERP and status filtering, paged."""
+    user_id, erp_id = await _create_user_and_erp(admin_client, email="m_list_all@example.com", erp_key="erp_list_all")
+    created = await admin_client.post(
+        f"/api/v1/global/users/{user_id}/memberships/{erp_id}", json={"local_user_id": "loc-list-1"}
+    )
+    assert created.status_code == 201
+
+    # List without filter
+    resp = await admin_client.get("/api/v1/global/memberships?limit=50&offset=0")
+    assert resp.status_code == 200
+    items = resp.json()["data"]
+    assert any(m["local_user_id"] == "loc-list-1" for m in items)
+
+    # List with erp filter
+    resp_erp = await admin_client.get(f"/api/v1/global/memberships?erp_id={erp_id}")
+    assert resp_erp.status_code == 200
+    erp_items = resp_erp.json()["data"]
+    assert len(erp_items) >= 1
+    assert all(m["erp_instance_id"] == str(erp_id) for m in erp_items)
+
+    # List with status filter
+    resp_pending = await admin_client.get("/api/v1/global/memberships?status=PENDING")
+    assert resp_pending.status_code == 200
+    assert any(m["local_user_id"] == "loc-list-1" for m in resp_pending.json()["data"])
+

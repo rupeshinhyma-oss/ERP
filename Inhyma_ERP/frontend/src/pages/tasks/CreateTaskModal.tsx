@@ -21,12 +21,16 @@ interface CreateTaskModalProps {
   onClose: () => void;
   onSuccess: (taskId?: string) => void;
   defaultStatus?: TaskStatus;
+  initialStartDate?: string;
+  initialDueDate?: string;
 }
 
 export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  initialStartDate,
+  initialDueDate,
 }) => {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -35,8 +39,15 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [parentTaskId, setParentTaskId] = useState<string | null>(null);
   const [sprintId, setSprintId] = useState<string | null>(null);
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
-  const [startDate, setStartDate] = useState("");
-  const [dueDate, setDueDate] = useState("");
+  const [startDate, setStartDate] = useState(initialStartDate || "");
+  const [dueDate, setDueDate] = useState(initialDueDate || "");
+
+  useEffect(() => {
+    if (isOpen) {
+      if (initialStartDate) setStartDate(initialStartDate);
+      if (initialDueDate) setDueDate(initialDueDate);
+    }
+  }, [isOpen, initialStartDate, initialDueDate]);
 
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
@@ -643,7 +654,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   <option value="IMPROVEMENT">Improvement</option>
                   <option value="STORY">Story</option>
                   <option value="EPIC">Epic</option>
-                  <option value="APPROVAL">Approval</option>
                 </select>
               </div>
 

@@ -84,6 +84,10 @@ const SYNONYMS: Record<string, string[]> = {
   standard_price: ["price", "selling price", "unit price", "mrp"],
   minimum_order_quantity: ["moq", "min order qty", "min qty"],
   reorder_level: ["reorder point", "reorder qty"],
+  quantity: ["qty", "count", "units", "quantity ordered", "ordered qty"],
+  brand_preference: ["brand", "preferred brand", "manufacturer"],
+  product_specs_remarks: ["specs", "specifications", "remarks", "product specs", "item remarks", "notes"],
+  status: ["item status", "approval status"],
 };
 
 /**
@@ -91,8 +95,11 @@ const SYNONYMS: Record<string, string[]> = {
  * names, return the best-guess sheet column name, or null.
  */
 function bestMatch(target: ImportHeader, sheetColumns: string[]): string | null {
-  const candidates = new Set([normalize(target.key), normalize(target.label)]);
+  const normKey = normalize(target.key);
+  const normSnake = normKey.replace(/\s+/g, "_");
+  const candidates = new Set([normKey, normalize(target.label)]);
   (SYNONYMS[target.key] || []).forEach((s) => candidates.add(normalize(s)));
+  (SYNONYMS[normSnake] || []).forEach((s) => candidates.add(normalize(s)));
 
   // 1. exact normalized match
   for (const col of sheetColumns) {
@@ -1338,6 +1345,23 @@ const PRODUCT_SAMPLES: Record<string, string> = {
   "status": "Active",
 };
 
+const INQUIRY_ITEM_SAMPLES: Record<string, string> = {
+  "Product Name": "FR900 Continuous Band Sealer",
+  product_name: "FR900 Continuous Band Sealer",
+  "Product Code": "PC10956df",
+  product_code: "PC10956df",
+  "Quantity": "10",
+  quantity: "10",
+  "UOM": "Sets",
+  uom: "Sets",
+  "Brand Preference": "Yinglima",
+  brand_preference: "Yinglima",
+  "Product Specs / Remarks": "220V 50Hz with Teflon belts and spare heating elements",
+  product_specs_remarks: "220V 50Hz with Teflon belts and spare heating elements",
+  "Status": "Proposed",
+  status: "Proposed",
+};
+
 const BRAND_SAMPLES: Record<string, string> = {
   "Brand Name": "Yinglima",
   name: "Yinglima",
@@ -1481,7 +1505,9 @@ const ORGANIZATION_SAMPLES: Record<string, string> = {
 export function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
   const ent = entityName.toLowerCase();
   let sampleMap: Record<string, string> = PRODUCT_SAMPLES;
-  if (ent.includes("buyer type") || ent === "buyertype") {
+  if (ent.includes("inquiry")) {
+    sampleMap = INQUIRY_ITEM_SAMPLES;
+  } else if (ent.includes("buyer type") || ent === "buyertype") {
     sampleMap = BUYER_TYPE_SAMPLES;
   } else if (ent.includes("supplier type") || ent === "suppliertype") {
     sampleMap = SUPPLIER_TYPE_SAMPLES;
@@ -1832,11 +1858,19 @@ export function ImpExpDropdown({
   );
 }
 
+export interface BulkActionItem {
+  label: string;
+  icon?: string;
+  color?: string;
+  onClick: () => void;
+}
+
 export interface BulkActionsDropdownProps {
   selectedCount: number;
   onBulkActivate?: () => void;
   onBulkDeactivate?: () => void;
   onBulkDelete?: () => void;
+  customActions?: BulkActionItem[];
 }
 
 export function BulkActionsDropdown({
@@ -1844,6 +1878,7 @@ export function BulkActionsDropdown({
   onBulkActivate,
   onBulkDeactivate,
   onBulkDelete,
+  customActions,
 }: BulkActionsDropdownProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1982,6 +2017,34 @@ export function BulkActionsDropdown({
                   🗑️ Bulk Delete ({selectedCount})
                 </button>
               )}
+              {customActions && customActions.map((action, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    action.onClick();
+                  }}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "10px 14px",
+                    fontSize: "13.5px",
+                    color: action.color || "#0f172a",
+                    fontWeight: 600,
+                    background: "none",
+                    border: "none",
+                    borderTop: (idx > 0 || onBulkActivate || onBulkDeactivate || onBulkDelete) ? "1px solid #f1f5f9" : "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  {action.icon && <span>{action.icon}</span>}
+                  <span>{action.label} ({selectedCount})</span>
+                </button>
+              ))}
             </>
           )}
         </div>

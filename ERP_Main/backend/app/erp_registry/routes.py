@@ -17,6 +17,16 @@ declared capabilities) is the kind of directory information a future
 ERP-launcher UI needs before a user has even logged into the control
 plane, and it contains no secrets, credentials, or business data. This is
 a deliberate choice, not an oversight; revisit if that assumption changes.
+
+Phase 5 authorization (Section 22): every mutating route below now uses
+`require_platform_permission(...)` instead of `require_platform_admin`
+directly. This is additive, not a narrowing -- a PlatformAdmin still
+satisfies every one of these checks exactly as before (see
+`app.platform_authz.dependencies`'s own docstring), so nothing that
+worked before Phase 5 stops working. What's new is that a GlobalUser
+holding the matching platform permission (e.g. `platform.erp.create`)
+can now also reach these routes, without needing a separate PlatformAdmin
+login.
 """
 
 from __future__ import annotations
@@ -39,8 +49,7 @@ from app.erp_registry.service import ErpRegistryService
 from app.global_audit.dependencies import get_global_audit_service
 from app.global_audit.models import AuditActorType, AuditEventType
 from app.global_audit.service import GlobalAuditService
-from app.platform_auth.dependencies import require_platform_admin
-from app.platform_auth.models import PlatformAdmin
+from app.platform_authz.dependencies import AuthorizedPrincipal, require_platform_permission
 
 router = APIRouter(prefix="/global/erps", tags=["ERP Registry"])
 
@@ -54,17 +63,17 @@ def _request_id(request: Request) -> str:
 async def register_erp(
     request: Request,
     payload: ErpInstanceCreate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.erp.create")),
     service: ErpRegistryService = Depends(get_erp_registry_service),
     audit: GlobalAuditService = Depends(get_global_audit_service),
 ) -> dict:
-    """Register a new ERP instance in the global registry. Requires an authenticated platform admin."""
+    """Register a new ERP instance in the global registry. Requires platform.erp.create (or PlatformAdmin)."""
     erp_instance = await service.register(payload)
     await audit.record(
         event_type=AuditEventType.ERP_REGISTERED,
         actor_type=AuditActorType.HUMAN_ADMIN,
-        actor_id=admin.id,
-        actor_label=admin.email,
+        actor_id=principal.principal_id,
+        actor_label=principal.principal_label,
         target_type="erp_instance",
         target_id=erp_instance.id,
         details={"key": erp_instance.key, "status": erp_instance.status.value},
@@ -111,7 +120,7 @@ async def update_erp(
     request: Request,
     erp_id: uuid.UUID,
     payload: ErpInstanceUpdate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.erp.update")),
     service: ErpRegistryService = Depends(get_erp_registry_service),
     audit: GlobalAuditService = Depends(get_global_audit_service),
 ) -> dict:
@@ -120,8 +129,8 @@ async def update_erp(
     await audit.record(
         event_type=AuditEventType.ERP_UPDATED,
         actor_type=AuditActorType.HUMAN_ADMIN,
-        actor_id=admin.id,
-        actor_label=admin.email,
+        actor_id=principal.principal_id,
+        actor_label=principal.principal_label,
         target_type="erp_instance",
         target_id=erp_instance.id,
         details={"fields_updated": sorted(payload.model_dump(exclude_unset=True).keys())},
@@ -138,7 +147,7 @@ async def change_erp_status(
     request: Request,
     erp_id: uuid.UUID,
     payload: ErpStatusUpdate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.erp.suspend")),
     service: ErpRegistryService = Depends(get_erp_registry_service),
     audit: GlobalAuditService = Depends(get_global_audit_service),
 ) -> dict:
@@ -148,8 +157,8 @@ async def change_erp_status(
     await audit.record(
         event_type=AuditEventType.ERP_STATUS_CHANGED,
         actor_type=AuditActorType.HUMAN_ADMIN,
-        actor_id=admin.id,
-        actor_label=admin.email,
+        actor_id=principal.principal_id,
+        actor_label=principal.principal_label,
         target_type="erp_instance",
         target_id=erp_instance.id,
         details={"old_status": old_status, "new_status": erp_instance.status.value},
@@ -165,7 +174,7 @@ async def change_erp_status(
 async def decommission_erp(
     request: Request,
     erp_id: uuid.UUID,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.erp.decommission")),
     service: ErpRegistryService = Depends(get_erp_registry_service),
     audit: GlobalAuditService = Depends(get_global_audit_service),
 ) -> dict:
@@ -179,8 +188,8 @@ async def decommission_erp(
     await audit.record(
         event_type=AuditEventType.ERP_DECOMMISSIONED,
         actor_type=AuditActorType.HUMAN_ADMIN,
-        actor_id=admin.id,
-        actor_label=admin.email,
+        actor_id=principal.principal_id,
+        actor_label=principal.principal_label,
         target_type="erp_instance",
         target_id=erp_instance.id,
         details={"key": erp_instance.key},
@@ -197,7 +206,7 @@ async def declare_module(
     request: Request,
     erp_id: uuid.UUID,
     payload: ErpModuleCreate,
-    admin: PlatformAdmin = Depends(require_platform_admin),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.capability.update")),
     service: ErpRegistryService = Depends(get_erp_registry_service),
     audit: GlobalAuditService = Depends(get_global_audit_service),
 ) -> dict:
@@ -206,8 +215,8 @@ async def declare_module(
     await audit.record(
         event_type=AuditEventType.CAPABILITY_UPDATED,
         actor_type=AuditActorType.HUMAN_ADMIN,
-        actor_id=admin.id,
-        actor_label=admin.email,
+        actor_id=principal.principal_id,
+        actor_label=principal.principal_label,
         target_type="erp_instance",
         target_id=erp_id,
         details={"module_key": module.module_key, "enabled": module.enabled},

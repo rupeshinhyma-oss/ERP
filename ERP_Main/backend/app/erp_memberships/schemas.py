@@ -57,3 +57,21 @@ class ErpMembershipWithErpSummary(ErpMembershipRead):
 
     erp_key: str
     erp_display_name: str
+
+
+class InternalMembershipLookupResponse(BaseModel):
+    """
+    Response for the service-credential-gated internal membership lookup
+    (Phase 4 Step 24/36).
+
+    Returned to an ERP's own backend so it can resolve a federation ID
+    token's `sub` (a GlobalUser id) to its own `local_user_id` --
+    server-side, from a trusted service-to-service call, never from
+    anything a browser could supply directly. Deliberately excludes any
+    other ERP's data: the calling ERP's own service credential determines
+    which single ERP's membership row (if any) is returned.
+    """
+
+    global_user_id: uuid.UUID
+    local_user_id: str
+    status: ErpMembershipStatus

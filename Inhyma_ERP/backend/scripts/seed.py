@@ -241,6 +241,15 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("task.assign", "task", "tasks", "manage", "ALL", "Assign tasks to any user in the organization."),
     ("task.escalate", "task", "tasks", "action", "ALL", "Manually escalate tasks to managers or candidate users."),
     ("task.manage", "task", "tasks", "manage", "ALL", "Full task management: edit, delete, or change status of any task."),
+    # Inquiries & Quotations (Sale > Inquiries)
+    ("inquiry.view", "inquiry", "inquiries", "view", "ALL", "View inquiries and consignment lists."),
+    ("inquiry.create", "inquiry", "inquiries", "create", "ALL", "Create new inquiries and consignments."),
+    ("inquiry.update", "inquiry", "inquiries", "update", "ALL", "Edit inquiries, items, statuses, and send messages."),
+    ("inquiry.delete", "inquiry", "inquiries", "delete", "ALL", "Delete inquiries and consignment items."),
+    ("inquiry.approve", "inquiry", "inquiries", "manage", "ALL", "Approve inquiry quotes and confirm consignments."),
+    ("quotation.create", "inquiry", "inquiries", "create", "ALL", "Add and upload quotations for inquiry items."),
+    ("quotation.approve", "inquiry", "inquiries", "manage", "ALL", "Approve quotations for inquiry items."),
+    ("quotation.delete", "inquiry", "inquiries", "delete", "ALL", "Delete quotations and quotation attachments."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
@@ -266,8 +275,10 @@ USER_ROLE_PERMISSION_CODES: list[str] = [
     "category.view",
     "subcategory.view",
     "product.view",
+    "productgallery.view",
     "supplier.view",
     "buyer.view",
+    "inquiry.view",
     "planning.view",
     "task.view",
     "task.assign",

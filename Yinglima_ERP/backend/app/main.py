@@ -17,20 +17,26 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
+from app.auth.dependencies import get_current_user
+from app.auth.service import CurrentUser
 from app.cache.dependency import get_cleanup_worker
+from app.common.storage import sanitize_filename
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.database.engine import dispose_engine, get_engine
+from app.integration import jobs as _integration_jobs  # noqa: F401 - import registers the dispatch_integration_event handler
+from app.integration import handlers as _integration_handlers  # noqa: F401 - import registers consumer handlers
 from app.middleware.audit_middleware import AuditMiddleware
 from app.middleware.logging_middleware import AccessLogMiddleware
 from app.middleware.request_id import RequestIdMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.queue.worker import get_worker
 from app.trash.purge_worker import TrashPurgeWorker
 
@@ -79,16 +85,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Eagerly initialize the engine to fail fast on misconfiguration.
     engine = get_engine()
-    try:
-        from sqlalchemy import text
-        async with engine.begin() as conn:
-            await conn.execute(text("ALTER TABLE products ADD COLUMN organization_ids JSON;"))
-    except Exception:
-        pass
 
     # Start the background queue worker (Phase 4).
     worker = get_worker()
     await worker.start()
+
+    # Phase 3: bootstrap the built-in durable-events consumer registry
+    # and start the durable events worker (claim/dispatch/retry +
+    # NOTIFY-driven wake-up). Runs alongside, not instead of, the
+    # existing in-memory app.events WebSocket dispatch -- see
+    # app/durable_events/worker.py's own module docstring for exactly
+    # how the two connect.
+    from app.database.engine import get_sessionmaker as _get_sessionmaker_p3
+    from app.durable_events.service import bootstrap_default_consumers
+    from app.durable_events.worker import get_durable_event_worker
+
+    async with _get_sessionmaker_p3()() as _p3_session:
+        await bootstrap_default_consumers(_p3_session)
+
+    durable_events_worker = get_durable_event_worker()
+    await durable_events_worker.start()
+
+    # Kick off the Phase 6 integration inbox polling loop. The job
+    # re-enqueues itself on every run (see
+    # app.integration.jobs.poll_integration_inbox), so this is a
+    # one-time seed at startup, not a recurring scheduler call.
+    from app.database.engine import get_sessionmaker as _get_sessionmaker
+    from app.integration.jobs import enqueue_poll
+    from app.queue.service import QueueService
+
+    async with _get_sessionmaker()() as _startup_session:
+        await enqueue_poll(QueueService(_startup_session))
+        await _startup_session.commit()
 
     # Start the background cache cleanup worker (Phase 5).
     cleanup_worker = get_cleanup_worker()
@@ -118,6 +146,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Gracefully drain the queue worker before closing the DB pool.
     await worker.stop()
+
+    # Stop the durable events worker (Phase 3).
+    await durable_events_worker.stop()
 
     # Stop the cache cleanup worker.
     await cleanup_worker.stop()
@@ -163,6 +194,7 @@ def create_application() -> FastAPI:
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(AuditMiddleware)
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allowed_origins_list,
@@ -179,8 +211,45 @@ def create_application() -> FastAPI:
     uploads_dir.mkdir(exist_ok=True)
     (uploads_dir / "products").mkdir(exist_ok=True)
     (uploads_dir / "suppliers").mkdir(exist_ok=True)
-    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
-    app.mount("/static/uploads", StaticFiles(directory=uploads_dir), name="static_uploads")
+    (uploads_dir / "private").mkdir(exist_ok=True)
+    (uploads_dir / "private" / "quotations").mkdir(parents=True, exist_ok=True)
+
+    @app.get("/uploads/quotations/{filename}", summary="Download quotation attachment (authenticated)")
+    async def download_quotation_attachment(
+        filename: str,
+        _current_user: CurrentUser = Depends(get_current_user),
+    ):
+        clean = sanitize_filename(filename)
+        target = uploads_dir / "private" / "quotations" / clean
+        if not target.is_file():
+            target = uploads_dir / "quotations" / clean
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="Quotation attachment not found.")
+        base_path = uploads_dir.resolve()
+        if not str(target.resolve()).startswith(str(base_path)):
+            raise HTTPException(status_code=400, detail="Invalid path traversal.")
+        return FileResponse(target)
+
+    @app.get("/uploads/private/{subfolder}/{filename}", summary="Download private file (authenticated)")
+    async def download_private_file(
+        subfolder: str,
+        filename: str,
+        _current_user: CurrentUser = Depends(get_current_user),
+    ):
+        clean_sub = sanitize_filename(subfolder)
+        clean_file = sanitize_filename(filename)
+        target = (uploads_dir / "private" / clean_sub / clean_file).resolve()
+        base_path = (uploads_dir / "private").resolve()
+        if not str(target).startswith(str(base_path)):
+            raise HTTPException(status_code=400, detail="Invalid path traversal.")
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="Private file not found.")
+        return FileResponse(target)
+
+    # Public static uploads for product images and supplier media
+    app.mount("/uploads/products", StaticFiles(directory=uploads_dir / "products"), name="uploads_products")
+    app.mount("/uploads/suppliers", StaticFiles(directory=uploads_dir / "suppliers"), name="uploads_suppliers")
+    app.mount("/static/uploads", StaticFiles(directory=uploads_dir / "products"), name="static_uploads")
 
     # ---------------------------------------------------------------
     # Optional same-origin frontend serving.
@@ -252,4 +321,4 @@ def _mount_frontend(app: FastAPI) -> None:
         return FileResponse(index_file)
 
 
-app = create_application()
+app = create_application()

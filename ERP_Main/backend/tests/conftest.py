@@ -124,3 +124,12 @@ async def admin_client(super_admin_client):
     dedicated PLATFORM_ADMIN-vs-SUPER_ADMIN authorization test).
     """
     yield super_admin_client
+
+
+@pytest.fixture(autouse=True)
+def isolate_signing_keys(tmp_path, monkeypatch):
+    """Ensure tests write federation keys to an isolated temp directory, preventing disk pollution."""
+    from app.core.config import settings
+    temp_dir = tmp_path / "fed_keys"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "FEDERATION_SIGNING_KEY_DIR", str(temp_dir))

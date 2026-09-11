@@ -112,32 +112,36 @@ class TaskRepository(BaseRepository[Task]):
                 )
             )
         elif view_mode == "department":
-            # Department manager or department member scoping
-            managed_depts_subq = select(DepartmentLeadershipAssignment.department_id).where(
-                DepartmentLeadershipAssignment.employee_id == current_user_id
-            )
-            user_depts_subq = select(UserRole.role_id).where(UserRole.user_id == current_user_id)
-            combined_depts_subq = select(UserRole.role_id).where(
-                or_(
-                    UserRole.role_id.in_(user_depts_subq),
-                    UserRole.role_id.in_(managed_depts_subq),
+            if can_view_org:
+                # Super Admin or users with organization view can view any department tasks
+                pass
+            else:
+                # Department manager or department member scoping
+                managed_depts_subq = select(DepartmentLeadershipAssignment.department_id).where(
+                    DepartmentLeadershipAssignment.employee_id == current_user_id
                 )
-            )
-            dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(combined_depts_subq))
-            base_query = base_query.where(
-                or_(
-                    Task.created_by == current_user_id,
-                    Task.created_by.in_(dept_users_subq),
-                    Task.id.in_(
-                        select(TaskAssignee.task_id).where(
-                            or_(
-                                TaskAssignee.user_id == current_user_id,
-                                TaskAssignee.user_id.in_(dept_users_subq),
+                user_depts_subq = select(UserRole.role_id).where(UserRole.user_id == current_user_id)
+                combined_depts_subq = select(UserRole.role_id).where(
+                    or_(
+                        UserRole.role_id.in_(user_depts_subq),
+                        UserRole.role_id.in_(managed_depts_subq),
+                    )
+                )
+                dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(combined_depts_subq))
+                base_query = base_query.where(
+                    or_(
+                        Task.created_by == current_user_id,
+                        Task.created_by.in_(dept_users_subq),
+                        Task.id.in_(
+                            select(TaskAssignee.task_id).where(
+                                or_(
+                                    TaskAssignee.user_id == current_user_id,
+                                    TaskAssignee.user_id.in_(dept_users_subq),
+                                )
                             )
-                        )
-                    ),
+                        ),
+                    )
                 )
-            )
         elif view_mode == "organization":
             if not can_view_org:
                 user_depts_subq = select(UserRole.role_id).where(UserRole.user_id == current_user_id)
@@ -250,6 +254,7 @@ class TaskRepository(BaseRepository[Task]):
                 selectinload(Task.attachments),
                 selectinload(Task.voice_notes),
                 selectinload(Task.reactions),
+                selectinload(Task.dependencies),
                 selectinload(Task.creator),
             )
             .order_by(

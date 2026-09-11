@@ -4,6 +4,11 @@ Welcome to the central documentation hub for the ERP System.
 
 ## Documentation Contents
 
+- 🌐 **[Master Multi-ERP Ecosystem Documentation](../../docs/MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md)**:
+  - Unified multi-ERP architecture (`ERP_Main`, `Yinglima_ERP`, `Inhyma_ERP`).
+  - Supabase PostgreSQL connection pooling, budgeting, and disaster recovery.
+  - OpenID Connect (OIDC) federation, transactional outbox streaming, and global projections.
+
 - 📘 **[Complete System Architecture & Feature Manual](SYSTEM_DOCUMENTATION.md)**:
   - High-level architecture, technology stack, and database entity relationships.
   - Complete module-by-module breakdown (Auth, Users, RBAC/Departments, Masters, Products, Suppliers, Buyers, Inquiries, AI Quotation Extractor, Shipment Planning, Audit Trails, Trash/Recovery).

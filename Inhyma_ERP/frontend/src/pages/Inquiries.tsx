@@ -11,14 +11,14 @@
  * continuous drill-down rather than distinct pages.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, toQueryString } from "@/lib/api";
-import { useLiveModule } from "@/lib/live/useLive";
+import { useLiveConnectionStatus, useLiveModule } from "@/lib/live/useLive";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { autoTitleCase } from "@/utils/text";
 import type { Buyer } from "@/types/buyers";
@@ -998,14 +998,43 @@ function ItemsView({
     void loadMessages(true);
   }, [load, loadMessages]);
 
-  // Live real-time WebSocket subscription: updates quietly when a supplier submits a quotation or message
-  useLiveModule("inquiries", (_event) => {
-    void load(true);
-    void loadMessages(true);
+  // Live real-time WebSocket subscription (Phase 5): targeted updates
+  // instead of reloading everything on every event (Section 14/26/48 of
+  // the Phase 5 brief -- "do not blindly reload the full list on every
+  // event"). Branches on the actual event_type/entity_id the backend
+  // sends rather than treating every inquiries-channel event as "reload
+  // load() + loadMessages() + loadQuotations() unconditionally", which
+  // is what this subscription used to do (see PHASE5_MIGRATION.md for
+  // the full before/after).
+  useLiveModule("inquiries", (event) => {
     const activeId = selectedItem?.id || selectedItemId;
-    if (activeId) {
-      void loadQuotations(activeId, true);
+
+    if (event.event_type === "inquiry.message.created") {
+      // A new message/quote-email only ever affects the messages tab
+      // and (if it carried an attached quotation) that item's
+      // quotations -- never the inquiry/item list itself.
+      void loadMessages(true);
+      if (activeId) void loadQuotations(activeId, true);
+      return;
     }
+
+    if (event.event_type === "quotation.created" || event.event_type === "quotation.updated") {
+      // A quotation event is scoped to ONE inquiry (event.entity_id),
+      // matching Section 15's "invalidate only the affected query" --
+      // reload this item's quotations only when it's the one currently
+      // open, never every open browser's full item list.
+      if (activeId && event.entity_id === activeId) {
+        void loadQuotations(activeId, true);
+      }
+      return;
+    }
+
+    // inquiry.created / inquiry.updated / inquiry.deleted / rfq.created:
+    // these DO affect the item list itself (status, item counts, new
+    // RFQ rows), so the existing full `load()` remains the correct,
+    // honest reconciliation here -- Section 9's "keep an authoritative
+    // fetch path", not a full-page reload, just this one list.
+    void load(true);
   });
 
   const items = inquiry?.items ?? [];
@@ -1038,16 +1067,64 @@ function ItemsView({
     }
   }, [selectedItem?.id, loadQuotations]);
 
-  // Seamless dynamic live sync every 2.5 seconds: ensures newly arriving quotes and emails appear immediately without manual refresh
+  // Phase 8D / Phase 5: Connection-aware and visibility-aware reconciliation fallback.
+  // When WebSocket realtime is connected, live events deliver updates immediately;
+  // the periodic fallback timer is stopped.
+  // If realtime disconnects or errors, the conservative 60s fallback timer engages,
+  // pausing while the document is hidden and guarded against overlapping requests.
+  // Upon reconnect or tab visibility restoration, a single reconciliation fetch runs.
+  const liveConnectionStatus = useLiveConnectionStatus();
+  const fallbackInFlightRef = useRef(false);
+
   useEffect(() => {
     const activeId = selectedItem?.id || selectedItemId;
     if (!activeId) return;
+
+    const reconcile = async () => {
+      if (document.visibilityState === "hidden" || fallbackInFlightRef.current) return;
+      fallbackInFlightRef.current = true;
+      try {
+        await Promise.allSettled([
+          loadQuotations(activeId, true),
+          loadMessages(true),
+        ]);
+      } finally {
+        fallbackInFlightRef.current = false;
+      }
+    };
+
+    // If realtime is healthy, no periodic timer is needed.
+    if (liveConnectionStatus === "connected") {
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === "visible") {
+          void reconcile();
+        }
+      };
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      return () => {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      };
+    }
+
+    // Fallback mode: realtime is disconnected/reconnecting.
+    // Trigger an immediate recovery fetch and start conservative 60s poll.
+    void reconcile();
     const interval = setInterval(() => {
-      void loadQuotations(activeId, true);
-      void loadMessages(true);
-    }, 2500);
-    return () => clearInterval(interval);
-  }, [selectedItem?.id, selectedItemId, loadQuotations, loadMessages]);
+      void reconcile();
+    }, 60_000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void reconcile();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [selectedItem?.id, selectedItemId, liveConnectionStatus, loadQuotations, loadMessages]);
 
   // Filtered products on left
   const filteredProducts = useMemo(() => {

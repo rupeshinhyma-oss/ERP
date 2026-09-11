@@ -3,6 +3,14 @@
 *.env
 !.env.example
 
+# Federation keys & private credentials
+federation_keys/
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+
 # Local SQLite databases
 *.db
 *.sqlite3

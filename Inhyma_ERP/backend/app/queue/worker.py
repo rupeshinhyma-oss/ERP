@@ -181,7 +181,7 @@ class BackgroundWorker:
             job_id_str = str(job.id)
             logger.info(
                 "Executing job.",
-                extra={"job_id": job_id_str, "job_name": job.job_name, "module": job.module},
+                extra={"job_id": job_id_str, "job_name": job.job_name, "job_module": job.module},
             )
 
             # Look up the registered handler.
@@ -270,3 +270,41 @@ def get_worker() -> BackgroundWorker:
     if _worker is None:
         _worker = BackgroundWorker()
     return _worker
+
+
+async def run_worker_standalone() -> None:
+    """Run the worker loop as a standalone process with graceful signal handling."""
+    import signal
+
+    worker = get_worker()
+    stop_event = asyncio.Event()
+
+    try:
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, stop_event.set)
+            except (NotImplementedError, AttributeError):
+                pass
+    except Exception:
+        pass
+
+    await worker.start()
+    logger.info("Standalone queue worker started.")
+    try:
+        await stop_event.wait()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        await worker.stop()
+        logger.info("Standalone queue worker stopped cleanly.")
+
+
+if __name__ == "__main__":
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    try:
+        asyncio.run(run_worker_standalone())
+    except (KeyboardInterrupt, SystemExit):
+        pass

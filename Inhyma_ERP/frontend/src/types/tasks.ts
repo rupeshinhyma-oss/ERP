@@ -324,6 +324,7 @@ export interface TaskSummary {
   escalation_count: number;
   attachment_count?: number;
   voice_note_count?: number;
+  depends_on_task_ids?: string[];
 }
 
 export interface TaskDetail {

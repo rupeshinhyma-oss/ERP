@@ -230,7 +230,7 @@ def upgrade() -> None:
     # --- products -----------------------------------------------------------------------
     op.create_table(
         'products',
-        sa.Column('product_code', sa.String(length=50), nullable=False),
+        sa.Column('product_code', sa.String(length=50), nullable=True),
         sa.Column('product_name', sa.String(length=255), nullable=False),
         sa.Column('barcode', sa.String(length=100), nullable=True),
         sa.Column('category_id', app.database.base.GUID(), nullable=False),

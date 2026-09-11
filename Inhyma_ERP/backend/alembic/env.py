@@ -69,7 +69,9 @@ config = context.config
 # "invalid interpolation syntax" here unless doubled to "%%" first. This
 # doubling is undone by configparser itself when the value is later read
 # back, so the URL SQLAlchemy actually receives is unescaped/correct.
-config.set_main_option("sqlalchemy.url", settings.sync_database_url.replace("%", "%%"))
+import re
+_sync_url = re.sub(r"([?&])ssl=([a-zA-Z0-9_-]+)", r"\1sslmode=\2", settings.sync_database_url)
+config.set_main_option("sqlalchemy.url", _sync_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging, unless it's disabled.
 if config.config_file_name is not None:

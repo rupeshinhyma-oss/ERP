@@ -128,6 +128,33 @@ class ErpMembershipService:
         """List memberships for one ERP, paged (Phase 3 Step 35: 'which Global Users belong to this ERP')."""
         return await self.membership_repository.list_for_erp(erp_instance_id, limit=limit, offset=offset)
 
+    async def list_all(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        erp_instance_id: uuid.UUID | None = None,
+        status: ErpMembershipStatus | None = None,
+    ) -> list[ErpMembership]:
+        """List memberships across all or specific ERP instances, paged."""
+        return await self.membership_repository.list_all(
+            limit=limit, offset=offset, erp_instance_id=erp_instance_id, status=status
+        )
+
+    async def get_for_user_and_erp(self, global_user_id: uuid.UUID, erp_instance_id: uuid.UUID) -> ErpMembership:
+        """
+        Fetch the membership (if any) linking a Global User to a specific ERP, or raise 404.
+
+        Used by the internal, service-credential-gated lookup (Phase 4
+        Step 24/36) -- `erp_instance_id` there always comes from the
+        caller's own verified service credential, never a path parameter
+        supplied by a browser.
+        """
+        membership = await self.membership_repository.get_by_user_and_erp(global_user_id, erp_instance_id)
+        if membership is None:
+            raise NotFoundException("No membership found for this Global User with the calling ERP.")
+        return membership
+
     async def verify(self, membership_id: uuid.UUID, *, actor: PlatformAdmin) -> ErpMembership:
         """
         Mark a PENDING membership as verified and ACTIVE.

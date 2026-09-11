@@ -346,18 +346,36 @@ export async function checkExpiredHolds(): Promise<{ processed: number; message:
   return res.data || { processed: 0, message: "" };
 }
 
+export async function checkTaskDeadlines(): Promise<{ notifications_sent: number }> {
+  const res = await apiPost<{ notifications_sent: number }>("/tasks/check-deadlines", {});
+  return res.data || { notifications_sent: 0 };
+}
+
 export async function getAvailableAssignees(): Promise<AvailableUser[]> {
   try {
     const res = await apiGet<any>("/users?page_size=200");
     const items = res.data?.items || res.data || [];
-    return items.map((u: any) => ({
-      id: u.id,
-      full_name: u.full_name || u.display_name || u.username || "Team Member",
-      username: u.username,
-      email: u.email,
-      department: u.position_name || (u.roles && u.roles[0]) || "",
-      roles: u.roles || [],
-    }));
+    const SYSTEM_SECURITY_ROLES = new Set(["super_admin", "admin", "user", "staff"]);
+    return items.map((u: any) => {
+      const nonSystemRoles = (u.roles || []).filter(
+        (r: string) => !SYSTEM_SECURITY_ROLES.has(r.toLowerCase())
+      );
+      let dept = u.position_name || "";
+      if (!dept && nonSystemRoles.length > 0) {
+        dept = nonSystemRoles[0];
+      }
+      if (!dept && (u.roles || []).includes("super_admin")) {
+        dept = "Management";
+      }
+      return {
+        id: u.id,
+        full_name: u.full_name || u.display_name || u.username || "Team Member",
+        username: u.username,
+        email: u.email,
+        department: dept || "General",
+        roles: u.roles || [],
+      };
+    });
   } catch (err) {
     console.error("Failed to load available assignees", err);
     return [];
@@ -587,6 +605,7 @@ export const tasksApi = {
   updateSubtask,
   deleteSubtask,
   checkExpiredHolds,
+  checkTaskDeadlines,
   getAvailableAssignees,
   fetchLabels,
   createLabel,

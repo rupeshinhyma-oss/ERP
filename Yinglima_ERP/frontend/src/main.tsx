@@ -10,7 +10,7 @@ import "./styles/pages.css";
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <ErrorBoundary title="The application failed to load.">
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ToastProvider>
           <App />
         </ToastProvider>

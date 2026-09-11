@@ -30,6 +30,7 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
+import { getBuyerWithCache, createBuyerOfflineCapable, updateBuyerOfflineCapable } from "@/lib/dataLayer";
 import { useLookup, useLookupNames } from "@/lib/lookups";
 import { usePendingGuard, useModalHistorySync, useAuth } from "@/lib/hooks";
 import { useLiveConnectionStatus, useLiveModule } from "@/lib/live/useLive";
@@ -315,7 +316,7 @@ function BuyerSkeletonRows({
 }
 
 export function BuyersPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, profile } = useAuth();
   const canCreate = hasPermission("buyer.create");
   const canUpdate = hasPermission("buyer.update");
   const canDelete = hasPermission("buyer.delete");
@@ -463,9 +464,9 @@ export function BuyersPage() {
 
     (async () => {
       try {
-        const { data } = await apiGet<Buyer>(`/buyers/${targetId}`);
+        const { buyer } = await getBuyerWithCache(targetId);
         if (activeFetchBuyerIdRef.current === targetId) {
-          setDetailBuyer(data);
+          setDetailBuyer(buyer as unknown as Buyer);
         }
       } catch (err) {
         console.error("Failed to load buyer detail for deep-link:", err);
@@ -510,6 +511,21 @@ export function BuyersPage() {
   const tableRef = useRef<HTMLTableElement>(null);
 
   const reload = () => setReloadCounter((n) => n + 1);
+
+  /* --- bfcache restoration handler --- */
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        // Page was restored from Back-Forward Cache (bfcache).
+        // Trigger a fresh list reload so table data is refreshed and loading skeleton is cleared.
+        reload();
+      }
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, []);
 
   /* Close Freeze menu on click outside */
   useEffect(() => {
@@ -1035,17 +1051,17 @@ export function BuyersPage() {
     setFormSubmitting(true);
     try {
       if (modalMode === "create") {
-        const { data: newBuyer } = await apiPost<Buyer>("/buyers", payload);
+        const { buyer: newBuyer } = await createBuyerOfflineCapable(payload as any, profile?.id ?? null);
         if (newBuyer) {
-          setRows((prev) => [newBuyer, ...prev]);
+          setRows((prev) => [newBuyer as unknown as Buyer, ...prev]);
           setTotalRecords((prev) => prev + 1);
         } else {
           reload();
         }
       } else if (editingId) {
-        const { data: updatedBuyer } = await apiPatch<Buyer>(`/buyers/${editingId}`, payload);
+        const { buyer: updatedBuyer } = await updateBuyerOfflineCapable(editingId, payload as any, profile?.id ?? null);
         if (updatedBuyer) {
-          setRows((prev) => prev.map((b) => (b.id === editingId ? updatedBuyer : b)));
+          setRows((prev) => prev.map((b) => (b.id === editingId ? (updatedBuyer as unknown as Buyer) : b)));
         } else {
           reload();
         }

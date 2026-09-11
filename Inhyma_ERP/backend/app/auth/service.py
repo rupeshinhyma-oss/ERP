@@ -193,6 +193,29 @@ class AuthService:
         )
         return access.token, refresh.token
 
+    # --- Federated (SSO) login (Multi-ERP Platform, Phase 4) -------------------
+    async def issue_session_for_federated_user(self, user: User, context: LoginContext) -> tuple[str, str]:
+        """
+        Establish an existing-shape local session for a user resolved via federation (Phase 4 Step 27).
+
+        This is the ENTIRE federation adapter's touch point into
+        `app.auth`: everything before this call (verifying ERP_Main's
+        token, resolving GlobalUser -> local_user_id via the trusted
+        membership lookup) happens in `app.federation`, and everything
+        after this call (JWT shape, session table, refresh, RBAC) is
+        identical to direct password login -- this method exists only so
+        `app.federation` doesn't need to duplicate `_issue_token_pair`'s
+        logic or reach into a private method from outside this module.
+        Still enforces `user.can_login` (Step 25: local user status
+        remains authoritative even after a valid federated identity is
+        presented) -- a disabled/locked local user is rejected here
+        exactly as it would be on direct login, regardless of how valid
+        the federation token was.
+        """
+        if not user.can_login:
+            raise UnauthorizedException("This account is not active. Please contact an administrator.")
+        return await self._issue_token_pair(user, context)
+
     # --- Refresh --------------------------------------------------------------
     async def refresh(self, *, refresh_token: str, context: LoginContext) -> tuple[str, str]:
         """Rotate a refresh token: verify it, revoke it, and issue a brand new pair."""

@@ -16,6 +16,7 @@
 5. [CONTACT: Buyers Module](#5-contact-buyers-module)
 6. [INVENTORY: Product Master Module](#6-inventory-product-master-module)
 7. [INVENTORY: Product Gallery Module](#7-inventory-product-gallery-module)
+7.1. [INVENTORY: Product Price Directory Module](#71-inventory-product-price-directory-module)
 8. [INVENTORY: Categories Master Module](#8-inventory-categories-master-module)
 9. [INVENTORY: Sub Categories Master Module](#9-inventory-sub-categories-master-module)
 10. [INVENTORY: Brands Master Module](#10-inventory-brands-master-module)
@@ -55,34 +56,46 @@
 
 ## 2. Master Navigation Sitemap
 
-| Sidebar Section | Navigation Label | Route Path | Active Key | Icon Key | Required Permission |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **DASHBOARD** | Dashboard | `/dashboard` | `dashboard` | `dashboard` | Public Authenticated |
-| **CONTACT** | Suppliers | `/suppliers` | `suppliers` | `factory` | `supplier.view` |
-| **CONTACT** | Buyers | `/buyers` | `buyers` | `shoppingBag` | `buyer.view` |
-| **INVENTORY** | Product Master | `/masters/products` | `masters-products` | `box` | `product.view` |
-| **INVENTORY** | Product Gallery | `/product-gallery` | `product-gallery` | `image` | `productgallery.view` |
-| **INVENTORY** | Categories | `/masters/categories` | `masters-categories` | `layers` | `category.view` |
-| **INVENTORY** | Sub Categories | `/masters/subcategories` | `masters-subcategories` | `folderTree` | `subcategory.view` |
-| **INVENTORY** | Brands | `/masters/brands` | `masters-brands` | `award` | `brand.view` |
-| **INVENTORY** | Supplier Types | `/masters/supplier-types` | `masters-supplier-types` | `network` | `suppliertype.view` |
-| **INVENTORY** | Buyer Types | `/masters/buyer-types` | `masters-buyer-types` | `idCard` | `buyertype.view` |
-| **SALE** | Inquiries | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
-| **PLANNING** | Shipment Planning | `/planning` | `planning` | `truck` | `planning.view` |
-| **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
-| **USER MANAGEMENT** | Positions | `/positions` | `positions` | `briefcase` | `position.view` |
-| **USER MANAGEMENT** | Organization Chart | `/org-chart` | `org-chart` | `orgChart` | `reporting.view` |
-| **USER MANAGEMENT** | Departments & Permissions | `/rbac` | `rbac` | `shield` | `roles_permissions.view` |
-| **CONFIGURATIONS** | HSN Codes | `/masters/hsn` | `masters-hsn` | `barcode` | `hsn.view` |
-| **CONFIGURATIONS** | Countries | `/masters/countries` | `masters-countries` | `globe` | `country.view` |
-| **CONFIGURATIONS** | Provinces | `/masters/states` | `masters-states` | `map` | `state.view` |
-| **CONFIGURATIONS** | City | `/masters/cities` | `masters-cities` | `pin` | `city.view` |
-| **CONFIGURATIONS** | Currencies | `/masters/currencies` | `masters-currencies` | `coins` | `currency.view` |
-| **CONFIGURATIONS** | Units of Measurement | `/masters/uom` | `masters-uom` | `ruler` | `uom.view` |
-| **CONFIGURATIONS** | Organization Settings | `/organization` | `organization` | `settings` | `organization.manage` |
-| **CONFIGURATIONS** | Organization List | `/masters/company-list` | `masters-company-list` | `building` | `organizationlist.view` |
-| **CONFIGURATIONS** | Audit Log | `/audit` | `audit` | `clock` | `audit.view` |
-| **CONFIGURATIONS** | Trash | `/trash` | `trash` | `trash` | `trash.view` |
+| Sidebar Section | Navigation Label | Sub-Menu / Type | Route Path | Active Key | Icon Key | Required Permission |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **DASHBOARD** | Dashboard | Direct | `/dashboard` | `dashboard` | `dashboard` | Public Authenticated |
+| **CONTACT** | Suppliers | Direct | `/suppliers` | `suppliers` | `factory` | `supplier.view` |
+| **CONTACT** | Buyers | Direct | `/buyers` | `buyers` | `shoppingBag` | `buyer.view` |
+| **INVENTORY** | Product Master | Direct | `/masters/products` | `masters-products` | `box` | `product.view` |
+| **INVENTORY** | Product Prices | Direct | `/inventory/product-prices` | `product-prices` | `coins` | `product.view` |
+| **INVENTORY** | Product Gallery | Direct | `/product-gallery` | `product-gallery` | `image` | `productgallery.view` |
+| **SALE** | Inquiries | Direct | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
+| **PLANNING** | Shipment Planning | Direct | `/planning` | `planning` | `truck` | `planning.view` |
+| **USER MANAGEMENT** | Users | Direct | `/users` | `users` | `user` | `user.view` |
+| **USER MANAGEMENT** | Positions | Direct | `/positions` | `positions` | `briefcase` | `position.view` |
+| **USER MANAGEMENT** | Departments & Permissions | Direct | `/rbac` | `rbac` | `shield` | `roles_permissions.view` |
+| **SETTINGS** | **Masters ▾** | **Accordion Parent** | *(Collapsible)* | `masters-group` | `masters` | Dynamic based on children |
+| *SETTINGS / Masters* | Cities | Sub-Item | `/masters/cities` | `masters-cities` | — | `city.view` |
+| *SETTINGS / Masters* | Provinces | Sub-Item | `/masters/states` | `masters-states` | — | `state.view` |
+| *SETTINGS / Masters* | Countries | Sub-Item | `/masters/countries` | `masters-countries` | — | `country.view` |
+| *SETTINGS / Masters* | Currencies | Sub-Item | `/masters/currencies` | `masters-currencies` | — | `currency.view` |
+| *SETTINGS / Masters* | Units of Measurement | Sub-Item | `/masters/uom` | `masters-uom` | — | `uom.view` |
+| *SETTINGS / Masters* | HSN Codes | Sub-Item | `/masters/hsn` | `masters-hsn` | — | `hsn.view` |
+| *SETTINGS / Masters* | Categories | Sub-Item | `/masters/categories` | `masters-categories` | — | `category.view` |
+| *SETTINGS / Masters* | Sub Categories | Sub-Item | `/masters/subcategories` | `masters-subcategories` | — | `subcategory.view` |
+| *SETTINGS / Masters* | Brands | Sub-Item | `/masters/brands` | `masters-brands` | — | `brand.view` |
+| *SETTINGS / Masters* | Supplier Types | Sub-Item | `/masters/supplier-types` | `masters-supplier-types` | — | `suppliertype.view` |
+| *SETTINGS / Masters* | Buyer Types | Sub-Item | `/masters/buyer-types` | `masters-buyer-types` | — | `buyertype.view` |
+| *SETTINGS / Masters* | Organization List | Sub-Item | `/masters/company-list` | `masters-company-list` | — | `organizationlist.view` |
+| **SETTINGS** | Organization Settings | Direct | `/organization` | `organization` | `settings` | `organization.manage` |
+| **SETTINGS** | Audit Log | Direct | `/audit` | `audit` | `clock` | `audit.view` |
+| **SETTINGS** | Trash | Direct | `/trash` | `trash` | `trash` | `trash.view` |
+
+### Sidebar Accordion Navigation Test Checklist
+- [ ] Verify `Masters ▾` renders in the `SETTINGS` group with a right-chevron `>` and person-plus icon.
+- [ ] Verify clicking `Masters` smoothly expands all 12 nested master links, rotating chevron to `∨`.
+- [ ] Verify clicking on any master sub-item (e.g., `Cities`) routes correctly and renders that master page.
+- [ ] Verify active master sub-item displays highlighted background (`#e0edff`) and bold `#0061f2` text.
+- [ ] Verify the parent `Masters` item retains `.active-parent` blue styling while any child is active.
+- [ ] Verify reloading the page or deep-linking to any master page (e.g., `/masters/hsn`) automatically keeps `Masters` expanded on load.
+- [ ] Verify collapsing the entire sidebar via `≡` hides sub-items cleanly and uncollapses when `Masters` icon is clicked.
+- [ ] Verify `Product Master`, `Product Gallery`, `Suppliers`, `Buyers`, and `Inquiries` remain directly visible as primary top-level menu items.
+
 
 ---
 
@@ -211,22 +224,24 @@ Multi-tab comprehensive modal for vendor master lifecycle.
 - **Factory / Office Visit Record**:
   - **Visited Factory / Office**: Radio/Select `Yes` / `No`.
   - **Visit Remarks**: Notes from physical plant inspection.
-  - **Visit Photos / Media Upload**: Multi-file uploader directly connected to **Supabase Cloud Storage** (`supplier-media` bucket) with preview thumbnails and delete action.
+  - **Visit Photos / Media Upload**: Multi-file uploader supporting **S3-compatible Object Storage** (`supplier-media` bucket) with transparent Supabase and local disk fallback (`uploads/suppliers/`) served statically by FastAPI (`/uploads/suppliers/`), complete with preview thumbnails and delete action.
   - **Visit Video URL**: Link to factory inspection video (YouTube, Youku, Cloud Storage).
 - **Overall Remarks**: General procurement notes.
 
 #### Tab 2: 📇 Contacts Sub-Panel
 Manage complete vendor team directory:
-- **`+ Add Contact` Button**: Opens contact sub-form with:
-  - **Salutation**: `Mr.`, `Ms.`, `Mrs.`, `Dr.`
-  - **Person Name** (*Required*): Full name.
+- **`+ Add New` Button**: Opens portal-mounted right-side drawer modal (`createPortal` to `document.body` with `backdropFadeIn` and `slideInRight` smooth animations, `useBodyScrollLock`, and `Esc` key listener) with:
+  - **Salutation**: `Mr`, `Mr.`, `Mrs.`, `Ms.`
+  - **Person Name** (*Required*): Full name with auto-focus and native validation.
   - **Designation**: Role / title.
-  - **Handling Territory**: e.g., North America, India, Europe.
-  - **Calling Number**: Phone input with country dial code prefix.
-  - **WhatsApp Number**: With "Same as Calling" checkbox.
-  - **WeChat ID / Number**: With "Same as Calling" checkbox.
+  - **Handling Territory**: e.g., local, Export India, Export Africa, Export Global.
+  - **Calling Number**: Phone input with country dial code prefix indicator.
+  - **WhatsApp Number**: With "Same As Calling" sync checkbox.
+  - **WeChat ID / Number**: With "Same As Calling" sync checkbox.
   - **Email Address**: Direct email.
-- **Contacts Table**: Lists all contacts with `Primary Contact` badge, `Edit` button, and `Delete` button.
+  - **Country**: Country dropdown with automatic dial code resolution.
+  - **Footer Actions**: Pinned `Cancel` and full-width `Submit` button properly bound to form ID.
+- **Contacts Table**: Lists all contacts with territory, phone, WhatsApp, WeChat, email, `Edit` button, and `Delete` button.
 
 #### Tab 3: 📦 Products & Categories
 - **Product Categories**: Multi-select panel.
@@ -310,10 +325,29 @@ Manage complete vendor team directory:
 #### Tab 2: 📇 Contacts Management
 - Multi-contact person manager with full CRUD: Name, Salutation, Designation, Calling Number, WhatsApp Number, Email. Auto-synced with Primary Contact.
 
+### 5.4. Buyers Bulk Import Workspace & 3-Way Duplicate Detection
+- **Import View:** Dedicated full-page import workflow modeled on Supplier Import via `Imp / Exp ⌵` -> `Import`.
+- **Upload Support:** Drag-and-drop or file selector for `.xlsx`, `.xls`, and `.csv` files (up to 5,000 rows, 8 MB).
+- **Template Download:** Instant `📥 Download Sample CSV Template` button generating sample with all 23 business fields matching `doc/buyerclient.txt`.
+- **Wizard Modal:** 4-step wizard with auto-matched column headers, fuzzy synonyms, live preview, and chunked uploads.
+- **True 3-Way Duplicate Prevention (Note 66 in `buyerclient.txt`):**
+  - **In-File Duplicate Check:** Prevents duplicate company names in the same import file.
+  - **Company Name Uniqueness:** Strictly enforces case-insensitive uniqueness on `Company Name` against the database even when phone numbers are empty or different.
+  - **Phone Collision Detection:** Cross-checks `Calling Number` and `WhatsApp Number` against both phone fields of all existing buyers ($\ge 6$ digits, stripping non-digit characters).
+  - **Real-Time Client Warnings:** Inline field warning badges display live while typing in the Add/Edit form, blocking save if any of the three vectors collides.
+  - **Safe Self-Update:** `exclude_id` ensures updating an existing buyer does not trigger self-collision.
+
 ### Test Cases
 - [ ] Create Buyer with Company Name, Country, Calling Number, and save.
-- [ ] Verify duplicate alert pops up if saving a second buyer with the exact same phone number.
+- [ ] Attempt to create a second buyer with the same Company Name (even with different or empty phone numbers) and verify duplicate conflict is raised.
+- [ ] Attempt to create a buyer with a different Company Name but the same Calling Number or WhatsApp Number as an existing buyer, and verify duplicate conflict is raised with the conflicting buyer's name.
+- [ ] Attempt to use an existing buyer's Calling Number as a new buyer's WhatsApp Number, and verify cross-phone duplicate detection blocks it.
+- [ ] Edit an existing buyer without changing phone/name, save, and verify `exclude_id` allows save without self-duplicate conflict.
 - [ ] Verify deleting a buyer with status `Existing` or potential `Yes` is blocked by protection dialog.
+- [ ] Click `Imp / Exp ⌵` -> `Import` to open the dedicated Buyer Import workspace.
+- [ ] Download Sample CSV template and verify all 23 headers match `doc/buyerclient.txt`.
+- [ ] Upload sample file and verify 3-way duplicate check prevents duplicate company names or phone numbers.
+- [ ] Master Data Imports: Download sample CSV from each master module (Brands, Categories, Sub-Categories, Buyer Types, Supplier Types, UOM, HSN, Countries, States, Cities, Currencies, Company List), upload directly, and verify all rows import with 100% success and no header/code mismatches.
 
 ---
 
@@ -367,12 +401,16 @@ Manage complete vendor team directory:
 - **Dynamic Technical Specifications Builder:**
   - Key-Value attribute table (e.g. `Voltage: 380V`, `Power: 4.5kW`, `Speed: 120 pcs/min`).
 - **Cloud Media & Photo Upload:**
-  - Multi-image uploader uploading directly to **Supabase Storage** (`product-images` bucket).
+  - Multi-image uploader supporting **S3-compatible Object Storage** (`product-images` bucket) with automatic Supabase and local filesystem fallback (`uploads/products/`) served statically by FastAPI (`/uploads/products/`), ensuring zero broken images even in air-gapped deployments.
 
 ### Test Cases
 - [ ] Create a product, enter Length: `100`, Width: `50`, Height: `40`. Verify CBM calculates to `0.200000`.
 - [ ] Select HSN code with 13% Refund VAT and confirm Refund VAT % field auto-populates with `13`.
 - [ ] Click "Download PDF Datasheet" (`GET /api/v1/products/{id}/datasheet-pdf`) and verify ReportLab PDF generates.
+- [ ] Open `/masters/products` and verify the table loads under 3 seconds with standard pagination (`Showing 1-50 of 3556`, `Page 1 of 72`) and zero 500 error banners.
+- [ ] Navigate through pages (`Next`, `Page 2`, `Page 3`) and verify 50 products render reliably per page.
+- [ ] Filter by Category, Sub-Category, or Brand using the toolbar dropdowns; confirm the table updates immediately with matching filtered count.
+- [ ] Test Comprehensive Server Search: Search by Product Code (`DAR-01849`), Product Name (`Ink Cup`), Brand Name (`Supreme`), or Category; confirm matching items display instantly without proxy timeout.
 
 ---
 
@@ -396,6 +434,94 @@ Manage complete vendor team directory:
    - 💾 **Download Current Photo** button.
    - 📦 **Download All Media (ZIP / Batch)** button.
    - ✏️ **Quick Edit Product** button (opens side drawer).
+
+---
+
+## 7.1. INVENTORY: Product Price Directory Module
+
+- **Route:** `/inventory/product-prices` (Aliases: `/product-prices`, `/masters/product-prices`)
+- **Active Key:** `product-prices`
+- **Icon:** `coins`
+- **Required Permissions:** `product.view` (read), `product.update` (assign / inline edit), `product.export` (export), `product.import` (import)
+- **Purpose:** Procurement and sales pricing catalog showing lowest supplier quote per product, inline price updating, expandable vendor price comparisons, and universal bulk Excel import/export.
+
+### Visual Elements & Actions
+1. **Header & Summary:**
+   - Heading: `Product Price Directory`
+   - Total Counter Badge: `N Products`
+   - Action Buttons: Filter Toggle Funnel button (`filterOpen` toggle styled `#0061f2` when active, `#475569` when closed), `📥 Export ▾` dropdown (`📊 Export to Excel (.xlsx)` with corporate navy header and auto-filters + `📄 Export to CSV (.csv)` with UTF-8 BOM, filter-aware up to 50,000 catalog items), `🔄 Refresh` (Bulk Import temporarily hidden).
+2. **Expandable Top Filter Box (matching Products Master):**
+   - Toggled open/closed by the header funnel button.
+   - **Category Filter Dropdown:** `All` or specific category from `/masters/product-categories`.
+   - **Sub-Category Filter Dropdown:** `All` or dynamically scoped sub-category from `/masters/product-sub-categories`.
+   - **Brand Filter Dropdown:** `All` or specific brand from `/masters/brands`.
+   - **Pricing Status Dropdown:** `All`, `Priced Items Only`, `Unpriced Items Only`.
+   - **Action Buttons:** `[Reset]` (grey `#64748b` - resets all filters and search) and `[Search]` (amber `#f59e0b` - triggers filter execution).
+3. **Table Card Toolbar:**
+   - **Items/Page Selector:** `10`, `50`, `100` items per page.
+   - **Search Catalog Input:** Debounced (300ms) multi-attribute search matching product code, product name, Tally alias, barcode, or vendor company name with `🔍` icon and instant `✕` clear button.
+3. **Main Table Columns:**
+   - **Sr. No.:** Global 1-indexed running number across pages `((page - 1) * pageSize + idx + 1)`.
+   - **Product Name & Code:**
+     - Product photo thumbnail.
+     - Product Name: Clickable link opening `Product Detail SideDrawer`.
+     - Product Code Badge (e.g. `DAR-01758`).
+     - Barcode (if present).
+   - **Category & Brand:** Category name, Brand name, and UOM code.
+   - **Best Price (Quote):**
+     - Formatted currency badge (e.g. `¥ 125.00` or `$ 16.50`).
+     - **Inline Editing:** Clicking/double-clicking turns badge into an inline number input. Pressing `Enter` or clicking `✓` automatically commits changes via `PATCH /api/v1/inventory/product-prices/{link_id}` with optimistic UI update. `Esc` cancels.
+     - Unpriced state: Amber button `+ Add Price` opening the Assign Quote modal.
+   - **Primary Supplier:**
+     - Lowest-price vendor name.
+     - Expandable Accordion Badge: `[ N Suppliers ▾ ]` toggling the comparison sub-table.
+     - Unpriced state: `—` with `+ Assign` button.
+   - **Actions:**
+     - `+ Quote` button (opens quick modal to link another supplier to this product).
+     - `Compare ▾` / `Close ▴` toggle button.
+4. **Option 1 Expandable Sub-Table Comparison (Accordion & 0ms Hover Pre-Fetching):**
+   - **Hover Pre-Fetching Engine:** Moving the cursor over any product table row (`<tr>`), supplier count badge `[ N Suppliers ▾ ]`, `+ Assign`, `+ Quote`, or `Compare ▾` button automatically triggers background pre-fetching (`prefetchProductSuppliers`) 200–300ms before click, caching quote data in React state.
+   - **0ms Instant Accordion Toggle:** Clicking `Compare ▾` or `[ N Suppliers ▾ ]` opens immediately (0ms) without waiting for server network latency or showing a loading spinner. If `supplier_count === 0`, it opens in 0ms with zero backend network requests.
+   - Sub-table columns:
+     - `Supplier Name`: Vendor company name, primary calling number (`📞`), WeChat ID (`💬`), and `BEST` green badge on lowest bidder.
+     - `Location`: City, Province, Country.
+     - `Quoted Price`: Formatted price, inline editable with click and auto-save!
+     - `Currency`: CNY, USD, EUR, INR.
+     - `MOQ`: Minimum Order Quantity (e.g. `50 pcs`).
+     - `Notes / Terms`: Procurement remarks.
+     - `Updated`: Formatted quotation date.
+     - `Actions`: `🗑️` Delete quote button with confirmation prompt (optimistically removes row and recalculates best price in 0ms).
+   - **Inline Quick-Add Row (`+ Add Another Supplier Quote:`):**
+     - Supplier select dropdown + Unit Price input + Currency dropdown + MOQ input + `Save Quote` button.
+     - **0ms Optimistic Sub-Table Injection:** Instantly appends the new quote to the sub-table, sorts ASC, updates the main row's best price badge and supplier count in 0ms, clears inputs immediately, and synchronizes with server in the background.
+5. **Modal: Assign / Add Supplier Quote (Clean New Quote Entry & 0ms Optimistic UI):**
+   - **Context-Aware Dynamic Header & Clean Form:** When clicking `+ Quote` on a product that already has quotes, the modal title dynamically reads **"+ Add New Supplier Quotation"** and opens with **clean, blank inputs** (Supplier dropdown blank, Unit Price blank) ready for entering the next vendor's quotation without confusing pre-fills.
+   - **Current Benchmark Quote Banner:** When quotes already exist on a product, a green benchmark summary card renders prominently at the top of the modal (*"Current Lowest Benchmark: ¥ 150.00 (via Darsh Impex) • 1 Quote on file"*), giving the procurement user immediate comparison context.
+   - **Smart Supplier Duplicate / Update Notice:** If a supplier that has already quoted is selected in the dropdown, an amber notification immediately displays (*"ℹ️ Darsh Impex already has a quote on file (¥ 150.00). Entering a new price will update their quotation."*), and the button adapts to *"Update Supplier Quote"*. If a new vendor is selected, the button displays *"+ Add Supplier Quote"*.
+   - **Instant 0ms Optimistic Save:** Submitting a valid quotation closes the modal immediately (0ms), renders a green success toast, updates the main product row (new best price, currency, primary vendor, and incremented supplier count), updates open sub-table quotes in memory, and performs background server sync with graceful rollback on error.
+6. **Modal: Bulk Import Product Prices:**
+   - Sample template link: `📥 Download Sample Price Template (.xlsx)`.
+   - Drag & drop or click-to-browse `.xlsx` file upload.
+   - Live import summary box: `✅ Created: N`, `🔄 Updated: N`, `❌ Failed: N`, with detailed error list and row numbers for invalid entries.
+7. **Product Detail SideDrawer:**
+   - Slides in from right upon clicking product name or code.
+   - High-resolution photo, Tally Name, Brand, Category, Sub-Category, HSN Code, UOM, Packaging Quantity, Refund VAT %, Packaging Net/Gross Weight, Dimensions (L x W x H cm), auto-computed Packaging Unit CBM, License Warning banner, and Technical Specifications.
+
+### Test Checklist for Quality Assurance
+- [ ] **Table Render**: Verify all 3,500+ products load smoothly under 1.5s with Sr. No., Product Name & Code, Category & Brand, Best Price, Primary Supplier, and Actions.
+- [ ] **Search Filter**: Type a product code (e.g. `DAR-01758`) or partial product name &rarr; verify table filters instantly.
+- [ ] **Category & Brand Filters**: Select a Category &rarr; verify Sub-Category dropdown auto-scopes &rarr; select a Brand &rarr; verify rows reflect selection.
+- [ ] **Pricing Status Filter**: Filter by `Priced Items Only` &rarr; verify only rows with quotes display; filter by `Unpriced Items Only` &rarr; verify rows show `+ Add Price`.
+- [ ] **Product Detail Drawer**: Click any product name or code &rarr; verify `SideDrawer` opens with full specs, dimensions, weights, CBM, and photo.
+- [ ] **Assign Modal 0ms Optimistic Save**: Click `+ Add Price` or `+ Quote` &rarr; select vendor, enter `125.00`, click Save &rarr; verify modal closes immediately (0ms), price badge and supplier update instantly on the main row without waiting for full catalog reload.
+- [ ] **Assign Modal Quick-Clear `✕`**: In the supplier search combobox, type any query or non-existent supplier &rarr; verify `✕` cross button appears inside the input &rarr; click `✕` &rarr; verify text and selection clear instantly, input stays focused, and full supplier list is restored.
+- [ ] **Inline Edit Main Row (0ms)**: Click on the price badge `¥ 125.00` &rarr; enter `130.00`, press `Enter` &rarr; verify price badge and sub-table quote update immediately with success banner.
+- [ ] **Hover Pre-fetching & Instant Compare**: Hover cursor over a product row or `Compare ▾` button for 200ms &rarr; click `Compare ▾` &rarr; verify sub-table opens in 0ms with zero loading delay or spinner.
+- [ ] **Zero Supplier 0ms Open**: Click `Compare ▾` on an unpriced item with 0 suppliers &rarr; verify sub-table opens immediately with empty quotes table and quick-add row with zero backend network requests.
+- [ ] **Sub-Table Inline Quick-Add (0ms)**: Select a 2nd supplier, enter `110.00`, click `Save Quote` &rarr; verify sub-table immediately injects the new quote with `BEST` badge, supplier count increases to `2 Suppliers`, and main row best price drops to `¥ 110.00` without waiting for network roundtrip.
+- [ ] **Sub-Table Delete Quote (0ms)**: Click `🗑️` on a quote &rarr; confirm prompt &rarr; verify quote removed immediately and best price recalculates in 0ms.
+- [ ] **Excel & CSV Export**: Click `📊 Export Excel` and `📄 Export CSV` &rarr; verify downloaded files contain all columns and valid data.
+- [ ] **Bulk Import & Template**: Open `Bulk Import Prices` modal &rarr; click `Download Sample Price Template` &rarr; verify `.xlsx` template downloads with headers and examples &rarr; upload file &rarr; verify import summary.
 
 ---
 
@@ -452,22 +578,32 @@ Manage complete vendor team directory:
   $$\text{Layer 1: Buyer Summary Directory} \longrightarrow \text{Layer 2: Buyer Consignments (FB1, FB2...)} \longrightarrow \text{Layer 3: Inquiry Line Items, RFQs \& Quotation Matrix}$$
 
 ### 13.1. Layer 1: Buyer Inquiries Directory
-- **Summary Cards / Top KPIs:**
-  - **Pending RFQs:** Count of items awaiting supplier quotes.
-  - **Approved Quotes:** Count of line items with approved supplier pricing.
-  - **Ongoing Inquiries:** Active buyer consignments currently in negotiation.
-  - **Completed Consignments:** Successfully ordered / fulfilled consignments.
-  - **Total Order Value:** Sum of all active consignment line items.
+- **Summary Cards / Top KPIs (Interactive Filters):**
+  - **Pending RFQs:** Count of items awaiting supplier quotes. Clickable &rarr; sets tab to `Pending`.
+  - **Approved Quotes:** Count of line items with approved supplier pricing. Clickable &rarr; sets tab to `Approved`.
+  - **Ongoing Inquiries:** Active buyer consignments currently in negotiation. Clickable &rarr; sets tab to `Ongoing`.
+  - **Completed Consignments:** Successfully ordered / fulfilled consignments. Clickable &rarr; sets tab to `Completed`.
+  - **Total Order Value:** Sum of all active consignment line items. Clickable &rarr; sets tab to `All`.
+- **Lifecycle Filter Tabs (Matching Product Master Pattern):**
+  - Positioned directly above the company table: `All (N)`, `Pending (N)`, `Ongoing (N)`, `Approved (N)`, `Completed (N)`.
+  - Active tab highlighted with blue underline (`2.5px solid #0061f2`) and active text color.
+- **Top Actions & Bulk Operations:**
+  - 🟢 **`Bulk Actions (N) ▾` Button & Dropdown Menu:**
+    - Positioned in the top-right header alongside `+ ADD NEW`.
+    - Shows `Select 1 or more items from list first` tooltip if 0 selected.
+    - Turns vibrant green (`#10b981`) with active count `(N)` when $\ge 1$ company is selected via checkboxes.
+    - **`🗑️ Bulk Delete ({N})`**: Deletes all consignments across selected buyer companies safely into Trash with confirmation prompt.
+  - ➕ **`+ ADD NEW` Button:** Opens the `QuickInquiryDrawer`.
 - **Buyer Directory Table Columns:**
-  1. **Checkbox:** Select all / individual buyer rows.
-  2. **SR. NO.:** Sequential index with sort.
-  3. **BUYER COMPANY NAME:** Clickable buyer title drilling down to Layer 2 Consignments.
-  4. **ACTIVE CONSIGNMENTS:** Count badge of active consignments (e.g. `3 Consignments`).
-  5. **TOTAL ITEMS:** Total product line items across all consignments.
-  6. **STATUS BADGE:** `PENDING`, `PARTIAL_APPROVED`, `FULLY_APPROVED`, `COMPLETED`.
-  7. **ORDER VALUE:** Financial sum with currency indicator.
-  8. **ACTIONS:** Drilldown arrow (`➔`), Quick Add Item button.
-- **Top Actions:**
+  1. **Checkbox:** Master select all in header; individual checkboxes per buyer row.
+  2. **BUYER COMPANY NAME:** Clickable buyer title drilling down to Layer 2 Consignments.
+  3. **CONSIGNMENT CODES:** Tag pills of consignment codes (e.g. `📦 FB1`, `📦 FB2`).
+  4. **STATUS BADGE:** `Pending`, `Partial Approved`, `Fully Approved`.
+  5. **TOTAL CBM:** Sum of CBM for this company's consignments.
+  6. **TOTAL WEIGHT:** Total kilograms.
+  7. **UPDATED DATE:** Timestamp of latest update.
+  8. **ACTIONS:** `👁️ View`, `✏️ Edit`, `🗑️ Delete`.
+- **Top Actions Details:**
   - ⚡ **`+ Quick Add Inquiry` Drawer:**
     - **Buyer Company** (*Required*): Searchable dropdown from `/buyers`.
     - **Consignment Code** (*Required*): Dropdown of existing codes or type new (e.g. `FB1`). Automatically cross-references existing codes to reuse matching IDs and prevent `HTTP 409 Conflict` errors.
@@ -496,17 +632,23 @@ Manage complete vendor team directory:
 
 ### 13.2. Layer 2: Consignments View (Inside a Buyer)
 - **Top Header & Navigation:**
-  - `← Back to All Companies` breadcrumb button.
-  - Heading: `Inquiries for {Buyer Company Name}`.
+  - `← All Companies` breadcrumb back button.
+  - Heading: `{Buyer Company Name} — Consignments`.
+  - 🟢 **`Bulk Actions (N) ▾` Button:** Top-right action bar beside `+ Add Inquiry Item`.
+    - Active when $\ge 1$ consignment checkbox is selected.
+    - **`🗑️ Bulk Delete ({N})`**: Deletes selected consignments and child items safely into Trash with confirmation prompt.
+  - ➕ **`+ Add Inquiry Item` Button:** Opens `AddItemModal`.
+- **Lifecycle Filter Tabs & Search Bar:**
+  - Tabs: `All (N)`, `Proposed (N)`, `Partial Approved (N)`, `Fully Approved (N)`.
+  - Live search input: `Search consignment code…`.
 - **Consignments Table Columns:**
-  1. **CONSIGNMENT CODE:** Clickable title (e.g. `FB1`, `FB2`) drilling down to Layer 3 Line Items.
-  2. **CREATED DATE:** Timestamp of inquiry initiation.
-  3. **TARGET DELIVERY DATE:** Expected receiving / shipping date.
-  4. **TOTAL ITEMS:** Count of items in this consignment.
-  5. **RFQ DISPATCH STATUS:** `Not Sent`, `Sent to Suppliers`, `Quotes Received`.
-  6. **QUOTES RECEIVED:** Count of submitted vendor quotes (e.g. `4 Quotes`).
-  7. **STATUS:** `DRAFT`, `SENT_TO_SUPPLIERS`, `UNDER_EVALUATION`, `APPROVED`, `CLOSED`.
-  8. **ACTIONS:** `Open Items View`, `Edit Consignment Details`, `Delete Consignment`.
+  1. **Checkbox:** Master select-all checkbox in `th`; row checkbox in each `td`.
+  2. **CONSIGNMENT CODE:** Clickable title (e.g. `FB1`, `FB2`) drilling down to Layer 3 Line Items.
+  3. **STATUS:** `badge-gray` (Proposed), `badge-yellow` (Partial Approved), `badge-green` (Fully Approved).
+  4. **TOTAL CBM:** Sum of CBM.
+  5. **TOTAL WEIGHT:** Sum of weight (kg).
+  6. **UPDATED:** Date of latest update.
+  7. **ACTION:** `View` (drills into Layer 3), `Delete` (moves to Trash).
 
 ---
 
@@ -517,6 +659,30 @@ Manage complete vendor team directory:
 - **Toolbar Actions:**
   - ➕ **`+ Add Line Item` Button & Modal:**
     - Product picker (loads SKU, image, category), Quantity, Primary UOM, Target Price, Brand Preference, Remarks.
+  - ➕ **`+ Add Line Item` Button & Modal:**
+    - Product picker (loads SKU, image, category), Quantity, Primary UOM, Target Price, Brand Preference, Remarks.
+  - 🔄 **`Imp / Exp ▾` Button & Dropdown Menu (Unified Import/Export):**
+    - **UI Placement**: Top-right action bar in Layer 3 beside `← Back` and `+ Add Item`.
+    - **Dropdown Options**:
+      - 📄 **SAMPLE FILE**: Downloads standardized sample CSV (`Sample_Inquiry_Items_Template.csv`) pre-populated with realistic machine/spare part data.
+      - 📥 **IMPORT**: Navigates to the dedicated `Import Inquiry Products` full-page interface.
+      - 📤 **EXPORT**: Exports all consignment line items to Excel (`.xlsx`) with enriched quotation metrics, UOM, and statuses.
+  - 📥 **`Import Inquiry Products` Dedicated Page & Column Mapping Wizard:**
+    - **Page Layout**:
+      - Breadcrumb: `Inquiries > {Buyer Name} > #{Consignment Code} > Import Products`.
+      - Header with `← BACK` navigation button.
+      - Drag-and-drop file selector supporting `.csv`, `.xlsx`, and `.xls` (Max 8 MB, up to 5,000 rows).
+      - `📥 Download Sample CSV Template` button.
+      - **Validation Guidelines & Notes Card**: Explains mandatory fields (`Product Name` or `Product Code`, `Quantity`), positive quantity requirement, auto-assigned UOM from Product Master, automated license flagging in red, and status defaulting to `Proposed`.
+      - Action buttons: `Cancel` and `Import`.
+    - **Interactive Column Mapping Modal (`WizardModal`)**:
+      - Client-side pre-parsing via SheetJS / PapaParse.
+      - Dynamic synonyms matching (e.g. `Item Name` $\rightarrow$ `Product Name`, `Qty` $\rightarrow$ `Quantity`, `SKU` $\rightarrow$ `Product Code`) with green `MATCHED` badges.
+      - First 5 rows live preview table for visual verification.
+      - Progressive chunked upload to `POST /api/v1/inquiries/{inquiry_id}/items/import`.
+    - **Results Summary Panel**:
+      - Displays total rows, created count, failed count, and row-by-row error diagnostics with exact spreadsheet row numbers.
+      - Automatically recomputes consignment rollups (Total CBM, Weight, Status) and updates the workspace in real-time.
   - ⚡ **`+ Bulk Add Items` Button & Modal:**
     - Multi-row product picker from Product Master with live search. Check multiple products and enter quantities simultaneously.
   - 📤 **`Dispatch Bulk RFQs` Button & Modal:**
@@ -548,6 +714,12 @@ Manage complete vendor team directory:
       - **Subsequent Sales / Negotiation Chatter**: Once the initial quote exists, subsequent conversations between the sales team and supplier (discounts, delivery questions, terms) bypass AI extraction completely (0 OpenAI tokens). Displays: `💬 Inbound Discussion / Negotiation Thread` (or `💬 Supplier WeChat Discussion`).
       - **Multi-Product RFQ Routing**: When an RFQ contains multiple products (e.g. Band Sealer & Ink Roll), the inbound worker checks message bodies first to ensure quotes for secondary items route to their respective line items without colliding or being blocked by the first item's quote.
       - **Multi-Supplier & Cross-Consignment Isolation**: Supplier A, B, and C replies remain strictly isolated side-by-side in the Quotation Matrix, and quotes for identical products in different consignments (e.g. FB1 vs INH1) never cross-leak.
+      - **WeCom / WeChat Intelligent Inbound Matching**:
+        - **Consignment Code Detection**: Auto-detects tagged tags like `[#YG7]`, `#YG7`, or `YG7` in message text.
+        - **Product Code Auto-Resolution**: When a supplier replies without quoting the consignment tag, the webhook auto-matches line items via product codes present in the reply (e.g. `#DAR-01849` -> automatically matches the inquiry containing that item).
+        - **Outbound Recipient Correlation**: If neither code is explicitly typed, matches the reply to the most recent outbound RFQ sent to the supplier's WeCom UserID / mobile number.
+        - **Supplier Signature Matching**: Auto-maps the supplier entity if the company name appears in the message signature (e.g. *Wenzhou Brother Machinery Co., Ltd.*).
+        - **Instant AI Quotation Parsing**: Automatically generates `QT-AUTO-XX` with unit price, currency, quantity, and payment/delivery terms, and logs the discussion in the WeChat Messages timeline.
     - **Interactive Inline Email Composer (Gmail/Figma-Style)**:
       - Embedded directly at the bottom of the Email timeline.
       - **"To:" Recipient Field**: Quick dropdown of suppliers or free-text comma-separated email entry.
@@ -555,7 +727,7 @@ Manage complete vendor team directory:
       - **"Message Body" Textarea**: Clean, spacious multiline composer for typing replies/messages.
       - **"📎 Attach File"**: Supabase Storage file/PDF uploader.
       - **Action Toolbar**: Primary blue **`✈️ Send Email`** button with async SMTP dispatch + Discard button.
-    - **Live Dynamic Polling & WebSocket Sync**: Automatically refreshes feed every 2.5 seconds.
+    - **Smart Hybrid Real-Time & Fallback Sync**: Primary live updates arrive instantly via WebSocket (sub-second zero-latency display), backed by a gentle 15-second visibility-aware fallback poll that automatically pauses when the browser tab is hidden and refreshes immediately upon window focus to eliminate network congestion and CPU overhead.
   - 📋 **`Bulk Tally Entry Post` Button:** Select multiple line items and mark them as `Tally Entry Posted` in one batch operation.
 - **Line Items Table Columns:**
   1. **Checkbox:** Select row for bulk RFQ dispatch or bulk Tally posting.
@@ -577,10 +749,16 @@ Manage complete vendor team directory:
 - [ ] Simulate or receive an incoming WeChat reply from a supplier; verify `/api/v1/inquiries/wechat/callback` parses the reply, extracts unit price and terms via AI, and automatically creates or updates the quotation row with real-time WebSocket broadcast.
 - [ ] Switch to the **Emails** tab in Layer 3, verify the timeline displays historical RFQs and replies.
 - [ ] In the **Inline Email Composer** at the bottom of the Emails tab, select a supplier from the dropdown, type a message body, and click `✈️ Send Email`. Verify the email is dispatched via SMTP and instantly appears in the conversation thread with the `Outbound Email ↗` badge.
+- [ ] Switch to the **WeChat Messages** tab in Layer 3, verify the timeline displays all incoming and outgoing WeChat messages with timestamps and badges (`WeChat Inbound ↙` vs `Outbound WeChat ↗`).
+- [ ] In the **WeChat Direct Reply Composer** at the bottom of the WeChat tab, verify the `To:` field auto-populates with the supplier's WeChat contact (e.g. `ChenXianNing` or `13736331731`), or select a supplier from the dropdown.
+- [ ] Click a quick negotiation prompt pill (e.g. `+ Can you offer a discount for bulk quantity?`), type any additional instructions in the text area, and click `Send to WeChat 💬`. Verify the message is dispatched live to the supplier's WeCom/WeChat mobile app via Tencent API, a green success alert displays, and the reply immediately appears in the timeline with the `Outbound WeChat ↗` badge and the salesperson's name.
 - [ ] Open Public Quote Portal (`/quote/:token`) for a supplier, submit unit price `¥4500` with PDF quote sheet upload.
 - [ ] Return to Layer 3 Items view, verify Received Quotes badge updates to `1 Quote`.
 - [ ] Open Quotation Matrix Comparison modal, verify Lowest Price is highlighted in green, click `Approve Quote`, verify status turns to `Approved`.
 - [ ] Click Tally Status toggle badge on a line item, verify it toggles between `Pending Tally` and `Tally Posted` instantly.
+- [ ] In Layer 3 Items view, click the **Export** button on the top-right toolbar. Select **Excel Spreadsheet (XLSX)** from the dropdown. Verify browser downloads `Inquiry_{Code}_{Date}.xlsx`. Open the file and verify columns (`Sr No`, `Product Code`, `Product Name`, `Quantity`, `UOM`, `Best Quote Price`, `Selected Supplier`, etc.) match active items.
+- [ ] In Layer 3 Items view, click the **Export** button and select **CSV Delimited (CSV)**. Verify browser downloads `Inquiry_{Code}_{Date}.csv` and file opens cleanly in Excel without character encoding issues.
+- [ ] Open a consignment with 0 items. Verify the **Export** button is disabled with tooltip `"No items to export"`.
 
 ---
 
@@ -929,6 +1107,35 @@ Manage complete vendor team directory:
   - ❌ **`Purge` Button:** Permanently deletes record from database (restricted to Super Administrator).
 - **Bulk Actions:** `Restore Selected`, `Empty Trash`.
 
+### Trash Conflict Detection & One-Click Restore Modal (`TrashConflictModal.tsx`)
+- **Applies To:** All 12 Master Data catalogs (Categories, Sub Categories, Brands, UOM, HSN, Countries, States, Cities, Currencies, Supplier Types, Buyer Types, Companies), Product Master, Buyer Management, Supplier Directory, and Quick Inquiry Drawer.
+- **Test Checklist:**
+  1. **Category Soft-Delete & Re-creation Conflict:**
+     - Navigate to `/masters/categories`.
+     - Create category `"Alpha Test 1"`.
+     - Soft-delete `"Alpha Test 1"` (record moves to Trash).
+     - Click `+ Add Category` and enter name `"Alpha Test 1"`.
+     - Click `Save`.
+     - **Expected Outcome:** Instead of a 500 error or unexpected crash, an interactive `TrashConflictModal` dialog immediately appears stating: *"Category Already Exists in Trash"*, displaying the matching Name and Code.
+  2. **One-Click Restore Action:**
+     - In the conflict popup, click `[ 🔄 Restore Alpha Test 1 from Trash ]`.
+     - **Expected Outcome:** The modal shows *"Restoring..."* briefly, closes, the categories table refreshes showing `"Alpha Test 1"` active again, and global dropdown caches are invalidated.
+  3. **Preserve Form Inputs on Cancel:**
+     - Open the create drawer for any entity (e.g. Buyer or Product).
+     - Enter detailed information across multiple fields (e.g. 5 contact fields, website, categories).
+     - Use a company name that exists in Trash. Click `Save`.
+     - When `TrashConflictModal` appears, click `[ Change Name / Cancel ]`.
+     - **Expected Outcome:** The popup closes, but the create drawer remains completely OPEN with all entered values, phone numbers, and categories 100% preserved so the user can easily adjust the name without re-entering anything.
+  4. **Open Trash Shortcut:**
+     - In `TrashConflictModal`, click `[ Open Trash ↗ ]`.
+     - **Expected Outcome:** Opens `/trash` in a new browser tab without losing the current page context.
+  5. **Inquiry Consignment Code Re-use & Multi-Item Append:**
+     - Open `QuickInquiryDrawer` on `/inquiries`.
+     - Add 3 product line items with quantities, brands, and remarks.
+     - Specify a consignment code that exists in Trash.
+     - Click `Save as Proposed`.
+     - **Expected Outcome:** The conflict modal opens with primary action `[ 🔄 Restore & Append My Items ]`. Clicking it restores the consignment and immediately appends all 3 line items into it with zero manual re-entry.
+
 ---
 
 ## 24. USER ACCOUNT: Profile, Security & Active Sessions
@@ -1049,6 +1256,73 @@ Checklist to execute:
    - Departments (/rbac) support optional short code and parent department nesting.
 6. Report any missing fields, broken endpoints, or regressions.
 ```
+
+---
+
+## 33. Universal Import & Deduplication Test Suite (`testingimportfile/`)
+
+A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained directly in `testingimportfile/` to allow developers and QA engineers to execute end-to-end import and duplicate-detection testing across the 4 core business modules:
+
+### 33.1. Supplier Master (`/suppliers`)
+- **Folder:** `testingimportfile/`
+- **File 1 (Clean Data):** `supplier_new_data.xlsx`
+  - **Rows:** 2 new supplier companies ("Hangzhou Precision Pack Machinery Co., Ltd.", "Apex Automation Systems Pvt. Ltd.")
+  - **Headers:** `Company Name`, `Product Categories`, `Key Strength Sub-Categories`, `Products Supplied`, `Secondary Products`, `Country`, `State / Province`, `City`, `Brand Description`, `Supplier Type`, `Current Status`, `Supplier Grade`, `Potential`, `Potential Reason`, `Contact Person`, `Designation`, `Calling Number`, `WhatsApp Number`, `WeChat Number`, `Emails`, `Tax ID / GST Number`, `Address`, `Town`, `Primary Website`, `Secondary Website`, `Visited Factory/Office`, `Visit Remarks`, `Overall Remarks`, `Status`.
+  - **Expected Result:** `created: 2, failed: 0`. Both suppliers created successfully and linked to their respective City/State/Country and Category/Sub-Category masters.
+- **File 2 (Duplicate / Conflict Data):** `supplier_duplicate_data.xlsx`
+  - **Rows:** 4 rows:
+    - Row 2: Existing Supplier "Yinglima Packaging Machinery Co., Ltd." (in Wenzhou, China).
+    - Row 3: Existing Supplier "Darsh Impex" (in Mumbai, India).
+    - Row 4: New company "Newtech Sealing Solutions Co., Ltd." (First entry in batch).
+    - Row 5: Same company "Newtech Sealing Solutions Co., Ltd." (Second entry in same batch).
+  - **Expected Result:** Rows 2 and 3 skipped/flagged as existing DB duplicates (`ConflictException`). Row 5 flagged as an in-file batch duplicate.
+
+### 33.2. Buyer (Client) Master (`/buyers`)
+- **Folder:** `testingimportfile/`
+- **File 1 (Clean Data):** `buyer_new_data.xlsx`
+  - **Rows:** 2 new buyers ("Zenith Food & Beverage Processing Ltd.", "Global Agro Industries Ltd.")
+  - **Headers:** `Company Name`, `Buyer Type`, `Product Categories`, `Product Sub Categories`, `Country`, `City`, `Address`, `Contact Salutation`, `Contact Person Name`, `Designation`, `Calling Number`, `WhatsApp Number`, `Emails`, `Tax ID / GST Number`, `Website`, `Current Status`, `Buyer Grade`, `Potential`, `Potential Reason`, `Product Range`, `Currently Buying From`, `Overall Remarks`, `Status`.
+  - **Expected Result:** `created: 2, failed: 0`. Clean import with full contact, salutation, category, and city linking.
+- **File 2 (Duplicate / Conflict Data):** `buyer_duplicate_data.xlsx`
+  - **Rows:** 5 rows testing Note 66 3-way deduplication:
+    - Row 2: "Darsh Impex" -> Triggers Duplicate Company Name collision.
+    - Row 3: "Sunrise FMCG Exports Pvt. Ltd." with Calling Number `+91 77384172578` -> Triggers Duplicate Calling Number collision.
+    - Row 4: "Horizon Pack Solutions LLP" with WhatsApp Number `+91 77384172578` -> Triggers Duplicate WhatsApp Number collision.
+    - Row 5: "Alpha Pack Industries" -> First entry in batch.
+    - Row 6: "Alpha Pack Industries" -> Second entry in batch -> Triggers in-file duplicate collision.
+  - **Expected Result:** 4 duplicate conflicts correctly captured and isolated; existing records protected from overwrite.
+
+### 33.3. Product Master (`/masters/products`)
+- **Folder:** `testingimportfile/`
+- **File 1 (Clean Data):** `product_new_data.xlsx`
+  - **Rows:** 3 new machine products ("High Speed Continuous Band Sealer Model CBS-900", "Semi-Automatic Carton Sealer Model FX-500", "Heavy Duty Liquid Piston Filling Machine 500ml").
+  - **Headers:** `Product Name (As Per Tally)`, `Product Code`, `Brand`, `Category`, `Sub Category`, `HSN Code`, `UOM`, `Organization`, `Branches`, `Pack. Qty`, `Pack. Net Weight`, `Pack. Gross Weight`, `Length (cm)`, `Width (cm)`, `Height (cm)`, `Pack. Unit CBM`, `Refund VAT %`, `Compliance & License Requirements`, `Specification`, `Status`.
+  - **Expected Result:** `created: 3, failed: 0`. All 3 products created with auto-calculated CBM and valid category-to-subcategory mapping.
+- **File 2 (Duplicate / Conflict Data):** `product_duplicate_data.xlsx`
+  - **Rows:** 4 rows:
+    - Row 2: Product Name "Ink Cup Set ( TDY 380C)" -> Triggers duplicate Product Name collision (existing code `DAR-01849`).
+    - Row 3: Product Code `DAR-01851` -> Triggers duplicate Product Code collision (existing product "Ink Roll (MY 380F)").
+    - Row 4: "Digital Ultrasonic Cleaner 30L Industrial" (Code `PRD-BATCH-DUP-01`) -> First entry in batch.
+    - Row 5: "Digital Ultrasonic Cleaner 30L Industrial" (Code `PRD-BATCH-DUP-02`) -> Triggers in-file duplicate Product Name collision.
+  - **Expected Result:** 3 duplicate conflicts captured and skipped; zero corruption of existing catalog.
+
+### 33.4. Inquiry Consignment Line Items (`/inquiries/{inquiry_id}/items`)
+- **Folder:** `testingimportfile/`
+- **File 1 (Clean Data):** `inquiry_items_new_data.xlsx`
+  - **Rows:** 4 valid line items referencing active Product Master items:
+    - Row 2: "Ink Cup Set ( TDY 380C)" (Code `DAR-01849`, Qty: 50, Status: Approved)
+    - Row 3: "Ink Roll (MY 380F)" (Code `DAR-01851`, Qty: 100, Status: Proposed)
+    - Row 4: "Mother Board for Handy and Printer" (Code `DAR-01852`, Qty: 20, Status: Approved)
+    - Row 5: "Motor (Tdy 380)" (Code `DAR-01853`, Qty: 15, Status: Proposed)
+  - **Headers:** `Product Name`, `Product Code`, `Quantity`, `UOM`, `Brand Preference`, `Product Specs / Remarks`, `Status`.
+  - **Expected Result:** `created: 4, failed: 0`. All 4 items imported into consignment with automatic UOM inheritance and consignment rollup calculation.
+- **File 2 (Duplicate & Validation Test Data):** `inquiry_items_duplicate_data.xlsx`
+  - **Rows:** 4 rows testing duplicate items and validation handling:
+    - Row 2: "Ink Cup Set ( TDY 380C)" (Qty: 50, Status: Approved) -> Initial entry.
+    - Row 3: "Ink Cup Set ( TDY 380C)" (Qty: 50, Status: Approved) -> Duplicate line item entry.
+    - Row 4: "Non-Existent Mystery Widget 999" (Code `NON-EXISTENT-SKU-999`) -> Triggers "Product not found in Product Master" failure.
+    - Row 5: "Motor (Tdy 380)" with Quantity `0` -> Triggers "Invalid quantity. Must be a positive number" failure.
+  - **Expected Result:** 2 valid rows imported; 2 invalid rows accurately flagged with exact row numbers and error descriptions.
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP.*

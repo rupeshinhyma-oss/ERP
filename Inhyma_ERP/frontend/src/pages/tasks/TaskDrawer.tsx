@@ -22,13 +22,6 @@ import { AttachmentList } from "@/components/AttachmentList";
 import { CommentComposer, type CommentSubmitData } from "@/components/CommentComposer";
 import { ReactionPicker } from "@/components/ReactionPicker";
 
-interface TaskDrawerProps {
-  taskId: string | null;
-  isOpen: boolean;
-  onClose: () => void;
-  onTaskUpdated: () => void;
-  onEscalateRequest?: (task: TaskDetail) => void;
-}
 
 function getUserDepartment(user?: { department?: string; roles?: string[] } | null): string {
   if (!user) return "Staff";
@@ -266,12 +259,23 @@ const EscalationCollaborationSection: React.FC<{ escalationId: string }> = ({ es
   );
 };
 
+interface TaskDrawerProps {
+  taskId: string | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onTaskUpdated: () => void;
+  onEscalateRequest?: (task: TaskDetail) => void;
+  initialTab?: "details" | "subtasks" | "dependencies" | "escalations" | "comments" | "timeline";
+}
+
+
 export const TaskDrawer: React.FC<TaskDrawerProps> = ({
   taskId,
   isOpen,
   onClose,
   onTaskUpdated,
   onEscalateRequest,
+  initialTab,
 }) => {
   const { hasPermission, isSuperAdmin, profile } = useAuth();
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -281,7 +285,13 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
   // Active drawer tab
   const [drawerTab, setDrawerTab] = useState<
     "details" | "subtasks" | "dependencies" | "escalations" | "comments" | "timeline"
-  >("details");
+  >(initialTab || "details");
+
+  useEffect(() => {
+    if (initialTab) {
+      setDrawerTab(initialTab);
+    }
+  }, [initialTab]);
 
   // V2.0 Dependencies, Labels, Sprints, Approvals
   const [availableLabels, setAvailableLabels] = useState<TaskLabel[]>([]);
@@ -290,9 +300,6 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
   const [isAddingDependency, setIsAddingDependency] = useState(false);
   const [depTaskId, setDepTaskId] = useState("");
   const [depType, setDepType] = useState<DependencyType>("BLOCKED_BY");
-  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
-  const [approvalNotes, setApprovalNotes] = useState("");
-  const [actioningApproval, setActioningApproval] = useState(false);
 
   // Inline editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -400,7 +407,6 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       setShowAddWatcher(false);
       setIsHoldModalOpen(false);
       setIsAddingDependency(false);
-      setIsApprovalModalOpen(false);
     } else {
       setTask(null);
       setIsEditingTitle(false);
@@ -411,7 +417,6 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       setShowAddWatcher(false);
       setIsHoldModalOpen(false);
       setIsAddingDependency(false);
-      setIsApprovalModalOpen(false);
     }
   }, [isOpen, taskId]);
 
@@ -423,8 +428,6 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       if (e.key === "Escape") {
         if (isHoldModalOpen) {
           setIsHoldModalOpen(false);
-        } else if (isApprovalModalOpen) {
-          setIsApprovalModalOpen(false);
         } else {
           onClose();
         }
@@ -439,7 +442,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       window.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = originalOverflow;
     };
-  }, [isOpen, isHoldModalOpen, isApprovalModalOpen, onClose]);
+  }, [isOpen, isHoldModalOpen, onClose]);
 
   const handleIssueTypeChange = async (newType: IssueType) => {
     if (!task) return;
@@ -554,44 +557,6 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       onTaskUpdated();
     } catch (err: any) {
       alert(err?.response?.data?.detail || "Failed to remove dependency");
-    }
-  };
-
-  const handleSubmitApproval = async () => {
-    if (!task) return;
-    setActioningApproval(true);
-    try {
-      const updated = await tasksApi.submitTaskForApproval(task.id, {
-        notes: approvalNotes.trim() || undefined,
-      });
-      setTask(updated);
-      setIsApprovalModalOpen(false);
-      setApprovalNotes("");
-      loadTimeline(task.id);
-      onTaskUpdated();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to submit for approval");
-    } finally {
-      setActioningApproval(false);
-    }
-  };
-
-  const handleActionApproval = async (action: "APPROVE" | "REJECT") => {
-    if (!task) return;
-    setActioningApproval(true);
-    try {
-      const updated = await tasksApi.actionTaskApproval(task.id, {
-        action,
-        notes: approvalNotes.trim() || undefined,
-      });
-      setTask(updated);
-      setApprovalNotes("");
-      loadTimeline(task.id);
-      onTaskUpdated();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || `Failed to ${action.toLowerCase()} task`);
-    } finally {
-      setActioningApproval(false);
     }
   };
 
@@ -1008,7 +973,6 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                 <option value="IMPROVEMENT">IMPROVEMENT</option>
                 <option value="STORY">STORY</option>
                 <option value="EPIC">EPIC</option>
-                <option value="APPROVAL">APPROVAL</option>
               </select>
 
               {overdue && (
@@ -1193,17 +1157,10 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
               key={tab.key}
               type="button"
               onClick={() => setDrawerTab(tab.key as any)}
+              className={`task-drawer-tab-btn ${drawerTab === tab.key ? "active" : ""}`}
               style={{
-                flex: 1,
-                padding: "10px 4px",
-                fontSize: "12.5px",
-                fontWeight: 600,
-                background: "transparent",
-                border: "none",
-                borderBottom: drawerTab === tab.key ? "2px solid #2563eb" : "2px solid transparent",
-                color: drawerTab === tab.key ? "#2563eb" : "#64748b",
-                cursor: "pointer",
-                textAlign: "center",
+                outline: "none",
+                boxShadow: "none",
               }}
             >
               {tab.icon} {tab.label}
@@ -1290,102 +1247,6 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                       <strong>Hold Reason:</strong> {task.hold_reason}
                     </div>
                   )}
-                </div>
-              )}
-
-              {/* Approval Workflow Banner & Actions */}
-              {(task.status === "PENDING_APPROVAL" || task.approval_status === "PENDING_APPROVAL") && (
-                <div
-                  style={{
-                    background: "#faf5ff",
-                    border: "1px solid #d8b4fe",
-                    borderRadius: "8px",
-                    padding: "14px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "10px",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ fontSize: "18px" }}>⏳</span>
-                      <div>
-                        <span style={{ fontWeight: 700, color: "#6b21a8", fontSize: "13.5px" }}>
-                          Pending Manager Approval
-                        </span>
-                        {task.approval_notes && (
-                          <div style={{ fontSize: "11.5px", color: "#7e22ce", marginTop: "2px" }}>
-                            Submission Note: "{task.approval_notes}"
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <span style={{ fontSize: "11px", fontWeight: 700, background: "#f3e8ff", color: "#7e22ce", padding: "2px 8px", borderRadius: "10px" }}>
-                      APPROVAL REQUIRED
-                    </span>
-                  </div>
-
-                  <div style={{ display: "flex", gap: "8px", paddingTop: "4px" }}>
-                    <button
-                      type="button"
-                      onClick={() => handleActionApproval("APPROVE")}
-                      disabled={actioningApproval}
-                      style={{
-                        padding: "6px 14px",
-                        background: "#16a34a",
-                        color: "#ffffff",
-                        border: "none",
-                        borderRadius: "6px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {actioningApproval ? "Processing..." : "✓ Approve & Complete"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleActionApproval("REJECT")}
-                      disabled={actioningApproval}
-                      style={{
-                        padding: "6px 14px",
-                        background: "#dc2626",
-                        color: "#ffffff",
-                        border: "none",
-                        borderRadius: "6px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {actioningApproval ? "Processing..." : "✕ Reject Task"}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Submit for Approval Button if not already pending */}
-              {task.status !== "PENDING_APPROVAL" && task.status !== "DONE" && (
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button
-                    type="button"
-                    onClick={() => setIsApprovalModalOpen(true)}
-                    style={{
-                      background: "#ede9fe",
-                      color: "#6d28d9",
-                      border: "1px solid #ddd6fe",
-                      borderRadius: "6px",
-                      padding: "5px 12px",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <span>📬 Submit for Approval</span>
-                  </button>
                 </div>
               )}
 
@@ -2313,25 +2174,44 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                     <div
                       key={c.id}
                       style={{
-                        background: "#f8fafc",
+                        background: "#ffffff",
                         border: "1px solid #e2e8f0",
-                        borderRadius: "8px",
-                        padding: "10px 12px",
+                        borderRadius: "10px",
+                        padding: "12px 14px",
                         display: "flex",
                         flexDirection: "column",
                         gap: "8px",
+                        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.03)",
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontWeight: 600, fontSize: "12.5px", color: "#1e293b" }}>
-                          {c.user?.full_name || "Team Member"}
-                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <div
+                            style={{
+                              width: "24px",
+                              height: "24px",
+                              borderRadius: "50%",
+                              background: "#eff6ff",
+                              color: "#2563eb",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: "11px",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {(c.user?.full_name || "T").charAt(0).toUpperCase()}
+                          </div>
+                          <span style={{ fontWeight: 600, fontSize: "13px", color: "#1e293b" }}>
+                            {c.user?.full_name || "Team Member"}
+                          </span>
+                        </div>
                         <span style={{ fontSize: "11px", color: "#94a3b8" }}>
                           {new Date(c.created_at).toLocaleString()}
                         </span>
                       </div>
                       {c.message && (
-                        <div style={{ fontSize: "13px", color: "#334155", whiteSpace: "pre-wrap" }}>
+                        <div style={{ fontSize: "13px", color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
                           {c.message}
                         </div>
                       )}
@@ -2346,7 +2226,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                         </div>
                       )}
                       {/* Comment Emoji Reaction */}
-                      <div style={{ marginTop: "4px" }}>
+                      <div style={{ marginTop: "4px", display: "flex", alignItems: "center" }}>
                         <ReactionPicker
                           size="sm"
                           reactions={c.reactions}
@@ -2508,102 +2388,6 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   disabled={!holdReasonDraft.trim()}
                 >
                   Confirm On Hold
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Submit for Approval Modal Dialog */}
-      {isApprovalModalOpen && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(15, 23, 42, 0.55)",
-            backdropFilter: "blur(3px)",
-            zIndex: 10005,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "16px",
-          }}
-          onClick={() => setIsApprovalModalOpen(false)}
-        >
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "12px",
-              width: "480px",
-              maxWidth: "100%",
-              padding: "20px",
-              boxShadow: "0 20px 30px rgba(0,0,0,0.22)",
-              border: "1px solid #ddd6fe",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "20px" }}>📬</span>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#6b21a8" }}>
-                  Submit Task for Approval
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsApprovalModalOpen(false)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  fontSize: "18px",
-                  cursor: "pointer",
-                  color: "#6b21a8",
-                  lineHeight: 1,
-                  padding: "4px",
-                }}
-                title="Close"
-              >
-                ✕
-              </button>
-            </div>
-            <p style={{ fontSize: "12.5px", color: "#6b21a8", margin: "0 0 14px" }}>
-              Submit this task for manager sign-off. The status will update to PENDING_APPROVAL and the manager will be alerted.
-            </p>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                  Notes / Summary for Approver
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="e.g. All deliverables completed, tested and verified. Ready for sign-off."
-                  value={approvalNotes}
-                  onChange={(e) => setApprovalNotes(e.target.value)}
-                  style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "6px" }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setIsApprovalModalOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ background: "#7c3aed", borderColor: "#6d28d9" }}
-                  onClick={handleSubmitApproval}
-                  disabled={actioningApproval}
-                >
-                  {actioningApproval ? "Submitting..." : "Submit for Approval"}
                 </button>
               </div>
             </div>

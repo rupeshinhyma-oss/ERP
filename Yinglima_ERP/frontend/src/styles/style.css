@@ -236,6 +236,25 @@ svg {
   opacity: 1;
 }
 
+.nav-item.active-parent {
+  color: #0061f2;
+  font-weight: 600;
+}
+
+.nav-item.active-parent svg {
+  color: #0061f2;
+  opacity: 1;
+}
+
+.nav-sub-item:hover {
+  background: #eff6ff !important;
+  color: #0061f2 !important;
+}
+
+.sidebar.collapsed .nav-sub-items {
+  display: none !important;
+}
+
 .nav-item .nav-badge {
   margin-left: auto;
   background: rgba(255, 255, 255, 0.15);
@@ -954,6 +973,28 @@ select::-ms-expand {
   height: auto;
   max-height: calc(90vh - 60px);
   overflow-y: auto;
+}
+
+.modal-dialog-card form > :not(.form-actions):not(.modal-footer) {
+  flex: none;
+  min-height: auto;
+  overflow: visible;
+}
+
+.modal-dialog-card.modal-overflow-visible {
+  overflow: visible !important;
+}
+
+.modal-dialog-card.modal-overflow-visible form {
+  overflow: visible !important;
+  max-height: none !important;
+}
+
+.modal-dialog-card.modal-overflow-visible form > :not(.form-actions):not(.modal-footer),
+.modal-dialog-card.modal-overflow-visible form > * {
+  overflow: visible !important;
+  flex: none !important;
+  min-height: auto !important;
 }
 
 /* ==========================================================================

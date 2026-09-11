@@ -34,24 +34,48 @@ from app.suppliers.models import Supplier
 router = APIRouter(prefix="/public/rfq", tags=["Public Supplier RFQ"])
 
 
-def generate_rfq_token(rfq_id: uuid.UUID, item_id: uuid.UUID, supplier_id: uuid.UUID) -> str:
-    """Generate a clean, compact URL slug for supplier's private quotation submission."""
-    return f"{rfq_id.hex}_{supplier_id.hex}"
+from app.common.rate_limit import enforce_rate_limit, public_rfq_limiter
+
+DEFAULT_RFQ_TOKEN_EXPIRE_DAYS = 7
+RFQ_TOKEN_AUDIENCE = "rfq_portal"
+RFQ_TOKEN_ISSUER = "inhyma_erp"
+RFQ_TOKEN_PURPOSE = "supplier_rfq"
+
+
+def generate_rfq_token(
+    rfq_id: uuid.UUID,
+    item_id: uuid.UUID,
+    supplier_id: uuid.UUID,
+    expires_in_days: int = DEFAULT_RFQ_TOKEN_EXPIRE_DAYS,
+) -> str:
+    """Generate a cryptographically signed token for supplier's private quotation submission."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": RFQ_TOKEN_PURPOSE,
+        "aud": RFQ_TOKEN_AUDIENCE,
+        "iss": RFQ_TOKEN_ISSUER,
+        "rfq_id": str(rfq_id),
+        "item_id": str(item_id) if item_id else None,
+        "supplier_id": str(supplier_id),
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=expires_in_days)).timestamp()),
+        "jti": uuid.uuid4().hex,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
 
 
 def decode_rfq_token(token: str) -> dict[str, Any]:
-    """Decode and validate a supplier RFQ token (supports clean short token and JWT)."""
+    """Decode and validate a supplier RFQ token with signature, audience, and expiry verification."""
     clean_token = token.strip()
-
-    # 1. Compact format: rfq_hex_supplier_hex
-    if "_" in clean_token:
+    # Compact slug fallback: rfq_hex_supplier_hex
+    if "_" in clean_token and not clean_token.startswith("ey"):
         parts = clean_token.split("_")
         if len(parts) == 2:
             try:
                 rfq_uuid = uuid.UUID(parts[0])
                 supplier_uuid = uuid.UUID(parts[1])
                 return {
-                    "sub": "supplier_rfq",
+                    "sub": RFQ_TOKEN_PURPOSE,
                     "rfq_id": str(rfq_uuid),
                     "supplier_id": str(supplier_uuid),
                     "item_id": None,
@@ -59,25 +83,47 @@ def decode_rfq_token(token: str) -> dict[str, Any]:
             except Exception:
                 pass
 
-    # 2. Standard JWT token format
     try:
         payload = jwt.decode(
             clean_token,
             settings.JWT_SECRET_KEY,
             algorithms=["HS256"],
+            audience=RFQ_TOKEN_AUDIENCE,
+            issuer=RFQ_TOKEN_ISSUER,
+            options={
+                "require": ["exp", "sub", "aud", "iss", "rfq_id", "supplier_id"],
+                "verify_exp": True,
+                "verify_aud": True,
+                "verify_iss": True,
+            },
         )
-        if payload.get("sub") != "supplier_rfq":
-            raise ValueError("Invalid token subject")
+        if payload.get("sub") != RFQ_TOKEN_PURPOSE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid quotation link token purpose.",
+            )
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="This Request for Quotation link has expired.",
         )
-    except Exception as e:
+    except (jwt.InvalidAudienceError, jwt.InvalidIssuerError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid quotation link token: {e}",
+            detail="Invalid quotation link audience or issuer.",
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or forged quotation link token.",
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid quotation link token.",
         )
 
 
@@ -97,6 +143,7 @@ async def get_public_rfq_details(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Fetch public RFQ details for the supplier to review product requirements."""
+    enforce_rate_limit(public_rfq_limiter, request, key_suffix=token[:16])
     token_data = decode_rfq_token(token)
     rfq_id = uuid.UUID(token_data["rfq_id"])
     supplier_id = uuid.UUID(token_data["supplier_id"])
@@ -141,7 +188,7 @@ async def get_public_rfq_details(
     if inquiry and inquiry.buyer_id:
         buyer = (await db.execute(select(Buyer).where(Buyer.id == inquiry.buyer_id))).scalar_one_or_none()
         if buyer:
-            buyer_name = buyer.company_name or buyer.name or "Buyer Company"
+            buyer_name = buyer.company_name or "Buyer Company"
 
     # Check if a quote was already submitted by this supplier for this item
     existing_quote_stmt = select(Quotation).where(
@@ -159,7 +206,7 @@ async def get_public_rfq_details(
         "buyer_company_name": buyer_name,
         "product_name": product_name,
         "product_code": product_code,
-        "quantity": float(item.quantity),
+        "quantity": float(item.quantity) if item.quantity is not None else 1.0,
         "uom_name": uom_name,
         "brand_preference": item.brand_preference,
         "product_specs_remarks": item.product_specs_remarks,
@@ -198,6 +245,7 @@ async def submit_public_rfq_quotation(
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Submit a quotation from the supplier for the specified RFQ."""
+    enforce_rate_limit(public_rfq_limiter, request, key_suffix=token[:16])
     token_data = decode_rfq_token(token)
     rfq_id = uuid.UUID(token_data["rfq_id"])
     supplier_id = uuid.UUID(token_data["supplier_id"])

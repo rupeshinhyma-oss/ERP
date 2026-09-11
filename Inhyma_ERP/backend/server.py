@@ -73,6 +73,22 @@ def _ensure_venv() -> None:
             result = subprocess.run([str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=BACKEND_DIR)
             sys.exit(result.returncode)
 
+    try:
+        import fastapi, uvicorn, alembic  # noqa
+        return
+    except ImportError:
+        pass
+
+    sibling_candidate = (
+        BACKEND_DIR.parent.parent / "Yinglima_ERP" / "backend" / ".venv" / "Scripts" / "python.exe"
+        if sys.platform == "win32"
+        else BACKEND_DIR.parent.parent / "Yinglima_ERP" / "backend" / ".venv" / "bin" / "python"
+    )
+    if sibling_candidate.is_file():
+        print(f"[server.py] Auto-switching to shared virtual environment:\n  {sibling_candidate}\n")
+        result = subprocess.run([str(sibling_candidate), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=BACKEND_DIR)
+        sys.exit(result.returncode)
+
     print(
         "\n[server.py] WARNING: Not running inside an activated virtual environment and no local venv directory found.\n"
         "If you encounter 'No module named ...' errors, create/activate your virtual environment:\n"

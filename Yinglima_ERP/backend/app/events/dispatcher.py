@@ -25,6 +25,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.events.channels import module_channel
 from app.events.manager import ConnectionManager, connection_manager
@@ -146,8 +147,40 @@ class EventDispatcher:
         failure the caller's route needs to see (it means the write
         itself may not be durable), so it propagates normally, exactly
         as an explicit ``db.commit()`` call anywhere else in a route
+        Like :meth:`publish`, this never raises for a delivery failure
+        -- see that method's own docstring. The ``session.commit()``
+        call, however, is NOT swallowed: a failed commit is a real
+        failure the caller's route needs to see (it means the write
+        itself may not be durable), so it propagates normally, exactly
+        as an explicit ``db.commit()`` call anywhere else in a route
         would.
+
+        Phase 4 pilot: when ``settings.DURABLE_EVENTS_ENABLED`` is true
+        (Section 59's feature flag), a durable event row is written via
+        ``session`` BEFORE ``session.commit()`` below, so the durable
+        record and the business write it describes commit or roll back
+        together atomically (Section 10). This is conditional on the
+        flag so the pilot can be reverted by flipping one setting, with
+        zero change to any of this function's existing call sites. A
+        failure while writing the durable event never blocks the
+        business transaction -- see the try/except below.
         """
+        if settings.DURABLE_EVENTS_ENABLED:
+            try:
+                from app.durable_events.service import DurableEventService
+
+                await DurableEventService(session).publish_durable_event(
+                    event_type=event_type,
+                    source=settings.ERP_KEY,
+                    entity=entity,
+                    entity_id=str(entity_id),
+                    entity_version=version,
+                    payload=changes,
+                    user_id=str(user_id),
+                )
+            except Exception:  # noqa: BLE001 - durability is additive; a failure here must never block the business write itself
+                logger.exception("Failed to write durable event alongside lifecycle event; business write still proceeds.")
+
         await session.commit()
         event = Event(
             event_type=event_type,

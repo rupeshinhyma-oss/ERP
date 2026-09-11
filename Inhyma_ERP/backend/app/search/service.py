@@ -101,6 +101,13 @@ def _not_deleted(model: Type) -> ColumnElement[bool] | bool:
     return True
 
 
+def escape_like_wildcards(val: str) -> str:
+    """
+    Escape SQL LIKE/ILIKE wildcards (%, _, \\).
+    """
+    return val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchResponse:
     """
     Search across all database entities for matching keywords.
@@ -111,7 +118,8 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
     if not clean_q:
         return UniversalSearchResponse(query="", total_hits=0, results=[])
 
-    pattern = f"%{clean_q}%"
+    escaped_q = escape_like_wildcards(clean_q)
+    pattern = f"%{escaped_q}%"
     results: List[SearchResultItem] = []
 
     # 1. Organization / Company Profile

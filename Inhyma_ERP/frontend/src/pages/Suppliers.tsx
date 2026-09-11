@@ -1232,7 +1232,10 @@ export function SuppliersPage() {
         if (cancelled) return;
         setRows([]);
         setError(err);
-        setLoading(false);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     })();
     return () => {
@@ -1264,6 +1267,21 @@ export function SuppliersPage() {
   }, [loading, rows]);
 
   const reload = () => setReloadCounter((n) => n + 1);
+
+  /* --- bfcache restoration handler --- */
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        // Page was restored from Back-Forward Cache (bfcache).
+        // Trigger a fresh list reload so table data is refreshed and loading skeleton is cleared.
+        reload();
+      }
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, []);
 
   /**
    * Live sync (Phase 9): Suppliers list receives real-time updates from
