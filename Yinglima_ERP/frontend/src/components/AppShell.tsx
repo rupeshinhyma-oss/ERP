@@ -29,6 +29,7 @@ import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/
 import { ICONS, IconBell, IconChevronDown, IconChevronRight } from "./icons";
 import { UniversalSearch } from "./UniversalSearch";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
+import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ErrorBanner } from "./ui";
 import type { Profile } from "@/types";
 
@@ -1027,8 +1028,29 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     window.location.reload();
   }, []);
 
+  useEffect(() => {
+    if (!loggedIn && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover")) {
+      processIncomingSsoHandover().then((ok) => {
+        if (ok) {
+          window.location.reload();
+        }
+      });
+    }
+  }, [loggedIn]);
+
+  const hasSsoHandover = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover");
   if (!loggedIn) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    if (hasSsoHandover) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ width: 36, height: 36, margin: "0 auto 16px", border: "3px solid #e2e8f0", borderTopColor: "#0284c7", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Authorizing Super Admin Single Sign-On...</div>
+          </div>
+        </div>
+      );
+    }
+    return <Navigate to={`/login${location.search}`} replace state={{ from: location.pathname }} />;
   }
 
   const navItem = NAV_ITEMS_BY_KEY[activeKey];
