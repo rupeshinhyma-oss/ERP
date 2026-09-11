@@ -41,9 +41,6 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "ERPS",
     items: [
       { key: "erp-switcher", label: "ERP Switcher", path: "/erps/switcher", icon: "layers" },
-      { key: "erp-registry", label: "ERP Registry", path: "/erps/registry", icon: "server" },
-      { key: "erp-instances", label: "ERP Instances", path: "/erps/instances", icon: "cpu" },
-      { key: "erp-modules", label: "ERP Modules", path: "/erps/modules", icon: "package" },
     ],
   },
   {
@@ -132,12 +129,9 @@ export const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "ERP Ecosystem Dashboard",
   
   // ERPs
-  "/erps": "ERP Registry",
-  "/erps/registry": "ERP Registry",
-  "/erps/switcher": "ERP Switcher (Authorized ERPs)",
-  "/my-erps": "ERP Switcher (Authorized ERPs)",
-  "/erps/instances": "ERP Runtime Instances",
-  "/erps/modules": "ERP Module Catalog",
+  "/erps": "ERP Switcher",
+  "/erps/switcher": "ERP Switcher",
+  "/my-erps": "ERP Switcher",
   
   // Users & Access
   "/access": "Users & Access Control",

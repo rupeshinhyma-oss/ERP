@@ -55,9 +55,9 @@ describe("8 Primary Navigation Sections Specification", () => {
   });
 
   it("verifies ERPs section tabs and paths", () => {
-    expect(ERP_SECTION_TABS).toHaveLength(4);
+    expect(ERP_SECTION_TABS).toHaveLength(1);
     const keys = ERP_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual(["erp-switcher", "erp-registry", "erp-instances", "erp-modules"]);
+    expect(keys).toEqual(["erp-switcher"]);
   });
 
   it("verifies Users & Access section tabs and paths", () => {
@@ -128,17 +128,17 @@ describe("8 Primary Navigation Sections Specification", () => {
   it("renders SectionNavTabs properly with active indicator", () => {
     render(
       <MemoryRouter>
-        <SectionNavTabs items={ERP_SECTION_TABS} activeKey="erp-instances" />
+        <SectionNavTabs items={ORG_SECTION_TABS} activeKey="departments" />
       </MemoryRouter>
     );
 
-    expect(screen.getByText("ERP Switcher")).toBeDefined();
-    expect(screen.getByText("ERP Registry")).toBeDefined();
-    expect(screen.getByText("ERP Instances")).toBeDefined();
-    expect(screen.getByText("ERP Modules")).toBeDefined();
+    expect(screen.getByText("Companies")).toBeDefined();
+    expect(screen.getByText("Organizations")).toBeDefined();
+    expect(screen.getByText("Departments")).toBeDefined();
+    expect(screen.getByText("Business Units")).toBeDefined();
 
-    const instancesLink = screen.getByRole("link", { name: /ERP Instances/i });
-    expect(instancesLink.getAttribute("href")).toBe("/erps/instances");
+    const deptsLink = screen.getByRole("link", { name: /Departments/i });
+    expect(deptsLink.getAttribute("href")).toBe("/organizations/departments");
   });
 
   it("renders AppShell with search button and slash shortcut indicator", () => {
@@ -159,7 +159,7 @@ describe("8 Primary Navigation Sections Specification", () => {
     const icons = allItems.map((item) => item.icon);
     const uniqueIcons = new Set(icons);
 
-    expect(allItems.length).toBe(39);
+    expect(allItems.length).toBe(36);
     expect(uniqueIcons.size).toBe(allItems.length);
   });
 });

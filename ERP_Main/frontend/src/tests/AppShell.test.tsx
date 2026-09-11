@@ -44,7 +44,7 @@ describe("AppShell Component", () => {
     expect(screen.getByText("Protected Dashboard Content")).toBeDefined();
     expect(screen.getAllByText("ERP Dashboard").length).toBeGreaterThan(0);
     expect(screen.getByText("Global Control Panel")).toBeDefined();
-    expect(screen.getByText("ERP Registry")).toBeDefined();
+    expect(screen.getByText("ERP Switcher")).toBeDefined();
     expect(screen.getByText("Global Users")).toBeDefined();
     expect(screen.getByText("ERP Memberships")).toBeDefined();
     expect(screen.getByText("Access Policies")).toBeDefined();

@@ -10,17 +10,9 @@ import { Link } from "react-router-dom";
 import { apiGet } from "@/lib/api";
 import { useGlobalSession } from "@/lib/session";
 import { AppShell } from "@/components/AppShell";
-import { SectionNavTabs } from "@/components/SectionNavTabs";
 import { StatusBadge, Banner, EmptyState, SkeletonFleetGrid } from "@/components/ui";
 import { ICONS } from "@/components/icons";
 import type { ErpInstance, ErpMembership } from "@/types";
-
-const ERP_TABS = [
-  { key: "switcher", label: "ERP Switcher", path: "/erps/switcher", icon: "layers" as const },
-  { key: "registry", label: "ERP Registry", path: "/erps/registry", icon: "server" as const },
-  { key: "instances", label: "ERP Instances", path: "/erps/instances", icon: "cpu" as const },
-  { key: "modules", label: "ERP Modules", path: "/erps/modules", icon: "sliders" as const },
-];
 
 /**
  * Fallback host URL resolver if base_url is unset in database.
@@ -128,8 +120,6 @@ export function ErpLauncher() {
       pageTitle="ERP Switcher"
       breadcrumbs={["ERP Management", "ERP Switcher"]}
     >
-      <SectionNavTabs items={ERP_TABS} activeKey="switcher" />
-
       <Banner error={error} />
 
       <div style={{ marginBottom: "24px" }}>

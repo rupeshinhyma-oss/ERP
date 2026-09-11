@@ -75,14 +75,14 @@ export function App() {
           <Route path="/dashboard" element={<Dashboard />} />
 
           {/* Section 2: ERPs */}
-          <Route path="/erps" element={<ErpRegistry />} />
-          <Route path="/erps/registry" element={<Navigate to="/erps" replace />} />
+          <Route path="/erps" element={<Navigate to="/erps/switcher" replace />} />
           <Route path="/erps/switcher" element={<ErpLauncher />} />
           <Route path="/erps/launcher" element={<Navigate to="/erps/switcher" replace />} />
           <Route path="/my-erps" element={<Navigate to="/erps/switcher" replace />} />
           <Route path="/launcher" element={<Navigate to="/erps/switcher" replace />} />
-          <Route path="/erps/instances" element={<ErpInstances />} />
-          <Route path="/erps/modules" element={<ErpModules />} />
+          <Route path="/erps/registry" element={<Navigate to="/erps/switcher" replace />} />
+          <Route path="/erps/instances" element={<Navigate to="/erps/switcher" replace />} />
+          <Route path="/erps/modules" element={<Navigate to="/erps/switcher" replace />} />
           <Route path="/erps/:id" element={<ErpDetail />} />
 
           {/* Section 3: Users & Access */}
