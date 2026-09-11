@@ -9,7 +9,7 @@ export default defineConfig({
   },
   server: {
     host: "0.0.0.0",
-    port: Number(process.env.VITE_PORT) || 5174,
+    port: Number(process.env.VITE_PORT) || 5170,
     // ERP_Main backend runs separately (default http://localhost:8000). Requests to
     // /api are proxied so browser calls /api/v1/... seamlessly without CORS friction.
     proxy: {
