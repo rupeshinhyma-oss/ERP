@@ -57,6 +57,10 @@ export const Auth = {
     return localStorage.getItem(SESSION_ID_KEY);
   },
 
+  setSessionId(sessionId: string): void {
+    localStorage.setItem(SESSION_ID_KEY, sessionId);
+  },
+
   setSession(tokens: TokenPair, profile?: Profile, sessionId?: string): void {
     localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
     localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);

@@ -11,7 +11,6 @@ import { apiPost } from "./api";
 import {
   getEcosystemCookie,
   setEcosystemCookie,
-  verifyCentralEcosystemSession,
   type EcosystemSessionData,
 } from "./ecosystemSession";
 import type { TokenPair } from "@/types";

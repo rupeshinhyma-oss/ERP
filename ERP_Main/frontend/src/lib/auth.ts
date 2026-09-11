@@ -53,6 +53,10 @@ export const Auth = {
     return localStorage.getItem(SESSION_ID_KEY);
   },
 
+  setSessionId(sessionId: string): void {
+    localStorage.setItem(SESSION_ID_KEY, sessionId);
+  },
+
   getExpiresAt(): Date | null {
     const raw = localStorage.getItem(EXPIRES_AT_KEY);
     if (!raw) return null;
