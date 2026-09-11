@@ -18,6 +18,7 @@ import type { Profile, TokenPair } from "@/types";
 const ACCESS_TOKEN_KEY = "erp_access_token";
 const REFRESH_TOKEN_KEY = "erp_refresh_token";
 const PROFILE_KEY = "erp_profile";
+const SESSION_ID_KEY = "erp_session_id";
 
 type Listener = (profile: Profile | null) => void;
 
@@ -52,9 +53,16 @@ export const Auth = {
     }
   },
 
-  setSession(tokens: TokenPair, profile?: Profile): void {
+  getSessionId(): string | null {
+    return localStorage.getItem(SESSION_ID_KEY);
+  },
+
+  setSession(tokens: TokenPair, profile?: Profile, sessionId?: string): void {
     localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
     localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+    if (sessionId) {
+      localStorage.setItem(SESSION_ID_KEY, sessionId);
+    }
     if (profile) {
       this.updateProfile(profile);
     }
@@ -73,6 +81,7 @@ export const Auth = {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(PROFILE_KEY);
+    localStorage.removeItem(SESSION_ID_KEY);
     notify(null);
   },
 

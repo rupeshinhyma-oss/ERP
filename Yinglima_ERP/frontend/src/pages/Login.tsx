@@ -52,6 +52,8 @@ function LoginIllustration() {
 
 const BRAND_CACHE_KEY = "erp_brand_name";
 
+import { establishCentralEcosystemSession } from "@/lib/ecosystemSession";
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [brand, setBrand] = useState(() => {
@@ -122,11 +124,20 @@ export function LoginPage() {
         password,
       });
 
+      // 2. Establish / sync unified Ecosystem Session
+      const email = identifier.trim().includes("@") ? identifier.trim() : `${identifier.trim()}@example.com`;
+      const ecosystemSession = await establishCentralEcosystemSession({
+        email,
+        password,
+        source_erp: "yinglima",
+      });
+      const sessionId = ecosystemSession?.session_id || `ihm-sess-${Date.now()}`;
+
       if (tokens.user) {
-        Auth.setSession(tokens, tokens.user);
+        Auth.setSession(tokens, tokens.user, sessionId);
       } else {
         // Fallback for legacy responses missing user profile
-        Auth.setSession(tokens);
+        Auth.setSession(tokens, undefined, sessionId);
         try {
           const { data: profile } = await apiGet<Profile>("/auth/profile");
           Auth.updateProfile(profile);

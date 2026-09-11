@@ -23,6 +23,7 @@ import {
   PAGE_TITLES,
 } from "@/lib/nav";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
+import { globalEcosystemLogout } from "@/lib/ecosystemSession";
 import { Breadcrumb } from "./Breadcrumb";
 import { ICONS, IconBell } from "./icons";
 import type { PlatformAdmin } from "@/types";
@@ -106,12 +107,14 @@ export function AppShell({
   usePageTitle(currentTitle);
 
   const handleLogout = useCallback(() => {
+    const sid = Auth.getSessionId() || undefined;
+    globalEcosystemLogout(sid);
     Auth.clear();
     navigate("/login");
   }, [navigate]);
 
   useEffect(() => {
-    if (!isLoggedIn && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover")) {
+    if (!isLoggedIn) {
       processIncomingSsoHandover().then((ok) => {
         if (ok) {
           window.location.reload();

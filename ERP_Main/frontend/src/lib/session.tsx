@@ -9,6 +9,11 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "./api";
 import { Auth, type CurrentUser } from "./auth";
+import {
+  establishCentralEcosystemSession,
+  globalEcosystemLogout,
+  initEcosystemSessionWatcher,
+} from "./ecosystemSession";
 import type {
   ErpMembership,
   GlobalLoginResponse,
@@ -117,12 +122,20 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
         const loginData = (res as { data?: GlobalLoginResponse })?.data || res;
 
         if (loginData?.access_token) {
+          const ecosystem = await establishCentralEcosystemSession({
+            email,
+            password,
+            source_erp: "control-plane",
+            existing_session_id: loginData.session_id,
+          });
+          const unifiedSessionId = ecosystem?.session_id || loginData.session_id;
+
           Auth.setSession(
             loginData.access_token,
             undefined,
             "global_user",
             loginData.expires_at,
-            loginData.session_id
+            unifiedSessionId
           );
 
           // Fetch Global User profile
@@ -159,7 +172,14 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
           const adminTokens = (res as { data?: TokenPair })?.data || res;
 
           if (adminTokens?.access_token) {
-            Auth.setSession(adminTokens.access_token, undefined, "platform_admin", adminTokens.expires_at);
+            const ecosystem = await establishCentralEcosystemSession({
+              email,
+              password,
+              source_erp: "control-plane",
+            });
+            const unifiedSessionId = ecosystem?.session_id || `ihm-sess-${Date.now()}`;
+
+            Auth.setSession(adminTokens.access_token, undefined, "platform_admin", adminTokens.expires_at, unifiedSessionId);
 
             // Fetch Platform Admin profile
             const resProfile = await apiGet<PlatformAdmin>("/global/auth/me");
@@ -181,6 +201,7 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
 
   // Global logout: revokes backend session and clears client storage
   const logout = useCallback(async () => {
+    const sid = Auth.getSessionId() || undefined;
     try {
       if (Auth.getPrincipalType() === "global_user" && Auth.isLoggedIn()) {
         await apiPost("/global/user-auth/logout", {});
@@ -188,6 +209,7 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
     } catch {
       /* ignore server error during logout */
     } finally {
+      await globalEcosystemLogout(sid);
       Auth.clear();
       setCurrentUser(null);
       setUserType(null);
@@ -195,6 +217,18 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
       setSessionExpired(false);
       navigate("/login", { replace: true });
     }
+  }, [navigate]);
+
+  // Listen for ecosystem-wide session revocation (logout in another ERP)
+  useEffect(() => {
+    const cleanup = initEcosystemSessionWatcher(Auth.getSessionId(), () => {
+      Auth.clear();
+      setCurrentUser(null);
+      setUserType(null);
+      setMemberships([]);
+      navigate("/login", { replace: true });
+    });
+    return cleanup;
   }, [navigate]);
 
   const dismissExpiredModal = useCallback(() => {

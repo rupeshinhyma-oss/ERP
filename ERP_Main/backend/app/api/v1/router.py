@@ -23,6 +23,7 @@ from app.federation.routes import discovery_router as federation_discovery_route
 from app.federation.routes import flow_router as federation_flow_router
 from app.global_audit.routes import router as global_audit_router
 from app.global_auth.routes import router as global_auth_router
+from app.global_auth.ecosystem_session import router as ecosystem_session_router
 from app.global_users.routes import router as global_users_router
 from app.health.routes import router as health_router
 from app.identity_linking.routes import identity_router, user_provision_router
@@ -39,6 +40,7 @@ api_router = APIRouter()
 api_router.include_router(health_router)
 api_router.include_router(platform_auth_router)
 api_router.include_router(global_auth_router)
+api_router.include_router(ecosystem_session_router)
 api_router.include_router(erp_registry_router)
 api_router.include_router(service_identity_router)
 api_router.include_router(global_users_router)

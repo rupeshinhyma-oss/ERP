@@ -31,6 +31,7 @@ import { ICONS, IconBell } from "./icons";
 import { UniversalSearch } from "./UniversalSearch";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
+import { globalEcosystemLogout, initEcosystemSessionWatcher } from "@/lib/ecosystemSession";
 import { ErrorBanner } from "./ui";
 import type { Profile } from "@/types";
 import { tasksApi } from "@/lib/tasksApi";
@@ -1014,8 +1015,10 @@ function Topbar() {
     setProfileOpen(false);
     const refreshToken = Auth.getRefreshToken();
     const accessToken = Auth.getAccessToken();
+    const sessionId = Auth.getSessionId() || undefined;
 
-    // 1. Immediately clear local session and transition to login (0ms perceived lag)
+    // 1. Immediately revoke ecosystem session globally and clear local state (0ms perceived lag)
+    globalEcosystemLogout(sessionId);
     Auth.clear();
     navigate("/login", { replace: true });
 
@@ -1355,8 +1358,18 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     window.location.reload();
   }, []);
 
+  // Synchronize remote logout across all ERPs in real-time
   useEffect(() => {
-    if (!loggedIn && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover")) {
+    if (!loggedIn) return;
+    const cleanup = initEcosystemSessionWatcher(Auth.getSessionId(), () => {
+      Auth.clear();
+      navigate("/login", { replace: true });
+    });
+    return cleanup;
+  }, [loggedIn, navigate]);
+
+  useEffect(() => {
+    if (!loggedIn) {
       processIncomingSsoHandover().then((ok) => {
         if (ok) {
           window.location.reload();

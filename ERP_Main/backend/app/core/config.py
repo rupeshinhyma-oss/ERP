@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     # rely on that alone: `validate_production_secrets()` also refuses to
     # boot in production with the literal "*" origin configured.
     # -------------------------------------------------------------------
-    CORS_ALLOWED_ORIGINS: str = "http://localhost:5173"
+    CORS_ALLOWED_ORIGINS: str = "http://localhost:5170,http://localhost:5173,http://localhost:5174,http://localhost:5175"
     CORS_ALLOW_CREDENTIALS: bool = True
     ALLOW_LOCAL_URLS: bool = False
 
