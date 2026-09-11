@@ -69,12 +69,13 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
 
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("sso_handover");
-  const cookieSession = getEcosystemCookie();
+  const isExplicitLogout = typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true";
 
-  let targetSessionId = cookieSession?.session_id;
-  let targetRole = cookieSession?.role || "super_admin";
-  let targetEmail = cookieSession?.email || "admin@example.com";
-  let allowedErps = cookieSession?.allowed_erps || ["*"];
+  let hasValidToken = false;
+  let targetSessionId: string | undefined;
+  let targetRole: "super_admin" | "admin" | "global_user" = "super_admin";
+  let targetEmail = "admin@example.com";
+  let allowedErps = ["*"];
 
   // 1. Process URL token if present
   if (token) {
@@ -83,6 +84,10 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
       const payload: SsoHandoverPayload = JSON.parse(json);
 
       if (payload.sig === SSO_SIGNATURE && Date.now() - payload.ts < SSO_VALIDITY_WINDOW_MS) {
+        hasValidToken = true;
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.removeItem("ihm_explicit_logout");
+        }
         if (payload.session_id) targetSessionId = payload.session_id;
         if (payload.role) targetRole = payload.role;
         if (payload.email) targetEmail = payload.email;
@@ -98,41 +103,29 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
     }
   }
 
-  // 2. Establish local session in ERP_Main if not already authenticated
-  if (!Auth.isLoggedIn()) {
-    try {
-      const res = await apiPost<TokenPair>("/global/auth/login", {
-        email: "admin@example.com",
-        password: "ChangeMe!12345",
-      });
+  // If user explicitly logged out and no new SSO token was provided in the URL, DO NOT auto-login
+  if (isExplicitLogout && !hasValidToken) {
+    return false;
+  }
 
-      const tokenData = (res as { data?: TokenPair })?.data || res;
-      if (tokenData?.access_token) {
-        const finalSessionId = targetSessionId || `ihm-sess-${Date.now()}`;
-        try {
-          const profileRes = await apiGet<PlatformAdmin>("/global/auth/me");
-          const profile = (profileRes as { data?: PlatformAdmin })?.data || profileRes;
-          Auth.setSession(tokenData.access_token, profile, "platform_admin", tokenData.expires_at, finalSessionId);
-        } catch {
-          Auth.setSession(tokenData.access_token, undefined, "platform_admin", tokenData.expires_at, finalSessionId);
-        }
+  const cookieSession = getEcosystemCookie();
+  const hasValidCookie = Boolean(cookieSession?.session_id);
 
-        // Sync cookie
-        const sessionData: EcosystemSessionData = {
-          session_id: finalSessionId,
-          email: targetEmail,
-          display_name: "Platform Super Admin",
-          role: targetRole,
-          user_type: "platform_admin",
-          allowed_erps: allowedErps,
-        };
-        setEcosystemCookie(sessionData);
-        return true;
-      }
-    } catch (err) {
-      console.warn("Auto-login in ERP_Main failed:", err);
-    }
-  } else {
+  if (!hasValidToken && !hasValidCookie) {
+    // Neither an incoming handover ticket nor an active ecosystem session cookie exists:
+    // DO NOT auto-login. Remain on the login page.
+    return false;
+  }
+
+  if (!hasValidToken && cookieSession) {
+    targetSessionId = cookieSession.session_id;
+    targetRole = cookieSession.role || "super_admin";
+    targetEmail = cookieSession.email || "admin@example.com";
+    allowedErps = cookieSession.allowed_erps || ["*"];
+  }
+
+  // 2. If already logged in locally, ensure session_id is aligned
+  if (Auth.isLoggedIn()) {
     if (targetSessionId && !Auth.getSessionId()) {
       const currentProfile = Auth.getProfile();
       const currentToken = Auth.getAccessToken();
@@ -141,6 +134,40 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
       }
     }
     return true;
+  }
+
+  // 3. Establish local session in ERP_Main via auto-login with valid SSO credentials
+  try {
+    const res = await apiPost<TokenPair>("/global/auth/login", {
+      email: "admin@example.com",
+      password: "ChangeMe!12345",
+    });
+
+    const tokenData = (res as { data?: TokenPair })?.data || res;
+    if (tokenData?.access_token) {
+      const finalSessionId = targetSessionId || `ihm-sess-${Date.now()}`;
+      try {
+        const profileRes = await apiGet<PlatformAdmin>("/global/auth/me");
+        const profile = (profileRes as { data?: PlatformAdmin })?.data || profileRes;
+        Auth.setSession(tokenData.access_token, profile, "platform_admin", tokenData.expires_at, finalSessionId);
+      } catch {
+        Auth.setSession(tokenData.access_token, undefined, "platform_admin", tokenData.expires_at, finalSessionId);
+      }
+
+      // Sync cookie
+      const sessionData: EcosystemSessionData = {
+        session_id: finalSessionId,
+        email: targetEmail,
+        display_name: "Platform Super Admin",
+        role: targetRole,
+        user_type: "platform_admin",
+        allowed_erps: allowedErps,
+      };
+      setEcosystemCookie(sessionData);
+      return true;
+    }
+  } catch (err) {
+    console.warn("Auto-login in ERP_Main failed:", err);
   }
 
   return false;

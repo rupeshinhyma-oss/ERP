@@ -114,6 +114,11 @@ export function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!identifier.trim() || !password) return;
+
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("ihm_explicit_logout");
+    }
+
     setError(null);
     setSubmitting(true);
 

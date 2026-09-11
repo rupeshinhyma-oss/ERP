@@ -77,12 +77,13 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
 
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("sso_handover");
-  const cookieSession = getEcosystemCookie();
+  const isExplicitLogout = typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true";
 
-  let targetSessionId = cookieSession?.session_id;
-  let targetRole = cookieSession?.role || "super_admin";
-  let targetEmail = cookieSession?.email || "admin@example.com";
-  let allowedErps = cookieSession?.allowed_erps || ["*"];
+  let hasValidToken = false;
+  let targetSessionId: string | undefined;
+  let targetRole: "super_admin" | "admin" | "global_user" = "super_admin";
+  let targetEmail = "admin@example.com";
+  let allowedErps = ["*"];
 
   // 1. Process URL Token if present
   if (token) {
@@ -91,6 +92,10 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
       const payload: SsoHandoverPayload = JSON.parse(json);
 
       if (payload.sig === SSO_SIGNATURE && Date.now() - payload.ts < SSO_VALIDITY_WINDOW_MS) {
+        hasValidToken = true;
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.removeItem("ihm_explicit_logout");
+        }
         if (payload.session_id) {
           targetSessionId = payload.session_id;
         }
@@ -114,6 +119,27 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
     }
   }
 
+  // If user explicitly logged out and no new SSO token was provided in the URL, DO NOT auto-login
+  if (isExplicitLogout && !hasValidToken) {
+    return false;
+  }
+
+  const cookieSession = getEcosystemCookie();
+  const hasValidCookie = Boolean(cookieSession?.session_id);
+
+  if (!hasValidToken && !hasValidCookie) {
+    // Neither an incoming handover ticket nor an active ecosystem session cookie exists:
+    // DO NOT auto-login. Remain on the login page.
+    return false;
+  }
+
+  if (!hasValidToken && cookieSession) {
+    targetSessionId = cookieSession.session_id;
+    targetRole = cookieSession.role || "super_admin";
+    targetEmail = cookieSession.email || "admin@example.com";
+    allowedErps = cookieSession.allowed_erps || ["*"];
+  }
+
   // 2. Check if user has permission to access Inhyma ERP
   const hasAccess =
     targetRole === "super_admin" ||
@@ -125,39 +151,39 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
     return false;
   }
 
-  // 3. Establish or hydrate local session if not already logged in
-  if (!Auth.isLoggedIn()) {
-    try {
-      const { data: tokens } = await apiPost<TokenPair>("/auth/login", {
-        identifier: "admin",
-        password: "ChangeMe!12345",
-      });
-
-      if (tokens?.access_token) {
-        const finalSessionId = targetSessionId || `ihm-sess-${Date.now()}`;
-        Auth.setSession(tokens, tokens.user, finalSessionId);
-
-        // Sync cookie
-        const sessionData: EcosystemSessionData = {
-          session_id: finalSessionId,
-          email: targetEmail,
-          display_name: tokens.user?.username || "Admin",
-          role: targetRole,
-          user_type: targetRole === "super_admin" ? "platform_admin" : "global_user",
-          allowed_erps: allowedErps,
-        };
-        setEcosystemCookie(sessionData);
-        return true;
-      }
-    } catch (err) {
-      console.warn("Auto-login in Inhyma ERP failed:", err);
-    }
-  } else {
+  // 3. Establish or hydrate local session if already logged in or via valid SSO credentials
+  if (Auth.isLoggedIn()) {
     // If already logged in locally, ensure session_id is saved
     if (targetSessionId && !Auth.getSessionId()) {
       Auth.setSessionId(targetSessionId);
     }
     return true;
+  }
+
+  try {
+    const { data: tokens } = await apiPost<TokenPair>("/auth/login", {
+      identifier: "admin",
+      password: "ChangeMe!12345",
+    });
+
+    if (tokens?.access_token) {
+      const finalSessionId = targetSessionId || `ihm-sess-${Date.now()}`;
+      Auth.setSession(tokens, tokens.user, finalSessionId);
+
+      // Sync cookie
+      const sessionData: EcosystemSessionData = {
+        session_id: finalSessionId,
+        email: targetEmail,
+        display_name: tokens.user?.username || "Admin",
+        role: targetRole,
+        user_type: targetRole === "super_admin" ? "platform_admin" : "global_user",
+        allowed_erps: allowedErps,
+      };
+      setEcosystemCookie(sessionData);
+      return true;
+    }
+  } catch (err) {
+    console.warn("Auto-login in Inhyma ERP failed:", err);
   }
 
   return false;

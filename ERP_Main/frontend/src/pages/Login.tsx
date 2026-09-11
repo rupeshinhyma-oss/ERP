@@ -77,6 +77,10 @@ export function Login() {
     e.preventDefault();
     if (!identifier.trim() || !password) return;
 
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("ihm_explicit_logout");
+    }
+
     setError(null);
     setSubmitting(true);
 

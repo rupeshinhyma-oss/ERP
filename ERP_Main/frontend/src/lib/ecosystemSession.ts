@@ -16,6 +16,7 @@ export interface EcosystemSessionData {
   created_at?: string;
   expires_at?: string;
   revoked_at?: string | null;
+  active?: boolean;
 }
 
 const COOKIE_NAME = "ihm_ecosystem_session";
@@ -30,8 +31,10 @@ export const CENTRAL_AUTH_API = "http://localhost:8000/api/v1/global/ecosystem-s
 export function setEcosystemCookie(session: EcosystemSessionData): void {
   if (typeof document === "undefined") return;
   try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("ihm_explicit_logout");
+    }
     const serialized = encodeURIComponent(JSON.stringify(session));
-    // Cookies on localhost are shared across all ports (:5170, :5173, :5174, etc.)
     document.cookie = `${COOKIE_NAME}=${serialized}; path=/; max-age=604800; SameSite=Lax`;
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(session));
   } catch (err) {
@@ -42,6 +45,10 @@ export function setEcosystemCookie(session: EcosystemSessionData): void {
 export function getEcosystemCookie(): EcosystemSessionData | null {
   if (typeof document === "undefined") return null;
   try {
+    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true") {
+      return null;
+    }
+
     // 1. Try reading cookie
     const match = document.cookie
       .split("; ")
@@ -67,7 +74,11 @@ export function getEcosystemCookie(): EcosystemSessionData | null {
 export function clearEcosystemCookie(): void {
   if (typeof document === "undefined") return;
   try {
-    document.cookie = `${COOKIE_NAME}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem("ihm_explicit_logout", "true");
+    }
+    document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    document.cookie = `${COOKIE_NAME}=; path=/; domain=localhost; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
     localStorage.removeItem(LOCAL_STORAGE_KEY);
   } catch (err) {
     console.warn("Could not clear ecosystem session cookie:", err);
@@ -157,7 +168,6 @@ export async function verifyCentralEcosystemSession(sessionId: string): Promise<
     }
     return { active: true, session: data };
   } catch {
-    // If backend unreachable, return active if cookie is fresh
     return { active: true };
   }
 }
@@ -167,6 +177,10 @@ export async function verifyCentralEcosystemSession(sessionId: string): Promise<
  * and notifies all open tabs in all ERP applications.
  */
 export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
+  if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") {
+    sessionStorage.setItem("ihm_explicit_logout", "true");
+  }
+
   const current = getEcosystemCookie();
   const idToRevoke = sessionId || current?.session_id;
 
@@ -202,6 +216,9 @@ export function initEcosystemSessionWatcher(
 
   const handleMessage = (msg: MessageEvent) => {
     if (msg.data?.type === "LOGOUT") {
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.setItem("ihm_explicit_logout", "true");
+      }
       clearEcosystemCookie();
       onSessionRevoked();
     }
@@ -211,11 +228,14 @@ export function initEcosystemSessionWatcher(
     ch.addEventListener("message", handleMessage);
   }
 
-  // Also check on window focus (e.g. user returns to this ERP tab)
   const handleFocus = async () => {
+    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true") {
+      onSessionRevoked();
+      return;
+    }
+
     const cookie = getEcosystemCookie();
     if (!cookie) {
-      // Cookie was cleared in another ERP tab
       onSessionRevoked();
       return;
     }
@@ -231,8 +251,12 @@ export function initEcosystemSessionWatcher(
 
   window.addEventListener("focus", handleFocus);
 
-  // Periodic heartbeat every 15 seconds
   const intervalId = setInterval(async () => {
+    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true") {
+      onSessionRevoked();
+      return;
+    }
+
     if (currentSessionId) {
       const cookie = getEcosystemCookie();
       if (!cookie) {
