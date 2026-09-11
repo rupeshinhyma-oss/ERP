@@ -11,11 +11,14 @@
  */
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { apiGet, apiPost, apiPatch, errorMessage } from "@/lib/api";
 import { useGlobalSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
-import { StatusBadge, LoadingSpinner, Banner, Modal } from "@/components/ui";
+import { SectionNavTabs } from "@/components/SectionNavTabs";
+import { INTEGRATION_SECTION_TABS } from "@/lib/nav";
+import { StatusBadge, LoadingSpinner, SkeletonTable, Banner, Modal } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { ICONS } from "@/components/icons";
 import type {
@@ -36,11 +39,32 @@ export function IntegrationEvents() {
   const canManage = isSuperAdmin || userType === "platform_admin";
   const canReconcile = isSuperAdmin || userType === "platform_admin";
 
+  const location = useLocation();
+
+  const resolveTabFromPath = useCallback((): ActiveTab => {
+    if (location.pathname.includes("/subscriptions")) return "subscriptions";
+    if (location.pathname.includes("/dlq")) return "dead_letters";
+    if (
+      location.pathname.includes("/events") ||
+      location.pathname.includes("/deliveries") ||
+      location.pathname.includes("/failed")
+    )
+      return "events";
+    return "overview";
+  }, [location.pathname]);
+
   // Tab & Data State
-  const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(resolveTabFromPath);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setActiveTab(resolveTabFromPath());
+    if (location.pathname.includes("/failed")) {
+      setStatusFilter("FAILED");
+    }
+  }, [resolveTabFromPath, location.pathname]);
 
   // Core Data
   const [dashboard, setDashboard] = useState<GlobalDashboard | null>(null);
@@ -270,11 +294,44 @@ export function IntegrationEvents() {
 
   const totalEventPages = Math.ceil(inboxEvents.length / pageSize) || 1;
 
+  const sectionKey = useMemo(() => {
+    if (location.pathname.includes("/subscriptions")) return "subscriptions";
+    if (location.pathname.includes("/dlq")) return "dead-letter-queue";
+    if (location.pathname.includes("/deliveries")) return "delivery-status";
+    if (location.pathname.includes("/failed")) return "failed-events";
+    if (location.pathname.includes("/events")) return "integration-events";
+    return "integrations";
+  }, [location.pathname]);
+
+  const pageTitle = useMemo(() => {
+    if (sectionKey === "subscriptions") return "Event Routing Subscriptions";
+    if (sectionKey === "dead-letter-queue") return "Dead Letter Queue & Recovery";
+    if (sectionKey === "delivery-status") return "Event Delivery Lifecycle Status";
+    if (sectionKey === "failed-events") return "Failed Integration Events";
+    if (sectionKey === "integration-events") return "Integration Events Directory";
+    return "ERP Integration Network";
+  }, [sectionKey]);
+
+  const tabItems = useMemo(() => {
+    return INTEGRATION_SECTION_TABS.map((tab) => {
+      if (tab.key === "dead-letter-queue") {
+        return { ...tab, badge: deadLetters.length > 0 ? deadLetters.length : undefined };
+      }
+      if (tab.key === "integration-events") {
+        return { ...tab, badge: inboxEvents.length > 0 ? inboxEvents.length : undefined };
+      }
+      if (tab.key === "subscriptions") {
+        return { ...tab, badge: subscriptions.length > 0 ? subscriptions.length : undefined };
+      }
+      return tab;
+    });
+  }, [deadLetters.length, inboxEvents.length, subscriptions.length]);
+
   return (
     <AppShell
-      activeKey="integration"
-      pageTitle="Integration Control Plane"
-      breadcrumbs={["Integration", "Operations & Monitor"]}
+      activeKey={sectionKey}
+      pageTitle={pageTitle}
+      breadcrumbs={["Integrations", pageTitle]}
       actions={
         lastUpdated ? (
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -285,6 +342,8 @@ export function IntegrationEvents() {
         ) : undefined
       }
     >
+      <SectionNavTabs items={tabItems} activeKey={sectionKey} />
+
       <Banner error={error} />
 
       {/* Global Control Plane Principle Banner */}
@@ -647,7 +706,7 @@ export function IntegrationEvents() {
 
             {/* Events Table */}
             {loading ? (
-              <LoadingSpinner text="Querying integration events..." />
+              <SkeletonTable rows={6} cols={6} />
             ) : paginatedEvents.length === 0 ? (
               <div style={{ padding: "48px 24px", textAlign: "center", color: "var(--color-muted)" }}>
                 <ICONS.activity width={32} height={32} style={{ opacity: 0.5, marginBottom: "8px" }} />
@@ -863,7 +922,7 @@ export function IntegrationEvents() {
             </div>
 
             {loading ? (
-              <LoadingSpinner text="Loading dead letters..." />
+              <SkeletonTable rows={5} cols={5} />
             ) : deadLetters.length === 0 ? (
               <div style={{ padding: "48px 24px", textAlign: "center", color: "var(--color-muted)" }}>
                 <ICONS.check width={36} height={36} style={{ color: "#10b981", marginBottom: "8px" }} />
@@ -986,7 +1045,7 @@ export function IntegrationEvents() {
             </div>
 
             {loading ? (
-              <LoadingSpinner text="Loading routing subscriptions..." />
+              <SkeletonTable rows={5} cols={5} />
             ) : subscriptions.length === 0 ? (
               <div style={{ padding: "32px", textAlign: "center", color: "var(--color-muted)" }}>
                 No routing subscriptions configured in the control plane.
@@ -1094,7 +1153,7 @@ export function IntegrationEvents() {
             </div>
 
             {loading ? (
-              <LoadingSpinner text="Loading reconciliation status..." />
+              <SkeletonTable rows={4} cols={5} />
             ) : erps.length === 0 ? (
               <div style={{ padding: "32px", textAlign: "center", color: "var(--color-muted)" }}>
                 No registered ERP instances found.

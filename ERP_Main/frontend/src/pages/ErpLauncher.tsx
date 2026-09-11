@@ -10,7 +10,8 @@ import { apiGet } from "@/lib/api";
 import { useGlobalSession } from "@/lib/session";
 import { authorizeErpLaunch } from "@/lib/federation";
 import { AppShell } from "@/components/AppShell";
-import { StatusBadge, LoadingSpinner, Banner, EmptyState } from "@/components/ui";
+import { SectionNavTabs } from "@/components/SectionNavTabs";
+import { StatusBadge, Banner, EmptyState, SkeletonFleetGrid } from "@/components/ui";
 import { ICONS } from "@/components/icons";
 import type { ErpInstance, ErpMembership, FederationClientRead } from "@/types";
 
@@ -147,6 +148,16 @@ export function ErpLauncher() {
       pageTitle="My ERP Applications"
       breadcrumbs={["ERP Management", "My ERPs"]}
     >
+      <SectionNavTabs
+        items={[
+          { key: "switcher", label: "ERP Switcher", path: "/erps/switcher", icon: "layers" },
+          { key: "registry", label: "ERP Registry", path: "/erps/registry", icon: "server" },
+          { key: "instances", label: "ERP Instances", path: "/erps/instances", icon: "cpu" },
+          { key: "modules", label: "ERP Modules", path: "/erps/modules", icon: "sliders" },
+        ]}
+        activeKey="switcher"
+      />
+
       <Banner error={error} />
 
       <div style={{ marginBottom: "24px" }}>
@@ -160,7 +171,7 @@ export function ErpLauncher() {
       </div>
 
       {loading ? (
-        <LoadingSpinner text="Loading your authorized ERP applications..." />
+        <SkeletonFleetGrid count={2} />
       ) : authorizedErps.length === 0 ? (
         <EmptyState
           title="No Authorized ERPs Available"

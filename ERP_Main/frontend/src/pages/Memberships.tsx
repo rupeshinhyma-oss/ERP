@@ -12,11 +12,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
+import { SectionNavTabs } from "@/components/SectionNavTabs";
+import { ACCESS_SECTION_TABS } from "@/lib/nav";
 import {
   Banner,
   ConfirmDialog,
   EmptyState,
-  LoadingSpinner,
+  SkeletonTable,
   Modal,
   StatusBadge,
 } from "@/components/ui";
@@ -268,6 +270,8 @@ export function Memberships() {
         </div>
       }
     >
+      <SectionNavTabs items={ACCESS_SECTION_TABS} activeKey="memberships" />
+
       <Banner error={error} />
 
       {/* Architecture Context Banner */}
@@ -450,7 +454,7 @@ export function Memberships() {
       </div>
 
       {loading ? (
-        <LoadingSpinner text="Loading membership bindings..." />
+        <SkeletonTable rows={6} cols={6} />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="No memberships found"

@@ -78,6 +78,28 @@ export function AppShell({
     }
   }, [isLoggedIn, profile]);
 
+  // Global '/' shortcut for Search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        navigate("/search");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [navigate]);
+
   // Document title
   const currentTitle = pageTitle || PAGE_TITLES[location.pathname] || (NAV_ITEMS_BY_KEY[activeKey]?.label) || "Global Control Panel";
   usePageTitle(currentTitle);
@@ -336,11 +358,12 @@ export function AppShell({
             <Link
               to="/search"
               className="icon-btn"
-              title="Search"
+              title="Universal Search (Press / to focus)"
+              id="header-search-btn"
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "6px",
+                gap: "8px",
                 padding: "6px 12px",
                 borderRadius: "var(--radius-sm, 6px)",
                 background: "var(--color-bg)",
@@ -352,6 +375,20 @@ export function AppShell({
             >
               <ICONS.search width={14} height={14} />
               <span style={{ display: "inline-block" }}>Search projections...</span>
+              <kbd
+                style={{
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  padding: "1px 5px",
+                  borderRadius: "4px",
+                  background: "var(--color-surface, #ffffff)",
+                  border: "1px solid var(--color-border, #cbd5e1)",
+                  color: "var(--color-text-secondary, #64748b)",
+                  lineHeight: 1.2,
+                }}
+              >
+                /
+              </kbd>
             </Link>
 
             {/* Notification Bell */}

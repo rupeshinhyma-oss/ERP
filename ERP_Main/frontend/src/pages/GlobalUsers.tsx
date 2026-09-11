@@ -15,11 +15,14 @@ import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
+import { SectionNavTabs } from "@/components/SectionNavTabs";
+import { ACCESS_SECTION_TABS } from "@/lib/nav";
 import {
   Banner,
   ConfirmDialog,
   EmptyState,
   LoadingSpinner,
+  SkeletonTable,
   Modal,
   StatusBadge,
 } from "@/components/ui";
@@ -389,6 +392,8 @@ export function GlobalUsers() {
         </button>
       }
     >
+      <SectionNavTabs items={ACCESS_SECTION_TABS} activeKey="users" />
+
       <Banner error={error} />
 
       {/* Filter and Search Bar */}
@@ -452,7 +457,7 @@ export function GlobalUsers() {
 
       {/* Users Table */}
       {loading ? (
-        <LoadingSpinner text="Loading Global Users directory..." />
+        <SkeletonTable rows={8} cols={6} />
       ) : filteredUsers.length === 0 ? (
         <EmptyState
           title="No Global Users Found"

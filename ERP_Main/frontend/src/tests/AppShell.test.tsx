@@ -47,6 +47,8 @@ describe("AppShell Component", () => {
     expect(screen.getByText("ERP Registry")).toBeDefined();
     expect(screen.getByText("Global Users")).toBeDefined();
     expect(screen.getByText("ERP Memberships")).toBeDefined();
-    expect(screen.getByText("Identity Conflicts")).toBeDefined();
+    expect(screen.getByText("Access Policies")).toBeDefined();
+    expect(screen.getByText("Sync Policies")).toBeDefined();
+    expect(screen.getByText("System Health")).toBeDefined();
   });
 });

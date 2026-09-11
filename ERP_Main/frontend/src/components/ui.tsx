@@ -203,41 +203,20 @@ export function LoadingSpinner({ text = "Loading..." }: { text?: string }) {
   );
 }
 
-export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
-  return (
-    <div className="table-wrap">
-      <table className="table">
-        <thead>
-          <tr>
-            {Array.from({ length: cols }).map((_, i) => (
-              <th key={i} style={{ height: "40px", background: "var(--color-bg)" }}>
-                <div style={{ height: "12px", width: "60%", background: "#e2e8f0", borderRadius: "4px" }} />
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {Array.from({ length: rows }).map((_, r) => (
-            <tr key={r}>
-              {Array.from({ length: cols }).map((_, c) => (
-                <td key={c} style={{ height: "48px" }}>
-                  <div
-                    style={{
-                      height: "12px",
-                      width: c === 0 ? "80%" : "50%",
-                      background: "#f1f5f9",
-                      borderRadius: "4px",
-                    }}
-                  />
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+export {
+  SkeletonLine,
+  SkeletonCircle,
+  SkeletonBox,
+  SkeletonStatCard,
+  SkeletonStatGrid,
+  SkeletonFleetCard,
+  SkeletonFleetGrid,
+  SkeletonTable,
+  SkeletonTabs,
+  SkeletonDashboard,
+  SkeletonPage,
+} from "./Skeleton";
+
 
 /* ------------------------------------------------------------------ */
 /* Empty State                                                        */

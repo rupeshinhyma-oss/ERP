@@ -14,13 +14,17 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
+import { SectionNavTabs } from "@/components/SectionNavTabs";
+import { ACCESS_SECTION_TABS } from "@/lib/nav";
 import {
   Banner,
   ConfirmDialog,
   LoadingSpinner,
+  SkeletonTable,
   Modal,
   StatusBadge,
 } from "@/components/ui";
@@ -37,10 +41,27 @@ import type {
 
 type ActiveTab = "roles" | "permissions" | "assignments" | "matrix";
 
-export function PlatformAuthz() {
-  const toast = useToast();
+interface PlatformAuthzProps {
+  defaultTab?: ActiveTab;
+}
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>("roles");
+export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
+  const toast = useToast();
+  const location = useLocation();
+
+  const resolveInitialTab = useCallback((): ActiveTab => {
+    if (defaultTab) return defaultTab;
+    if (location.pathname.includes("/permissions")) return "permissions";
+    if (location.pathname.includes("/policies")) return "matrix";
+    if (location.pathname.includes("/roles")) return "roles";
+    return "roles";
+  }, [defaultTab, location.pathname]);
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>(resolveInitialTab);
+
+  useEffect(() => {
+    setActiveTab(resolveInitialTab());
+  }, [resolveInitialTab]);
 
   const [roles, setRoles] = useState<PlatformRole[]>([]);
   const [permissions, setPermissions] = useState<PlatformPermission[]>([]);
@@ -397,11 +418,24 @@ export function PlatformAuthz() {
     return found ? found.name : id;
   };
 
+  const sectionActiveKey = useMemo(() => {
+    if (activeTab === "permissions") return "permissions";
+    if (activeTab === "matrix") return "access-policies";
+    return "roles";
+  }, [activeTab]);
+
+  const pageTitle = useMemo(() => {
+    if (activeTab === "permissions") return "Platform Permissions";
+    if (activeTab === "matrix") return "Platform Access Policies";
+    if (activeTab === "assignments") return "User Role Assignments";
+    return "Platform Roles";
+  }, [activeTab]);
+
   return (
     <AppShell
-      activeKey="authz"
-      pageTitle="Platform Roles & Permissions"
-      breadcrumbs={["Identity & Access", "Platform Authorization"]}
+      activeKey={sectionActiveKey}
+      pageTitle={pageTitle}
+      breadcrumbs={["Users & Access", pageTitle]}
       actions={
         <div style={{ display: "flex", gap: "8px" }}>
           {activeTab === "roles" && (
@@ -441,6 +475,8 @@ export function PlatformAuthz() {
         </div>
       }
     >
+      <SectionNavTabs items={ACCESS_SECTION_TABS} activeKey={sectionActiveKey} />
+
       <Banner error={error} />
 
       {/* Architectural Callout */}
@@ -583,7 +619,7 @@ export function PlatformAuthz() {
       </div>
 
       {loading ? (
-        <LoadingSpinner text="Loading authorization architecture..." />
+        <SkeletonTable rows={6} cols={5} />
       ) : (
         <>
           {/* ========================================================================= */}

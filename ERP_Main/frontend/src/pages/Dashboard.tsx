@@ -11,7 +11,7 @@ import { apiGet, apiPost } from "@/lib/api";
 import { useGlobalSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
-import { StatusBadge, LoadingSpinner, Banner, Modal } from "@/components/ui";
+import { StatusBadge, Banner, Modal, SkeletonDashboard } from "@/components/ui";
 import { ICONS } from "@/components/icons";
 import type { GlobalDashboard, GlobalAuditEvent } from "@/types";
 
@@ -143,37 +143,11 @@ export function Dashboard() {
       <Banner error={error} />
 
       {loading && !dashboard ? (
-        <LoadingSpinner text="Loading control panel metrics..." />
+        <SkeletonDashboard />
       ) : (
         <>
-          {/* Freshness Banner */}
-          {dashboard?.data_as_of && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "8px 16px",
-                background: "var(--color-surface)",
-                border: "1px solid var(--color-border)",
-                borderRadius: "var(--radius)",
-                marginBottom: "20px",
-                fontSize: "12px",
-                color: "var(--color-muted)",
-              }}
-            >
-              <span>
-                Control Panel Operations Aggregation &bull; Data accurate as of:{" "}
-                <strong>{new Date(dashboard.data_as_of).toLocaleTimeString()}</strong>
-              </span>
-              <span style={{ fontSize: "11px", color: "var(--color-primary)" }}>
-                Zero cross-database business queries
-              </span>
-            </div>
-          )}
-
           {/* Top Stat Tiles */}
-          <div className="cp-stat-grid">
+          <div className="cp-stat-grid" style={{ marginBottom: "32px" }}>
             <div className="cp-stat-card">
               <div className="cp-stat-icon-wrapper" style={{ background: "#e0edff", color: "#0061f2" }}>
                 <ICONS.server width={24} height={24} />
@@ -218,32 +192,6 @@ export function Dashboard() {
                 <span className="cp-stat-label">Ingested Inbox Events</span>
               </div>
             </div>
-          </div>
-
-          {/* Architectural Boundary Note */}
-          <div
-            style={{
-              background: "var(--color-bg)",
-              border: "1px solid var(--color-border)",
-              borderRadius: "var(--radius)",
-              padding: "12px 16px",
-              marginBottom: "24px",
-              fontSize: "12px",
-              color: "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: "8px",
-            }}
-          >
-            <div>
-              <strong>Architecture Guardrail:</strong> Global Users and Memberships govern control-plane identity.
-              Business entities (buyers, purchase orders, inventory) remain strictly owned by local ERP databases.
-            </div>
-            <Link to="/integration" style={{ color: "var(--color-primary)", fontWeight: 600 }}>
-              Integration Monitor ({dashboard?.events_dead_lettered_total ?? 0} dead letters) &rarr;
-            </Link>
           </div>
 
           {/* ERP Fleet Status Grid */}

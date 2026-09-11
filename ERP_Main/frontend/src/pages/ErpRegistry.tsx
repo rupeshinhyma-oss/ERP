@@ -9,9 +9,10 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
+import { SectionNavTabs } from "@/components/SectionNavTabs";
 import {
   StatusBadge,
-  LoadingSpinner,
+  SkeletonTable,
   Banner,
   Modal,
   ConfirmDialog,
@@ -170,6 +171,16 @@ export function ErpRegistry() {
         </div>
       }
     >
+      <SectionNavTabs
+        items={[
+          { key: "switcher", label: "ERP Switcher", path: "/erps/switcher", icon: "layers" },
+          { key: "registry", label: "ERP Registry", path: "/erps/registry", icon: "server" },
+          { key: "instances", label: "ERP Instances", path: "/erps/instances", icon: "cpu" },
+          { key: "modules", label: "ERP Modules", path: "/erps/modules", icon: "sliders" },
+        ]}
+        activeKey="registry"
+      />
+
       <Banner error={error} />
 
       {/* Filter and Search Bar */}
@@ -222,7 +233,7 @@ export function ErpRegistry() {
 
       {/* Table / List */}
       {loading ? (
-        <LoadingSpinner text="Loading registered ERP instances..." />
+        <SkeletonTable rows={4} cols={5} />
       ) : filtered.length === 0 ? (
         <EmptyState
           title="No ERP instances found"
