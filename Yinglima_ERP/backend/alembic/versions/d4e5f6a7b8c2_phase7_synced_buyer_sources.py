@@ -24,17 +24,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "synced_buyer_sources",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("source_erp_id", sa.String(100), nullable=False),
-        sa.Column("source_buyer_id", sa.String(100), nullable=False),
-        sa.Column("local_buyer_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.UniqueConstraint("source_erp_id", "source_buyer_id", name="uq_synced_buyer_source"),
-    )
-    op.create_index("ix_synced_buyer_sources_local_buyer_id", "synced_buyer_sources", ["local_buyer_id"])
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if not insp.has_table("synced_buyer_sources"):
+        op.create_table(
+            "synced_buyer_sources",
+            sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("source_erp_id", sa.String(100), nullable=False),
+            sa.Column("source_buyer_id", sa.String(100), nullable=False),
+            sa.Column("local_buyer_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.UniqueConstraint("source_erp_id", "source_buyer_id", name="uq_synced_buyer_source"),
+        )
+        op.create_index("ix_synced_buyer_sources_local_buyer_id", "synced_buyer_sources", ["local_buyer_id"])
 
 
 def downgrade() -> None:

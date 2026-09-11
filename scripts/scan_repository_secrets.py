@@ -23,6 +23,7 @@ EXCLUDE_DIRS = {
     "build",
     ".vite",
     "scratch",
+    "federation_keys",
 }
 
 EXCLUDE_FILES = {

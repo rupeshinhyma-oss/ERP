@@ -23,18 +23,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "processed_integration_events",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("event_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("consumer_id", sa.String(100), nullable=False),
-        sa.Column("event_type", sa.String(150), nullable=False),
-        sa.Column("processed_at", sa.DateTime(timezone=True), nullable=False),
-        sa.UniqueConstraint("event_id", "consumer_id", name="uq_processed_integration_event"),
-    )
-    op.create_index("ix_processed_integration_events_event_id", "processed_integration_events", ["event_id"])
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if not insp.has_table("processed_integration_events"):
+        op.create_table(
+            "processed_integration_events",
+            sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("event_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("consumer_id", sa.String(100), nullable=False),
+            sa.Column("event_type", sa.String(150), nullable=False),
+            sa.Column("processed_at", sa.DateTime(timezone=True), nullable=False),
+            sa.UniqueConstraint("event_id", "consumer_id", name="uq_processed_integration_event"),
+        )
+        op.create_index("ix_processed_integration_events_event_id", "processed_integration_events", ["event_id"])
 
 
 def downgrade() -> None:
