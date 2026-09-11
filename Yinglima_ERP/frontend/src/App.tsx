@@ -49,9 +49,19 @@ import { ProductGalleryPage } from "@/pages/ProductGallery";
 import { TrashPage } from "@/pages/Trash";
 import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
+import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 
 export function App() {
   const navigate = useNavigate();
+
+  // Process incoming cross-ERP SSO handover immediately on load
+  useEffect(() => {
+    processIncomingSsoHandover().then((loggedIn) => {
+      if (loggedIn) {
+        navigate("/dashboard", { replace: true });
+      }
+    });
+  }, [navigate]);
 
   // Initialize global paste auto-clean across all inputs and forms
   useEffect(() => {

@@ -17,6 +17,7 @@ import { useEffect } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { setUnauthorizedHandler } from "./lib/api";
 import { GlobalSessionProvider } from "./lib/session";
+import { processIncomingSsoHandover } from "./lib/ssoBridge";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Login } from "./pages/Login";
 import { AuthCallback } from "./pages/AuthCallback";
@@ -55,6 +56,15 @@ import { Forbidden } from "./pages/Forbidden";
 
 export function App() {
   const navigate = useNavigate();
+
+  // Process incoming cross-ERP SSO handover immediately on load
+  useEffect(() => {
+    processIncomingSsoHandover().then((loggedIn) => {
+      if (loggedIn) {
+        navigate("/dashboard", { replace: true });
+      }
+    });
+  }, [navigate]);
 
   useEffect(() => {
     setUnauthorizedHandler(() => {

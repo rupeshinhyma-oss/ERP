@@ -13,6 +13,7 @@ import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge, Banner, Modal, SkeletonDashboard } from "@/components/ui";
 import { ICONS } from "@/components/icons";
+import { createSsoHandoverUrl } from "@/lib/ssoBridge";
 import type { GlobalDashboard, GlobalAuditEvent } from "@/types";
 
 export function Dashboard() {
@@ -200,7 +201,7 @@ export function Dashboard() {
               <h2 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "var(--color-text)" }}>
                 Registered ERP Fleet Status
               </h2>
-              <Link to="/erps" style={{ fontSize: "13px", color: "var(--color-primary)", fontWeight: 600 }}>
+              <Link to="/erps/switcher" style={{ fontSize: "13px", color: "var(--color-primary)", fontWeight: 600 }}>
                 Manage All ERPs &rarr;
               </Link>
             </div>
@@ -263,10 +264,33 @@ export function Dashboard() {
                       <Link to={`/erps/${erp.erp_id}`} className="btn btn-secondary btn-sm">
                         View Details
                       </Link>
-                      <Link to="/my-erps" className="btn btn-primary btn-sm" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                        Launch ERP
-                        <ICONS.externalLink width={13} height={13} />
-                      </Link>
+                      {(() => {
+                        let host = (erp as any).base_url;
+                        if (!host) {
+                          const k = (erp.erp_key || "").toLowerCase();
+                          if (k === "inhyma") host = "http://localhost:5174/dashboard";
+                          else if (k === "yinglima") host = "http://localhost:5173/dashboard";
+                        }
+                        const targetUrl = host ? createSsoHandoverUrl(host) : "/erps/switcher";
+                        const isExt = targetUrl.startsWith("http");
+                        return isExt ? (
+                          <a
+                            href={targetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-primary btn-sm"
+                            style={{ display: "flex", alignItems: "center", gap: "4px", textDecoration: "none" }}
+                          >
+                            Launch ERP
+                            <ICONS.externalLink width={13} height={13} />
+                          </a>
+                        ) : (
+                          <Link to={targetUrl} className="btn btn-primary btn-sm" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            Launch ERP
+                            <ICONS.externalLink width={13} height={13} />
+                          </Link>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}
@@ -275,8 +299,8 @@ export function Dashboard() {
               <div className="card" style={{ padding: "24px", textAlign: "center", color: "var(--color-muted)" }}>
                 No active ERP fleet instances registered yet.
                 <div style={{ marginTop: "12px" }}>
-                  <Link to="/erps" className="btn btn-primary btn-sm">
-                    Go to ERP Registry
+                  <Link to="/erps/switcher" className="btn btn-primary btn-sm">
+                    Go to ERP Switcher
                   </Link>
                 </div>
               </div>

@@ -12,6 +12,7 @@ import { useGlobalSession } from "@/lib/session";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge, Banner, EmptyState, SkeletonFleetGrid } from "@/components/ui";
 import { ICONS } from "@/components/icons";
+import { createSsoHandoverUrl } from "@/lib/ssoBridge";
 import type { ErpInstance, ErpMembership } from "@/types";
 
 /**
@@ -360,7 +361,7 @@ export function ErpLauncher() {
                 >
                   <a
                     id={`btn-launch-${erp.erp_key || (erp as any).key}`}
-                    href={hostUrl || "#"}
+                    href={hostUrl ? (isSuperAdmin ? createSsoHandoverUrl(hostUrl) : hostUrl) : "#"}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn btn-primary"

@@ -29,6 +29,7 @@ import {
 import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/brand";
 import { ICONS, IconBell } from "./icons";
 import { UniversalSearch } from "./UniversalSearch";
+import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { ErrorBanner } from "./ui";
 import type { Profile } from "@/types";
 import { tasksApi } from "@/lib/tasksApi";
@@ -1055,7 +1056,8 @@ function Topbar() {
     <header className="topbar">
       <UniversalSearch />
       <div className="topbar-spacer" />
-      <div className="topbar-actions" ref={popoverRef} style={{ position: "relative" }}>
+      <div className="topbar-actions" ref={popoverRef} style={{ position: "relative", display: "flex", alignItems: "center", gap: "10px" }}>
+        <EcosystemSwitcher currentKey="inhyma" />
         <NotificationBell />
         <button
           type="button"

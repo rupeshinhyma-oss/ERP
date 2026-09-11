@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Auth } from "@/lib/auth";
 import { useGlobalSession } from "@/lib/session";
+import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ErrorBanner } from "@/components/ui";
 
 const BRAND_NAME = "INHYMA SOLUTIONS LLP";
@@ -61,7 +62,12 @@ export function Login() {
   useEffect(() => {
     document.title = `Sign In — ${BRAND_NAME}`;
     identifierRef.current?.focus();
-  }, []);
+    processIncomingSsoHandover().then((ok) => {
+      if (ok) {
+        navigate(redirectUrl, { replace: true });
+      }
+    });
+  }, [navigate, redirectUrl]);
 
   if (Auth.isLoggedIn()) {
     return <Navigate to={redirectUrl} replace />;

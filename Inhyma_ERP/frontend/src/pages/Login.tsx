@@ -7,6 +7,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { setBrandName } from "@/lib/brand";
+import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ErrorBanner } from "@/components/ui";
 import type { Profile, TokenPair } from "@/types";
 
@@ -97,7 +98,12 @@ export function LoginPage() {
 
   useEffect(() => {
     identifierRef.current?.focus();
-  }, []);
+    processIncomingSsoHandover().then((ok) => {
+      if (ok) {
+        navigate("/dashboard", { replace: true });
+      }
+    });
+  }, [navigate]);
 
   if (Auth.isLoggedIn()) {
     return <Navigate to="/dashboard" replace />;
