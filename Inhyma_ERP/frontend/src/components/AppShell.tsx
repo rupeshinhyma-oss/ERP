@@ -1308,6 +1308,7 @@ export interface AppShellProps {
 export function AppShell({ activeKey, children, pageClassName }: AppShellProps) {
   const { profile, isSuperAdmin, hasPermission } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [brandName, setBrandName] = useState(() => getCachedBrandName());
   const [passwordModalDismissed, setPasswordModalDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
