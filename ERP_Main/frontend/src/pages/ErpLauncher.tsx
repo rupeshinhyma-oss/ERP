@@ -1,19 +1,37 @@
 /**
- * Functional ERP Launcher ("My ERPs") for ERP_Main.
+ * ERP Switcher & Launcher for ERP_Main Control Plane.
  *
- * Implements membership-aware ERP discovery, dynamic fleet resolution,
- * and secure Phase 4 federation / SSO launch with PKCE and state protection.
+ * Implements membership-aware ERP discovery, display of ERP runtime instances,
+ * and direct host endpoint launching for Yinglima and Inhyma.
  */
 
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiGet } from "@/lib/api";
 import { useGlobalSession } from "@/lib/session";
-import { authorizeErpLaunch } from "@/lib/federation";
 import { AppShell } from "@/components/AppShell";
 import { SectionNavTabs } from "@/components/SectionNavTabs";
 import { StatusBadge, Banner, EmptyState, SkeletonFleetGrid } from "@/components/ui";
 import { ICONS } from "@/components/icons";
-import type { ErpInstance, ErpMembership, FederationClientRead } from "@/types";
+import type { ErpInstance, ErpMembership } from "@/types";
+
+const ERP_TABS = [
+  { key: "switcher", label: "ERP Switcher", path: "/erps/switcher", icon: "layers" as const },
+  { key: "registry", label: "ERP Registry", path: "/erps/registry", icon: "server" as const },
+  { key: "instances", label: "ERP Instances", path: "/erps/instances", icon: "cpu" as const },
+  { key: "modules", label: "ERP Modules", path: "/erps/modules", icon: "sliders" as const },
+];
+
+/**
+ * Fallback host URL resolver if base_url is unset in database.
+ */
+export function getErpHostUrl(erp: Partial<ErpInstance>): string {
+  if (erp.base_url) return erp.base_url;
+  const key = (erp.erp_key || (erp as any).key || "").toLowerCase();
+  if (key === "inhyma") return "http://localhost:5174/dashboard";
+  if (key === "yinglima") return "http://localhost:5173/dashboard";
+  return "";
+}
 
 export function ErpLauncher() {
   const { currentUser, userType, memberships: sessionMemberships } = useGlobalSession();
@@ -22,7 +40,7 @@ export function ErpLauncher() {
   const [erps, setErps] = useState<ErpInstance[]>([]);
   const [memberships, setMemberships] = useState<ErpMembership[]>(sessionMemberships);
   const [loading, setLoading] = useState(true);
-  const [launchingErpId, setLaunchingErpId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
@@ -47,7 +65,6 @@ export function ErpLauncher() {
               memsList = rawMems;
             }
           } catch {
-            // Fallback for platform admins or restricted permissions
             memsList = [];
           }
         }
@@ -69,7 +86,6 @@ export function ErpLauncher() {
 
     loadData();
 
-    // Revalidate when user returns to this tab without background periodic polling
     const handleFocus = () => {
       loadData();
     };
@@ -82,7 +98,7 @@ export function ErpLauncher() {
   }, [currentUser?.id, sessionMemberships]);
 
   // Authorized ERPs determination:
-  // - Platform Super Admins can see all active or registered ERPs
+  // - Platform Super Admins can see all registered ERPs
   // - Global Users see ERPs where they have an ACTIVE membership
   const authorizedErps = erps.filter((erp) => {
     if (isSuperAdmin) {
@@ -98,75 +114,31 @@ export function ErpLauncher() {
     return memberships.find((m) => m.erp_instance_id === erpId);
   };
 
-  const handleLaunch = async (erp: ErpInstance) => {
-    if (erp.status !== "ACTIVE") {
-      setError(`This ERP instance is currently ${erp.status.toLowerCase()} and cannot be launched.`);
-      return;
-    }
-
-    if (!erp.base_url) {
-      setError(`ERP ${erp.name} does not have a configured base URL.`);
-      return;
-    }
-
-    setLaunchingErpId(erp.id);
-    setError(null);
-
-    try {
-      // 1. Fetch registered federation client to obtain authorized redirect URI
-      let customRedirectUri: string | undefined;
-      try {
-        const clientRes = await apiGet<FederationClientRead>(`/global/erps/${erp.id}/federation`);
-        if (clientRes?.redirect_uris && clientRes.redirect_uris.length > 0) {
-          customRedirectUri = clientRes.redirect_uris[0];
-        }
-      } catch {
-        // Fallback: authorizeErpLaunch will use default /auth/callback on erp.base_url
-      }
-
-      // 2. Perform secure authorization code request with PKCE and state protection
-      const { launchUrl } = await authorizeErpLaunch(erp, customRedirectUri);
-
-      // 3. Securely navigate the user to the destination ERP
-      window.location.href = launchUrl;
-    } catch (err: unknown) {
-      setLaunchingErpId(null);
-      const msg = (err as Error)?.message || "";
-      if (msg.includes("active membership") || msg.includes("membership_not_active")) {
-        setError("You no longer have access to this ERP.");
-      } else if (msg.includes("decommissioned") || msg.includes("INACTIVE")) {
-        setError("This ERP is currently unavailable.");
-      } else {
-        setError(`Unable to open ${erp.name}. Please try again.`);
-      }
+  const handleCopy = (erpId: string, url: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url);
+      setCopiedId(erpId);
+      setTimeout(() => setCopiedId(null), 2000);
     }
   };
 
   return (
     <AppShell
-      activeKey="my-erps"
-      pageTitle="My ERP Applications"
-      breadcrumbs={["ERP Management", "My ERPs"]}
+      activeKey="erp-switcher"
+      pageTitle="ERP Switcher"
+      breadcrumbs={["ERP Management", "ERP Switcher"]}
     >
-      <SectionNavTabs
-        items={[
-          { key: "switcher", label: "ERP Switcher", path: "/erps/switcher", icon: "layers" },
-          { key: "registry", label: "ERP Registry", path: "/erps/registry", icon: "server" },
-          { key: "instances", label: "ERP Instances", path: "/erps/instances", icon: "cpu" },
-          { key: "modules", label: "ERP Modules", path: "/erps/modules", icon: "sliders" },
-        ]}
-        activeKey="switcher"
-      />
+      <SectionNavTabs items={ERP_TABS} activeKey="switcher" />
 
       <Banner error={error} />
 
       <div style={{ marginBottom: "24px" }}>
         <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: "0 0 6px" }}>
-          My ERP Applications
+          ERP Switcher
         </h2>
         <p style={{ margin: 0, fontSize: "14px", color: "var(--color-muted, #64748b)", maxWidth: "680px" }}>
-          Access your authorized business ERP applications. Business transactions and organization
-          workspaces remain strictly isolated within each independent ERP.
+          Seamlessly switch between connected ERP applications in the fleet. Each ERP operates with autonomous
+          workspaces and its own dedicated host address.
         </p>
       </div>
 
@@ -182,14 +154,14 @@ export function ErpLauncher() {
           className="erp-launcher-grid"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
             gap: "24px",
           }}
         >
           {authorizedErps.map((erp) => {
             const membership = getMembershipForErp(erp.id);
-            const isLaunching = launchingErpId === erp.id;
             const isUnavailable = erp.status !== "ACTIVE";
+            const hostUrl = getErpHostUrl(erp);
 
             return (
               <div
@@ -214,13 +186,13 @@ export function ErpLauncher() {
                       alignItems: "flex-start",
                       justifyContent: "space-between",
                       gap: "12px",
-                      marginBottom: "14px",
+                      marginBottom: "12px",
                     }}
                   >
                     <div>
                       <h3
                         style={{
-                          fontSize: "17px",
+                          fontSize: "18px",
                           fontWeight: 700,
                           color: "#1e293b",
                           margin: "0 0 4px",
@@ -238,7 +210,7 @@ export function ErpLauncher() {
                           borderRadius: "4px",
                         }}
                       >
-                        {erp.erp_key}
+                        {erp.erp_key || (erp as any).key}
                       </span>
                     </div>
                     <StatusBadge status={erp.status} />
@@ -250,10 +222,102 @@ export function ErpLauncher() {
                       color: "#64748b",
                       margin: "0 0 16px",
                       lineHeight: "1.5",
+                      minHeight: "40px",
                     }}
                   >
-                    {erp.description || `Independent Business ERP running version v${erp.version || "1.0"}.`}
+                    {erp.description || `Autonomous ERP application running version v${erp.version || "1.0"}.`}
                   </p>
+
+                  {/* Prominent Host URL Box */}
+                  <div
+                    style={{
+                      marginBottom: "16px",
+                      padding: "10px 12px",
+                      background: "#f8fafc",
+                      borderRadius: "8px",
+                      border: "1px solid #e2e8f0",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.5px",
+                          color: "#64748b",
+                        }}
+                      >
+                        Host URL
+                      </span>
+                      {hostUrl && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleCopy(erp.id, hostUrl);
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: "2px 6px",
+                            fontSize: "11px",
+                            color: copiedId === erp.id ? "#16a34a" : "#64748b",
+                            cursor: "pointer",
+                            borderRadius: "4px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                          title="Copy Host URL"
+                        >
+                          {copiedId === erp.id ? (
+                            <>
+                              <ICONS.check width={12} height={12} />
+                              <span>Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <ICONS.copy width={12} height={12} />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    {hostUrl ? (
+                      <a
+                        href={hostUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          fontSize: "13px",
+                          fontFamily: "monospace",
+                          color: "#0061f2",
+                          textDecoration: "none",
+                          fontWeight: 600,
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        <span>{hostUrl}</span>
+                        <ICONS.externalLink width={13} height={13} />
+                      </a>
+                    ) : (
+                      <span style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+                        Host URL not configured
+                      </span>
+                    )}
+                  </div>
 
                   <div
                     style={{
@@ -294,51 +358,63 @@ export function ErpLauncher() {
                   </div>
                 </div>
 
-                <div style={{ marginTop: "auto", paddingTop: "14px", borderTop: "1px solid #f1f5f9" }}>
-                  <button
-                    type="button"
-                    id={`btn-launch-${erp.erp_key}`}
-                    disabled={isUnavailable || isLaunching}
-                    onClick={() => handleLaunch(erp)}
+                <div
+                  style={{
+                    marginTop: "auto",
+                    paddingTop: "14px",
+                    borderTop: "1px solid #f1f5f9",
+                    display: "flex",
+                    gap: "10px",
+                    alignItems: "center",
+                  }}
+                >
+                  <a
+                    id={`btn-launch-${erp.erp_key || (erp as any).key}`}
+                    href={hostUrl || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary"
                     style={{
-                      width: "100%",
+                      flex: 1,
                       padding: "10px 16px",
-                      backgroundColor: isUnavailable ? "#94a3b8" : isLaunching ? "#1e40af" : "#0061f2",
+                      backgroundColor: isUnavailable ? "#94a3b8" : "#0061f2",
                       color: "#ffffff",
                       fontSize: "14px",
                       fontWeight: 600,
                       borderRadius: "6px",
                       border: "none",
-                      cursor: isUnavailable || isLaunching ? "not-allowed" : "pointer",
+                      textDecoration: "none",
+                      cursor: isUnavailable ? "not-allowed" : "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       gap: "8px",
+                      pointerEvents: isUnavailable ? "none" : "auto",
                       transition: "background 0.2s ease",
                     }}
                   >
-                    {isLaunching ? (
-                      <>
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          style={{ animation: "spin 0.8s linear infinite" }}
-                        >
-                          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                        </svg>
-                        <span>Initiating Secure SSO...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Open {erp.name}</span>
-                        <ICONS.externalLink width={15} height={15} />
-                      </>
-                    )}
-                  </button>
+                    <span>Open {erp.name}</span>
+                    <ICONS.externalLink width={15} height={15} />
+                  </a>
+
+                  <Link
+                    to={`/erps/${erp.id}`}
+                    className="btn btn-secondary"
+                    style={{
+                      padding: "10px 14px",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      textDecoration: "none",
+                      borderRadius: "6px",
+                    }}
+                    title="View ERP Details and Config"
+                  >
+                    <ICONS.settings width={14} height={14} />
+                    <span>Details</span>
+                  </Link>
                 </div>
               </div>
             );

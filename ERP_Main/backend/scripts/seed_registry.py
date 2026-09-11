@@ -102,7 +102,7 @@ async def seed() -> None:
         module_repo = ErpModuleRepository(db)
         service = ErpRegistryService(instance_repository=instance_repo, module_repository=module_repo)
 
-        yinglima, _ = await _register_or_get(
+        yinglima, yinglima_is_new = await _register_or_get(
             service,
             instance_repo,
             ErpInstanceCreate(
@@ -111,15 +111,16 @@ async def seed() -> None:
                 display_name="Yinglima ERP",
                 description="Production ERP for Inhyma Solutions' import/trading operations.",
                 status=ErpStatus.ACTIVE,
+                base_url="http://localhost:5173/dashboard",
             ),
         )
+        if not yinglima_is_new:
+            await service.update_metadata(
+                yinglima.id,
+                ErpInstanceUpdate(base_url="http://localhost:5173/dashboard"),
+            )
         await _declare_modules(service, yinglima.id, _SHARED_MODULES)
 
-        # Phase 3: Inhyma is now a real, complete, independently-tested
-        # application (see docs/INHYMA_AUDIT.md) -- registered as its own
-        # instance with accurate metadata, and INACTIVE for the deliberate
-        # reason explained in this file's module docstring, not because
-        # it doesn't exist.
         inhyma, inhyma_is_new = await _register_or_get(
             service,
             instance_repo,
@@ -129,35 +130,25 @@ async def seed() -> None:
                 display_name="Inhyma ERP",
                 description=(
                     "Independent ERP for Inhyma's own operations. A complete, independently-tested "
-                    "application (buyers/suppliers/products/inquiries/planning/organizations, plus "
-                    "task management and notifications not present in Yinglima). Registered INACTIVE: "
-                    "no live deployment configuration exists yet in this environment, so it is not "
-                    "currently eligible for platform interaction -- see docs/INHYMA_AUDIT.md."
+                    "application running at http://localhost:5174/dashboard."
                 ),
-                status=ErpStatus.INACTIVE,
+                status=ErpStatus.ACTIVE,
+                base_url="http://localhost:5174/dashboard",
             ),
         )
         if not inhyma_is_new:
-            # Re-running this script after the Phase 2 -> Phase 3 upgrade:
-            # the row already exists with the old "future placeholder"
-            # description. Bring it up to date (Phase 3 Step 29: "Remove
-            # outdated descriptions stating that Inhyma does not exist or
-            # has not been implemented") without touching its status --
-            # status changes are a deliberate separate action, not a
-            # side effect of a metadata refresh.
             await service.update_metadata(
                 inhyma.id,
                 ErpInstanceUpdate(
                     description=(
                         "Independent ERP for Inhyma's own operations. A complete, independently-tested "
-                        "application (buyers/suppliers/products/inquiries/planning/organizations, plus "
-                        "task management and notifications not present in Yinglima). Currently INACTIVE: "
-                        "no live deployment configuration exists yet in this environment -- see "
-                        "docs/INHYMA_AUDIT.md."
-                    )
+                        "application running at http://localhost:5174/dashboard."
+                    ),
+                    base_url="http://localhost:5174/dashboard",
                 ),
             )
-            print("Updated inhyma's description to reflect its real, current state.")
+            await service.change_status(inhyma.id, ErpStatus.ACTIVE)
+            print("Updated inhyma's description, base_url, and ACTIVE status.")
         await _declare_modules(service, inhyma.id, _SHARED_MODULES + _INHYMA_ONLY_MODULES)
 
         await db.commit()

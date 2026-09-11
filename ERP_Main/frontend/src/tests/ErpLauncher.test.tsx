@@ -78,6 +78,50 @@ describe("ErpLauncher Component", () => {
     await waitFor(() => {
       expect(screen.getByText("Yinglima ERP")).toBeDefined();
       expect(screen.getByText("Open Yinglima ERP")).toBeDefined();
+      expect(screen.getByText("http://localhost:8001")).toBeDefined();
+    });
+  });
+
+  it("renders both Inhyma and Yinglima with their respective host URLs", async () => {
+    vi.spyOn(apiModule, "apiGet").mockImplementation((endpoint: string) => {
+      if (endpoint === "/global/erps") {
+        return Promise.resolve({
+          data: [
+            {
+              id: "erp-yinglima",
+              erp_key: "yinglima",
+              name: "Yinglima ERP",
+              status: "ACTIVE",
+              base_url: "http://localhost:5173/dashboard",
+            },
+            {
+              id: "erp-inhyma",
+              erp_key: "inhyma",
+              name: "Inhyma ERP",
+              status: "ACTIVE",
+              base_url: "http://localhost:5174/dashboard",
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <MemoryRouter>
+        <GlobalSessionProvider>
+          <ErpLauncher />
+        </GlobalSessionProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Yinglima ERP")).toBeDefined();
+      expect(screen.getByText("Inhyma ERP")).toBeDefined();
+      expect(screen.getByText("http://localhost:5173/dashboard")).toBeDefined();
+      expect(screen.getByText("http://localhost:5174/dashboard")).toBeDefined();
+      expect(screen.getByText("Open Yinglima ERP")).toBeDefined();
+      expect(screen.getByText("Open Inhyma ERP")).toBeDefined();
     });
   });
 });
