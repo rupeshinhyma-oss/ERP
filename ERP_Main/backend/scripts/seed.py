@@ -72,7 +72,11 @@ async def seed_bootstrap_accounts() -> None:
             )
             print(f"Created bootstrap Platform Admin: {BOOTSTRAP_EMAIL} (role: {admin.role.value})")
         else:
-            print(f"Platform Admin {BOOTSTRAP_EMAIL} already exists (skipped).")
+            existing_admin.password_hash = hash_admin_password(BOOTSTRAP_PASSWORD)
+            existing_admin.role = PlatformAdminRole.SUPER_ADMIN
+            existing_admin.is_active = True
+            await db.flush()
+            print(f"Updated bootstrap Platform Admin: {BOOTSTRAP_EMAIL} (role: SUPER_ADMIN)")
 
         # ------------------------------------------------------------------
         # 2. Global User (End-User Identity for SSO & Memberships)
@@ -99,7 +103,21 @@ async def seed_bootstrap_accounts() -> None:
             print(f"Created bootstrap Global User: {BOOTSTRAP_EMAIL}")
             existing_user = user
         else:
-            print(f"Global User {BOOTSTRAP_EMAIL} already exists (skipped).")
+            cred_stmt = select(GlobalUserCredential).where(GlobalUserCredential.global_user_id == existing_user.id)
+            existing_cred = await db.scalar(cred_stmt)
+            if existing_cred:
+                existing_cred.password_hash = hash_global_password(BOOTSTRAP_PASSWORD)
+                existing_cred.must_change_password = False
+            else:
+                cred = GlobalUserCredential(
+                    global_user_id=existing_user.id,
+                    password_hash=hash_global_password(BOOTSTRAP_PASSWORD),
+                    must_change_password=False,
+                )
+                db.add(cred)
+            existing_user.status = GlobalUserStatus.ACTIVE
+            await db.flush()
+            print(f"Updated bootstrap Global User: {BOOTSTRAP_EMAIL} credentials")
 
         # ------------------------------------------------------------------
         # 3. Memberships for Yinglima and Inhyma

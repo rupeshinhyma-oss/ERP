@@ -373,7 +373,13 @@ async def seed() -> None:
             await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------
+        from app.rbac.models import UserRole, RoleAssignmentType, RoleAssignmentStatus
+        from sqlalchemy import select
+
         admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)
+        if admin is None:
+            admin = await user_repo.get_by_email(settings.BOOTSTRAP_ADMIN_EMAIL)
+
         if admin is None:
             admin = await user_repo.create(
                 username=settings.BOOTSTRAP_ADMIN_USERNAME,
@@ -381,18 +387,51 @@ async def seed() -> None:
                 password_hash=hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD),
                 status=UserStatus.ACTIVE,
                 is_active=True,
-                must_change_password=True,
+                must_change_password=False,
                 password_changed_at=datetime.now(timezone.utc),
             )
-            from app.rbac.models import UserRole
-
             session.add(
-                UserRole(user_id=admin.id, role_id=role.id, assigned_at=datetime.now(timezone.utc))
+                UserRole(
+                    user_id=admin.id,
+                    role_id=role.id,
+                    assignment_type=RoleAssignmentType.PRIMARY,
+                    is_primary=True,
+                    status=RoleAssignmentStatus.ACTIVE,
+                    assigned_at=datetime.now(timezone.utc),
+                )
             )
             await session.flush()
             logger.info("Seeded bootstrap admin user.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
         else:
-            logger.info("Bootstrap admin user already exists; skipping.")
+            admin.email = settings.BOOTSTRAP_ADMIN_EMAIL
+            admin.password_hash = hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD)
+            admin.status = UserStatus.ACTIVE
+            admin.is_active = True
+            admin.must_change_password = False
+            admin.failed_login_count = 0
+            admin.locked_until = None
+            if hasattr(admin, "deleted_at") and admin.deleted_at is not None:
+                admin.deleted_at = None
+
+            ur_stmt = select(UserRole).where(UserRole.user_id == admin.id, UserRole.role_id == role.id)
+            existing_ur = (await session.execute(ur_stmt)).scalars().first()
+            if existing_ur is None:
+                session.add(
+                    UserRole(
+                        user_id=admin.id,
+                        role_id=role.id,
+                        assignment_type=RoleAssignmentType.PRIMARY,
+                        is_primary=True,
+                        status=RoleAssignmentStatus.ACTIVE,
+                        assigned_at=datetime.now(timezone.utc),
+                    )
+                )
+            else:
+                existing_ur.status = RoleAssignmentStatus.ACTIVE
+                existing_ur.assignment_type = RoleAssignmentType.PRIMARY
+                existing_ur.is_primary = True
+            await session.flush()
+            logger.info("Updated bootstrap admin user to match standard credentials.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
 
         # Seed China provinces and major cities
         from scripts.seed_china_geo import seed_china
@@ -404,8 +443,8 @@ async def seed() -> None:
     print(
         "Seed complete.\n"
         f"  Admin username: {settings.BOOTSTRAP_ADMIN_USERNAME}\n"
-        f"  Admin password: {settings.BOOTSTRAP_ADMIN_PASSWORD} (change immediately -- "
-        "must_change_password is set)\n"
+        f"  Admin email: {settings.BOOTSTRAP_ADMIN_EMAIL}\n"
+        f"  Admin password: {settings.BOOTSTRAP_ADMIN_PASSWORD}\n"
     )
 
 

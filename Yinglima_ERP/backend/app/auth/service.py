@@ -100,12 +100,13 @@ class AuthService:
         await self.cache.set(key, attempts, ttl_seconds=settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS)
 
     # --- Effective Permissions helper ---------------------------------------
-    async def get_user_effective_permissions(self, user_id: uuid.UUID) -> set[str]:
+    async def get_user_effective_permissions(self, user_id: uuid.UUID, *, force_refresh: bool = False) -> set[str]:
         """Fetch user's effective permissions with caching and immediate invalidation support."""
         cache_key = CacheBackend.build_key("user_perms", str(user_id))
-        cached = await self.cache.get(cache_key)
-        if cached is not None and isinstance(cached, list):
-            return set(cached)
+        if not force_refresh:
+            cached = await self.cache.get(cache_key)
+            if cached is not None and isinstance(cached, list):
+                return set(cached)
 
         perms = await self.role_repository.get_permission_codes_for_user(user_id)
         await self.cache.set(cache_key, list(perms), ttl_seconds=3600)
@@ -178,7 +179,7 @@ class AuthService:
 
     async def _issue_token_pair(self, user: User, context: LoginContext) -> tuple[str, str]:
         """Issue a fresh access + refresh token pair and persist the new session row."""
-        permissions = await self.get_user_effective_permissions(user.id)
+        permissions = await self.get_user_effective_permissions(user.id, force_refresh=True)
         access = create_access_token(user.id, permissions=list(permissions))
         refresh = create_refresh_token(user.id)
 

@@ -54,3 +54,5 @@ Thumbs.db
 # Logs & Temp
 *.log
 *.tmp
+*.db
+*.sqlite3

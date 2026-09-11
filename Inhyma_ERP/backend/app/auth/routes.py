@@ -77,7 +77,7 @@ async def login(
         identifier=payload.identifier, password=payload.password, context=context
     )
     roles = await rbac_service.list_roles_for_user(user.id)
-    permissions = await auth_service.get_user_effective_permissions(user.id)
+    permissions = await auth_service.get_user_effective_permissions(user.id, force_refresh=True)
     profile = ProfileResponse(
         id=user.id,
         first_name=user.first_name,
