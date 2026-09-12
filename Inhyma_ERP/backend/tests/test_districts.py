@@ -317,6 +317,7 @@ async def test_district_lookup_endpoint():
     from app.auth.dependencies import get_current_user
     from app.auth.service import CurrentUser
     from app.main import create_application
+    from app.masters.districts.dependencies import get_district_service
     from httpx import ASGITransport, AsyncClient
 
     app = create_application()
@@ -327,6 +328,23 @@ async def test_district_lookup_endpoint():
     )
     app.dependency_overrides[get_current_user] = lambda: user
 
+    did = uuid.uuid4()
+    sid = uuid.uuid4()
+    cid = uuid.uuid4()
+    mock_district = District(
+        id=did,
+        country_id=cid,
+        state_id=sid,
+        name="Patna",
+        code="PAT",
+        status=RecordStatus.ACTIVE,
+    )
+
+    mock_service = AsyncMock()
+    mock_service.list_all_cached.return_value = [mock_district]
+    mock_service.list_by_state.return_value = [mock_district]
+    app.dependency_overrides[get_district_service] = lambda: mock_service
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         response = await ac.get("/api/v1/masters/districts/lookup")
@@ -334,11 +352,19 @@ async def test_district_lookup_endpoint():
         body = response.json()
         assert body["success"] is True
         assert isinstance(body["data"], list)
-        # Verify districts exist in seed database
-        assert len(body["data"]) > 0
+        assert len(body["data"]) == 1
         item = body["data"][0]
-        assert "id" in item
-        assert "name" in item
-        assert "state_id" in item
+        assert item["id"] == str(did)
+        assert item["name"] == "Patna"
+        assert item["state_id"] == str(sid)
+
+        # Test filtered by state_id
+        response_filtered = await ac.get(f"/api/v1/masters/districts/lookup?state_id={sid}")
+        assert response_filtered.status_code == 200
+        body_filtered = response_filtered.json()
+        assert body_filtered["success"] is True
+        assert len(body_filtered["data"]) == 1
+        assert body_filtered["data"][0]["name"] == "Patna"
+
 
 
