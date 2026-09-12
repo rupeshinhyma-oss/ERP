@@ -93,6 +93,7 @@ entry in :data:`MODULE_CHANNEL_PERMISSIONS` below (see
 MODULE_CHANNEL_PERMISSIONS: dict[str, str] = {
     # --- Core transactional modules (buyers/planning: Phase 1/2; suppliers/inquiries: Phase 9) ---
     module_channel("buyers"):        "buyer.view",
+    module_channel("companies"):     "supplier.view",
     module_channel("suppliers"):     "supplier.view",
     module_channel("planning"):      "planning.read",
     module_channel("inquiries"):     "inquiry.read",

@@ -1044,8 +1044,13 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
 
   useEffect(() => {
     if (!loggedIn) {
-      processIncomingSsoHandover().then((ok) => {
-        if (ok) {
+      processIncomingSsoHandover().then((result) => {
+        // Only a genuine fresh auto-login (a real state change) warrants a
+        // reload. "already-logged-in" means Auth was already logged in by
+        // the time this ran (e.g. AppShell remounting on a route change
+        // right after a previous reload) -- reloading again here would
+        // just repeat the same effect on the next mount, forever.
+        if (result === "logged-in") {
           window.location.reload();
         }
       });

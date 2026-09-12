@@ -63,11 +63,34 @@ export function Search() {
   // Debounced input for live typing
   const debouncedQuery = useDebounce(query, 350);
 
-  // Load ERP instances for filter
+  // Load connected ERP instances for filter
   useEffect(() => {
-    apiGet<ErpInstance[]>("/global/erp-instances")
-      .then((data) => setErps(Array.isArray(data) ? data : []))
-      .catch(() => setErps([]));
+    let cancelled = false;
+    const fetchErps = async () => {
+      try {
+        const res = await apiGet<ErpInstance[]>("/global/erps");
+        const list = Array.isArray(res) ? res : ((res as any)?.data || []);
+        if (Array.isArray(list) && list.length > 0) {
+          if (!cancelled) setErps(list);
+          return;
+        }
+      } catch {
+        // Fallback for mocked test environments
+      }
+      try {
+        const res = await apiGet<ErpInstance[]>("/global/erp-instances");
+        const list = Array.isArray(res) ? res : ((res as any)?.data || []);
+        if (Array.isArray(list) && !cancelled) {
+          setErps(list);
+        }
+      } catch {
+        if (!cancelled) setErps([]);
+      }
+    };
+    fetchErps();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Sync state to URL params
@@ -172,7 +195,17 @@ export function Search() {
       <Banner error={error} />
 
       {/* Main Search Input Card */}
-      <div className="card" style={{ padding: "24px", marginBottom: "20px" }}>
+      <div
+        className="card"
+        style={{
+          padding: "24px 28px",
+          marginBottom: "24px",
+          borderRadius: "12px",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 4px 16px -2px rgba(0, 0, 0, 0.04), 0 2px 4px -1px rgba(0, 0, 0, 0.02)",
+          background: "#ffffff",
+        }}
+      >
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -180,22 +213,39 @@ export function Search() {
             executeSearch(query, selectedErp, statusFilter, 1);
           }}
         >
-          <div style={{ position: "relative", marginBottom: "16px" }}>
+          <div
+            style={{
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              background: "#ffffff",
+              border: "1.5px solid #cbd5e1",
+              borderRadius: "10px",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.03)",
+              marginBottom: "18px",
+              transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+            }}
+          >
             <ICONS.search
-              width={20}
-              height={20}
-              style={{ position: "absolute", left: "16px", top: "14px", color: "var(--color-primary)" }}
+              width={18}
+              height={18}
+              style={{ position: "absolute", left: "16px", color: "#0061f2", opacity: 0.9 }}
             />
             <input
               type="text"
               className="form-input"
               style={{
-                paddingLeft: "48px",
-                paddingRight: "100px",
+                border: "none",
+                outline: "none",
+                background: "transparent",
+                paddingLeft: "46px",
+                paddingRight: "116px",
                 height: "48px",
-                fontSize: "16px",
+                fontSize: "15px",
                 width: "100%",
-                borderRadius: "var(--radius)",
+                borderRadius: "10px",
+                boxShadow: "none",
+                color: "#1e293b",
               }}
               placeholder="Search cross-ERP projections by company or entity name (e.g. Acme, Horizon)..."
               value={query}
@@ -208,8 +258,22 @@ export function Search() {
             <button
               type="submit"
               className="btn btn-primary"
-              style={{ position: "absolute", right: "6px", top: "6px", height: "36px", padding: "0 16px" }}
+              style={{
+                position: "absolute",
+                right: "6px",
+                top: "6px",
+                height: "36px",
+                padding: "0 18px",
+                borderRadius: "7px",
+                fontWeight: 600,
+                fontSize: "13px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 2px 4px rgba(0, 97, 242, 0.2)",
+              }}
             >
+              <ICONS.search width={14} height={14} />
               Search
             </button>
           </div>
@@ -218,11 +282,54 @@ export function Search() {
         {/* Filter Controls Row */}
         <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
           {/* Entity Type Selector */}
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ fontSize: "12px", color: "var(--color-muted)", fontWeight: 600 }}>ENTITY:</span>
+          <div
+            style={{
+              position: "relative",
+              display: "inline-flex",
+              alignItems: "center",
+              background: "#ffffff",
+              border: "1.5px solid #cbd5e1",
+              borderRadius: "8px",
+              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <span
+              style={{
+                padding: "0 10px",
+                fontSize: "11px",
+                fontWeight: 700,
+                color: "#64748b",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+                borderRight: "1px solid #e2e8f0",
+                background: "#f8fafc",
+                height: "36px",
+                display: "flex",
+                alignItems: "center",
+                borderTopLeftRadius: "6px",
+                borderBottomLeftRadius: "6px",
+                whiteSpace: "nowrap",
+                userSelect: "none",
+              }}
+            >
+              Entity:
+            </span>
             <select
-              className="form-select"
-              style={{ height: "34px", fontSize: "13px", width: "auto" }}
+              aria-label="Filter by Entity Type"
+              style={{
+                appearance: "none",
+                WebkitAppearance: "none",
+                MozAppearance: "none",
+                border: "none",
+                background: "transparent",
+                height: "36px",
+                padding: "0 34px 0 12px",
+                fontSize: "13px",
+                fontWeight: 500,
+                color: "#0f172a",
+                cursor: "pointer",
+                outline: "none",
+              }}
               value={entityType}
               onChange={(e) => {
                 setEntityType(e.target.value);
@@ -235,14 +342,67 @@ export function Search() {
                 </option>
               ))}
             </select>
+            <ICONS.chevronDown
+              width={14}
+              height={14}
+              style={{
+                position: "absolute",
+                right: "10px",
+                pointerEvents: "none",
+                color: "#64748b",
+              }}
+            />
           </div>
 
           {/* ERP Filter */}
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ fontSize: "12px", color: "var(--color-muted)", fontWeight: 600 }}>ERP:</span>
+          <div
+            style={{
+              position: "relative",
+              display: "inline-flex",
+              alignItems: "center",
+              background: "#ffffff",
+              border: "1.5px solid #cbd5e1",
+              borderRadius: "8px",
+              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <span
+              style={{
+                padding: "0 10px",
+                fontSize: "11px",
+                fontWeight: 700,
+                color: "#64748b",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+                borderRight: "1px solid #e2e8f0",
+                background: "#f8fafc",
+                height: "36px",
+                display: "flex",
+                alignItems: "center",
+                borderTopLeftRadius: "6px",
+                borderBottomLeftRadius: "6px",
+                whiteSpace: "nowrap",
+                userSelect: "none",
+              }}
+            >
+              ERP:
+            </span>
             <select
-              className="form-select"
-              style={{ height: "34px", fontSize: "13px", width: "auto" }}
+              aria-label="Filter by ERP Instance"
+              style={{
+                appearance: "none",
+                WebkitAppearance: "none",
+                MozAppearance: "none",
+                border: "none",
+                background: "transparent",
+                height: "36px",
+                padding: "0 34px 0 12px",
+                fontSize: "13px",
+                fontWeight: 500,
+                color: "#0f172a",
+                cursor: "pointer",
+                outline: "none",
+              }}
               value={selectedErp}
               onChange={(e) => {
                 setSelectedErp(e.target.value);
@@ -250,20 +410,79 @@ export function Search() {
               }}
             >
               <option value="ALL">All Registered ERPs</option>
-              {erps.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name || e.display_name || e.erp_key} ({e.erp_key || e.key})
-                </option>
-              ))}
+              {erps.map((e) => {
+                const isDecommissioned = e.status === "DECOMMISSIONED";
+                const isActive = e.status === "ACTIVE";
+                const statusText = isActive ? "Active" : isDecommissioned ? "Decommissioned" : "Inactive";
+                const displayName = e.display_name || e.name || e.erp_key || (e as any).key;
+                return (
+                  <option key={e.id} value={e.id}>
+                    {displayName} ({statusText})
+                  </option>
+                );
+              })}
             </select>
+            <ICONS.chevronDown
+              width={14}
+              height={14}
+              style={{
+                position: "absolute",
+                right: "10px",
+                pointerEvents: "none",
+                color: "#64748b",
+              }}
+            />
           </div>
 
           {/* Status Filter */}
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ fontSize: "12px", color: "var(--color-muted)", fontWeight: 600 }}>STATUS:</span>
+          <div
+            style={{
+              position: "relative",
+              display: "inline-flex",
+              alignItems: "center",
+              background: "#ffffff",
+              border: "1.5px solid #cbd5e1",
+              borderRadius: "8px",
+              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <span
+              style={{
+                padding: "0 10px",
+                fontSize: "11px",
+                fontWeight: 700,
+                color: "#64748b",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+                borderRight: "1px solid #e2e8f0",
+                background: "#f8fafc",
+                height: "36px",
+                display: "flex",
+                alignItems: "center",
+                borderTopLeftRadius: "6px",
+                borderBottomLeftRadius: "6px",
+                whiteSpace: "nowrap",
+                userSelect: "none",
+              }}
+            >
+              Status:
+            </span>
             <select
-              className="form-select"
-              style={{ height: "34px", fontSize: "13px", width: "auto" }}
+              aria-label="Filter by Status"
+              style={{
+                appearance: "none",
+                WebkitAppearance: "none",
+                MozAppearance: "none",
+                border: "none",
+                background: "transparent",
+                height: "36px",
+                padding: "0 34px 0 12px",
+                fontSize: "13px",
+                fontWeight: 500,
+                color: "#0f172a",
+                cursor: "pointer",
+                outline: "none",
+              }}
               value={statusFilter}
               onChange={(e) => {
                 setStatusFilter(e.target.value);
@@ -274,6 +493,16 @@ export function Search() {
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
             </select>
+            <ICONS.chevronDown
+              width={14}
+              height={14}
+              style={{
+                position: "absolute",
+                right: "10px",
+                pointerEvents: "none",
+                color: "#64748b",
+              }}
+            />
           </div>
 
           {(query || selectedErp !== "ALL" || statusFilter !== "ALL") && (
@@ -286,8 +515,19 @@ export function Search() {
                 setStatusFilter("ALL");
                 setPage(1);
               }}
-              style={{ fontSize: "12px" }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                fontSize: "12px",
+                height: "36px",
+                padding: "0 12px",
+                borderRadius: "8px",
+                color: "#64748b",
+                border: "1px solid #cbd5e1",
+              }}
             >
+              <ICONS.refreshCw width={12} height={12} />
               Reset Filters
             </button>
           )}
@@ -299,21 +539,49 @@ export function Search() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginTop: "16px",
-            paddingTop: "12px",
-            borderTop: "1px solid var(--color-border-light)",
+            marginTop: "20px",
+            paddingTop: "14px",
+            borderTop: "1px solid #f1f5f9",
             fontSize: "12px",
-            color: "var(--color-muted)",
+            color: "#64748b",
+            flexWrap: "wrap",
+            gap: "10px",
           }}
         >
-          <span>
-            Searches asynchronous read projections maintained in ERP_Main. Zero direct live queries to business ERP
-            databases.
-          </span>
-          {dataAsOf && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <ICONS.server width={14} height={14} style={{ color: "#0061f2", opacity: 0.8 }} />
             <span>
-              Projection Freshness: <strong>{new Date(dataAsOf).toLocaleTimeString()}</strong>
+              Searches asynchronous read projections maintained in ERP_Main. Zero direct live queries to business ERP
+              databases.
             </span>
+          </div>
+          {dataAsOf && (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                background: "#f0fdf4",
+                color: "#166534",
+                padding: "3px 10px",
+                borderRadius: "12px",
+                fontSize: "11px",
+                fontWeight: 600,
+                border: "1px solid #bbf7d0",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  background: "#22c55e",
+                  display: "inline-block",
+                }}
+              />
+              Projection Freshness: <strong>{new Date(dataAsOf).toLocaleTimeString()}</strong>
+            </div>
           )}
         </div>
       </div>
@@ -323,6 +591,23 @@ export function Search() {
         <LoadingSpinner text="Searching global projection index..." />
       ) : results.length === 0 ? (
         <EmptyState
+          icon={
+            <div
+              style={{
+                width: "64px",
+                height: "64px",
+                borderRadius: "50%",
+                background: "rgba(0, 97, 242, 0.08)",
+                color: "#0061f2",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 16px",
+              }}
+            >
+              <ICONS.search width={30} height={30} />
+            </div>
+          }
           title="No Projections Found"
           description={
             query.trim() || selectedErp !== "ALL" || statusFilter !== "ALL"
@@ -330,7 +615,19 @@ export function Search() {
               : "No entity projections found in the control plane index."
           }
           action={
-            <Link to="/integration" className="btn btn-secondary">
+            <Link
+              to="/integration"
+              className="btn btn-secondary btn-sm"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                marginTop: "10px",
+                padding: "8px 16px",
+                borderRadius: "8px",
+              }}
+            >
+              <ICONS.activity width={14} height={14} />
               Check Integration Event Stream
             </Link>
           }

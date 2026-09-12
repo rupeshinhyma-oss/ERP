@@ -28,6 +28,7 @@ from app.masters.cities.routes import router as cities_router
 from app.masters.company_list.routes import router as company_list_router
 from app.masters.countries.routes import router as countries_router
 from app.masters.currencies.routes import router as currencies_router
+from app.masters.districts.routes import router as districts_router
 from app.masters.hsn.routes import router as hsn_router
 from app.masters.product_categories.routes import router as product_categories_router
 from app.masters.product_sub_categories.routes import router as product_sub_categories_router
@@ -46,6 +47,7 @@ from app.planning.routes import router as planning_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
 from app.search.routes import router as search_router
+from app.companies.routes import router as companies_router
 from app.suppliers.routes import router as suppliers_router
 from app.notifications.routes import router as notifications_router
 from app.tasks.routes import router as tasks_router
@@ -88,6 +90,7 @@ api_router.include_router(organizations_router)
 # Phase 7: Master Data Management.
 api_router.include_router(countries_router)
 api_router.include_router(states_router)
+api_router.include_router(districts_router)
 api_router.include_router(cities_router)
 api_router.include_router(currencies_router)
 api_router.include_router(uom_router)
@@ -99,6 +102,9 @@ api_router.include_router(products_router)
 api_router.include_router(company_list_router)
 api_router.include_router(supplier_types_router)
 api_router.include_router(buyer_types_router)
+
+# Companies Management.
+api_router.include_router(companies_router)
 
 # Phase 8: Supplier Management.
 api_router.include_router(suppliers_router)

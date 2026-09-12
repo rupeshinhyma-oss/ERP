@@ -14,7 +14,6 @@ import {
   StatusBadge,
   SkeletonTable,
   Banner,
-  Modal,
   ConfirmDialog,
   EmptyState,
 } from "@/components/ui";
@@ -33,14 +32,7 @@ export function ErpRegistry() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
 
-  // Register Modal
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [formKey, setFormKey] = useState("");
-  const [formName, setFormName] = useState("");
-  const [formBaseUrl, setFormBaseUrl] = useState("");
-  const [formVersion, setFormVersion] = useState("1.0.0");
-  const [formCapabilities, setFormCapabilities] = useState("buyers,products,inquiries,orders");
-  const [submitting, setSubmitting] = useState(false);
+
 
   // Decommission / Reactivate Dialogs
   const [selectedErp, setSelectedErp] = useState<ErpInstance | null>(null);
@@ -89,35 +81,7 @@ export function ErpRegistry() {
     };
   }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    try {
-      const caps = formCapabilities
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
 
-      await apiPost<ErpInstance>("/global/erps", {
-        erp_key: formKey.trim().toLowerCase(),
-        name: formName.trim(),
-        base_url: formBaseUrl.trim(),
-        version: formVersion.trim(),
-        capabilities: caps,
-      });
-
-      toast("ERP instance registered successfully.", "success");
-      setCreateModalOpen(false);
-      setFormKey("");
-      setFormName("");
-      setFormBaseUrl("");
-      await fetchErps();
-    } catch (err) {
-      toast("Failed to register ERP: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const handleActionConfirm = async () => {
     if (!selectedErp || !confirmAction) return;
@@ -157,19 +121,7 @@ export function ErpRegistry() {
       activeKey="erps"
       pageTitle="ERP Registry"
       breadcrumbs={["ERP Management", "ERP Registry"]}
-      actions={
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => setCreateModalOpen(true)}
-            style={{ display: "flex", alignItems: "center", gap: "6px" }}
-          >
-            <ICONS.plus width={14} height={14} />
-            Register ERP
-          </button>
-        </div>
-      }
+
     >
       <SectionNavTabs
         items={[
@@ -241,11 +193,6 @@ export function ErpRegistry() {
             search || statusFilter !== "ALL"
               ? "No ERPs matched your current filter criteria."
               : "No ERP instances have been registered in the control plane yet."
-          }
-          action={
-            <button type="button" className="btn btn-primary" onClick={() => setCreateModalOpen(true)}>
-              Register First ERP
-            </button>
           }
         />
       ) : (
@@ -345,106 +292,7 @@ export function ErpRegistry() {
         </div>
       )}
 
-      {/* Register ERP Modal Dialog */}
-      <Modal
-        open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-        title="Register New ERP Instance"
-        variant="center"
-        cardStyle={{ maxWidth: "520px" }}
-      >
-        <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="erpKey">
-              ERP Key (Unique Identifier) *
-            </label>
-            <input
-              id="erpKey"
-              type="text"
-              className="form-input"
-              placeholder="e.g. yinglima, inhyma, future_erp"
-              value={formKey}
-              onChange={(e) => setFormKey(e.target.value)}
-              required
-              pattern="^[a-z0-9_-]+$"
-              title="Lowercase alphanumeric, hyphen, underscore only"
-            />
-            <span className="form-helper">Immutable machine identifier used in event routing.</span>
-          </div>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="erpName">
-              Display Name *
-            </label>
-            <input
-              id="erpName"
-              type="text"
-              className="form-input"
-              placeholder="e.g. Yinglima ERP"
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="baseUrl">
-              Base URL *
-            </label>
-            <input
-              id="baseUrl"
-              type="url"
-              className="form-input"
-              placeholder="http://localhost:8001"
-              value={formBaseUrl}
-              onChange={(e) => setFormBaseUrl(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="version">
-              Software Version
-            </label>
-            <input
-              id="version"
-              type="text"
-              className="form-input"
-              placeholder="1.0.0"
-              value={formVersion}
-              onChange={(e) => setFormVersion(e.target.value)}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="capabilities">
-              Enabled Capabilities (comma-separated)
-            </label>
-            <input
-              id="capabilities"
-              type="text"
-              className="form-input"
-              placeholder="buyers, suppliers, products, inquiries"
-              value={formCapabilities}
-              onChange={(e) => setFormCapabilities(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px" }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setCreateModalOpen(false)}
-              disabled={submitting}
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? "Registering..." : "Register Instance"}
-            </button>
-          </div>
-        </form>
-      </Modal>
 
       {/* Decommission / Reactivate Confirmation */}
       <ConfirmDialog

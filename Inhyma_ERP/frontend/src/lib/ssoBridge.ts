@@ -70,9 +70,21 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
 /**
  * Consumes an incoming SSO handover ticket or shared ecosystem session cookie.
  * Automatically logs in as local Admin/User with the matching session_id.
+ *
+ * Returns "already-logged-in" (rather than a plain boolean) when Auth was
+ * already logged in on entry -- no new session was actually established,
+ * so nothing changed and there is nothing for a caller to react to.
+ * Distinguishing this from a genuine fresh auto-login matters: a caller
+ * that reloads the page whenever this resolves truthy would otherwise
+ * reload on every call once logged in, including calls made right after
+ * a reload it just triggered -- an infinite reload loop that repeats the
+ * whole login -> establish -> fetch sequence forever. Only "logged-in"
+ * (a real state change) should ever trigger a reload/navigation.
  */
-export async function processIncomingSsoHandover(): Promise<boolean> {
-  if (typeof window === "undefined") return false;
+export async function processIncomingSsoHandover(): Promise<
+  "logged-in" | "already-logged-in" | "not-logged-in"
+> {
+  if (typeof window === "undefined") return "not-logged-in";
 
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("sso_handover");
@@ -120,7 +132,7 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
 
   // If user explicitly logged out and no new SSO token was provided in the URL, DO NOT auto-login
   if (isExplicitLogout && !hasValidToken) {
-    return false;
+    return "not-logged-in";
   }
 
   const cookieSession = getEcosystemCookie();
@@ -129,7 +141,7 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
   if (!hasValidToken && !hasValidCookie) {
     // Neither an incoming handover ticket nor an active ecosystem session cookie exists:
     // DO NOT auto-login. Remain on the login page.
-    return false;
+    return "not-logged-in";
   }
 
   if (!hasValidToken && cookieSession) {
@@ -147,16 +159,20 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
 
   if (!hasAccess && !Auth.isLoggedIn()) {
     console.warn("User is not authorized for Inhyma ERP");
-    return false;
+    return "not-logged-in";
   }
 
   // 3. Establish or hydrate local session if already logged in or via valid SSO credentials
   if (Auth.isLoggedIn()) {
-    // If already logged in locally, ensure session_id is saved
+    // If already logged in locally, ensure session_id is saved. Nothing
+    // about the local session actually changed here, so this reports
+    // "already-logged-in" rather than "logged-in" -- a caller reloading
+    // the page on every truthy result would otherwise reload every time
+    // this runs while already logged in, forever.
     if (targetSessionId && !Auth.getSessionId()) {
       Auth.setSessionId(targetSessionId);
     }
-    return true;
+    return "already-logged-in";
   }
 
   try {
@@ -179,11 +195,11 @@ export async function processIncomingSsoHandover(): Promise<boolean> {
         allowed_erps: allowedErps,
       };
       setEcosystemCookie(sessionData);
-      return true;
+      return "logged-in";
     }
   } catch (err) {
     console.warn("Auto-login in Inhyma ERP failed:", err);
   }
 
-  return false;
+  return "not-logged-in";
 }

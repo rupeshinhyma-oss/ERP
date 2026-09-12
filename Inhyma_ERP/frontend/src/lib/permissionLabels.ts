@@ -16,6 +16,7 @@ export const MODULE_NAMES: Record<string, string> = {
   organizationlist: "Organization List",
   buyer: "Agents & Buyers",
   buyertype: "Buyer Types",
+  company: "Companies",
   supplier: "Suppliers",
   suppliertype: "Supplier Types",
   planning: "Shipment Planning",

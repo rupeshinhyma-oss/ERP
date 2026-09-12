@@ -11,6 +11,12 @@
  * 7. Monitoring & Audit (Subsystem Health, ERP Health, Queue, Realtime, Workers, Alerts, Audit, Security)
  * 8. Settings (General, Security, Sessions, Notifications)
  * Plus Universal Search & Error boundaries.
+ *
+ * FIX (nav redirect bug): ErpRegistry, ErpInstances, ErpModules, GlobalAudit,
+ * and Health were fully built pages that were never imported/routed here.
+ * Their real paths either fell through the catch-all "*" route (bounce to
+ * /dashboard) or were hard-redirected to a sibling page (/erps/switcher,
+ * MonitoringHub). They are now imported and routed to themselves below.
  */
 
 import { useEffect } from "react";
@@ -26,6 +32,9 @@ import { Dashboard } from "./pages/Dashboard";
 // ERPs Section
 import { ErpDetail } from "./pages/ErpDetail";
 import { ErpLauncher } from "./pages/ErpLauncher";
+import { ErpRegistry } from "./pages/ErpRegistry";
+import { ErpInstances } from "./pages/ErpInstances";
+import { ErpModules } from "./pages/ErpModules";
 
 // Users & Access Section
 import { GlobalUsers } from "./pages/GlobalUsers";
@@ -44,6 +53,8 @@ import { SynchronizationHub } from "./pages/SynchronizationHub";
 
 // Monitoring & Audit Section
 import { MonitoringHub } from "./pages/MonitoringHub";
+import { GlobalAudit } from "./pages/GlobalAudit";
+import { Health } from "./pages/Health";
 import { Reporting } from "./pages/Reporting";
 
 // Settings & Utilities
@@ -54,10 +65,13 @@ import { Forbidden } from "./pages/Forbidden";
 export function App() {
   const navigate = useNavigate();
 
-  // Process incoming cross-ERP SSO handover immediately on load
+  // Process incoming cross-ERP SSO handover immediately on load. Only a
+  // genuine fresh auto-login ("logged-in") should redirect to /dashboard;
+  // "already-logged-in" means nothing changed, so the user's current page
+  // (wherever they navigated to) is left alone.
   useEffect(() => {
-    processIncomingSsoHandover().then((loggedIn) => {
-      if (loggedIn) {
+    processIncomingSsoHandover().then((result) => {
+      if (result === "logged-in") {
         navigate("/dashboard", { replace: true });
       }
     });
@@ -87,9 +101,9 @@ export function App() {
           <Route path="/erps/launcher" element={<Navigate to="/erps/switcher" replace />} />
           <Route path="/my-erps" element={<Navigate to="/erps/switcher" replace />} />
           <Route path="/launcher" element={<Navigate to="/erps/switcher" replace />} />
-          <Route path="/erps/registry" element={<Navigate to="/erps/switcher" replace />} />
-          <Route path="/erps/instances" element={<Navigate to="/erps/switcher" replace />} />
-          <Route path="/erps/modules" element={<Navigate to="/erps/switcher" replace />} />
+          <Route path="/erps/registry" element={<ErpRegistry />} />
+          <Route path="/erps/instances" element={<ErpInstances />} />
+          <Route path="/erps/modules" element={<ErpModules />} />
           <Route path="/erps/:id" element={<ErpDetail />} />
 
           {/* Section 3: Users & Access */}
@@ -137,10 +151,10 @@ export function App() {
           <Route path="/monitoring/realtime" element={<MonitoringHub />} />
           <Route path="/monitoring/workers" element={<MonitoringHub />} />
           <Route path="/monitoring/alerts" element={<MonitoringHub />} />
-          <Route path="/monitoring/audit" element={<MonitoringHub />} />
+          <Route path="/monitoring/audit" element={<GlobalAudit />} />
           <Route path="/monitoring/security" element={<MonitoringHub />} />
-          <Route path="/audit" element={<MonitoringHub />} />
-          <Route path="/health" element={<MonitoringHub />} />
+          <Route path="/audit" element={<GlobalAudit />} />
+          <Route path="/health" element={<Health />} />
           <Route path="/reporting" element={<Reporting />} />
 
           {/* Section 8: Settings */}

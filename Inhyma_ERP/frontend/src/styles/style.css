@@ -216,6 +216,31 @@ svg {
   font-weight: 700;
 }
 
+.nav-sub-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+  text-decoration: none;
+  border-radius: 5px;
+  background: transparent;
+  transition: all 0.12s ease;
+}
+
+.nav-sub-item:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+  text-decoration: none;
+}
+
+.nav-sub-item.active {
+  background: #e0edff !important;
+  color: #0061f2 !important;
+  font-weight: 700 !important;
+}
+
 .nav-item svg,
 .nav-icon {
   width: 18px;

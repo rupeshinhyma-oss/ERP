@@ -8,13 +8,23 @@
 
 import type { IconKey } from "@/components/icons";
 
-export interface NavItem {
+export interface NavSubItem {
   key: string;
   label: string;
   path: string;
+  icon?: IconKey;
+  permission?: string;
+  superAdminOnly?: boolean;
+}
+
+export interface NavItem {
+  key: string;
+  label: string;
+  path?: string;
   icon: IconKey;
   permission?: string;
   superAdminOnly?: boolean;
+  children?: NavSubItem[];
 }
 
 export interface NavSection {
@@ -32,6 +42,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "CONTACT",
     items: [
+      { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "supplier.view" },
       { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
       { key: "buyers", label: "Buyers", path: "/buyers", icon: "shoppingBag", permission: "buyer.view" },
     ],
@@ -48,18 +59,9 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", icon: "idCard", permission: "buyertype.view" },
     ],
   },
-
   {
     label: "SALE",
     items: [
-      // Bug fix: this key used to be "proforma" while Inquiries.tsx passes
-      // <AppShell activeKey="inquiries">, and Sidebar only highlights a nav
-      // item when `item.key === activeKey` matches exactly (see
-      // AppShell.tsx's `nav-item ${item.key === activeKey ? "active" : ""}`).
-      // The mismatch meant this item's row/icon never got the active
-      // highlight or auto-scroll-into-view, even while on the Inquiries
-      // page -- every other nav item's key already matches its page's
-      // activeKey (e.g. "masters-buyer-types"), so this brings it in line.
       { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText" },
     ],
   },
@@ -84,18 +86,47 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: "CONFIGURATIONS",
+    label: "SETTINGS",
     items: [
-      { key: "masters-hsn", label: "HSN Codes", path: "/masters/hsn", icon: "barcode", permission: "hsn.view" },
+      {
+        key: "masters-group",
+        label: "Masters",
+        icon: "masters",
+        children: [
+          { key: "masters-cities", label: "Cities", path: "/masters/cities", permission: "city.view" },
+          { key: "masters-districts", label: "Districts", path: "/masters/districts", permission: "district.view" },
+          { key: "masters-states", label: "States", path: "/masters/states", permission: "state.view" },
+          { key: "masters-taxes", label: "Taxes", path: "/masters/taxes" },
+          { key: "masters-additional-charges", label: "Additional Charges", path: "/masters/additional-charges" },
+          { key: "masters-social-media", label: "Social Media", path: "/masters/social-media" },
+          { key: "masters-agent-types", label: "Agent Types", path: "/masters/agent-types" },
+          { key: "masters-company-categories", label: "Company Categories", path: "/masters/company-categories" },
+          { key: "masters-company-sectors", label: "Company Sectors", path: "/masters/company-sectors" },
+          { key: "masters-warehouses", label: "Warehouses", path: "/masters/warehouses" },
+          { key: "masters-uom", label: "UOM", path: "/masters/uom", permission: "uom.view" },
+          { key: "masters-billing-company", label: "Billing Company", path: "/masters/billing-company" },
+          { key: "masters-technicians", label: "Technicians", path: "/masters/technicians" },
+          { key: "masters-bank", label: "Bank", path: "/masters/bank" },
+          { key: "masters-transport", label: "Transport", path: "/masters/transport" },
+          { key: "masters-payment-terms", label: "Payment Terms", path: "/masters/payment-terms" },
+          { key: "masters-lead-sources", label: "Lead Sources", path: "/masters/lead-sources" },
+          { key: "masters-adjustment-purpose", label: "Adjustment Purpose", path: "/masters/adjustment-purpose" },
+          { key: "masters-call-types", label: "Call Types", path: "/masters/call-types" },
+        ],
+      },
       { key: "masters-countries", label: "Countries", path: "/masters/countries", icon: "globe", permission: "country.view" },
-      { key: "masters-states", label: "Provinces", path: "/masters/states", icon: "map", permission: "state.view" },
-      { key: "masters-cities", label: "City", path: "/masters/cities", icon: "pin", permission: "city.view" },
       { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", icon: "coins", permission: "currency.view" },
-      { key: "masters-uom", label: "Units of Measurement", path: "/masters/uom", icon: "ruler", permission: "uom.view" },
+      { key: "masters-hsn", label: "HSN Codes", path: "/masters/hsn", icon: "barcode", permission: "hsn.view" },
       { key: "organization", label: "Organization Settings", path: "/organization", icon: "settings", permission: "organization.manage" },
       { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", icon: "building", permission: "organizationlist.view" },
       { key: "audit", label: "Audit Log", path: "/audit", icon: "clock", permission: "audit.view" },
       { key: "trash", label: "Trash", path: "/trash", icon: "trash", permission: "trash.view" },
+    ],
+  },
+  {
+    label: "CALL LOG",
+    items: [
+      { key: "call-logs-follow-up", label: "Follow Up Logs", path: "/call-logs/follow-up", icon: "fileText" },
     ],
   },
 ];
@@ -121,19 +152,20 @@ export const PAGE_TITLES: Record<string, string> = {
   "org-chart": "Organization Chart",
   "masters-company-list": "Organization List",
   "masters-countries": "Countries (National Level)",
-  "masters-states": "Provinces (First Level Divisions)",
-  "masters-cities": "City",
+  "masters-states": "States",
+  "masters-districts": "Districts",
+  "masters-cities": "Cities",
   "masters-currencies": "Currencies",
-  "masters-uom": "Units of Measurement",
+  "masters-uom": "UOM",
   "masters-hsn": "HSN Codes",
   "masters-brands": "Brands",
   "masters-supplier-types": "Supplier Types",
   "masters-buyer-types": "Buyer Types",
-
   "masters-categories": "Categories",
   "masters-subcategories": "Sub Categories",
   "masters-products": "Product Master",
   suppliers: "Suppliers",
+  companies: "Companies",
   audit: "Audit Log",
   rbac: "Departments & Permissions",
   "effective-permissions": "Effective Permissions Inspector",
@@ -144,28 +176,46 @@ export const PAGE_TITLES: Record<string, string> = {
   tasks: "Task Management",
   "tasks-kanban": "Tasks Kanban Board",
   "tasks-calendar": "Tasks Calendar",
+
+  // Masters from screenshot
+  "masters-taxes": "Taxes",
+  "masters-additional-charges": "Additional Charges",
+  "masters-social-media": "Social Media",
+  "masters-agent-types": "Agent Types",
+  "masters-company-categories": "Company Categories",
+  "masters-company-sectors": "Company Sectors",
+  "masters-warehouses": "Warehouses",
+  "masters-billing-company": "Billing Company",
+  "masters-technicians": "Technicians",
+  "masters-bank": "Bank",
+  "masters-transport": "Transport",
+  "masters-payment-terms": "Payment Terms",
+  "masters-lead-sources": "Lead Sources",
+  "masters-adjustment-purpose": "Adjustment Purpose",
+  "masters-call-types": "Call Types",
+  "call-logs-follow-up": "Follow Up Logs",
 };
 
 export const DEFAULT_BRAND_NAME = "Inhyma";
 
 /** Flat lookup of every nav item by key, for the page-access check. */
-export const NAV_ITEMS_BY_KEY: Record<string, NavItem> = NAV_SECTIONS.reduce(
+export const NAV_ITEMS_BY_KEY: Record<string, NavItem | NavSubItem> = NAV_SECTIONS.reduce(
   (acc, section) => {
     section.items.forEach((item) => {
       acc[item.key] = item;
+      if (item.children) {
+        item.children.forEach((child) => {
+          acc[child.key] = child;
+        });
+      }
     });
     return acc;
   },
-  {} as Record<string, NavItem>
+  {} as Record<string, NavItem | NavSubItem>
 );
 
 /**
  * Old filename -> new path, for bookmark compatibility.
- *
- * Single source of truth for App.tsx's redirect routes AND for resolving the
- * legacy `./whatever.html` targets the backend's universal search endpoint
- * still emits (app/search/service.py predates the SPA rewrite and was never
- * updated to know about client-side routes) -- see resolveLegacyUrl below.
  */
 export const LEGACY_REDIRECTS: Record<string, string> = {
   "/index.html": "/dashboard",
@@ -183,6 +233,7 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/inquiries.html": "/inquiries",
   "/masters-countries.html": "/masters/countries",
   "/masters-states.html": "/masters/states",
+  "/masters-districts.html": "/masters/districts",
   "/masters-cities.html": "/masters/cities",
   "/masters-currencies.html": "/masters/currencies",
   "/masters-uom.html": "/masters/uom",
@@ -201,10 +252,7 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
 };
 
 /**
- * Resolve any URL the app might be handed -- a real React path already
- * (`/masters/products`), a legacy absolute path (`/users.html`), or a legacy
- * relative path as emitted by the backend's universal search results
- * (`./users.html`) -- into the React route to navigate to.
+ * Resolve any URL the app might be handed.
  */
 export function resolveLegacyUrl(url: string): string {
   const absolute = url.startsWith("./") ? url.slice(1) : url;

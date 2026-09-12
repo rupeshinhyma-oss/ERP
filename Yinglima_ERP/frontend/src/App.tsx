@@ -6,6 +6,12 @@
  * `/masters-countries.html` continue to resolve -- including
  * `employee-detail.html` and `employee-form.html`, which were already just
  * redirect stubs pointing at User Management.
+ *
+ * FIX (nav redirect bug): EffectivePermissionsPage was a fully built page
+ * (linked from LEGACY_REDIRECTS' "/effective-permissions.html" -> "/effective-permissions"
+ * mapping) that was never imported or given its own route here. Visiting
+ * /effective-permissions fell through the "*" catch-all and bounced to
+ * /dashboard. It is now imported and routed below.
  */
 
 import { useEffect } from "react";
@@ -21,6 +27,7 @@ import { AuditPage } from "@/pages/Audit";
 import { UsersPage } from "@/pages/Users";
 import { ProfilePage } from "@/pages/Profile";
 import { RbacPage } from "@/pages/Rbac";
+import { EffectivePermissionsPage } from "@/pages/EffectivePermissions";
 import { PositionsPage } from "@/pages/org/Positions";
 import { SuppliersPage } from "@/pages/Suppliers";
 import { BuyersPage } from "@/pages/Buyers";
@@ -54,10 +61,13 @@ import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 export function App() {
   const navigate = useNavigate();
 
-  // Process incoming cross-ERP SSO handover immediately on load
+  // Process incoming cross-ERP SSO handover immediately on load. Only a
+  // genuine fresh auto-login ("logged-in") should redirect to /dashboard;
+  // "already-logged-in" means nothing changed, so the user's current page
+  // (wherever they navigated to) is left alone.
   useEffect(() => {
-    processIncomingSsoHandover().then((loggedIn) => {
-      if (loggedIn) {
+    processIncomingSsoHandover().then((result) => {
+      if (result === "logged-in") {
         navigate("/dashboard", { replace: true });
       }
     });
@@ -101,6 +111,7 @@ export function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/rbac" element={<RbacPage />} />
+          <Route path="/effective-permissions" element={<EffectivePermissionsPage />} />
           {/* Employee was merged into User -- /employees is now an alias for the same page. */}
           <Route path="/employees" element={<UsersPage />} />
           <Route path="/positions" element={<PositionsPage />} />

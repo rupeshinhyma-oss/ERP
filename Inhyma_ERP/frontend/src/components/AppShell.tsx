@@ -27,7 +27,7 @@ import {
   DEFAULT_BRAND_NAME,
 } from "@/lib/nav";
 import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/brand";
-import { ICONS, IconBell } from "./icons";
+import { ICONS, IconBell, IconChevronDown, IconChevronRight } from "./icons";
 import { UniversalSearch } from "./UniversalSearch";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
@@ -187,7 +187,7 @@ function NotificationBell() {
   useEffect(() => {
     loadNotifications();
     // Run deadline checks for current user on mount
-    tasksApi.checkTaskDeadlines().then(() => loadNotifications()).catch(() => {});
+    tasksApi.checkTaskDeadlines().then(() => loadNotifications()).catch(() => { });
   }, [loadNotifications]);
 
   // Live WebSocket updates
@@ -226,7 +226,7 @@ function NotificationBell() {
 
   const handleNotificationClick = async (n: InAppNotification) => {
     if (!n.is_read) {
-      apiPatch(`/notifications/${n.id}/read`).catch(() => {});
+      apiPatch(`/notifications/${n.id}/read`).catch(() => { });
       setNotifications((prev) =>
         prev.map((item) => (item.id === n.id ? { ...item, is_read: true } : item))
       );
@@ -502,17 +502,17 @@ function NotificationBell() {
                 {activeCategory === "deadlines"
                   ? "No task deadlines"
                   : activeCategory === "escalations"
-                  ? "No escalation notifications"
-                  : activeCategory === "team"
-                  ? "No team activity"
-                  : "No notifications yet"}
+                    ? "No escalation notifications"
+                    : activeCategory === "team"
+                      ? "No team activity"
+                      : "No notifications yet"}
               </div>
               <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "4px" }}>
                 {activeCategory === "deadlines"
                   ? "Approaching or overdue tasks assigned to you will appear here."
                   : activeCategory === "escalations"
-                  ? "Escalations assigned to you will trigger alerts here."
-                  : "You are all caught up!"}
+                    ? "Escalations assigned to you will trigger alerts here."
+                    : "You are all caught up!"}
               </div>
             </div>
           ) : (
@@ -860,13 +860,47 @@ function Sidebar({
     () =>
       NAV_SECTIONS.map((section) => ({
         ...section,
-        items: section.items.filter((item) => {
-          if (item.superAdminOnly && !isSuperAdmin) return false;
-          return !item.permission || hasPermission(item.permission);
-        }),
+        items: section.items
+          .map((item) => {
+            if (item.children) {
+              const visibleChildren = item.children.filter((child) => {
+                if (child.superAdminOnly && !isSuperAdmin) return false;
+                return !child.permission || hasPermission(child.permission);
+              });
+              return { ...item, children: visibleChildren };
+            }
+            return item;
+          })
+          .filter((item) => {
+            if (item.children) return item.children.length > 0;
+            if (item.superAdminOnly && !isSuperAdmin) return false;
+            return !item.permission || hasPermission(item.permission);
+          }),
       })).filter((section) => section.items.length > 0),
     [isSuperAdmin, hasPermission]
   );
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const section of NAV_SECTIONS) {
+      for (const item of section.items) {
+        if (item.children && item.children.some((c) => c.key === activeKey)) {
+          initial[item.key] = true;
+        }
+      }
+    }
+    return initial;
+  });
+
+  useEffect(() => {
+    for (const section of visibleSections) {
+      for (const item of section.items) {
+        if (item.children && item.children.some((c) => c.key === activeKey)) {
+          setOpenGroups((prev) => ({ ...prev, [item.key]: true }));
+        }
+      }
+    }
+  }, [activeKey, visibleSections]);
 
   useEffect(() => {
     const navEl = navRef.current;
@@ -880,7 +914,7 @@ function Sidebar({
       navEl.scrollTop = Math.min(saved, maxScroll);
     }
 
-    const active = navEl.querySelector(".nav-item.active");
+    const active = navEl.querySelector(".nav-item.active, .nav-sub-item.active");
     if (active) {
       const navBox = navEl.getBoundingClientRect();
       const itemBox = active.getBoundingClientRect();
@@ -971,11 +1005,94 @@ function Sidebar({
           <div className="nav-group" key={section.label}>
             <div className="nav-group-label">{section.label}</div>
             {section.items.map((item) => {
+              if (item.children) {
+                const isOpen = Boolean(openGroups[item.key]);
+                const isAnyChildActive = item.children.some((c) => c.key === activeKey);
+                const Icon = ICONS[item.icon];
+                return (
+                  <div key={item.key} className="nav-group-item-container">
+                    <button
+                      type="button"
+                      className={`nav-item nav-item-accordion ${isAnyChildActive ? "active-parent" : ""}`}
+                      onClick={() => {
+                        if (collapsed) {
+                          onToggleSidebar();
+                          setOpenGroups((prev) => ({ ...prev, [item.key]: true }));
+                        } else {
+                          setOpenGroups((prev) => ({ ...prev, [item.key]: !prev[item.key] }));
+                        }
+                      }}
+                      title={collapsed ? item.label : undefined}
+                      style={{
+                        width: "100%",
+                        background: isAnyChildActive && !collapsed ? "#eff6ff" : "none",
+                        border: "none",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        outline: "none",
+                        font: "inherit",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        padding: "9px 12px",
+                        borderRadius: "6px",
+                      }}
+                    >
+                      <Icon />
+                      <span className="nav-label">{item.label}</span>
+                      {!collapsed && (
+                        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", opacity: 0.65 }}>
+                          {isOpen ? <IconChevronDown /> : <IconChevronRight />}
+                        </span>
+                      )}
+                    </button>
+                    {isOpen && !collapsed && (
+                      <div
+                        className="nav-sub-items"
+                        style={{
+                          paddingLeft: "32px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "1px",
+                          marginTop: "2px",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        {item.children.map((child) => {
+                          const isChildActive = child.key === activeKey;
+                          return (
+                            <Link
+                              key={child.key}
+                              to={child.path}
+                              className={`nav-sub-item ${isChildActive ? "active" : ""}`}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                padding: "6px 12px",
+                                fontSize: "13px",
+                                color: isChildActive ? "#0061f2" : "#64748b",
+                                fontWeight: isChildActive ? 700 : 500,
+                                textDecoration: "none",
+                                borderRadius: "5px",
+                                background: isChildActive ? "#e0edff" : "transparent",
+                                transition: "all 0.12s ease",
+                              }}
+                            >
+                              <span>{child.label}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
               const Icon = ICONS[item.icon];
               return (
                 <Link
                   key={item.key}
-                  to={item.path}
+                  to={item.path || "#"}
                   className={`nav-item ${item.key === activeKey ? "active" : ""}`}
                   title={collapsed ? item.label : undefined}
                 >
@@ -1371,8 +1488,13 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
 
   useEffect(() => {
     if (!loggedIn) {
-      processIncomingSsoHandover().then((ok) => {
-        if (ok) {
+      processIncomingSsoHandover().then((result) => {
+        // Only a genuine fresh auto-login (a real state change) warrants a
+        // reload. "already-logged-in" means Auth was already logged in by
+        // the time this ran (e.g. AppShell remounting on a route change
+        // right after a previous reload) -- reloading again here would
+        // just repeat the same effect on the next mount, forever.
+        if (result === "logged-in") {
           window.location.reload();
         }
       });

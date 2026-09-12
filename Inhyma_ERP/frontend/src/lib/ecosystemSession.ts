@@ -206,11 +206,36 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
 /* Real-Time Session Watcher (Detects Remote Logout Across ERPs)      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Module-level guard against duplicate watchers.
+ *
+ * initEcosystemSessionWatcher() sets up a `setInterval` (every 15s) plus
+ * `focus`/BroadcastChannel listeners. It's only ever meant to have ONE
+ * live instance per tab. If something calls it again before the previous
+ * instance's cleanup has run (e.g. AppShell re-mounting in quick succession
+ * during an SSO redirect chain, before React has committed the prior
+ * instance's unmount), the old interval/listeners were previously leaked
+ * forever -- each stacking up its own independent 15s polling loop, so N
+ * overlapping calls produced requests roughly every (15000/N) ms instead of
+ * one every 15s. Tearing down any existing watcher before creating a new
+ * one makes it impossible to ever have more than one live at a time,
+ * regardless of what triggered the extra call.
+ */
+let activeWatcherCleanup: (() => void) | null = null;
+
 export function initEcosystemSessionWatcher(
   currentSessionId: string | null,
   onSessionRevoked: () => void
 ): () => void {
-  if (typeof window === "undefined") return () => {};
+  if (typeof window === "undefined") return () => { };
+
+  // Tear down any previously-registered watcher first so calling this
+  // again (for any reason) can never leave a prior interval/listener set
+  // running alongside the new one.
+  if (activeWatcherCleanup) {
+    activeWatcherCleanup();
+    activeWatcherCleanup = null;
+  }
 
   const ch = getAuthChannel();
 
@@ -271,11 +296,16 @@ export function initEcosystemSessionWatcher(
     }
   }, 15000);
 
-  return () => {
+  const cleanup = () => {
     if (ch) {
       ch.removeEventListener("message", handleMessage);
     }
     window.removeEventListener("focus", handleFocus);
     clearInterval(intervalId);
+    if (activeWatcherCleanup === cleanup) {
+      activeWatcherCleanup = null;
+    }
   };
+  activeWatcherCleanup = cleanup;
+  return cleanup;
 }

@@ -100,8 +100,12 @@ export function LoginPage() {
 
   useEffect(() => {
     identifierRef.current?.focus();
-    processIncomingSsoHandover().then((ok) => {
-      if (ok) {
+    processIncomingSsoHandover().then((result) => {
+      // Unlike AppShell/App, being on the Login page itself means either
+      // outcome ("logged-in" or "already-logged-in") should move on to
+      // /dashboard -- there's no reason to stay on the login form once we
+      // know the user is authenticated either way.
+      if (result === "logged-in" || result === "already-logged-in") {
         navigate("/dashboard", { replace: true });
       }
     });

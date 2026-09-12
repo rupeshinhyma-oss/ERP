@@ -514,10 +514,29 @@ export function IconClose(props: IconProps) {
 }
 
 
+export function IconChevronDown(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <polyline points="6 9 12 15 18 9" />
+    </NavSvg>
+  );
+}
+
 export function IconChevronRight(props: IconProps) {
   return (
     <NavSvg {...props}>
       <polyline points="9 18 15 12 9 6" />
+    </NavSvg>
+  );
+}
+
+export function IconUserPlus(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <line x1="19" y1="8" x2="19" y2="14" />
+      <line x1="22" y1="11" x2="16" y2="11" />
     </NavSvg>
   );
 }
@@ -549,6 +568,10 @@ export const ICONS = {
   building: IconBuilding,
   clock: IconClock,
   trash: IconTrash,
+  chevronDown: IconChevronDown,
+  chevronRight: IconChevronRight,
+  userPlus: IconUserPlus,
+  masters: IconUserPlus,
   // Work Management
   calendar: IconCalendar,
   kanban: IconKanban,

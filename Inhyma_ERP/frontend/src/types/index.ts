@@ -99,6 +99,13 @@ export interface State extends MasterRecord {
   country_id: string;
 }
 
+export interface District extends MasterRecord {
+  name: string;
+  code?: string | null;
+  country_id: string;
+  state_id: string;
+}
+
 export interface City extends MasterRecord {
   name: string;
   country_id: string;
@@ -518,6 +525,67 @@ export interface Supplier {
   is_active?: boolean;
   dealing_officer_id?: string | null;
   contacts?: SupplierContact[];
+}
+
+/* ------------------------------------------------------------------ */
+/* Companies                                                          */
+/* ------------------------------------------------------------------ */
+
+export interface CompanyContact {
+  id: string;
+  salutation?: string | null;
+  person_name: string;
+  designation?: string | null;
+  handling_territory?: string | null;
+  country_id?: string | null;
+  calling_number?: string | null;
+  whatsapp_number?: string | null;
+  wechat_number?: string | null;
+  email?: string | null;
+  is_primary?: boolean;
+}
+
+export interface Company {
+  id: string;
+  version?: number;
+  company_name: string;
+  category_ids?: string[];
+  sub_category_ids?: string[];
+  product_ids?: string[];
+  company_type?: string | null;
+  brand_description?: string | null;
+  country_id?: string | null;
+  state_id?: string | null;
+  city_id?: string | null;
+  area?: string | null;
+  district?: string | null;
+  sales_person_id?: string | null;
+  contact_salutation?: string | null;
+  contact_full_name?: string | null;
+  contact_designation?: string | null;
+  contact_calling_number?: string | null;
+  contact_whatsapp_number?: string | null;
+  contact_wechat_number?: string | null;
+  contact_indiamart_number?: string | null;
+  emails?: string[];
+  tax_id_number?: string | null;
+  address?: string | null;
+  town?: string | null;
+  primary_website?: string | null;
+  secondary_website?: string | null;
+  company_grade?: string | null;
+  current_status?: string | null;
+  potential?: string | null;
+  potential_reason?: string | null;
+  secondary_products_description?: string | null;
+  visited_factory_office?: boolean;
+  visit_remarks?: string | null;
+  visit_media?: string[] | null;
+  media_urls?: string | null;
+  overall_remarks?: string | null;
+  is_active?: boolean;
+  dealing_officer_id?: string | null;
+  contacts?: CompanyContact[];
 }
 
 /** Backend list endpoints that wrap rows in an object rather than an array. */

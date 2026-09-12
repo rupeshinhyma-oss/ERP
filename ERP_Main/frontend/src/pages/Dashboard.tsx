@@ -122,8 +122,8 @@ export function Dashboard() {
       activeKey="dashboard"
       pageTitle="ERP Dashboard"
       actions={
-        <div style={{ display: "flex", gap: "8px" }}>
-          {canRebuild && (
+        canRebuild ? (
+          <div style={{ display: "flex", gap: "8px" }}>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -133,12 +133,8 @@ export function Dashboard() {
               <ICONS.refreshCw width={14} height={14} />
               Rebuild Projections
             </button>
-          )}
-          <Link to="/erps" className="btn btn-primary btn-sm" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <ICONS.plus width={14} height={14} />
-            Register ERP
-          </Link>
-        </div>
+          </div>
+        ) : undefined
       }
     >
       <Banner error={error} />
