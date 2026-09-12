@@ -276,8 +276,6 @@ export function Dashboard() {
                         return isExt ? (
                           <a
                             href={targetUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
                             className="btn btn-primary btn-sm"
                             style={{ display: "flex", alignItems: "center", gap: "4px", textDecoration: "none" }}
                           >

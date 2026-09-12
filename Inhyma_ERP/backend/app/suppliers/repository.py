@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Select, and_, exists, or_, select
+from sqlalchemy import ColumnElement, Select, and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -112,7 +112,7 @@ class SupplierRepository(BaseRepository[Supplier]):
             Supplier.visit_remarks,
             Supplier.overall_remarks,
         ]
-        conditions = [col.ilike(pattern) for col in direct_columns]
+        conditions: list[ColumnElement[bool]] = [col.ilike(pattern) for col in direct_columns]
 
         # 1. Country Name / Code
         conditions.append(

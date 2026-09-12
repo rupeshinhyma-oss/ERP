@@ -407,7 +407,7 @@ class InquiryItemRepository(BaseRepository[InquiryItem]):
             InquiryItem.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
-        return int(result.scalar_one())
+        return result.scalar_one()
 
 
 class QuotationRepository(BaseRepository[Quotation]):
@@ -535,13 +535,13 @@ class QuotationRepository(BaseRepository[Quotation]):
             )
         )
         result = await self.session.execute(stmt)
-        return int(result.scalar_one())
+        return result.scalar_one()
 
     async def generate_quote_number(self) -> str:
         """Generate next quote number sequence e.g. #QT-501."""
         stmt = select(func.count()).select_from(Quotation)
         result = await self.session.execute(stmt)
-        count = int(result.scalar_one())
+        count = result.scalar_one()
         return f"#QT-{500 + count + 1}"
 
     async def get_last_purchase_for_product(self, product_id: uuid.UUID) -> dict | None:

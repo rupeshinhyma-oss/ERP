@@ -412,8 +412,6 @@ export function Organizations() {
               <div style={{ display: "flex", gap: "8px", borderTop: "1px solid var(--color-border)", paddingTop: "14px" }}>
                 <a
                   href={erp.base_url}
-                  target="_blank"
-                  rel="noreferrer"
                   className="btn btn-primary btn-sm"
                   style={{ flex: 1, justifyContent: "center" }}
                 >

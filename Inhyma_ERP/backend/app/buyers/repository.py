@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Select, and_, exists, or_, select
+from sqlalchemy import ColumnElement, Select, and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.buyers.models import Buyer, BuyerCategoryLink, BuyerContact, BuyerEmail, BuyerSubCategoryLink
@@ -85,7 +85,7 @@ class BuyerRepository(BaseRepository[Buyer]):
             Buyer.currently_buying_from,
             Buyer.overall_remarks,
         ]
-        conditions = [col.ilike(pattern) for col in direct_columns]
+        conditions: list[ColumnElement[bool]] = [col.ilike(pattern) for col in direct_columns]
 
         # 1. Country Name / Code
         conditions.append(

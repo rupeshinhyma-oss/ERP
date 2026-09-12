@@ -362,8 +362,6 @@ export function ErpLauncher() {
                   <a
                     id={`btn-launch-${erp.erp_key || (erp as any).key}`}
                     href={hostUrl ? (isSuperAdmin ? createSsoHandoverUrl(hostUrl) : hostUrl) : "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="btn btn-primary"
                     style={{
                       flex: 1,
