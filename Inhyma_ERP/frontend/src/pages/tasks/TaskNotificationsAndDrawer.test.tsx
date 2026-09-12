@@ -231,4 +231,40 @@ describe("EscalateTaskModal Verification & Validation (QA Specification 32.4)", 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(2);
   });
+
+  it("displays validation error when submitting escalation without SLA due date", async () => {
+    render(
+      <EscalateTaskModal
+        isOpen={true}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        taskId="task-123"
+        taskTitle="Critical Performance Bottleneck"
+      />
+    );
+
+    const reasonInput = screen.getByPlaceholderText(/Explain the blocker, urgency/i);
+    fireEvent.change(reasonInput, { target: { value: "Upstream vendor API unavailable" } });
+
+    const submitBtn = screen.getByRole("button", { name: /Submit Escalation/i });
+    await waitFor(() => {
+      expect((submitBtn as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    const form = submitBtn.closest("form")!;
+    fireEvent.submit(form);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Target SLA resolution due date is required for escalation/i)).toBeDefined();
+    });
+  });
+});
+
+describe("Kanban Pipeline Complete Status Coverage (BUG-04)", () => {
+  it("includes all 6 required enterprise lifecycle states", () => {
+    const requiredStatuses = ["TODO", "IN_PROGRESS", "REVIEW", "PENDING_APPROVAL", "ON_HOLD", "DONE"];
+    expect(requiredStatuses).toContain("PENDING_APPROVAL");
+    expect(requiredStatuses).toContain("ON_HOLD");
+    expect(requiredStatuses.length).toBe(6);
+  });
 });

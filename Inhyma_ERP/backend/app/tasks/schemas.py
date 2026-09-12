@@ -534,6 +534,8 @@ class TaskCreate(BaseModel):
     initial_escalation: TaskInitialEscalationInput | None = None
     attachments: list[TaskAttachmentCreateInput] = []
     voice_notes: list[TaskVoiceNoteCreateInput] = []
+    hold_reason: str | None = None
+    hold_until: date | None = None
 
     @model_validator(mode="after")
     def validate_dates(self) -> TaskCreate:

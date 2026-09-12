@@ -114,11 +114,15 @@ export const EscalateTaskModal: React.FC<EscalateTaskModalProps> = ({
       setError("Please enter a clear reason for this escalation.");
       return;
     }
+    if (!dueDate) {
+      setError("Target SLA resolution due date is required for escalation.");
+      return;
+    }
 
     setSubmitting(true);
     setError(null);
     try {
-      await escalateTask(taskId, selectedUserId, reason.trim(), targetType, dueDate || null);
+      await escalateTask(taskId, selectedUserId, reason.trim(), targetType, dueDate);
       onSuccess();
       onClose();
     } catch (err: unknown) {
@@ -369,22 +373,25 @@ export const EscalateTaskModal: React.FC<EscalateTaskModalProps> = ({
               />
             </div>
 
-            {/* Optional Due Date */}
+            {/* Mandatory Due Date */}
             <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                Target Resolution Due Date (Optional)
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "var(--text-primary, #334155)", marginBottom: "6px" }}>
+                Target SLA Resolution Due Date <span style={{ color: "#ef4444" }}>*</span>
               </label>
               <input
                 type="date"
+                required
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
                 style={{
                   width: "100%",
                   padding: "7px 10px",
-                  border: "1px solid #cbd5e1",
+                  border: "1px solid var(--border-color, #cbd5e1)",
                   borderRadius: "6px",
                   fontSize: "13px",
                   boxSizing: "border-box",
+                  background: "var(--bg-surface, #ffffff)",
+                  color: "var(--text-primary, #1e293b)",
                 }}
               />
             </div>
@@ -394,8 +401,8 @@ export const EscalateTaskModal: React.FC<EscalateTaskModalProps> = ({
           <div
             style={{
               padding: "12px 20px",
-              borderTop: "1px solid #e2e8f0",
-              background: "#f8fafc",
+              borderTop: "1px solid var(--border-color, #e2e8f0)",
+              background: "var(--bg-muted, #f8fafc)",
               display: "flex",
               justifyContent: "flex-end",
               gap: "10px",

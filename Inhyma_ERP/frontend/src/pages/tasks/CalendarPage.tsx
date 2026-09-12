@@ -24,6 +24,7 @@ export const CalendarPage: React.FC = () => {
 
   // Modals & Drawer
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [escalatingTask, setEscalatingTask] = useState<TaskDetail | null>(null);
 
@@ -73,7 +74,8 @@ export const CalendarPage: React.FC = () => {
     setCurrentDate(new Date());
   };
 
-  const handleDayClick = () => {
+  const handleDayClick = (dateKey?: string) => {
+    setSelectedDate(dateKey || "");
     setIsCreateOpen(true);
   };
 
@@ -246,7 +248,7 @@ export const CalendarPage: React.FC = () => {
               className={`task-calendar-day-cell ${
                 !cell.isCurrentMonth ? "outside-month" : ""
               } ${cell.isToday ? "today" : ""}`}
-              onClick={() => handleDayClick()}
+              onClick={() => handleDayClick(cell.dateKey)}
             >
               <div className="task-calendar-day-header">
                 <span className={`task-calendar-day-number ${cell.isToday ? "today-badge" : ""}`}>
@@ -283,7 +285,7 @@ export const CalendarPage: React.FC = () => {
                     className="task-calendar-more"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDayClick();
+                      handleDayClick(cell.dateKey);
                     }}
                   >
                     +{cell.tasks.length - 3} more
@@ -298,14 +300,15 @@ export const CalendarPage: React.FC = () => {
       {/* Unscheduled Tasks Section */}
       {unscheduledTasks.length > 0 && (
         <div className="task-card-container" style={{ marginTop: "24px" }}>
-          <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "12px" }}>
-            Unscheduled Tasks ({unscheduledTasks.length})
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: "12px", color: "var(--text-secondary)" }}>
+            ⏳ Unscheduled Tasks (No Due Date) — {unscheduledTasks.length}
           </h3>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "10px" }}>
             {unscheduledTasks.map((t) => (
               <div
                 key={t.id}
-                className="task-unscheduled-pill"
+                className="task-calendar-pill"
+                style={{ cursor: "pointer", padding: "8px 12px" }}
                 onClick={() => setSelectedTaskId(t.id)}
               >
                 <span>{t.title}</span>
@@ -321,9 +324,15 @@ export const CalendarPage: React.FC = () => {
       {/* Create Task Modal */}
       <CreateTaskModal
         isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
+        initialStartDate={selectedDate || undefined}
+        initialDueDate={selectedDate || undefined}
+        onClose={() => {
+          setIsCreateOpen(false);
+          setSelectedDate("");
+        }}
         onSuccess={() => {
           setIsCreateOpen(false);
+          setSelectedDate("");
           fetchTasks();
         }}
       />
