@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppException
 from app.database.engine import get_sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
         except Exception:
             pass
-        if not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GeneratorExit)):
+        if not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, AppException)):
             logger.exception("Session rolled back due to an unhandled exception.")
         raise
     finally:

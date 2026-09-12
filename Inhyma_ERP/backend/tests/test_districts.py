@@ -367,4 +367,48 @@ async def test_district_lookup_endpoint():
         assert body_filtered["data"][0]["name"] == "Patna"
 
 
+@pytest.mark.asyncio
+async def test_list_districts_permission_enforcement():
+    """Verify GET /api/v1/masters/districts requires district.view permission."""
+    from app.auth.dependencies import get_current_user
+    from app.auth.service import CurrentUser
+    from app.main import create_application
+    from app.masters.districts.dependencies import get_district_service
+    from httpx import ASGITransport, AsyncClient
+
+    app = create_application()
+
+    # 1. User without district.view -> 403
+    unauth_user = CurrentUser(
+        id=uuid.uuid4(),
+        username="no_district_perm_user",
+        permissions={"city.view"},
+    )
+    app.dependency_overrides[get_current_user] = lambda: unauth_user
+
+    mock_service = AsyncMock()
+    mock_service.list_paginated.return_value = ([], 0)
+    app.dependency_overrides[get_district_service] = lambda: mock_service
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        res = await ac.get("/api/v1/masters/districts")
+        assert res.status_code == 403
+        assert "district.view" in res.json()["errors"][0]["message"]
+
+    # 2. User with district.view -> 200
+    auth_user = CurrentUser(
+        id=uuid.uuid4(),
+        username="district_perm_user",
+        permissions={"district.view"},
+    )
+    app.dependency_overrides[get_current_user] = lambda: auth_user
+
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        res2 = await ac.get("/api/v1/masters/districts")
+        assert res2.status_code == 200
+        assert res2.json()["success"] is True
+
+
+
 

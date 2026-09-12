@@ -60,7 +60,7 @@ async def db_session():
 @pytest_asyncio.fixture
 async def seeded_country(db_session):
     """Seed a real Country row with a unique ISO code."""
-    unique_suffix = uuid.uuid4().hex[:4].upper()
+    unique_suffix = uuid.uuid4().hex[:8].upper()
     code = f"W{unique_suffix}"
     country = Country(name=f"Test Country {uuid.uuid4().hex}", code=code)
     db_session.add(country)

@@ -70,9 +70,12 @@ export function AppShell({
   // Sync profile on mount if missing
   useEffect(() => {
     if (isLoggedIn && !profile) {
-      apiGet<PlatformAdmin>("/global/auth/me")
-        .then((res) => {
-          if (res) Auth.updateProfile(res);
+      const pType = Auth.getPrincipalType();
+      const endpoint = pType === "platform_admin" ? "/global/auth/me" : "/global/user-auth/me";
+      apiGet(endpoint)
+        .then((res: unknown) => {
+          const prof = (res as { data?: unknown })?.data || res;
+          if (prof) Auth.updateProfile(prof as any);
         })
         .catch(() => {
           // Handled by 401 interceptor in api.ts
