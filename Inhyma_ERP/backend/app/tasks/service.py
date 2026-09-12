@@ -103,6 +103,64 @@ class TaskService:
         self.dispatcher = dispatcher or EventDispatcher()
 
     # --- Helpers ---
+    async def _assert_can_mutate_task(self, task: Task, current_user: Any, action: str = "update") -> None:
+        """
+        Enforce strict Object-Level Authorization (BUG-01 & BUG-02).
+        Allowed actors:
+          - Super Admin / explicit task.manage / task.organization_view
+          - Creator (for update or delete)
+          - Assignees (for update/assign/dependency/subtasks; delete restricted)
+          - Department Manager of creator or any assignee
+        """
+        user_perms = set(getattr(current_user, "permissions", []))
+        is_super_admin = (
+            "super_admin" in user_perms
+            or "task.organization_view" in user_perms
+            or "task.manage" in user_perms
+            or "*" in user_perms
+        )
+        if is_super_admin:
+            return
+
+        actor_id = getattr(current_user, "id", None)
+        if not actor_id:
+            raise ForbiddenException(f"You do not have permission to {action} this task.")
+
+        # Creator can update or delete own task
+        if task.created_by == actor_id:
+            return
+
+        # Assignees can update, assign, link dependencies, but cannot delete
+        is_assignee = any(getattr(a, "user_id", None) == actor_id for a in getattr(task, "assignees", []))
+        if is_assignee and action != "delete":
+            return
+
+        # Department Manager check: verify if current_user is manager for creator's or assignees' departments
+        target_user_ids = {task.created_by} if task.created_by else set()
+        for a in getattr(task, "assignees", []):
+            if getattr(a, "user_id", None):
+                target_user_ids.add(a.user_id)
+
+        if target_user_ids:
+            dept_subq = select(UserRole.role_id).where(UserRole.user_id.in_(target_user_ids))
+            mgr_stmt = (
+                select(DepartmentLeadershipAssignment.id)
+                .where(
+                    DepartmentLeadershipAssignment.employee_id == actor_id,
+                    DepartmentLeadershipAssignment.department_id.in_(dept_subq),
+                )
+                .limit(1)
+            )
+            res = await self.repository.session.execute(mgr_stmt)
+            if res.scalar_one_or_none():
+                return
+
+        # If action is delete and user has explicit task.delete
+        if action == "delete" and "task.delete" in user_perms and task.created_by == actor_id:
+            return
+
+        raise ForbiddenException(f"You do not have permission to {action} this task.")
+
     def _to_summary(self, task: Task) -> TaskSummaryRead:
         from sqlalchemy import inspect
         state = inspect(task, raiseerr=False)
@@ -305,6 +363,11 @@ class TaskService:
             if not sprint:
                 raise ValidationException("Specified sprint does not exist.")
 
+        hold_reason_val = getattr(payload, "hold_reason", None)
+        hold_until_val = getattr(payload, "hold_until", None)
+        if payload.status == TaskStatus.ON_HOLD and (not hold_reason_val or not hold_reason_val.strip()):
+            raise ValidationException("Hold reason is required when setting task status to ON_HOLD.")
+
         issue_type_str = payload.issue_type.value if hasattr(payload.issue_type, "value") else str(payload.issue_type or "TASK")
         task = Task(
             title=payload.title,
@@ -316,6 +379,8 @@ class TaskService:
             sprint_id=payload.sprint_id,
             start_date=payload.start_date,
             due_date=payload.due_date,
+            hold_reason=hold_reason_val,
+            hold_until=hold_until_val,
             created_by=current_user.id,
         )
         if payload.approver_id:
@@ -481,6 +546,7 @@ class TaskService:
         current_user: Any,
     ) -> Task:
         task = await self.get_task(task_id)
+        await self._assert_can_mutate_task(task, current_user, action="update")
 
         new_start = payload.start_date if payload.start_date is not None else task.start_date
         new_due = payload.due_date if payload.due_date is not None else task.due_date
@@ -502,8 +568,8 @@ class TaskService:
         old_values = {
             "title": task.title,
             "description": task.description,
-            "priority": task.priority.value,
-            "status": task.status.value,
+            "priority": task.priority.value if hasattr(task.priority, "value") else str(task.priority or "MEDIUM"),
+            "status": task.status.value if hasattr(task.status, "value") else str(task.status or "TODO"),
             "start_date": task.start_date.isoformat() if task.start_date else None,
             "due_date": task.due_date.isoformat() if task.due_date else None,
             "hold_reason": task.hold_reason,
@@ -542,6 +608,31 @@ class TaskService:
         status_changed_from_hold = False
 
         if payload.status is not None:
+            if payload.status == TaskStatus.DONE:
+                # Check all BLOCKED_BY dependencies (BUG-03)
+                incomplete_blockers: list[str] = []
+                for dep in getattr(task, "dependencies", []):
+                    dep_type = dep.dependency_type.value if hasattr(dep.dependency_type, "value") else str(dep.dependency_type)
+                    if dep_type == "BLOCKED_BY":
+                        dep_task = await self.repository.get_task_by_id(dep.depends_on_task_id)
+                        if dep_task and dep_task.status != TaskStatus.DONE:
+                            incomplete_blockers.append(dep_task.title)
+                for dep in getattr(task, "dependent_on", []):
+                    dep_type = dep.dependency_type.value if hasattr(dep.dependency_type, "value") else str(dep.dependency_type)
+                    if dep_type == "BLOCKS":
+                        dep_task = await self.repository.get_task_by_id(dep.task_id)
+                        if dep_task and dep_task.status != TaskStatus.DONE:
+                            incomplete_blockers.append(dep_task.title)
+                if incomplete_blockers:
+                    raise ValidationException(
+                        f"Cannot complete task. Blocked by: {', '.join(incomplete_blockers)}"
+                    )
+
+            if payload.status == TaskStatus.ON_HOLD:
+                hold_reason_check = payload.hold_reason or task.hold_reason
+                if not hold_reason_check or not hold_reason_check.strip():
+                    raise ValidationException("A valid, non-empty hold reason is required when placing a task ON_HOLD.")
+
             if task.status != TaskStatus.DONE and payload.status == TaskStatus.DONE:
                 status_changed_to_done = True
             if task.status != TaskStatus.ON_HOLD and payload.status == TaskStatus.ON_HOLD:
@@ -780,6 +871,7 @@ class TaskService:
         role: str = "ASSIGNEE",
     ) -> Task:
         task = await self.get_task(task_id)
+        await self._assert_can_mutate_task(task, current_user, action="assign users to")
         old_ids = {a.user_id for a in task.assignees if a.assignment_role == role}
         await self.repository.set_assignees(task, user_ids, role=role)
         await self.repository.session.commit()
@@ -1211,6 +1303,13 @@ class TaskService:
         escalation_type: str = "ORGANIZATION_USER",
         due_date: date | None = None,
     ) -> TaskEscalation:
+        if not to_user:
+            raise ValidationException("Escalation target user is required.")
+        if not reason or not reason.strip():
+            raise ValidationException("A clear reason is required for escalation.")
+        if not due_date:
+            raise ValidationException("SLA resolution due date is required for escalation.")
+
         task = await self.get_task(task_id)
         esc = await self.repository.add_escalation(
             task.id,
@@ -1375,6 +1474,7 @@ class TaskService:
 
     async def soft_delete_task(self, task_id: uuid.UUID, current_user: Any) -> None:
         task = await self.get_task(task_id)
+        await self._assert_can_mutate_task(task, current_user, action="delete")
         task.deleted_at = datetime.now(timezone.utc)
         task.deleted_by = current_user.id
         await self.repository.session.commit()
@@ -1683,6 +1783,7 @@ class TaskService:
         current_user: Any,
     ) -> TaskDependency:
         task = await self.get_task(task_id)
+        await self._assert_can_mutate_task(task, current_user, action="add dependency to")
         dep_task = await self.repository.get_task_by_id(payload.depends_on_task_id)
         if not dep_task:
             raise NotFoundException(f"Target task with ID {payload.depends_on_task_id} not found.")
@@ -1721,6 +1822,7 @@ class TaskService:
         if not dep:
             raise NotFoundException(f"Dependency with ID {dependency_id} not found.")
         task = await self.get_task(dep.task_id)
+        await self._assert_can_mutate_task(task, current_user, action="remove dependency from")
         await self.repository.remove_dependency(dependency_id)
         await self.repository.session.commit()
         await self._broadcast_task_event("TASK_DEPENDENCY_REMOVED", task, actor_id=current_user.id)

@@ -438,7 +438,7 @@ async def update_task(
 async def delete_task(
     id: uuid.UUID,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.manage", "task.delete", "task.view")),
+    current_user: CurrentUser = Depends(require_any_permission("task.manage", "task.delete", "task.create")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     await service.soft_delete_task(id, current_user)

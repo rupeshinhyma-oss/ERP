@@ -460,7 +460,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     >
       <div
         style={{
-          background: "#ffffff",
+          background: "var(--color-surface, #ffffff)",
+          color: "var(--color-text, #0f172a)",
           borderRadius: "14px",
           width: "820px",
           maxWidth: "100%",
@@ -469,7 +470,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           flexDirection: "column",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
           overflow: "hidden",
-          border: "1px solid #e2e8f0",
+          border: "1px solid var(--color-border, #e2e8f0)",
         }}
         onClick={(e) => e.stopPropagation()}
         onPaste={handlePaste}
@@ -478,18 +479,18 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         <div
           style={{
             padding: "18px 24px",
-            borderBottom: "1px solid #e2e8f0",
-            background: "#f8fafc",
+            borderBottom: "1px solid var(--color-border, #e2e8f0)",
+            background: "var(--color-bg, #f8fafc)",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
           }}
         >
           <div>
-            <h2 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
+            <h2 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "var(--color-text, #0f172a)" }}>
               + Create New Task
             </h2>
-            <p style={{ margin: "2px 0 0", fontSize: "12.5px", color: "#64748b" }}>
+            <p style={{ margin: "2px 0 0", fontSize: "12.5px", color: "var(--color-muted, #64748b)" }}>
               Enterprise work item with Issue Types, Epic hierarchy, Sprints, Labels, Assignees, and Escalation.
             </p>
           </div>

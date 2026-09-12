@@ -570,6 +570,19 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       setIsHoldModalOpen(true);
       return;
     }
+    if (newStatus === "DONE") {
+      const blockers = (task.dependencies || []).filter(
+        (d) => d.dependency_type === "BLOCKED_BY" && d.depends_on_task_status && d.depends_on_task_status !== "DONE"
+      );
+      if (blockers.length > 0) {
+        alert(
+          `Cannot complete task. Blocked by: ${blockers
+            .map((b) => b.depends_on_task_title || "Linked Task")
+            .join(", ")}`
+        );
+        return;
+      }
+    }
     try {
       const updated = await tasksApi.updateTask(task.id, { status: newStatus });
       setTask(updated);
@@ -582,10 +595,14 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
 
   const handleConfirmHold = async () => {
     if (!task) return;
+    if (!holdReasonDraft.trim()) {
+      alert("A valid, non-empty hold reason is required when placing a task ON_HOLD.");
+      return;
+    }
     try {
       const updated = await tasksApi.updateTask(task.id, {
         status: "ON_HOLD",
-        hold_reason: holdReasonDraft.trim() || null,
+        hold_reason: holdReasonDraft.trim(),
         hold_until: holdUntilDraft || null,
       });
       setTask(updated);
