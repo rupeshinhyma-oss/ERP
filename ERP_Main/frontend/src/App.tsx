@@ -24,11 +24,8 @@ import { AuthCallback } from "./pages/AuthCallback";
 import { Dashboard } from "./pages/Dashboard";
 
 // ERPs Section
-import { ErpRegistry } from "./pages/ErpRegistry";
 import { ErpDetail } from "./pages/ErpDetail";
 import { ErpLauncher } from "./pages/ErpLauncher";
-import { ErpInstances } from "./pages/ErpInstances";
-import { ErpModules } from "./pages/ErpModules";
 
 // Users & Access Section
 import { GlobalUsers } from "./pages/GlobalUsers";

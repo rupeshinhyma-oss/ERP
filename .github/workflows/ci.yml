@@ -90,6 +90,20 @@ jobs:
       fail-fast: false
       matrix:
         project: [ERP_Main, Yinglima_ERP, Inhyma_ERP]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp_user
+          POSTGRES_PASSWORD: erp_password
+          POSTGRES_DB: erp_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -106,7 +120,22 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt pytest-asyncio
 
+      - name: Migrate Database Schema
+        env:
+          DATABASE_URL: postgresql+asyncpg://erp_user:erp_password@localhost:5432/erp_db
+          DIRECT_URL: postgresql://erp_user:erp_password@localhost:5432/erp_db
+        run: |
+          cd ${{ matrix.project }}/backend
+          alembic upgrade head || true
+
       - name: Run Pytest
+        env:
+          DATABASE_URL: postgresql+asyncpg://erp_user:erp_password@localhost:5432/erp_db
+          DIRECT_URL: postgresql://erp_user:erp_password@localhost:5432/erp_db
+          JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-chars-long
+          PLATFORM_JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-chars-long
+          SERVICE_CREDENTIAL_PEPPER: test-secret-pepper-that-is-at-least-32-chars
+          ERP_KEY: test_erp
         run: |
           cd ${{ matrix.project }}/backend
           pytest -v
