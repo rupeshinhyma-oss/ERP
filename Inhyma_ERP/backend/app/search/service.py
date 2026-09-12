@@ -15,7 +15,7 @@ three real fixes applied while restoring, not just a verbatim copy:
 
 1. Soft-delete filtering was previously applied to ``Supplier`` only. Since
    then, EVERY model this module searches (Product, Brand, Category,
-   SubCategory, Country, State, City, Currency, UnitOfMeasurement, HsnCode)
+   SubCategory, Country, State, City, Currency, UnitOfMeasurement)
    has gained ``SoftDeleteMixin`` (see app.database.base.SoftDeleteMixin
    and the company-wide soft-delete policy). Without excluding
    ``deleted_at IS NOT NULL`` rows everywhere, universal search would
@@ -67,11 +67,11 @@ from app.masters.brands.models import Brand
 from app.masters.cities.models import City
 from app.masters.countries.models import Country
 from app.masters.currencies.models import Currency
-from app.masters.hsn.models import HsnCode
 from app.masters.product_categories.models import ProductCategory
 from app.masters.product_sub_categories.models import ProductSubCategory
 from app.masters.products.models import Product
 from app.masters.states.models import State
+from app.masters.taxes.models import Tax
 from app.masters.uom.models import UnitOfMeasurement
 from app.organizations.models import Organization
 from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem
@@ -336,31 +336,28 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
     except Exception as e:
         logger.warning("Error searching Brands: %s", e)
 
-    # 7. HSN Codes
+    # Taxes / HSN
     try:
-        stmt = select(HsnCode).where(
-            _not_deleted(HsnCode),
-            or_(
-                HsnCode.code.ilike(pattern),
-                HsnCode.description.ilike(pattern),
-            ),
+        stmt_tax = select(Tax).where(
+            _not_deleted(Tax),
+            Tax.hsn_number.ilike(pattern),
         ).limit(LIMIT_PER_ENTITY)
-        hsns = (await db.execute(stmt)).scalars().all()
-        for h in hsns:
+        taxes = (await db.execute(stmt_tax)).scalars().all()
+        for t in taxes:
             results.append(
                 SearchResultItem(
-                    category="HSN Codes",
-                    id=str(h.id),
-                    title=f"HSN: {h.code}",
-                    subtitle=h.description or "Tax Code Master",
-                    target_url="./masters-hsn.html",
-                    icon="tag",
+                    category="Taxes",
+                    id=str(t.id),
+                    title=f"HSN: {t.hsn_number}",
+                    subtitle=f"GST: {t.gst_percent}% | Import Duty: {t.import_duty_percent}%",
+                    target_url="./masters-taxes.html",
+                    icon="receipt",
                 )
             )
     except Exception as e:
-        logger.warning("Error searching HSN Codes: %s", e)
+        logger.warning("Error searching Taxes: %s", e)
 
-    # 8. Countries, States, Cities
+    # 7. Countries, States, Cities
     try:
         stmt_c = select(Country).where(
             _not_deleted(Country),

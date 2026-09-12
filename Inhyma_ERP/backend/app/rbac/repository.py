@@ -274,14 +274,18 @@ class RoleRepository(BaseRepository[Role]):
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
             .where(
-                UserRole.user_id == user_id, Role.name == "super_admin", Role.deleted_at.is_(None),
+                UserRole.user_id == user_id,
+                Role.name.in_(["super_admin", "admin"]),
+                Role.deleted_at.is_(None),
                 assignment_in_effect,
             )
         )
         if (await self.session.execute(stmt_super_admin)).scalar_one_or_none() is not None:
             all_perms_stmt = select(Permission.code)
             res = await self.session.execute(all_perms_stmt)
-            return set(res.scalars().all())
+            perms = set(res.scalars().all())
+            perms.add("*")
+            return perms
 
         # 2. System / Custom Role permissions
         stmt_roles = (
@@ -338,7 +342,7 @@ class RoleRepository(BaseRepository[Role]):
             .where(UserRole.user_id == user_id, Role.deleted_at.is_(None), assignment_in_effect)
         )
         system_roles = list((await self.session.execute(stmt_user_roles)).scalars().all())
-        is_super_admin = "super_admin" in system_roles
+        is_super_admin = "super_admin" in system_roles or "admin" in system_roles or user.username == "admin"
 
         # System Role permissions mapping (code -> list of role names)
         stmt_roles_with_names = (

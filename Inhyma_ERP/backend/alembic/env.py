@@ -47,7 +47,7 @@ import app.masters.cities.models  # noqa: F401,E402 - Phase 7
 import app.masters.company_list.models  # noqa: F401,E402
 import app.masters.currencies.models  # noqa: F401,E402 - Phase 7
 import app.masters.uom.models  # noqa: F401,E402 - Phase 7
-import app.masters.hsn.models  # noqa: F401,E402 - Phase 7
+import app.masters.taxes.models  # noqa: F401,E402
 import app.masters.brands.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_sub_categories.models  # noqa: F401,E402 - Phase 7

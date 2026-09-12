@@ -9,7 +9,6 @@ import type {
   Product,
   Supplier,
   Brand,
-  Hsn,
   ProductCategory,
   ProductSubCategory,
   Uom,
@@ -381,7 +380,6 @@ export function ProductGalleryPage() {
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 250);
   const brands = useLookup<Brand>("/masters/brands", 250);
-  const hsnCodes = useLookup<Hsn>("/masters/hsn", 250);
   const uoms = useLookup<Uom>("/masters/uom", 250);
   const countries = useLookup<Country>("/masters/countries", 250);
   const cities = useLookup<City>("/masters/cities", 250);
@@ -501,7 +499,6 @@ export function ProductGalleryPage() {
   const prodBrand = p ? brands.items.find((b) => b.id === p.brand_id) : null;
   const prodCat = p ? categories.items.find((c) => c.id === p.category_id) : null;
   const prodSubCat = p ? subCategories.items.find((sc) => sc.id === p.sub_category_id) : null;
-  const prodHsn = p ? hsnCodes.items.find((h) => h.id === p.hsn_id) : null;
   const prodUom = p ? uoms.items.find((u) => u.id === p.uom_id) : null;
 
   const supp = selectedSupplier;
@@ -1569,7 +1566,6 @@ export function ProductGalleryPage() {
                   { label: "Brand", value: prodBrand ? prodBrand.name : "—" },
                   { label: "Category", value: prodCat ? prodCat.name : "—" },
                   { label: "Sub Category", value: prodSubCat ? prodSubCat.name : "—" },
-                  { label: "HSN Code", value: prodHsn ? prodHsn.code : "—" },
                   {
                     label: "Refund VAT %",
                     value: <span style={{ color: "#16a34a" }}>{p.refund_vat_percent != null ? `${p.refund_vat_percent}%` : "0%"}</span>,

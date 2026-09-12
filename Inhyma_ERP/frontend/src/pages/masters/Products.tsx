@@ -5,7 +5,6 @@
  *  - Sub-Category options are scoped to the selected Category. The original
  *    called populateSubCategoryOptions() imperatively from the change handler
  *    and again from fillForm(); here the list derives from form.category_id.
- *  - Choosing an HSN code auto-fills Refund VAT % from that code's rate.
  *  - Packaging Unit CBM is computed live from L x W x H / 1,000,000 and the
  *    field stays read-only.
  *  - The payload sends both the `*_cm` dimension keys and the legacy bare
@@ -34,7 +33,6 @@ import { API_ORIGIN, apiGet, apiPostMultipart } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type {
   Brand,
-  Hsn,
   Product,
   ProductCategory,
   ProductSubCategory,
@@ -49,7 +47,6 @@ const EMPTY: FormState = {
   category_id: "",
   sub_category_id: "",
   brand_id: "",
-  hsn_id: "",
   uom_id: "",
   secondary_uom_id: "",
   organization_id: "",
@@ -140,7 +137,6 @@ export function ProductsPage() {
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250, true);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500, true);
   const brands = useLookup<Brand>("/masters/brands", 250, true);
-  const hsnCodes = useLookup<Hsn>("/masters/hsn", 250, true);
   const uoms = useLookup<Uom>("/masters/uom", 250, true);
   const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250, true);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
@@ -165,7 +161,6 @@ export function ProductsPage() {
     categories.loaded,
     subCategories.loaded,
     brands.loaded,
-    hsnCodes.loaded,
     uoms.loaded,
     organizations.loaded,
   ].join("-");
@@ -261,7 +256,6 @@ export function ProductsPage() {
         const brand = brands.items.find((x) => x.id === p.brand_id);
         const cat = categories.items.find((x) => x.id === p.category_id);
         const subCat = subCategories.items.find((x) => x.id === p.sub_category_id);
-        const hsn = hsnCodes.items.find((x) => x.id === p.hsn_id);
         const uom = uoms.items.find((x) => x.id === p.uom_id);
 
         const orgIds = p.organization_ids && p.organization_ids.length > 0
@@ -287,8 +281,6 @@ export function ProductsPage() {
           cat?.code,
           subCat?.name,
           subCat?.code,
-          hsn?.code,
-          hsn?.description,
           uom?.name,
           uom?.code,
           uom?.short_name,
@@ -402,7 +394,6 @@ export function ProductsPage() {
         "Product Code",
         "Brand",
         "Sub Category",
-        "HSN Code",
         "UOM",
         "Organization",
         "Branches",
@@ -504,18 +495,6 @@ export function ProductsPage() {
           },
         },
         {
-          header: "HSN Code",
-          sortValue: (p) => hsnCodes.items.find((x) => x.id === p.hsn_id)?.code || "",
-          render: (p) => {
-            const code = hsnCodes.items.find((x) => x.id === p.hsn_id)?.code ?? "—";
-            return (
-              <span title={code} style={{ fontFamily: "monospace", fontSize: "12.5px" }}>
-                {code}
-              </span>
-            );
-          },
-        },
-        {
           header: "UOM",
           sortValue: (p) => uoms.items.find((x) => x.id === p.uom_id)?.code || "",
           render: (p) => {
@@ -591,7 +570,6 @@ export function ProductsPage() {
         { key: "Brand", label: "Brand" },
         { key: "Category", label: "Category", required: true },
         { key: "Sub Category", label: "Sub Category", required: true },
-        { key: "HSN Code", label: "HSN Code", required: true },
         { key: "UOM", label: "UOM", required: true },
         { key: "Pack. Qty", label: "Packaging Quantity", required: true },
         { key: "Pack. Net Weight", label: "Packaging Net Weight (kg)" },
@@ -616,7 +594,6 @@ export function ProductsPage() {
           category_id: str(item?.category_id),
           sub_category_id: str(item?.sub_category_id),
           brand_id: str(item?.brand_id),
-          hsn_id: str(item?.hsn_id),
           uom_id: str(item?.uom_id),
           secondary_uom_id: str(item?.secondary_uom_id),
           organization_id: str(item?.organization_id),
@@ -667,7 +644,6 @@ export function ProductsPage() {
 
         if (!f.category_id) throw new Error("Please select a Category.");
         if (!f.sub_category_id) throw new Error("Please select a Sub-Category.");
-        if (!f.hsn_id) throw new Error("Please select a HSN Code.");
         if (!f.uom_id) throw new Error("Please select a Primary UOM.");
         if (numOrNull(f.packaging_quantity) === null) throw new Error("Packaging Quantity (unit) is required.");
 
@@ -726,7 +702,6 @@ export function ProductsPage() {
           category_id: f.category_id,
           sub_category_id: f.sub_category_id || null,
           brand_id: f.brand_id || null,
-          hsn_id: f.hsn_id || null,
           uom_id: f.uom_id,
           secondary_uom_id: secUomId,
 
@@ -787,9 +762,6 @@ export function ProductsPage() {
         }
         if (!f.sub_category_id) {
           errs.sub_category_id = "Please select a Sub-Category.";
-        }
-        if (!f.hsn_id) {
-          errs.hsn_id = "Please select a HSN Code.";
         }
         if (!f.uom_id) {
           errs.uom_id = "Please select a Primary UOM.";
@@ -995,26 +967,8 @@ export function ProductsPage() {
                 ))}
               </SelectField>
 
-              {/* Row 3: HSN Code, Refund VAT %, Organization, UOM */}
-              <SelectField
-                id="hsn_id"
-                label="HSN Code *"
-                value={f.hsn_id}
-                error={errors.hsn_id}
-                onChange={(v) => {
-                  set("hsn_id", v);
-                  const picked = hsnCodes.items.find((h) => h.id === v);
-                  set("refund_vat_percent", String(picked?.refund_vat_percent ?? 0));
-                }}
-              >
-                <option value="">-- Select HSN Code --</option>
-                {hsnCodes.items.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {`${h.code} - ${h.description || ""} (Refund VAT: ${h.refund_vat_percent || 0}%)`}
-                  </option>
-                ))}
-              </SelectField>
-              <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
+              {/* Row 3: Refund VAT %, Organization, UOM */}
+              <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Refund VAT %" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
               <MultiSelectField
                 id="organization_ids_json"
                 label="Organization"
@@ -1337,7 +1291,6 @@ export function ProductsPage() {
   const cat = p ? categories.items.find((c) => c.id === p.category_id) : undefined;
   const subCat = p ? subCategories.items.find((sc) => sc.id === p.sub_category_id) : undefined;
   const brand = p ? brands.items.find((b) => b.id === p.brand_id) : undefined;
-  const hsn = p ? hsnCodes.items.find((h) => h.id === p.hsn_id) : undefined;
   const uom = p ? uoms.items.find((u) => u.id === p.uom_id) : undefined;
 
   const length = p ? p.length_cm ?? p.length : null;
@@ -1395,7 +1348,6 @@ export function ProductsPage() {
                 { label: "Brand", value: brand ? `${brand.name}${brand.status === "inactive" ? " (Inactive)" : ""}` : "—" },
                 { label: "Category", value: cat ? `${cat.name}${cat.status === "inactive" ? " (Inactive)" : ""}` : "—" },
                 { label: "Sub Category", value: subCat ? `${subCat.name}${subCat.status === "inactive" ? " (Inactive)" : ""}` : "—" },
-                { label: "HSN Code", value: hsn ? hsn.code : "—" },
                 {
                   label: "Organization",
                   value: (() => {

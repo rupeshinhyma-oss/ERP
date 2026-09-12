@@ -25,7 +25,7 @@ export function useAuth(): {
   );
 
   const isSuperAdmin = useMemo(
-    () => Boolean(profile && Array.isArray(profile.roles) && profile.roles.includes("super_admin")),
+    () => Auth.isSuperAdmin(),
     [profile]
   );
 

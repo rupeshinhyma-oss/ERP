@@ -109,7 +109,7 @@ MODULE_CHANNEL_PERMISSIONS: dict[str, str] = {
     module_channel("cities"):        "city.read",
     module_channel("currencies"):    "currency.read",
     module_channel("uom"):           "uom.read",
-    module_channel("hsn"):           "hsn.read",
+    module_channel("taxes"):         "tax.view",
     # --- Task management ---
     module_channel("tasks"):         "task.view",
 }

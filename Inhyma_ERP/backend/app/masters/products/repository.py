@@ -15,7 +15,7 @@ class ProductRepository(BaseRepository[Product]):
 
     searchable_fields = ("product_code", "product_name", "product_name_tally", "product_name_invoice", "barcode")
     sortable_fields = ("product_code", "product_name", "created_at", "updated_at", "standard_price")
-    filterable_fields = ("status", "category_id", "sub_category_id", "brand_id", "hsn_id", "uom_id", "organization_id")
+    filterable_fields = ("status", "category_id", "sub_category_id", "brand_id", "uom_id", "organization_id")
 
     def __init__(self, session: AsyncSession) -> None:
         """Bind to a DB session, operating on the ``Product`` model."""
@@ -133,7 +133,6 @@ class ProductRepository(BaseRepository[Product]):
 
         from sqlalchemy import case, exists, func, or_
         from app.masters.brands.models import Brand
-        from app.masters.hsn.models import HsnCode
         from app.masters.product_categories.models import ProductCategory
         from app.masters.product_sub_categories.models import ProductSubCategory
         from app.masters.uom.models import UnitOfMeasurement
@@ -171,14 +170,6 @@ class ProductRepository(BaseRepository[Product]):
             exists().where(
                 Brand.id == Product.brand_id,
                 or_(Brand.name.ilike(pattern), Brand.code.ilike(pattern)),
-            )
-        )
-
-        # Linked HSN
-        conditions.append(
-            exists().where(
-                HsnCode.id == Product.hsn_id,
-                or_(HsnCode.code.ilike(pattern), HsnCode.description.ilike(pattern)),
             )
         )
 

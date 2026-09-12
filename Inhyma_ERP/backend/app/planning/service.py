@@ -3154,7 +3154,7 @@ class PlanningService:
         is_test_yn_column = col_name_check.startswith("test") or ("test" in col_name_check and "y/n" in col_name_check)
         is_approval_date_column = col_name_check in ("approval date", "approval_date") or "approval" in col_name_check
 
-        if user_permissions is not None:
+        if user_permissions is not None and "*" not in user_permissions:
             if is_test_yn_column:
                 if "planning.textyn.edit" not in user_permissions and "planning.cell.edit" not in user_permissions:
                     raise ForbiddenException("This action requires the 'planning.textyn.edit' permission.")
@@ -3346,7 +3346,7 @@ class PlanningService:
             # CUSTOM, and clearing a status (status_color=None) are what
             # planning.cell.edit governs -- only Red/Green were split into their
             # own standalone permissions.
-            if user_permissions is not None:
+            if user_permissions is not None and "*" not in user_permissions:
                 if status_color == PlanningCellStatusColor.RED_REQUIREMENT:
                     if "planning.colorstatusred.edit" not in user_permissions:
                         raise ForbiddenException("This action requires the 'planning.colorstatusred.edit' permission.")

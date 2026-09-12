@@ -9,7 +9,6 @@ from app.cache.dependency import get_cache_manager
 from app.cache.manager import CacheManager
 from app.database.session import get_db_session
 from app.masters.brands.repository import BrandRepository
-from app.masters.hsn.repository import HsnRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
 from app.masters.products.repository import ProductRepository
@@ -27,7 +26,6 @@ def get_product_service(
         ProductCategoryRepository(db),
         ProductSubCategoryRepository(db),
         BrandRepository(db),
-        HsnRepository(db),
         UomRepository(db),
         cache_manager,
     )

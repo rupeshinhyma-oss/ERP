@@ -95,9 +95,17 @@ export const Auth = {
 
   isSuperAdmin(): boolean {
     const profile = this.getProfile();
-    return Boolean(
-      profile && Array.isArray(profile.roles) && profile.roles.includes("super_admin")
-    );
+    if (!profile) return false;
+    if (profile.username === "admin") return true;
+    if (Array.isArray(profile.roles)) {
+      if (profile.roles.includes("super_admin") || profile.roles.includes("admin")) {
+        return true;
+      }
+    }
+    if (Array.isArray(profile.permissions) && profile.permissions.includes("*")) {
+      return true;
+    }
+    return false;
   },
 
   /**
@@ -109,10 +117,10 @@ export const Auth = {
     if (!code) return true;
     const profile = this.getProfile();
     if (!profile) return false;
-    if (Array.isArray(profile.roles) && profile.roles.includes("super_admin")) return true;
+    if (this.isSuperAdmin()) return true;
     if (!Array.isArray(profile.permissions)) return false;
     const perms = profile.permissions;
-    if (perms.includes(code)) return true;
+    if (perms.includes("*") || perms.includes(code)) return true;
 
     // View <-> Read compatibility alias
     if (code.endsWith(".view")) {

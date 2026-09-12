@@ -127,11 +127,10 @@ export interface Uom extends MasterRecord {
   description?: string | null;
 }
 
-export interface Hsn extends MasterRecord {
-  code: string;
-  description?: string | null;
+export interface Tax extends MasterRecord {
+  hsn_number: string;
   gst_percent: number;
-  refund_vat_percent?: number | null;
+  import_duty_percent: number;
 }
 
 export interface Brand extends MasterRecord {
@@ -186,7 +185,6 @@ export interface Product extends MasterRecord {
   category_id: string;
   sub_category_id?: string | null;
   brand_id?: string | null;
-  hsn_id?: string | null;
   uom_id: string;
   secondary_uom_id?: string | null;
   organization_id?: string | null;

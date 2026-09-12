@@ -22,7 +22,6 @@ class ProductCreate(BaseModel):
     category_id: uuid.UUID
     sub_category_id: uuid.UUID | None = None
     brand_id: uuid.UUID | None = None
-    hsn_id: uuid.UUID | None = None
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
@@ -92,7 +91,6 @@ class ProductUpdate(BaseModel):
     category_id: uuid.UUID | None = None
     sub_category_id: uuid.UUID | None = None
     brand_id: uuid.UUID | None = None
-    hsn_id: uuid.UUID | None = None
     uom_id: uuid.UUID | None = None
     secondary_uom_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
@@ -147,7 +145,6 @@ class ProductRead(BaseModel):
     category_id: uuid.UUID
     sub_category_id: uuid.UUID | None
     brand_id: uuid.UUID | None
-    hsn_id: uuid.UUID | None
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None
     organization_id: uuid.UUID | None = None

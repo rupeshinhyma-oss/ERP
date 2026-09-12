@@ -43,13 +43,13 @@ import { CitiesPage } from "@/pages/masters/Cities";
 import { CompanyListPage } from "@/pages/masters/CompanyList";
 import { CurrenciesPage } from "@/pages/masters/Currencies";
 import { UomPage } from "@/pages/masters/Uom";
-import { HsnPage } from "@/pages/masters/Hsn";
 import { BrandsPage } from "@/pages/masters/Brands";
 import { SupplierTypesPage } from "@/pages/masters/SupplierTypes";
 import { BuyerTypesPage } from "@/pages/masters/BuyerTypes";
 import { CategoriesPage } from "@/pages/masters/Categories";
 import { SubCategoriesPage } from "@/pages/masters/SubCategories";
 import { ProductsPage } from "@/pages/masters/Products";
+import { TaxesPage } from "@/pages/masters/Taxes";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -135,7 +135,6 @@ export function App() {
           <Route path="/masters/cities" element={<CitiesPage />} />
           <Route path="/masters/currencies" element={<CurrenciesPage />} />
           <Route path="/masters/uom" element={<UomPage />} />
-          <Route path="/masters/hsn" element={<HsnPage />} />
           <Route path="/masters/brands" element={<BrandsPage />} />
           <Route path="/masters/supplier-types" element={<SupplierTypesPage />} />
           <Route path="/masters/buyer-types" element={<BuyerTypesPage />} />
@@ -146,7 +145,8 @@ export function App() {
           <Route path="/product_gallery" element={<Navigate to="/product-gallery" replace />} />
 
           {/* Master modules from legacy ERP screenshot */}
-          <Route path="/masters/taxes" element={<ComingSoonPage activeKey="masters-taxes" title="Taxes" subtitle="Configure GST, VAT, and tax slabs" breadcrumbLabel="Taxes" featureName="Taxes" />} />
+          <Route path="/masters/taxes" element={<TaxesPage />} />
+          <Route path="/tax/list" element={<Navigate to="/masters/taxes" replace />} />
           <Route path="/masters/additional-charges" element={<ComingSoonPage activeKey="masters-additional-charges" title="Additional Charges" subtitle="Manage freight, packaging, and surcharge rates" breadcrumbLabel="Additional Charges" featureName="Additional Charges" />} />
           <Route path="/masters/social-media" element={<ComingSoonPage activeKey="masters-social-media" title="Social Media" subtitle="Configure social platforms and communication channels" breadcrumbLabel="Social Media" featureName="Social Media" />} />
           <Route path="/masters/agent-types" element={<ComingSoonPage activeKey="masters-agent-types" title="Agent Types" subtitle="Manage agent classifications and commission tiers" breadcrumbLabel="Agent Types" featureName="Agent Types" />} />

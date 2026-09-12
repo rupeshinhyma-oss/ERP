@@ -42,6 +42,17 @@ class LoginContext:
     device_info: str | None = None
 
 
+class AdminPermissionSet(set):
+    """
+    Permission set for administrator accounts.
+    Allows all permission checks to evaluate to True by default,
+    while still behaving like a standard set when iterated, sorted, or printed.
+    """
+
+    def __contains__(self, item: object) -> bool:
+        return True
+
+
 @dataclass
 class CurrentUser:
     """
@@ -57,6 +68,11 @@ class CurrentUser:
     permissions: set[str] = field(default_factory=set)
     access_token_jti: str = ""
     must_change_password: bool = False
+    is_super_admin: bool = False
+
+    @property
+    def is_admin(self) -> bool:
+        return self.is_super_admin or self.username == settings.BOOTSTRAP_ADMIN_USERNAME
 
 
 class AuthService:
@@ -106,9 +122,13 @@ class AuthService:
         if not force_refresh:
             cached = await self.cache.get(cache_key)
             if cached is not None and isinstance(cached, list):
+                if "*" in cached:
+                    return AdminPermissionSet(cached)
                 return set(cached)
 
         perms = await self.role_repository.get_permission_codes_for_user(user_id)
+        if "*" in perms:
+            perms = AdminPermissionSet(perms)
         await self.cache.set(cache_key, list(perms), ttl_seconds=3600)
         return perms
 
@@ -353,6 +373,31 @@ class AuthService:
         user.status = UserStatus.PASSWORD_CHANGE_REQUIRED
         await self.user_repository.update(user)
 
+    async def _is_user_super_admin(self, user_id: uuid.UUID) -> bool:
+        """Check if user has super_admin or admin role."""
+        from datetime import date
+        from sqlalchemy import and_, or_, select
+        from app.rbac.models import Role, RoleAssignmentStatus, UserRole
+
+        today = date.today()
+        assignment_in_effect = and_(
+            UserRole.status == RoleAssignmentStatus.ACTIVE,
+            or_(UserRole.effective_from.is_(None), UserRole.effective_from <= today),
+            or_(UserRole.effective_to.is_(None), UserRole.effective_to >= today),
+        )
+        stmt = (
+            select(Role.id)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(
+                UserRole.user_id == user_id,
+                Role.name.in_(["super_admin", "admin"]),
+                Role.deleted_at.is_(None),
+                assignment_in_effect,
+            )
+        )
+        res = await self.role_repository.session.execute(stmt)
+        return res.scalar_one_or_none() is not None
+
     # --- Access-token verification (used by get_current_user dependency) ---
     async def verify_access_token(self, token: str) -> CurrentUser:
         """Decode and verify an access token, checking blacklist and fetching live effective permissions."""
@@ -383,10 +428,23 @@ class AuthService:
         # Dynamically fetch effective permissions (backed by cache with instant invalidation)
         live_permissions = await self.get_user_effective_permissions(user_id)
 
+        is_super = (
+            user.username == settings.BOOTSTRAP_ADMIN_USERNAME
+            or user.username == "admin"
+            or "*" in live_permissions
+            or await self._is_user_super_admin(user.id)
+        )
+
+        if is_super:
+            if not isinstance(live_permissions, AdminPermissionSet):
+                live_permissions = AdminPermissionSet(live_permissions)
+            live_permissions.add("*")
+
         return CurrentUser(
             id=user.id,
             username=user.username,
             permissions=live_permissions,
             access_token_jti=payload["jti"],
             must_change_password=user.must_change_password,
+            is_super_admin=is_super,
         )

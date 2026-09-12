@@ -50,9 +50,6 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     brand_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("brands.id", ondelete="RESTRICT"), nullable=True, index=True
     )
-    hsn_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("hsn_codes.id", ondelete="RESTRICT"), nullable=True, index=True
-    )
     uom_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("units_of_measurement.id", ondelete="RESTRICT"), nullable=False, index=True
     )

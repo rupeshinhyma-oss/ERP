@@ -71,7 +71,7 @@ export function LiveConnectionIndicator() {
           50% { opacity: 0.35; }
         }
       `}</style>
-      Reconnecting live updates…
+      Reconnecting.....
     </div>
   );
 }

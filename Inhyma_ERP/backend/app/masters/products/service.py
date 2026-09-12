@@ -18,7 +18,6 @@ from app.common.list_query import ListQueryParams
 from app.core.constants import RecordStatus
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.masters.brands.repository import BrandRepository
-from app.masters.hsn.repository import HsnRepository
 from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
@@ -48,7 +47,6 @@ class ProductService:
         category_repository: ProductCategoryRepository,
         sub_category_repository: ProductSubCategoryRepository,
         brand_repository: BrandRepository,
-        hsn_repository: HsnRepository,
         uom_repository: UomRepository,
         cache_manager: CacheManager,
     ) -> None:
@@ -57,7 +55,6 @@ class ProductService:
         self.category_repository = category_repository
         self.sub_category_repository = sub_category_repository
         self.brand_repository = brand_repository
-        self.hsn_repository = hsn_repository
         self.uom_repository = uom_repository
         self.cache_manager = cache_manager
 
@@ -103,10 +100,6 @@ class ProductService:
         brand_id = field_values.get("brand_id")
         if brand_id is not None and await self.brand_repository.get_by_id(brand_id) is None:
             raise BadRequestException("The specified brand does not exist.")
-
-        hsn_id = field_values.get("hsn_id")
-        if hsn_id is not None and await self.hsn_repository.get_by_id(hsn_id) is None:
-            raise BadRequestException("The specified HSN code does not exist.")
 
         uom_id = field_values.get("uom_id")
         if uom_id is not None and await self.uom_repository.get_by_id(uom_id) is None:
@@ -164,13 +157,6 @@ class ProductService:
         if cbm is None or float(cbm) <= 0:
             raise BadRequestException("Packaging Unit CBM is required (provide Length, Width, Height to calculate automatically or provide Packaging Unit CBM directly).")
 
-        # Auto-inherit refund_vat_percent from HSN if not explicitly set
-        hsn_id = field_values.get("hsn_id")
-        if hsn_id and field_values.get("refund_vat_percent") is None:
-            hsn_obj = await self.hsn_repository.get_by_id(hsn_id)
-            if hsn_obj and getattr(hsn_obj, "refund_vat_percent", None) is not None:
-                field_values["refund_vat_percent"] = hsn_obj.refund_vat_percent
-
         if field_values.get("refund_vat_percent") is None:
             field_values["refund_vat_percent"] = 0.0
 
@@ -197,7 +183,6 @@ class ProductService:
             "category_id": field_values.get("category_id", product.category_id),
             "sub_category_id": field_values.get("sub_category_id", product.sub_category_id),
             "brand_id": field_values.get("brand_id", product.brand_id),
-            "hsn_id": field_values.get("hsn_id", product.hsn_id),
             "uom_id": field_values.get("uom_id", product.uom_id),
             "secondary_uom_id": field_values.get("secondary_uom_id", product.secondary_uom_id),
         }
@@ -273,7 +258,6 @@ class ProductService:
         categories_map = {str(c.id): c.name for c in await self.category_repository.list(limit=2000)}
         sub_categories_map = {str(sc.id): sc.name for sc in await self.sub_category_repository.list(limit=3000)}
         brands_map = {str(b.id): b.name for b in await self.brand_repository.list(limit=2000)}
-        hsns_map = {str(h.id): h.code for h in await self.hsn_repository.list(limit=2000)}
         uoms_map = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
 
         def _serialize_for_compare(p: Product) -> dict[str, Any]:
@@ -283,7 +267,6 @@ class ProductService:
                 "Brand": brands_map.get(str(p.brand_id), "—") if p.brand_id else "—",
                 "Category": categories_map.get(str(p.category_id), "—") if p.category_id else "—",
                 "Sub Category": sub_categories_map.get(str(p.sub_category_id), "—") if p.sub_category_id else "—",
-                "HSN Code": hsns_map.get(str(p.hsn_id), "—") if p.hsn_id else "—",
                 "UOM": uoms_map.get(str(p.uom_id), "—") if p.uom_id else "—",
                 "Pack. Qty": p.packaging_quantity if p.packaging_quantity is not None else "—",
                 "Pack. Net Weight": p.packaging_net_weight if p.packaging_net_weight is not None else "—",
@@ -301,7 +284,6 @@ class ProductService:
             category_code = field_values.pop("category_code")
             sub_category_code = field_values.pop("sub_category_code", None)
             brand_code = field_values.pop("brand_code", None)
-            hsn_code = field_values.pop("hsn_code", None)
             uom_code = field_values.pop("uom_code")
             secondary_uom_code = field_values.pop("secondary_uom_code", None)
 
@@ -332,15 +314,6 @@ class ProductService:
                 if brand is None:
                     raise BadRequestException(f"Brand '{brand_code}' does not exist in Brand Master.")
                 field_values["brand_id"] = brand.id
-
-            if hsn_code:
-                hsn = await self.hsn_repository.get_by_code(hsn_code)
-                if hsn is None:
-                    hsns = await self.hsn_repository.list(limit=1000)
-                    hsn = next((h for h in hsns if h.code.lower() == str(hsn_code).lower()), None)
-                if hsn is None:
-                    raise BadRequestException(f"HSN Code '{hsn_code}' does not exist in HSN Master.")
-                field_values["hsn_id"] = hsn.id
 
             uom = await self.uom_repository.get_by_code(uom_code)
             if uom is None:
@@ -415,7 +388,6 @@ class ProductService:
         categories = {str(c.id): c.name for c in await self.category_repository.list(limit=2000)}
         sub_categories = {str(sc.id): sc.name for sc in await self.sub_category_repository.list(limit=3000)}
         brands = {str(b.id): b.name for b in await self.brand_repository.list(limit=2000)}
-        hsns = {str(h.id): h.code for h in await self.hsn_repository.list(limit=2000)}
         uoms = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
 
         # Organizations
@@ -453,7 +425,6 @@ class ProductService:
                 "Brand": brands.get(str(p.brand_id), "") if p.brand_id else "",
                 "Category": categories.get(str(p.category_id), "") if p.category_id else "",
                 "Sub Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",
-                "HSN Code": hsns.get(str(p.hsn_id), "") if p.hsn_id else "",
                 "UOM": uoms.get(str(p.uom_id), "") if p.uom_id else "",
                 "Organization": ", ".join(org_names),
                 "Branches": ", ".join(branch_names),

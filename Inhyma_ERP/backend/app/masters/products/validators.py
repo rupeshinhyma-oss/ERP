@@ -40,7 +40,6 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     category_code = _get_val(raw_row, "Category", "category_code", "Category Code", "category_name", "Category / Sub-Cat.")
     sub_category_code = _get_val(raw_row, "Sub Category", "Sub-Category", "Sub Cate.", "sub_category_code", "Sub-Category Code")
     brand_code = _get_val(raw_row, "Brand", "brand_code", "Brand Code", "brand_name")
-    hsn_code = _get_val(raw_row, "HSN Code", "HSN", "hsn_code")
     uom_code = _get_val(raw_row, "UOM", "uom_code", "Unit of Measure", "uom_name")
 
     if not product_name:
@@ -49,8 +48,6 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
         raise BadRequestException(f"Row {row_number}: Category is required.")
     if not sub_category_code:
         raise BadRequestException(f"Row {row_number}: Sub Category is required.")
-    if not hsn_code:
-        raise BadRequestException(f"Row {row_number}: HSN Code is required.")
     if not uom_code:
         raise BadRequestException(f"Row {row_number}: UOM (Unit of Measure) is required.")
 
@@ -102,7 +99,6 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
         "category_code": category_code,
         "sub_category_code": sub_category_code,
         "brand_code": brand_code or None,
-        "hsn_code": hsn_code,
         "uom_code": uom_code,
         "specification": spec or None,
         "description": desc or None,

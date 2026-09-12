@@ -25,7 +25,7 @@ from app.masters.product_categories.models import ProductCategory
 from app.masters.product_sub_categories.models import ProductSubCategory
 from app.masters.brands.models import Brand
 from app.masters.uom.models import UnitOfMeasurement
-from app.masters.hsn.models import HsnCode
+from app.masters.taxes.models import Tax
 from app.masters.countries.models import Country
 from app.masters.states.models import State
 from app.masters.cities.models import City
@@ -54,7 +54,7 @@ MODEL_MAP: dict[str, tuple[Type[Any], str, str | None]] = {
     "SubCategory": (ProductSubCategory, "name", "code"),
     "Brand": (Brand, "name", "code"),
     "UOM": (UnitOfMeasurement, "name", "code"),
-    "HSN Code": (HsnCode, "code", None),
+    "Tax": (Tax, "hsn_number", None),
     "Country": (Country, "name", "code"),
     "State": (State, "name", "code"),
     "City": (City, "name", None),
