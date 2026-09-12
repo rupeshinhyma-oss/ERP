@@ -26,7 +26,6 @@ import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { globalEcosystemLogout } from "@/lib/ecosystemSession";
 import { Breadcrumb } from "./Breadcrumb";
 import { ICONS, IconBell } from "./icons";
-import type { PlatformAdmin } from "@/types";
 
 interface AppShellProps {
   activeKey: string;
