@@ -30,10 +30,12 @@ aiosqlite==0.20.0        # async SQLite driver (local dev / tests, mirrors Yingl
 argon2-cffi==23.1.0      # Argon2id hashing: platform-admin passwords + service-credential secrets
 pyjwt==2.10.1            # JWT for platform-admin session tokens (control-plane only, not ERP-local JWTs)
 cryptography==43.0.3     # RSA keys & certificates for federation tokens (app.federation)
+email-validator==2.2.0   # Pydantic EmailStr validation
 
 # --- Utilities ---
 python-dotenv==1.0.1
 orjson==3.10.14
+openpyxl==3.1.5          # Reporting Excel export generation
 
 # --- Testing ---
 pytest==8.3.4

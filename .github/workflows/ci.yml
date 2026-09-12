@@ -21,7 +21,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Validate Staging/Production Configurations
         run: |
@@ -113,6 +112,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
+          cache-dependency-path: "${{ matrix.project }}/backend/requirements.txt"
 
       - name: Install Dependencies
         run: |
@@ -135,7 +135,6 @@ jobs:
           JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-chars-long
           PLATFORM_JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-chars-long
           SERVICE_CREDENTIAL_PEPPER: test-secret-pepper-that-is-at-least-32-chars
-          ERP_KEY: test_erp
         run: |
           cd ${{ matrix.project }}/backend
           pytest -v
