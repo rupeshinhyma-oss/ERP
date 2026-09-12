@@ -34,9 +34,12 @@ def validate_city_row(raw_row: dict[str, str], row_number: int) -> dict[str, Any
             f"Row {row_number}: invalid status {status_raw!r}. Must be 'active' or 'inactive'."
         ) from exc
 
+    district_name = (raw_row.get("district_name") or raw_row.get("district") or "").strip() or None
+
     return {
         "name": name,
         "country_code": country_code,
         "state_name": state_name,
+        "district_name": district_name,
         "status": status,
     }

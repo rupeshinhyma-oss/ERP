@@ -148,6 +148,7 @@ class CityService:
         async def _create(field_values: dict[str, Any]) -> City:
             country_code = field_values.pop("country_code")
             state_name = field_values.pop("state_name")
+            field_values.pop("district_name", None)
             country = await self.country_repository.get_by_code(country_code)
             if country is None:
                 raise ValueError(f"Country code {country_code!r} does not exist.")
@@ -186,6 +187,7 @@ class CityService:
                 "id": str(c.id),
                 "country_id": str(c.country_id),
                 "state_id": str(c.state_id),
+                "district_id": str(c.district_id) if c.district_id else "",
                 "name": c.name,
                 "status": c.status.value,
                 "created_at": c.created_at.isoformat(),

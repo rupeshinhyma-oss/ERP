@@ -110,6 +110,7 @@ export interface City extends MasterRecord {
   name: string;
   country_id: string;
   state_id: string;
+  district_id?: string | null;
 }
 
 export interface Currency extends MasterRecord {

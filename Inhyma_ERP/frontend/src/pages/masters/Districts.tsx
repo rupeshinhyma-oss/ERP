@@ -35,16 +35,16 @@ export function DistrictsPage() {
       searchPlaceholder="Search district name or Sr. No..."
       hideQuickAdd={true}
       reloadToken={`${countries.loaded}-${states.loaded}`}
-      columnHeaders={["DISTRICT", "PROVINCE / STATE", "COUNTRY", "STATUS"]}
+      columnHeaders={["DISTRICT", "STATE", "COUNTRY", "STATUS"]}
       columns={[
         { header: "DISTRICT", render: (d) => <span className="cell-primary">{d.name}</span> },
-        { header: "PROVINCE / STATE", render: (d) => stateName(d.state_id) },
+        { header: "STATE", render: (d) => stateName(d.state_id) },
         { header: "COUNTRY", render: (d) => countryName(d.country_id) },
         { header: "STATUS", render: (d) => <StatusBadge status={d.status} /> },
       ]}
       importHeaders={[
         { key: "country_code", label: "Country Code", required: true },
-        { key: "state_name", label: "Province / Region Name", required: true },
+        { key: "state_name", label: "State Name", required: true },
         { key: "name", label: "District Name", required: true },
         { key: "code", label: "District Code" },
         { key: "status", label: "Status" },
@@ -59,7 +59,7 @@ export function DistrictsPage() {
       })}
       toPayload={(f) => {
         if (!f.country_id) throw new Error("Please select a valid Country.");
-        if (!f.state_id) throw new Error("Please select a valid Province / State.");
+        if (!f.state_id) throw new Error("Please select a valid State.");
         if (!f.name || !f.name.trim()) throw new Error("District Name is required.");
         return {
           country_id: f.country_id,
@@ -77,7 +77,7 @@ export function DistrictsPage() {
           <div className="form-grid">
             <SelectField
               id="country_id"
-              label="Country / National Level *"
+              label="Country *"
               required
               value={f.country_id}
               onChange={(v) => {
@@ -99,15 +99,15 @@ export function DistrictsPage() {
             </SelectField>
             <SelectField
               id="state_id"
-              label="Province / State *"
+              label="State *"
               required
               value={f.state_id}
               onChange={(v) => set("state_id", v)}
             >
               <option value="">
                 {scopedStates.length
-                  ? "-- Select Province / State --"
-                  : "-- No Provinces Found! Create Province First --"}
+                  ? "-- Select State --"
+                  : "-- No States Found! Create State First --"}
               </option>
               {scopedStates.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -137,7 +137,7 @@ export function DistrictsPage() {
       detailFields={(d) => [
         { label: "District Name", value: d.name, fullWidth: true },
         { label: "District Code", value: d.code || "—" },
-        { label: "Province / State", value: stateName(d.state_id) },
+        { label: "State", value: stateName(d.state_id) },
         { label: "Country", value: countryName(d.country_id) },
         { label: "Current Status", value: <StatusBadge status={d.status} /> },
       ]}

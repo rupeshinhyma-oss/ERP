@@ -29,6 +29,9 @@ class City(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     state_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("states.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    district_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("districts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
 
     status: Mapped[RecordStatus] = mapped_column(

@@ -15,6 +15,7 @@ class CityCreate(BaseModel):
 
     country_id: uuid.UUID
     state_id: uuid.UUID
+    district_id: uuid.UUID | None = None
     name: str = Field(..., min_length=1, max_length=150)
     status: RecordStatus = RecordStatus.ACTIVE
 
@@ -24,6 +25,7 @@ class CityUpdate(BaseModel):
 
     country_id: uuid.UUID | None = None
     state_id: uuid.UUID | None = None
+    district_id: uuid.UUID | None = None
     name: str | None = Field(default=None, min_length=1, max_length=150)
     status: RecordStatus | None = None
 
@@ -45,6 +47,7 @@ class CityRead(BaseModel):
     id: uuid.UUID
     country_id: uuid.UUID
     state_id: uuid.UUID
+    district_id: uuid.UUID | None = None
     name: str
     status: RecordStatus
     created_at: datetime
