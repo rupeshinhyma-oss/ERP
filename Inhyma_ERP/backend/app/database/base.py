@@ -17,9 +17,46 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator, CHAR
+
+from app.core.constants import RecordStatus
+
+
+class RecordStatusColumn(TypeDecorator):
+    """
+    Platform-independent, case-resilient column type for RecordStatus enums.
+
+    Stores 'ACTIVE' or 'INACTIVE' strings in the database, matching the PostgreSQL
+    schema convention across the ERP, while safely accepting and normalizing
+    both uppercase and lowercase strings ('active', 'inactive') on read and write,
+    preventing Enum LookupErrors from casing discrepancies.
+    """
+
+    impl = String(20)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, RecordStatus):
+            return value.name
+        val_str = str(value).strip()
+        val_upper = val_str.upper()
+        if val_upper in RecordStatus.__members__:
+            return val_upper
+        return val_str
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, RecordStatus):
+            return value
+        val_upper = str(value).strip().upper()
+        if val_upper in RecordStatus.__members__:
+            return RecordStatus[val_upper]
+        return RecordStatus.ACTIVE
 
 
 class GUID(TypeDecorator):

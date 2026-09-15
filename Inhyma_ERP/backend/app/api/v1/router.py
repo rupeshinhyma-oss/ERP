@@ -42,6 +42,9 @@ from app.masters.agent_types.routes import router as agent_types_router
 from app.masters.company_categories.routes import router as company_categories_router
 from app.masters.company_sectors.routes import router as company_sectors_router
 from app.masters.warehouses.routes import router as warehouses_router
+from app.masters.billing_companies.routes import router as billing_companies_router
+from app.masters.technicians.routes import router as technicians_router
+from app.masters.banks.routes import router as banks_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.dependencies import get_organization_service
 from app.organizations.routes import router as organizations_router
@@ -114,6 +117,9 @@ api_router.include_router(agent_types_router)
 api_router.include_router(company_categories_router)
 api_router.include_router(company_sectors_router)
 api_router.include_router(warehouses_router)
+api_router.include_router(billing_companies_router)
+api_router.include_router(technicians_router)
+api_router.include_router(banks_router)
 
 # Companies Management.
 api_router.include_router(companies_router)

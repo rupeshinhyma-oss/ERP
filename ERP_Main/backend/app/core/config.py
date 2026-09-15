@@ -117,7 +117,10 @@ class Settings(BaseSettings):
     # rely on that alone: `validate_production_secrets()` also refuses to
     # boot in production with the literal "*" origin configured.
     # -------------------------------------------------------------------
-    CORS_ALLOWED_ORIGINS: str = "http://localhost:5170,http://localhost:5173,http://localhost:5174,http://localhost:5175"
+    CORS_ALLOWED_ORIGINS: str = (
+        "http://localhost:5170,http://localhost:5173,http://localhost:5174,http://localhost:5175,"
+        "http://127.0.0.1:5170,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175"
+    )
     CORS_ALLOW_CREDENTIALS: bool = True
     ALLOW_LOCAL_URLS: bool = False
 
@@ -233,7 +236,7 @@ class Settings(BaseSettings):
     # (via JWKS) -- the private key never leaves ERP_Main (Step 5).
     # -------------------------------------------------------------------
     FEDERATION_ISSUER: str = Field(
-        default="http://localhost:8100",
+        default="http://127.0.0.1:8000",
         description="This ERP_Main instance's OIDC issuer URL. Must exactly match what ERPs are "
         "configured to expect as `iss` -- see app.federation.",
     )

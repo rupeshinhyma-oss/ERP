@@ -305,15 +305,15 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------
     INHYMA_SSO_ENABLED: bool = True
     ERP_MAIN_ISSUER: str = Field(
-        default="http://localhost:8100",
+        default="http://127.0.0.1:8000",
         description="ERP_Main's OIDC issuer URL. Federation ID tokens with any other `iss` are rejected.",
     )
     ERP_MAIN_JWKS_URL: str = Field(
-        default="http://localhost:8100/api/v1/.well-known/jwks.json",
+        default="http://127.0.0.1:8000/api/v1/.well-known/jwks.json",
         description="Where this ERP fetches ERP_Main's public signing keys to verify federation ID tokens.",
     )
     ERP_MAIN_API_BASE_URL: str = Field(
-        default="http://localhost:8100/api/v1",
+        default="http://127.0.0.1:8000/api/v1",
         description="Base URL for calling ERP_Main's own API (e.g. the internal membership lookup).",
     )
     FEDERATION_CLIENT_ID: str = Field(
@@ -332,7 +332,7 @@ class Settings(BaseSettings):
 
     # Peer ERP Direct Integration Endpoints (Phase 8E - Direct runtime ERP-to-ERP delivery)
     PEER_ERP_ENDPOINTS: str = Field(
-        default="inhyma=http://localhost:8002/api/v1,yinglima=http://localhost:8001/api/v1",
+        default="inhyma=http://127.0.0.1:8002/api/v1,yinglima=http://127.0.0.1:8001/api/v1",
         description="Comma-separated key=url mapping of peer ERP base URLs for direct runtime sync.",
     )
 

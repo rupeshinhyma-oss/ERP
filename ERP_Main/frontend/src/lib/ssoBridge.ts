@@ -49,6 +49,10 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
 
   try {
     const url = new URL(targetBaseUrl, window.location.origin);
+    const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
+    if (url.hostname === "localhost" && host !== "localhost") {
+      url.hostname = host;
+    }
     if (targetPath) {
       url.pathname = targetPath;
     }

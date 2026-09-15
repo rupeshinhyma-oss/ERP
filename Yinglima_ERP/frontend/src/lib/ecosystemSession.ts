@@ -22,7 +22,14 @@ export interface EcosystemSessionData {
 const COOKIE_NAME = "ihm_ecosystem_session";
 const LOCAL_STORAGE_KEY = "ihm_ecosystem_session";
 const BROADCAST_CHANNEL_NAME = "ihm_ecosystem_auth";
-export const CENTRAL_AUTH_API = "http://localhost:8000/api/v1/global/ecosystem-session";
+const getCentralAuthApi = (): string => {
+  if (typeof window !== "undefined" && window.location.hostname) {
+    const host = window.location.hostname;
+    return `http://${host}:8000/api/v1/global/ecosystem-session`;
+  }
+  return "http://127.0.0.1:8000/api/v1/global/ecosystem-session";
+};
+export const CENTRAL_AUTH_API = getCentralAuthApi();
 
 /* ------------------------------------------------------------------ */
 /* Cookie & Storage Helpers (Shared across localhost ports)            */
@@ -79,6 +86,9 @@ export function clearEcosystemCookie(): void {
     }
     document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
     document.cookie = `${COOKIE_NAME}=; path=/; domain=localhost; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    if (typeof window !== "undefined" && window.location.hostname && window.location.hostname !== "localhost") {
+      document.cookie = `${COOKIE_NAME}=; path=/; domain=${window.location.hostname}; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    }
     localStorage.removeItem(LOCAL_STORAGE_KEY);
   } catch (err) {
     console.warn("Could not clear ecosystem session cookie:", err);

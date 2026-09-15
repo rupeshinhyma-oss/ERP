@@ -41,42 +41,42 @@ SERVICES = [
         "color": CYAN,
         "cwd": ROOT_DIR / "ERP_Main" / "backend",
         "cmd": [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
-        "url": "http://localhost:8000",
+        "url": "http://127.0.0.1:8000",
     },
     {
         "name": "MAIN-UI",
         "color": BLUE,
         "cwd": ROOT_DIR / "ERP_Main" / "frontend",
         "cmd": ["cmd.exe", "/c", "npm", "run", "dev"],
-        "url": "http://localhost:5170",
+        "url": "http://127.0.0.1:5170",
     },
     {
         "name": "YINGLIMA-API",
         "color": GREEN,
         "cwd": ROOT_DIR / "Yinglima_ERP" / "backend",
         "cmd": [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"],
-        "url": "http://localhost:8001",
+        "url": "http://127.0.0.1:8001",
     },
     {
         "name": "YINGLIMA-UI",
         "color": YELLOW,
         "cwd": ROOT_DIR / "Yinglima_ERP" / "frontend",
         "cmd": ["cmd.exe", "/c", "npm", "run", "dev"],
-        "url": "http://localhost:5173",
+        "url": "http://127.0.0.1:5173",
     },
     {
         "name": "INHYMA-API",
         "color": MAGENTA,
         "cwd": ROOT_DIR / "Inhyma_ERP" / "backend",
         "cmd": [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002", "--reload"],
-        "url": "http://localhost:8002",
+        "url": "http://127.0.0.1:8002",
     },
     {
         "name": "INHYMA-UI",
         "color": WHITE,
         "cwd": ROOT_DIR / "Inhyma_ERP" / "frontend",
         "cmd": ["cmd.exe", "/c", "npm", "run", "dev"],
-        "url": "http://localhost:5174",
+        "url": "http://127.0.0.1:5174",
     },
 ]
 
@@ -90,16 +90,16 @@ def print_banner():
 >>> MULTI-ERP ECOSYSTEM MASTER RUNNER <<<
 ================================================================================{RESET}
   {BOLD}ERP_Main Control Plane:{RESET}
-    - Frontend UI:  {CYAN}http://localhost:5170{RESET}
-    - Backend API:  {CYAN}http://localhost:8000{RESET} (Docs: /docs)
+    - Frontend UI:  {CYAN}http://127.0.0.1:5170{RESET}
+    - Backend API:  {CYAN}http://127.0.0.1:8000{RESET} (Docs: /docs)
 
   {BOLD}Yinglima ERP (China Procurement):{RESET}
-    - Frontend UI:  {YELLOW}http://localhost:5173{RESET}
-    - Backend API:  {GREEN}http://localhost:8001{RESET} (Docs: /docs)
+    - Frontend UI:  {YELLOW}http://127.0.0.1:5173{RESET}
+    - Backend API:  {GREEN}http://127.0.0.1:8001{RESET} (Docs: /docs)
 
   {BOLD}Inhyma ERP (India Distribution):{RESET}
-    - Frontend UI:  {WHITE}http://localhost:5174{RESET}
-    - Backend API:  {MAGENTA}http://localhost:8002{RESET} (Docs: /docs)
+    - Frontend UI:  {WHITE}http://127.0.0.1:5174{RESET}
+    - Backend API:  {MAGENTA}http://127.0.0.1:8002{RESET} (Docs: /docs)
 
   {BOLD}Default Admin Credentials:{RESET}
     - Username / Email: {BOLD}admin@example.com{RESET}

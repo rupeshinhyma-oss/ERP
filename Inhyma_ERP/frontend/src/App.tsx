@@ -56,6 +56,9 @@ import { AgentTypesPage } from "@/pages/masters/AgentTypes";
 import { CompanyCategoriesPage } from "@/pages/masters/CompanyCategories";
 import { CompanySectorsPage } from "@/pages/masters/CompanySectors";
 import { WarehousesPage } from "@/pages/masters/Warehouses";
+import { BillingCompaniesPage } from "@/pages/masters/BillingCompanies";
+import { TechniciansPage } from "@/pages/masters/Technicians";
+import { BanksPage } from "@/pages/masters/Banks";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -165,9 +168,14 @@ export function App() {
           <Route path="/company/sector/list" element={<Navigate to="/masters/company-sectors" replace />} />
           <Route path="/masters/warehouses" element={<WarehousesPage />} />
           <Route path="/warehouse/list" element={<Navigate to="/masters/warehouses" replace />} />
-          <Route path="/masters/billing-company" element={<ComingSoonPage activeKey="masters-billing-company" title="Billing Company" subtitle="Manage invoicing legal entities and tax registrations" breadcrumbLabel="Billing Company" featureName="Billing Company" />} />
-          <Route path="/masters/technicians" element={<ComingSoonPage activeKey="masters-technicians" title="Technicians" subtitle="Manage service engineers and field technicians" breadcrumbLabel="Technicians" featureName="Technicians" />} />
-          <Route path="/masters/bank" element={<ComingSoonPage activeKey="masters-bank" title="Bank" subtitle="Manage settlement accounts and banking details" breadcrumbLabel="Bank" featureName="Bank" />} />
+          <Route path="/masters/billing-company" element={<BillingCompaniesPage />} />
+          <Route path="/company/list" element={<Navigate to="/masters/billing-company" replace />} />
+          <Route path="/company/addedit" element={<Navigate to="/masters/billing-company" replace />} />
+          <Route path="/masters/technicians" element={<TechniciansPage />} />
+          <Route path="/technician/list" element={<Navigate to="/masters/technicians" replace />} />
+          <Route path="/masters/banks" element={<BanksPage />} />
+          <Route path="/masters/bank" element={<Navigate to="/masters/banks" replace />} />
+          <Route path="/bank/list" element={<Navigate to="/masters/banks" replace />} />
           <Route path="/masters/transport" element={<ComingSoonPage activeKey="masters-transport" title="Transport" subtitle="Manage logistics carriers and transport agencies" breadcrumbLabel="Transport" featureName="Transport" />} />
           <Route path="/masters/payment-terms" element={<ComingSoonPage activeKey="masters-payment-terms" title="Payment Terms" subtitle="Configure credit limits and payment condition cycles" breadcrumbLabel="Payment Terms" featureName="Payment Terms" />} />
           <Route path="/masters/lead-sources" element={<ComingSoonPage activeKey="masters-lead-sources" title="Lead Sources" subtitle="Track acquisition channels and campaign sources" breadcrumbLabel="Lead Sources" featureName="Lead Sources" />} />

@@ -87,6 +87,8 @@
 | **CONFIGURATIONS** | Company Categories | `/masters/company-categories` | `masters-company-categories` | `building` | `companycategory.view` |
 | **CONFIGURATIONS** | Company Sectors | `/masters/company-sectors` | `masters-company-sectors` | `layers` | `companysector.view` |
 | **CONFIGURATIONS** | Warehouses | `/masters/warehouses` | `masters-warehouses` | `home` | `warehouse.view` |
+| **CONFIGURATIONS** | Billing Company | `/masters/billing-company` | `masters-billing-company` | `building` | `billingcompany.view` |
+| **CONFIGURATIONS** | Technicians | `/masters/technicians` | `masters-technicians` | `user` | `technician.view` |
 | **CONFIGURATIONS** | Organization Settings | `/organization` | `organization` | `settings` | `organization.manage` |
 | **CONFIGURATIONS** | Organization List | `/masters/company-list` | `masters-company-list` | `building` | `organizationlist.view` |
 | **CONFIGURATIONS** | Audit Log | `/audit` | `audit` | `clock` | `audit.view` |
@@ -1383,4 +1385,47 @@ Checklist to execute:
 - [ ] Verify universal topbar search indexes company categories by name and business type.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 15, 2026 (Company Categories Master Module Addition & Multi-ERP Integration).*
+
+## 27. SETTINGS: Bank Master Module
+
+- **Route:** `/masters/banks`
+- **Legacy Redirects:** `/bank/list`, `/masters-bank.html`, `/masters-banks.html`, `/masters/bank`
+- **Required Permission:** `bank.view` (Mutations: `bank.create`, `bank.update`, `bank.delete`, `bank.export`, `bank.import`, `bank.bulk_action`)
+- **Purpose:** Centralized corporate banking registry tracking account numbers, bank names, account holders, IFSC codes, and branch locations.
+
+### Visual Elements & Layout
+1. **Breadcrumbs:** `Settings` > `Masters` > `Bank`
+2. **Page Title:** `Bank`
+3. **Action Buttons:**
+   - `+ ADD NEW` (Primary blue button) — Opens popup modal to add a new bank account.
+   - `DELETE` (Green button) — Bulk delete action for selected bank accounts.
+4. **Table Columns:**
+   - `Checkbox` — Multi-row selection for bulk operations.
+   - `Sr. No.` — Row sequence index counter.
+   - `Holder Name` — Account holder entity name (e.g. `INHYMA SOLUTIONS LLP (GUJARAT)`).
+   - `Bank` — Two-line formatted cell displaying bank name in bold (e.g. `HDFC BANK`) and account number below in secondary monospace font.
+   - `Branch` — Bank branch location (e.g. `PARMESHWARI PLAZA MULUND (W)`).
+   - `Status` — Active / Inactive status toggle pill.
+   - `Action` — Quick Edit (blue pencil icon) and Soft-Delete (red trash can icon) buttons.
+5. **Modal Form Fields (Add / Edit Bank):**
+   - `Bank Name *` — Required text input (e.g. `HDFC BANK`).
+   - `Account Number *` — Required text input, validated for uniqueness (e.g. `50200117491557`).
+   - `Account Holder Name *` — Required text input (e.g. `INHYMA SOLUTIONS LLP (GUJARAT)`).
+   - `IFSC Code *` — Required text input, auto-capitalized (e.g. `HDFC0000118`).
+   - `Branch *` — Required text input (e.g. `PARMESHWARI PLAZA MULUND (W)`).
+   - `Status` — Status dropdown (`Active`, `Inactive`).
+   - `Submit` — Blue action button submitting the form.
+
+### Test Cases
+- [ ] Verify navigating to `/bank/list` automatically redirects to `/masters/banks`.
+- [ ] Verify the 3 seeded legacy bank accounts render with correct holder name, multi-line bank/account number, and branch.
+- [ ] Verify clicking `+ ADD NEW` opens the popup modal with all 5 required fields.
+- [ ] Verify creating a bank account with an existing account number raises a 409 conflict error.
+- [ ] Verify editing a bank account updates the record and live table immediately.
+- [ ] Verify toggling active/inactive status updates the database.
+- [ ] Verify soft-deleting a bank account moves it to Trash (`/trash`) with restore support.
+- [ ] Verify bulk delete operates correctly on selected checkboxes.
+- [ ] Verify export downloads CSV/XLSX with all bank fields.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 15, 2026 (Bank Master Module Addition & Seeding).*

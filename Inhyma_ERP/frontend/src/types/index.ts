@@ -173,6 +173,44 @@ export interface Warehouse extends MasterRecord {
   updated_at?: string;
 }
 
+export interface BillingCompany extends MasterRecord {
+  name: string;
+  email?: string | null;
+  mobile?: string | null;
+  logo_url?: string | null;
+  signature_url?: string | null;
+  address?: string | null;
+  city: string;
+  zip_code?: string | null;
+  gst_no?: string | null;
+  pan_no?: string | null;
+  so_prefix: string;
+  pi_prefix: string;
+  bank_name: string;
+  terms_and_conditions?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Technician extends MasterRecord {
+  name: string;
+  mobile: string;
+  city: string;
+  password?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Bank extends MasterRecord {
+  bank_name: string;
+  account_number: string;
+  account_holder_name: string;
+  ifsc_code: string;
+  branch: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Brand extends MasterRecord {
   name: string;
   code: string;

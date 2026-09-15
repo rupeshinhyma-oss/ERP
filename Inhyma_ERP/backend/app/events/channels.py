@@ -116,6 +116,9 @@ MODULE_CHANNEL_PERMISSIONS: dict[str, str] = {
     module_channel("company_categories"): "companycategory.view",
     module_channel("company_sectors"): "companysector.view",
     module_channel("warehouses"): "warehouse.view",
+    module_channel("billing_companies"): "billingcompany.view",
+    module_channel("technicians"): "technician.view",
+    module_channel("banks"): "bank.view",
     # --- Task management ---
     module_channel("tasks"):         "task.view",
 }

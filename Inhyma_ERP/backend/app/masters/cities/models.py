@@ -10,11 +10,10 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import ForeignKey, String, UniqueConstraint
-from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+from app.database.base import GUID, Base, RecordStatusColumn, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 class City(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
@@ -35,7 +34,7 @@ class City(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
 
     status: Mapped[RecordStatus] = mapped_column(
-        SAEnum(RecordStatus, name="city_status", native_enum=False, length=20),
+        RecordStatusColumn(),
         default=RecordStatus.ACTIVE,
         nullable=False,
         index=True,

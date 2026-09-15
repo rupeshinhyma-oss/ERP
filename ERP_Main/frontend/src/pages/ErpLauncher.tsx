@@ -19,10 +19,20 @@ import type { ErpInstance, ErpMembership } from "@/types";
  * Fallback host URL resolver if base_url is unset in database.
  */
 export function getErpHostUrl(erp: Partial<ErpInstance>): string {
-  if (erp.base_url) return erp.base_url;
+  const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
+  if (erp.base_url) {
+    try {
+      const url = new URL(erp.base_url);
+      if (url.hostname === "localhost" && host !== "localhost") {
+        url.hostname = host;
+        return url.toString();
+      }
+    } catch {}
+    return erp.base_url;
+  }
   const key = (erp.erp_key || (erp as any).key || "").toLowerCase();
-  if (key === "inhyma") return "http://localhost:5174/dashboard";
-  if (key === "yinglima") return "http://localhost:5173/dashboard";
+  if (key === "inhyma") return `http://${host}:5174/dashboard`;
+  if (key === "yinglima") return `http://${host}:5173/dashboard`;
   return "";
 }
 

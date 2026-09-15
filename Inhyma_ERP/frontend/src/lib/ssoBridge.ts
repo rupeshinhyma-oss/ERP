@@ -28,11 +28,18 @@ export interface SsoHandoverPayload {
 const SSO_SIGNATURE = "ihm_erp_sso_v1";
 const SSO_VALIDITY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
-export const ECOSYSTEM_ERPS = [
-  { key: "control-plane", name: "Global Control Panel", hostUrl: "http://localhost:5170/erps/switcher", badge: "Control Plane" },
-  { key: "yinglima", name: "Yinglima ERP", hostUrl: "http://localhost:5173/dashboard", badge: "Active Port 5173" },
-  { key: "inhyma", name: "Inhyma ERP", hostUrl: "http://localhost:5174/dashboard", badge: "Active Port 5174" },
-];
+const getHost = () => (typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1");
+
+export const getEcosystemErps = () => {
+  const host = getHost();
+  return [
+    { key: "control-plane", name: "Global Control Panel", hostUrl: `http://${host}:5170/erps/switcher`, badge: "Control Plane" },
+    { key: "yinglima", name: "Yinglima ERP", hostUrl: `http://${host}:5173/dashboard`, badge: "Active Port 5173" },
+    { key: "inhyma", name: "Inhyma ERP", hostUrl: `http://${host}:5174/dashboard`, badge: "Active Port 5174" },
+  ];
+};
+
+export const ECOSYSTEM_ERPS = getEcosystemErps();
 
 /**
  * Creates an SSO handover URL for switching to another ERP or Global Control Panel.
@@ -56,6 +63,10 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
 
   try {
     const url = new URL(targetBaseUrl, window.location.origin);
+    const host = getHost();
+    if (url.hostname === "localhost" && host !== "localhost") {
+      url.hostname = host;
+    }
     if (targetPath) {
       url.pathname = targetPath;
     }
