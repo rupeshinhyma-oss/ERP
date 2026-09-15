@@ -211,6 +211,15 @@ export interface Bank extends MasterRecord {
   updated_at?: string;
 }
 
+export interface Transport extends MasterRecord {
+  name: string;
+  gst_number: string;
+  mobile?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+
 export interface Brand extends MasterRecord {
   name: string;
   code: string;

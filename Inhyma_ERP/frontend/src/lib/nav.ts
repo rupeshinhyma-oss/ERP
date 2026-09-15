@@ -107,7 +107,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-billing-company", label: "Billing Company", path: "/masters/billing-company", permission: "billingcompany.view" },
           { key: "masters-technicians", label: "Technicians", path: "/masters/technicians", permission: "technician.view" },
           { key: "masters-banks", label: "Bank", path: "/masters/banks", permission: "bank.view" },
-          { key: "masters-transport", label: "Transport", path: "/masters/transport" },
+          { key: "masters-transport", label: "Transport", path: "/masters/transport", permission: "transport.view" },
           { key: "masters-payment-terms", label: "Payment Terms", path: "/masters/payment-terms" },
           { key: "masters-lead-sources", label: "Lead Sources", path: "/masters/lead-sources" },
           { key: "masters-adjustment-purpose", label: "Adjustment Purpose", path: "/masters/adjustment-purpose" },

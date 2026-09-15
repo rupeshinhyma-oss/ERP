@@ -57,6 +57,7 @@ import app.masters.warehouses.models  # noqa: F401,E402
 import app.masters.billing_companies.models  # noqa: F401,E402
 import app.masters.technicians.models  # noqa: F401,E402
 import app.masters.banks.models  # noqa: F401,E402
+import app.masters.transports.models  # noqa: F401,E402
 import app.masters.brands.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_sub_categories.models  # noqa: F401,E402 - Phase 7

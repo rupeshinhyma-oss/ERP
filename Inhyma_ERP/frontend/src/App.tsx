@@ -59,6 +59,7 @@ import { WarehousesPage } from "@/pages/masters/Warehouses";
 import { BillingCompaniesPage } from "@/pages/masters/BillingCompanies";
 import { TechniciansPage } from "@/pages/masters/Technicians";
 import { BanksPage } from "@/pages/masters/Banks";
+import { TransportPage } from "@/pages/masters/Transport";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -176,7 +177,9 @@ export function App() {
           <Route path="/masters/banks" element={<BanksPage />} />
           <Route path="/masters/bank" element={<Navigate to="/masters/banks" replace />} />
           <Route path="/bank/list" element={<Navigate to="/masters/banks" replace />} />
-          <Route path="/masters/transport" element={<ComingSoonPage activeKey="masters-transport" title="Transport" subtitle="Manage logistics carriers and transport agencies" breadcrumbLabel="Transport" featureName="Transport" />} />
+          <Route path="/masters/transport" element={<TransportPage />} />
+          <Route path="/masters/transports" element={<Navigate to="/masters/transport" replace />} />
+          <Route path="/transport/list" element={<Navigate to="/masters/transport" replace />} />
           <Route path="/masters/payment-terms" element={<ComingSoonPage activeKey="masters-payment-terms" title="Payment Terms" subtitle="Configure credit limits and payment condition cycles" breadcrumbLabel="Payment Terms" featureName="Payment Terms" />} />
           <Route path="/masters/lead-sources" element={<ComingSoonPage activeKey="masters-lead-sources" title="Lead Sources" subtitle="Track acquisition channels and campaign sources" breadcrumbLabel="Lead Sources" featureName="Lead Sources" />} />
           <Route path="/masters/adjustment-purpose" element={<ComingSoonPage activeKey="masters-adjustment-purpose" title="Adjustment Purpose" subtitle="Manage stock reconciliation reasons" breadcrumbLabel="Adjustment Purpose" featureName="Adjustment Purpose" />} />
