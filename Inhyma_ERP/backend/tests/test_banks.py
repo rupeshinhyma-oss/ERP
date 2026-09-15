@@ -278,3 +278,33 @@ async def test_bank_service_list_paginated(bank_service, mock_bank_repo):
     items, total = await bank_service.list_paginated(query)
     assert len(items) == 1
     assert total == 1
+
+
+# ---------------------------------------------------------------------------
+# 5. Repository & Dependency Tests
+# ---------------------------------------------------------------------------
+
+def test_bank_repository_initialization():
+    """Verify BankRepository instantiates correctly with session and attaches Bank model."""
+    from unittest.mock import MagicMock
+    from app.masters.banks.repository import BankRepository
+
+    session = MagicMock()
+    repo = BankRepository(session)
+    assert repo.session is session
+    assert repo.model is Bank
+
+
+@pytest.mark.asyncio
+async def test_get_bank_service_dependency():
+    """Verify get_bank_service dependency builds service with BankRepository."""
+    from unittest.mock import MagicMock
+    from app.masters.banks.dependencies import get_bank_service
+    from app.masters.banks.repository import BankRepository
+
+    session = MagicMock()
+    cache_manager = MagicMock()
+    service = await get_bank_service(session=session, cache_manager=cache_manager)
+    assert isinstance(service.repository, BankRepository)
+    assert service.repository.model is Bank
+

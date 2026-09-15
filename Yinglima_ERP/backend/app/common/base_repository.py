@@ -69,10 +69,15 @@ class BaseRepository(Generic[ModelT]):
     sortable_fields: tuple[str, ...] = ()
     filterable_fields: tuple[str, ...] = ()
 
-    def __init__(self, session: AsyncSession, model: type[ModelT]) -> None:
+    def __init__(self, session: AsyncSession, model: type[ModelT] | None = None) -> None:
         """Bind this repository instance to a session and a model class."""
         self.session = session
-        self.model = model
+        if model is not None:
+            self.model = model
+        elif getattr(self, "model", None) is not None:
+            pass
+        else:
+            raise TypeError(f"{type(self).__name__} requires a model class or subclass 'model' attribute.")
 
     def _base_select(self) -> Select:
         """
@@ -139,6 +144,19 @@ class BaseRepository(Generic[ModelT]):
             stmt = stmt.limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_all(self) -> list[ModelT]:
+        """Return every active / non-deleted record, ordered by name, bank_name, or created_at."""
+        stmt = self._base_select()
+        if hasattr(self.model, "name"):
+            stmt = stmt.order_by(getattr(self.model, "name"))
+        elif hasattr(self.model, "bank_name"):
+            stmt = stmt.order_by(getattr(self.model, "bank_name"))
+        elif hasattr(self.model, "created_at"):
+            stmt = stmt.order_by(getattr(self.model, "created_at").desc())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
 
     async def count(self, *, filters: dict[str, Any] | None = None) -> int:
         """Count rows matching the given filters (respecting soft-delete exclusion)."""

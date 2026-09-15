@@ -18,6 +18,10 @@ class BankRepository(BaseRepository[Bank]):
     sortable_fields = ("created_at", "updated_at", "bank_name", "account_number", "account_holder_name", "status")
     filterable_fields = ("status", "bank_name", "branch")
 
+    def __init__(self, session: AsyncSession) -> None:
+        """Bind to a DB session, operating on the ``Bank`` model."""
+        super().__init__(session, Bank)
+
     async def get_by_account_number(self, account_number: str) -> Bank | None:
         """Find an active or non-deleted bank by account number."""
         stmt = (
@@ -27,3 +31,10 @@ class BankRepository(BaseRepository[Bank]):
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
+
+    async def list_all(self) -> list[Bank]:
+        """Return every non-deleted bank, ordered by bank_name."""
+        stmt = self._base_select().order_by(Bank.bank_name)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
