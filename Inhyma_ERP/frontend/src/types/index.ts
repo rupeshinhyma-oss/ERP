@@ -219,6 +219,13 @@ export interface Transport extends MasterRecord {
   updated_at?: string;
 }
 
+export interface PaymentTerm extends MasterRecord {
+  name: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+
 
 export interface Brand extends MasterRecord {
   name: string;

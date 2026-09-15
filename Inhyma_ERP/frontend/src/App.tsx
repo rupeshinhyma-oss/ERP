@@ -60,6 +60,7 @@ import { BillingCompaniesPage } from "@/pages/masters/BillingCompanies";
 import { TechniciansPage } from "@/pages/masters/Technicians";
 import { BanksPage } from "@/pages/masters/Banks";
 import { TransportPage } from "@/pages/masters/Transport";
+import { PaymentTermsPage } from "@/pages/masters/PaymentTerms";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -180,7 +181,10 @@ export function App() {
           <Route path="/masters/transport" element={<TransportPage />} />
           <Route path="/masters/transports" element={<Navigate to="/masters/transport" replace />} />
           <Route path="/transport/list" element={<Navigate to="/masters/transport" replace />} />
-          <Route path="/masters/payment-terms" element={<ComingSoonPage activeKey="masters-payment-terms" title="Payment Terms" subtitle="Configure credit limits and payment condition cycles" breadcrumbLabel="Payment Terms" featureName="Payment Terms" />} />
+          <Route path="/masters/payment-terms" element={<PaymentTermsPage />} />
+          <Route path="/masters/payment_terms" element={<Navigate to="/masters/payment-terms" replace />} />
+          <Route path="/payment-terms/list" element={<Navigate to="/masters/payment-terms" replace />} />
+          <Route path="/paymentterms/list" element={<Navigate to="/masters/payment-terms" replace />} />
           <Route path="/masters/lead-sources" element={<ComingSoonPage activeKey="masters-lead-sources" title="Lead Sources" subtitle="Track acquisition channels and campaign sources" breadcrumbLabel="Lead Sources" featureName="Lead Sources" />} />
           <Route path="/masters/adjustment-purpose" element={<ComingSoonPage activeKey="masters-adjustment-purpose" title="Adjustment Purpose" subtitle="Manage stock reconciliation reasons" breadcrumbLabel="Adjustment Purpose" featureName="Adjustment Purpose" />} />
           <Route path="/masters/call-types" element={<ComingSoonPage activeKey="masters-call-types" title="Call Types" subtitle="Configure CRM telecalling interaction types" breadcrumbLabel="Call Types" featureName="Call Types" />} />

@@ -46,6 +46,7 @@ from app.masters.billing_companies.routes import router as billing_companies_rou
 from app.masters.technicians.routes import router as technicians_router
 from app.masters.banks.routes import router as banks_router
 from app.masters.transports.routes import router as transports_router
+from app.masters.payment_terms.routes import router as payment_terms_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.dependencies import get_organization_service
 from app.organizations.routes import router as organizations_router
@@ -123,6 +124,9 @@ api_router.include_router(technicians_router)
 api_router.include_router(banks_router)
 api_router.include_router(transports_router, prefix="/masters/transports")
 api_router.include_router(transports_router, prefix="/masters/transport")
+api_router.include_router(payment_terms_router, prefix="/masters/payment-terms")
+api_router.include_router(payment_terms_router, prefix="/masters/payment_terms")
+api_router.include_router(payment_terms_router, prefix="/masters/payment-term")
 
 # Companies Management.
 api_router.include_router(companies_router)
