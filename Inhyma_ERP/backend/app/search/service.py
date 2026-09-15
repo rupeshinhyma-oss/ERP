@@ -72,6 +72,12 @@ from app.masters.product_sub_categories.models import ProductSubCategory
 from app.masters.products.models import Product
 from app.masters.states.models import State
 from app.masters.taxes.models import Tax
+from app.masters.additional_charges.models import AdditionalCharge
+from app.masters.social_media.models import SocialMedia
+from app.masters.agent_types.models import AgentType
+from app.masters.company_categories.models import CompanyCategory
+from app.masters.company_sectors.models import CompanySector
+from app.masters.warehouses.models import Warehouse
 from app.masters.uom.models import UnitOfMeasurement
 from app.organizations.models import Organization
 from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem
@@ -356,6 +362,149 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
             )
     except Exception as e:
         logger.warning("Error searching Taxes: %s", e)
+
+    # Additional Charges
+    try:
+        stmt_ac = select(AdditionalCharge).where(
+            _not_deleted(AdditionalCharge),
+            or_(
+                AdditionalCharge.name.ilike(pattern),
+                AdditionalCharge.hsn_number.ilike(pattern),
+            ),
+        ).limit(LIMIT_PER_ENTITY)
+        additional_charges = (await db.execute(stmt_ac)).scalars().all()
+        for ac in additional_charges:
+            results.append(
+                SearchResultItem(
+                    category="Additional Charges",
+                    id=str(ac.id),
+                    title=ac.name,
+                    subtitle=f"HSN: {ac.hsn_number or 'N/A'} | GST: {ac.gst_percent}%",
+                    target_url="./masters-additional-charges.html",
+                    icon="receipt",
+                )
+            )
+    except Exception as e:
+        logger.warning("Error searching Additional Charges: %s", e)
+
+    # Social Media
+    try:
+        stmt_sm = select(SocialMedia).where(
+            _not_deleted(SocialMedia),
+            SocialMedia.name.ilike(pattern),
+        ).limit(LIMIT_PER_ENTITY)
+        social_medias = (await db.execute(stmt_sm)).scalars().all()
+        for sm in social_medias:
+            results.append(
+                SearchResultItem(
+                    category="Social Media",
+                    id=str(sm.id),
+                    title=sm.name,
+                    subtitle="Social Media Platform",
+                    target_url="./masters-social-media.html",
+                    icon="share2",
+                )
+            )
+    except Exception as e:
+        logger.warning("Error searching Social Media: %s", e)
+
+    # Agent Types
+    try:
+        stmt_at = select(AgentType).where(
+            _not_deleted(AgentType),
+            or_(
+                AgentType.name.ilike(pattern),
+                AgentType.description.ilike(pattern),
+            ),
+        ).limit(LIMIT_PER_ENTITY)
+        agent_types = (await db.execute(stmt_at)).scalars().all()
+        for at in agent_types:
+            results.append(
+                SearchResultItem(
+                    category="Agent Types",
+                    id=str(at.id),
+                    title=at.name,
+                    subtitle=at.description or "Agent Type",
+                    target_url="./masters-agent-types.html",
+                    icon="userCheck",
+                )
+            )
+    except Exception as e:
+        logger.warning("Error searching Agent Types: %s", e)
+
+    # Company Categories
+    try:
+        stmt_cc = select(CompanyCategory).where(
+            _not_deleted(CompanyCategory),
+            or_(
+                CompanyCategory.name.ilike(pattern),
+                CompanyCategory.business_type.ilike(pattern),
+                CompanyCategory.description.ilike(pattern),
+            ),
+        ).limit(LIMIT_PER_ENTITY)
+        company_categories = (await db.execute(stmt_cc)).scalars().all()
+        for cc in company_categories:
+            results.append(
+                SearchResultItem(
+                    category="Company Categories",
+                    id=str(cc.id),
+                    title=cc.name,
+                    subtitle=f"Type: {cc.business_type}" + (f" | {cc.description}" if cc.description else ""),
+                    target_url="./masters-company-categories.html",
+                    icon="building",
+                )
+            )
+    except Exception as e:
+        logger.warning("Error searching Company Categories: %s", e)
+
+    # 6b. Company Sectors
+    try:
+        stmt_cs = select(CompanySector).where(
+            _not_deleted(CompanySector),
+            or_(
+                CompanySector.name.ilike(pattern),
+                CompanySector.description.ilike(pattern),
+            ),
+        ).limit(LIMIT_PER_ENTITY)
+        company_sectors = (await db.execute(stmt_cs)).scalars().all()
+        for cs in company_sectors:
+            results.append(
+                SearchResultItem(
+                    category="Company Sectors",
+                    id=str(cs.id),
+                    title=cs.name,
+                    subtitle=cs.description or "Sector",
+                    target_url="./masters-company-sectors.html",
+                    icon="layers",
+                )
+            )
+    except Exception as e:
+        logger.warning("Error searching Company Sectors: %s", e)
+
+    # 6c. Warehouses
+    try:
+        stmt_wh = select(Warehouse).where(
+            _not_deleted(Warehouse),
+            or_(
+                Warehouse.name.ilike(pattern),
+                Warehouse.address.ilike(pattern),
+                Warehouse.billing_company.ilike(pattern),
+            ),
+        ).limit(LIMIT_PER_ENTITY)
+        warehouses = (await db.execute(stmt_wh)).scalars().all()
+        for wh in warehouses:
+            results.append(
+                SearchResultItem(
+                    category="Warehouses",
+                    id=str(wh.id),
+                    title=wh.name,
+                    subtitle=f"{wh.billing_company} | {wh.address}",
+                    target_url="./masters-warehouses.html",
+                    icon="building",
+                )
+            )
+    except Exception as e:
+        logger.warning("Error searching Warehouses: %s", e)
 
     # 7. Countries, States, Cities
     try:

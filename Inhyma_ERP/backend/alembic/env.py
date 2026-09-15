@@ -48,6 +48,12 @@ import app.masters.company_list.models  # noqa: F401,E402
 import app.masters.currencies.models  # noqa: F401,E402 - Phase 7
 import app.masters.uom.models  # noqa: F401,E402 - Phase 7
 import app.masters.taxes.models  # noqa: F401,E402
+import app.masters.additional_charges.models  # noqa: F401,E402
+import app.masters.social_media.models  # noqa: F401,E402
+import app.masters.agent_types.models  # noqa: F401,E402
+import app.masters.company_categories.models  # noqa: F401,E402
+import app.masters.company_sectors.models  # noqa: F401,E402
+import app.masters.warehouses.models  # noqa: F401,E402
 import app.masters.brands.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_sub_categories.models  # noqa: F401,E402 - Phase 7

@@ -26,6 +26,12 @@ from app.masters.product_sub_categories.models import ProductSubCategory
 from app.masters.brands.models import Brand
 from app.masters.uom.models import UnitOfMeasurement
 from app.masters.taxes.models import Tax
+from app.masters.additional_charges.models import AdditionalCharge
+from app.masters.social_media.models import SocialMedia
+from app.masters.agent_types.models import AgentType
+from app.masters.company_categories.models import CompanyCategory
+from app.masters.company_sectors.models import CompanySector
+from app.masters.warehouses.models import Warehouse
 from app.masters.countries.models import Country
 from app.masters.states.models import State
 from app.masters.cities.models import City
@@ -55,6 +61,12 @@ MODEL_MAP: dict[str, tuple[Type[Any], str, str | None]] = {
     "Brand": (Brand, "name", "code"),
     "UOM": (UnitOfMeasurement, "name", "code"),
     "Tax": (Tax, "hsn_number", None),
+    "Additional Charge": (AdditionalCharge, "name", "hsn_number"),
+    "Social Media": (SocialMedia, "name", None),
+    "Agent Type": (AgentType, "name", None),
+    "Company Category": (CompanyCategory, "name", "business_type"),
+    "Company Sector": (CompanySector, "name", None),
+    "Warehouse": (Warehouse, "name", "billing_company"),
     "Country": (Country, "name", "code"),
     "State": (State, "name", "code"),
     "City": (City, "name", None),

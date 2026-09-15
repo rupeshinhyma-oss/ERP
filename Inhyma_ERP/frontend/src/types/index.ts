@@ -133,6 +133,46 @@ export interface Tax extends MasterRecord {
   import_duty_percent: number;
 }
 
+export interface AdditionalCharge extends MasterRecord {
+  name: string;
+  hsn_number?: string | null;
+  gst_percent: number;
+  description?: string | null;
+}
+
+export interface SocialMedia extends MasterRecord {
+  name: string;
+}
+
+export interface AgentType extends MasterRecord {
+  name: string;
+  description?: string | null;
+}
+
+export interface CompanyCategory extends MasterRecord {
+  name: string;
+  business_type: string;
+  description?: string | null;
+}
+
+export interface CompanySector extends MasterRecord {
+  name: string;
+  description?: string | null;
+}
+
+export interface Warehouse extends MasterRecord {
+  name: string;
+  address: string;
+  billing_company: string;
+  over_selling: boolean;
+  is_primary: boolean;
+  main_warehouse_id?: string | null;
+  main_warehouse_name?: string | null;
+  color: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Brand extends MasterRecord {
   name: string;
   code: string;

@@ -80,6 +80,13 @@
 | **CONFIGURATIONS** | City | `/masters/cities` | `masters-cities` | `pin` | `city.view` |
 | **CONFIGURATIONS** | Currencies | `/masters/currencies` | `masters-currencies` | `coins` | `currency.view` |
 | **CONFIGURATIONS** | Units of Measurement | `/masters/uom` | `masters-uom` | `ruler` | `uom.view` |
+| **CONFIGURATIONS** | Taxes | `/masters/taxes` | `masters-taxes` | `percent` | `tax.view` |
+| **CONFIGURATIONS** | Additional Charges | `/masters/additional-charges` | `masters-additional-charges` | `receipt` | `additionalcharge.view` |
+| **CONFIGURATIONS** | Social Media | `/masters/social-media` | `masters-social-media` | `share2` | `socialmedia.view` |
+| **CONFIGURATIONS** | Agent Types | `/masters/agent-types` | `masters-agent-types` | `userCheck` | `agenttype.view` |
+| **CONFIGURATIONS** | Company Categories | `/masters/company-categories` | `masters-company-categories` | `building` | `companycategory.view` |
+| **CONFIGURATIONS** | Company Sectors | `/masters/company-sectors` | `masters-company-sectors` | `layers` | `companysector.view` |
+| **CONFIGURATIONS** | Warehouses | `/masters/warehouses` | `masters-warehouses` | `home` | `warehouse.view` |
 | **CONFIGURATIONS** | Organization Settings | `/organization` | `organization` | `settings` | `organization.manage` |
 | **CONFIGURATIONS** | Organization List | `/masters/company-list` | `masters-company-list` | `building` | `organizationlist.view` |
 | **CONFIGURATIONS** | Audit Log | `/audit` | `audit` | `clock` | `audit.view` |
@@ -1335,4 +1342,45 @@ Checklist to execute:
 ```
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 8, 2026 (Task Module Aggressive Stress, Speed Latency Profiling, Notification Isolation Matrix & Dual Junior/Senior QA Verification).*
+
+## 34. CONFIGURATIONS: Company Categories Master Module
+
+- **Route:** `/masters/company-categories`
+- **Legacy Redirects:** `/company/category/list`, `/masters-company-categories.html`
+- **Required Permission:** `companycategory.view` (Mutations: `companycategory.create`, `companycategory.update`, `companycategory.delete`, `companycategory.export`, `companycategory.import`, `companycategory.bulk_action`)
+- **Purpose:** Configurable corporate classifications and tiers (B2B, B2C) for business accounts and client entities.
+
+### Visual Elements & Layout
+1. **Breadcrumbs:** `Settings` > `Masters` > `Company Categories`
+2. **Page Title:** `Company Categories`
+3. **Subtitle:** `Manage corporate tiers, business classifications (B2B/B2C), and company categories.`
+4. **Action Buttons:**
+   - `+ ADD NEW` (Primary blue button) — Opens the modal drawer to add a new company category.
+   - `DELETE` / `Bulk Actions` — Bulk status update and bulk deletion for selected rows.
+   - `Import` / `Export` (CSV / XLSX) buttons.
+5. **Table Columns:**
+   - `Checkbox` — Row select for bulk actions.
+   - `Sr. No.` — Sequence index counter.
+   - `Name` — Category name (e.g. `Corporate`, `SME`, `Non Traditional`, `Traditional`).
+   - `Business Type` — Pill badge indicating `B2B` (blue) or `B2C` (amber).
+   - `Status` — Active / Inactive status badge with toggle trigger.
+   - `Action` — Quick Edit (pencil icon) and Soft-Delete (trash can icon) action buttons.
+6. **Form Fields (Create / Edit Modal):**
+   - `Name *` — Required text input (max 100 chars, trimmed, unique).
+   - `Business Type *` — Required dropdown selector with options: `B2B`, `B2C`.
+   - `Status` — Status dropdown (`Active`, `Inactive`).
+   - `Description` — Optional multiline/singleline text notes (max 500 chars).
+
+### Test Cases
+- [ ] Verify navigating to `/company/category/list` automatically redirects to `/masters/company-categories`.
+- [ ] Verify seeded categories (`Traditional`, `Non Traditional`, `SME`, `Corporate`) render in the list.
+- [ ] Verify clicking `+ ADD NEW` opens the creation drawer with `Name`, `Business Type` (default `B2B`), `Status` (default `Active`), and `Description`.
+- [ ] Verify duplicate category names are blocked with a clear conflict error.
+- [ ] Verify updating category name or business type immediately updates the table without reload.
+- [ ] Verify toggling active/inactive status updates the database and cache.
+- [ ] Verify row deletion moves category to Trash (`/trash`) with restore capability.
+- [ ] Verify multi-select checkboxes allow bulk deletion of selected items.
+- [ ] Verify universal topbar search indexes company categories by name and business type.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 15, 2026 (Company Categories Master Module Addition & Multi-ERP Integration).*

@@ -110,6 +110,12 @@ MODULE_CHANNEL_PERMISSIONS: dict[str, str] = {
     module_channel("currencies"):    "currency.read",
     module_channel("uom"):           "uom.read",
     module_channel("taxes"):         "tax.view",
+    module_channel("additional_charges"): "additionalcharge.view",
+    module_channel("social_media"): "socialmedia.view",
+    module_channel("agent_types"): "agenttype.view",
+    module_channel("company_categories"): "companycategory.view",
+    module_channel("company_sectors"): "companysector.view",
+    module_channel("warehouses"): "warehouse.view",
     # --- Task management ---
     module_channel("tasks"):         "task.view",
 }

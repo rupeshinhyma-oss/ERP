@@ -50,6 +50,12 @@ import { CategoriesPage } from "@/pages/masters/Categories";
 import { SubCategoriesPage } from "@/pages/masters/SubCategories";
 import { ProductsPage } from "@/pages/masters/Products";
 import { TaxesPage } from "@/pages/masters/Taxes";
+import { AdditionalChargesPage } from "@/pages/masters/AdditionalCharges";
+import { SocialMediaPage } from "@/pages/masters/SocialMedia";
+import { AgentTypesPage } from "@/pages/masters/AgentTypes";
+import { CompanyCategoriesPage } from "@/pages/masters/CompanyCategories";
+import { CompanySectorsPage } from "@/pages/masters/CompanySectors";
+import { WarehousesPage } from "@/pages/masters/Warehouses";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -147,12 +153,18 @@ export function App() {
           {/* Master modules from legacy ERP screenshot */}
           <Route path="/masters/taxes" element={<TaxesPage />} />
           <Route path="/tax/list" element={<Navigate to="/masters/taxes" replace />} />
-          <Route path="/masters/additional-charges" element={<ComingSoonPage activeKey="masters-additional-charges" title="Additional Charges" subtitle="Manage freight, packaging, and surcharge rates" breadcrumbLabel="Additional Charges" featureName="Additional Charges" />} />
-          <Route path="/masters/social-media" element={<ComingSoonPage activeKey="masters-social-media" title="Social Media" subtitle="Configure social platforms and communication channels" breadcrumbLabel="Social Media" featureName="Social Media" />} />
-          <Route path="/masters/agent-types" element={<ComingSoonPage activeKey="masters-agent-types" title="Agent Types" subtitle="Manage agent classifications and commission tiers" breadcrumbLabel="Agent Types" featureName="Agent Types" />} />
-          <Route path="/masters/company-categories" element={<ComingSoonPage activeKey="masters-company-categories" title="Company Categories" subtitle="Manage corporate tiers and classification categories" breadcrumbLabel="Company Categories" featureName="Company Categories" />} />
-          <Route path="/masters/company-sectors" element={<ComingSoonPage activeKey="masters-company-sectors" title="Company Sectors" subtitle="Manage business industry verticals and sectors" breadcrumbLabel="Company Sectors" featureName="Company Sectors" />} />
-          <Route path="/masters/warehouses" element={<ComingSoonPage activeKey="masters-warehouses" title="Warehouses" subtitle="Manage storage hubs, godowns, and inventory facilities" breadcrumbLabel="Warehouses" featureName="Warehouses" />} />
+          <Route path="/masters/additional-charges" element={<AdditionalChargesPage />} />
+          <Route path="/additionalcharges/list" element={<Navigate to="/masters/additional-charges" replace />} />
+          <Route path="/masters/social-media" element={<SocialMediaPage />} />
+          <Route path="/social/list" element={<Navigate to="/masters/social-media" replace />} />
+          <Route path="/masters/agent-types" element={<AgentTypesPage />} />
+          <Route path="/agent/role/list" element={<Navigate to="/masters/agent-types" replace />} />
+          <Route path="/masters/company-categories" element={<CompanyCategoriesPage />} />
+          <Route path="/company/category/list" element={<Navigate to="/masters/company-categories" replace />} />
+          <Route path="/masters/company-sectors" element={<CompanySectorsPage />} />
+          <Route path="/company/sector/list" element={<Navigate to="/masters/company-sectors" replace />} />
+          <Route path="/masters/warehouses" element={<WarehousesPage />} />
+          <Route path="/warehouse/list" element={<Navigate to="/masters/warehouses" replace />} />
           <Route path="/masters/billing-company" element={<ComingSoonPage activeKey="masters-billing-company" title="Billing Company" subtitle="Manage invoicing legal entities and tax registrations" breadcrumbLabel="Billing Company" featureName="Billing Company" />} />
           <Route path="/masters/technicians" element={<ComingSoonPage activeKey="masters-technicians" title="Technicians" subtitle="Manage service engineers and field technicians" breadcrumbLabel="Technicians" featureName="Technicians" />} />
           <Route path="/masters/bank" element={<ComingSoonPage activeKey="masters-bank" title="Bank" subtitle="Manage settlement accounts and banking details" breadcrumbLabel="Bank" featureName="Bank" />} />

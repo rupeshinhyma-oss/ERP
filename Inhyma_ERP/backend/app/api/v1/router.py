@@ -36,6 +36,12 @@ from app.masters.states.routes import router as states_router
 from app.masters.buyer_types.routes import router as buyer_types_router
 from app.masters.supplier_types.routes import router as supplier_types_router
 from app.masters.taxes.routes import router as taxes_router
+from app.masters.additional_charges.routes import router as additional_charges_router
+from app.masters.social_media.routes import router as social_media_router
+from app.masters.agent_types.routes import router as agent_types_router
+from app.masters.company_categories.routes import router as company_categories_router
+from app.masters.company_sectors.routes import router as company_sectors_router
+from app.masters.warehouses.routes import router as warehouses_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.dependencies import get_organization_service
 from app.organizations.routes import router as organizations_router
@@ -102,6 +108,12 @@ api_router.include_router(company_list_router)
 api_router.include_router(supplier_types_router)
 api_router.include_router(buyer_types_router)
 api_router.include_router(taxes_router)
+api_router.include_router(additional_charges_router)
+api_router.include_router(social_media_router)
+api_router.include_router(agent_types_router)
+api_router.include_router(company_categories_router)
+api_router.include_router(company_sectors_router)
+api_router.include_router(warehouses_router)
 
 # Companies Management.
 api_router.include_router(companies_router)

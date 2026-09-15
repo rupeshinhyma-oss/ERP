@@ -324,8 +324,14 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Cycle Prevention:** Strict validation prevents assigning an ancestor as a child or vice-versa.
 
 ### 8.4. Master Data & Generic Catalogs
-- **Modules:** Brands, Categories, Sub-Categories, Countries, States, Cities, Currencies, Units of Measurement (UOM), HSN/SAC Codes, and Operating Companies.
-- **Features:** Built on the unified `MasterPage.tsx` engine providing uniform search, pagination, validation, modal creation, and cached lookup resolution (`nameResolver.ts`).
+- **Modules:** Brands, Categories, Sub-Categories, Countries, States, Cities, Currencies, Units of Measurement (UOM), HSN/SAC Codes, Operating Companies, Taxes, Additional Charges, Social Media, Agent Types, Company Categories, Company Sectors, and Warehouses.
+- **Features:** Built on the unified `MasterPage.tsx` engine providing uniform search, pagination, validation, modal creation, cached lookup resolution (`nameResolver.ts`), and bulk activate/deactivate/delete.
+  - **Company Categories:** Configurable business classifications supporting B2B and B2C corporate tiers, status toggles, bulk deletion, and legacy route resolution (`/company/category/list` -> `/masters/company-categories`).
+  - **Company Sectors:** Industry vertical classifications (e.g., Agriculture, Pharma & Healthcare, Packaging, FMCG, Metals & Mining, Chemical, Textile, Electronics, Automobile), status toggles, bulk deletion, CSV/Excel import/export, and legacy route resolution (`/company/sector/list` -> `/masters/company-sectors`).
+  - **Warehouses:** Inventory hubs, transit depots, and storage facilities with Billing Company associations, Over Selling permissions, Primary status flags, Main Warehouse hierarchy links, color indicators, bulk deletion, and legacy route resolution (`/warehouse/list` -> `/masters/warehouses`).
+  - **Additional Charges:** HSN and GST percentage-based rates for freight, transport, packing & forwarding.
+  - **Social Media:** Managed external communication and marketing channel handles.
+  - **Agent Types:** Multi-tier agent classifications and commission brackets.
 
 ### 8.5. Product Catalog & Dynamic Specification Builder
 - **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`.
@@ -654,6 +660,11 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Masters** | `GET/POST`| `/api/v1/masters/company-list` | Manage enterprise company/branch entities | `organizationlist.*` |
 | **Masters** | `GET/POST`| `/api/v1/masters/supplier-types` | Manage supplier classification types | `suppliertype.*` |
 | **Masters** | `GET/POST`| `/api/v1/masters/buyer-types` | Manage buyer client classification types | `buyertype.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/taxes` | Manage tax rates, GST, and HSN codes | `tax.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/additional-charges` | Manage freight, packing & forwarding, and additional charges | `additionalcharge.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/social-media` | Manage social media communication channels | `socialmedia.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/agent-types` | Manage agent classifications and partnership tiers | `agenttype.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/company-categories` | Manage corporate tiers and B2B/B2C company categories | `companycategory.*` |
 | **Search**  | `GET` | `/api/v1/search` | Universal global topbar search across all modules | Authenticated |
 | **Products**| `GET` | `/api/v1/products` | Paginated product catalog | `product.read` |
 | **Products**| `POST` | `/api/v1/products` | Create product record | `product.create` |
