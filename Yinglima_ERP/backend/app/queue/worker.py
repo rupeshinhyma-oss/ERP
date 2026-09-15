@@ -86,7 +86,7 @@ class BackgroundWorker:
             logger.warning("BackgroundWorker.start() called but worker is already running.")
             return
 
-        self._stop_event.clear()
+        self._stop_event = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name="queue-worker")
         self._task.add_done_callback(self._on_task_done)
         logger.info("Background queue worker started.")
@@ -102,7 +102,8 @@ class BackgroundWorker:
             return
 
         logger.info("Stopping background queue worker (graceful)...")
-        self._stop_event.set()
+        if self._stop_event is not None:
+            self._stop_event.set()
 
         if self._task is not None:
             try:
@@ -112,6 +113,8 @@ class BackgroundWorker:
                 self._task.cancel()
             except asyncio.CancelledError:
                 pass
+            finally:
+                self._task = None
 
         logger.info("Background queue worker stopped.")
 
@@ -132,7 +135,7 @@ class BackgroundWorker:
         """Main poll loop: claim and execute jobs until stop() is called."""
         poll_interval = _IDLE_POLL_INTERVAL
 
-        while not self._stop_event.is_set():
+        while self._stop_event is not None and not self._stop_event.is_set():
             # Periodic stuck-job recovery.
             await self._maybe_recover_stuck_jobs()
 

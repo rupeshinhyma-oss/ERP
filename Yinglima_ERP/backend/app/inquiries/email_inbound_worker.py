@@ -115,6 +115,8 @@ class EmailInboundWorker:
                 await self._task
             except asyncio.CancelledError:
                 pass
+            finally:
+                self._task = None
         logger.info("Automated Inbound Email Quotation Worker stopped.")
 
     async def _poll_loop(self) -> None:

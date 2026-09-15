@@ -113,17 +113,20 @@ class NotifyListener:
                 "Workers will rely solely on polling (correctness is unaffected, only latency)."
             )
             return
-        self._stop_event.clear()
+        self._stop_event = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name="durable-events-listener")
 
     async def stop(self) -> None:
         """Stop listening and close the direct connection."""
-        self._stop_event.set()
+        if self._stop_event is not None:
+            self._stop_event.set()
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=10.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._task.cancel()
+            finally:
+                self._task = None
         if self._connection is not None:
             try:
                 await self._connection.close()

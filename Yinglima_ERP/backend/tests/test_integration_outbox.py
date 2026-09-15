@@ -204,7 +204,7 @@ class TestDispatchEvent:
 class TestEventTypeValidation:
     """Tests for the event_type shape validator on the ORM model."""
 
-    def test_valid_event_type_accepted(self):
+    async def test_valid_event_type_accepted(self):
         """A well-formed lowercase-dotted event_type is accepted."""
         event = IntegrationOutboxEvent(
             event_id=uuid.uuid4(),
@@ -217,7 +217,7 @@ class TestEventTypeValidation:
         )
         assert event.event_type == "buyer.created"
 
-    def test_malformed_event_type_rejected(self):
+    async def test_malformed_event_type_rejected(self):
         """An event_type with no dot, or uppercase letters, is rejected at construction time."""
         with pytest.raises(ValueError):
             IntegrationOutboxEvent(

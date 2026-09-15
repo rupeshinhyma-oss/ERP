@@ -92,7 +92,8 @@ class DurableEventWorker:
         if self.is_running:
             logger.warning("DurableEventWorker.start() called but worker is already running.")
             return
-        self._stop_event.clear()
+        self._stop_event = asyncio.Event()
+        self._wake_signal = asyncio.Event()
         await self._notify_listener.start()
         self._task = asyncio.create_task(self._run(), name="durable-events-worker")
         self._task.add_done_callback(self._on_task_done)
@@ -103,7 +104,8 @@ class DurableEventWorker:
         if not self.is_running:
             return
         logger.info("Stopping durable events worker (graceful)...")
-        self._stop_event.set()
+        if self._stop_event is not None:
+            self._stop_event.set()
         await self._notify_listener.stop()
         if self._task is not None:
             try:
@@ -113,6 +115,8 @@ class DurableEventWorker:
                 self._task.cancel()
             except asyncio.CancelledError:
                 pass
+            finally:
+                self._task = None
         logger.info("Durable events worker stopped.")
 
     def _wake_up(self) -> None:

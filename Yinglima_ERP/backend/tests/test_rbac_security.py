@@ -16,7 +16,7 @@ from app.auth.service import CurrentUser
 pytestmark = pytest.mark.asyncio
 
 
-def test_permission_model_hierarchy():
+async def test_permission_model_hierarchy():
     """Verify Permission model has module, page, action, scope fields."""
     perm = Permission(
         code="employee.view",
@@ -33,7 +33,7 @@ def test_permission_model_hierarchy():
     assert perm.scope == "ALL"
 
 
-def test_current_user_must_change_password_flag():
+async def test_current_user_must_change_password_flag():
     """Verify CurrentUser carries must_change_password flag."""
     user_id = uuid.uuid4()
     user = CurrentUser(
@@ -45,7 +45,7 @@ def test_current_user_must_change_password_flag():
     assert user.must_change_password is True
 
 
-def test_user_account_status_can_login():
+async def test_user_account_status_can_login():
     """Verify User.can_login status restrictions."""
     user = User(
         username="active_user",
@@ -93,7 +93,7 @@ def test_user_account_status_can_login():
     assert pwd_change_user.can_login is True
 
 
-def test_user_permission_override_model():
+async def test_user_permission_override_model():
     """Verify UserPermission override fields."""
     user_id = uuid.uuid4()
     perm_id = uuid.uuid4()
@@ -126,7 +126,7 @@ async def test_effective_permissions_source_tracing():
     assert "user.delete" not in sources_dict
 
 
-def test_user_override_audit_actions():
+async def test_user_override_audit_actions():
     """Verify AuditAction enum contains USER_OVERRIDE_ADDED and USER_OVERRIDE_REMOVED."""
     from app.audit.constants import AuditAction
     assert AuditAction.USER_OVERRIDE_ADDED == "USER_OVERRIDE_ADDED"
