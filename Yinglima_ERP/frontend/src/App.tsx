@@ -20,6 +20,7 @@ import { setUnauthorizedHandler } from "@/lib/api";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
 
 import { LoginPage } from "@/pages/Login";
+import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { DashboardPage } from "@/pages/Dashboard";
 import { ForbiddenPage } from "@/pages/Forbidden";
 import { OrganizationPage } from "@/pages/Organization";
@@ -101,6 +102,7 @@ export function App() {
       <ErrorBoundary key={location.pathname} title="This page ran into a problem.">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/quote/:token" element={<PublicSupplierQuotePage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />

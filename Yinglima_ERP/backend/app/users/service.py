@@ -10,6 +10,8 @@ session" has exactly one implementation.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import secrets
 import uuid
@@ -19,10 +21,13 @@ from app.auth.security import generate_temporary_password, hash_password
 from app.auth.service import AuthService
 from app.core.config import settings
 from app.core.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
+from app.federation.global_identity_client import register_user_with_global_identity
 from app.rbac.repository import UserRoleRepository
 from app.rbac.service import RBACService
 from app.users.models import User, UserStatus
 from app.users.repository import UserRepository
+
+logger = logging.getLogger(__name__)
 
 # The one and only role name that grants full administrator access. Reserved
 # exclusively for the hardcoded bootstrap admin account (see scripts/seed.py);
@@ -32,6 +37,27 @@ SUPER_ADMIN_ROLE_NAME = "super_admin"
 # The role every newly-created account gets by default when the caller
 # doesn't specify any role_ids explicitly.
 DEFAULT_USER_ROLE_NAME = "user"
+
+
+async def _register_new_user_globally(*, email: str, display_name: str, local_user_id: uuid.UUID) -> None:
+    """
+    Fire-and-forget wrapper around `register_user_with_global_identity`.
+
+    Extra defense-in-depth on top of that function's own try/except:
+    this wrapper is what actually runs inside `asyncio.create_task(...)`,
+    so ANY exception escaping here -- even one this module didn't
+    anticipate -- would otherwise surface only as an unhandled
+    "Task exception was never retrieved" warning at garbage-collection
+    time, with no context. Catching broadly here and logging is
+    deliberate and correct for a fire-and-forget background task; it is
+    not a pattern to copy for code on a request's actual response path.
+    """
+    try:
+        await register_user_with_global_identity(
+            email=email, display_name=display_name, local_user_id=local_user_id
+        )
+    except Exception:  # noqa: BLE001 -- see docstring: this is the fire-and-forget boundary itself
+        logger.warning("Unexpected error during background global identity registration.", exc_info=True)
 
 
 class UserService:
@@ -354,6 +380,20 @@ class UserService:
                 is_primary=True,
                 status=OrgRecordStatus.ACTIVE,
             )
+
+        # Best-effort: tell ERP_Main this new login-having user exists, so
+        # a Global User account is ready for them without a platform admin
+        # having to manually link it via ERP_Main's Memberships page first.
+        # Fired in the background, deliberately never awaited on this
+        # request's critical path -- see `global_identity_client` module
+        # docstring for the full reliability contract. If ERP_Main is
+        # slow, down, or misconfigured, this local user is already fully
+        # created and can log in immediately regardless; the manual
+        # linking flow remains the permanent fallback for anyone this
+        # call doesn't reach.
+        asyncio.create_task(
+            _register_new_user_globally(email=email, display_name=display_name.strip(), local_user_id=user.id)
+        )
 
         return user, password_to_set
 

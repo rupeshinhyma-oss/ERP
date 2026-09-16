@@ -13,15 +13,20 @@ import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge, Banner, Modal, SkeletonDashboard } from "@/components/ui";
 import { ICONS } from "@/components/icons";
-import { createSsoHandoverUrl } from "@/lib/ssoBridge";
-import type { GlobalDashboard, GlobalAuditEvent } from "@/types";
+import { authorizeErpLaunch, getErpHostUrl } from "@/lib/federation";
+import type { GlobalDashboard, GlobalAuditEvent, ErpInstance, ErpMembership } from "@/types";
 
 export function Dashboard() {
-  const { isSuperAdmin, userType } = useGlobalSession();
+  const { currentUser, isSuperAdmin, userType, memberships: sessionMemberships } = useGlobalSession();
   const toast = useToast();
 
   const [dashboard, setDashboard] = useState<GlobalDashboard | null>(null);
   const [recentAudit, setRecentAudit] = useState<GlobalAuditEvent[]>([]);
+  const [erps, setErps] = useState<ErpInstance[]>([]);
+  const [memberships, setMemberships] = useState<ErpMembership[]>(sessionMemberships || []);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
@@ -41,10 +46,30 @@ export function Dashboard() {
     }
     setError(null);
     try {
-      const [dashData, auditData] = await Promise.all([
+      const [dashData, auditData, erpsRes] = await Promise.all([
         apiGet<GlobalDashboard>("/global/dashboard").catch(() => null),
         apiGet<GlobalAuditEvent[]>("/global/audit?limit=6").catch(() => []),
+        apiGet<ErpInstance[]>("/global/erps").catch(() => []),
       ]);
+
+      const rawErps = (erpsRes as any)?.data ?? erpsRes;
+      if (Array.isArray(rawErps)) {
+        setErps(rawErps);
+      }
+
+      let memsList: ErpMembership[] = sessionMemberships || [];
+      if ((!memsList || memsList.length === 0) && currentUser?.id) {
+        try {
+          const memsRes = await apiGet<ErpMembership[]>(`/global/users/${currentUser.id}/memberships`);
+          const rawMems = (memsRes as any)?.data ?? memsRes;
+          if (Array.isArray(rawMems)) {
+            memsList = rawMems;
+          }
+        } catch {
+          memsList = [];
+        }
+      }
+      setMemberships(memsList);
 
       if (dashData) {
         setDashboard(dashData);
@@ -72,6 +97,55 @@ export function Dashboard() {
       if (!silent) {
         setLoading(false);
       }
+    }
+  };
+
+  const handleCopy = (erpId: string, url: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url);
+      setCopiedId(erpId);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
+
+  const handleLaunchErp = async (erpKey: string, erpId: string, displayName: string) => {
+    const matched = erps.find((e) => e.erp_key === erpKey || e.id === erpId);
+    const baseUrl = matched?.base_url || getErpHostUrl({ erp_key: erpKey, base_url: matched?.base_url });
+    if (!baseUrl) {
+      setLaunchError((prev) => ({ ...prev, [erpId]: `No host URL configured for ${displayName}.` }));
+      return;
+    }
+
+    const instance: ErpInstance = {
+      id: matched?.id || erpId,
+      name: matched?.name || displayName,
+      erp_key: erpKey,
+      base_url: baseUrl,
+      status: (matched?.status as any) || "ACTIVE",
+      version: matched?.version || "1.0",
+      description: matched?.description,
+      capabilities: matched?.capabilities || [],
+      created_at: "",
+      updated_at: "",
+    };
+
+    setLaunchError((prev) => {
+      const next = { ...prev };
+      delete next[erpId];
+      return next;
+    });
+    setLaunchingId(erpId);
+
+    try {
+      const { launchUrl } = await authorizeErpLaunch(instance);
+      window.location.assign(launchUrl);
+    } catch (err) {
+      setLaunchingId(null);
+      const message =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message?: unknown }).message)
+          : `Could not launch ${displayName}. Please try again.`;
+      setLaunchError((prev) => ({ ...prev, [erpId]: message }));
     }
   };
 
@@ -197,114 +271,262 @@ export function Dashboard() {
               <h2 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "var(--color-text)" }}>
                 Registered ERP Fleet Status
               </h2>
-              <Link to="/erps/switcher" style={{ fontSize: "13px", color: "var(--color-primary)", fontWeight: 600 }}>
-                Manage All ERPs &rarr;
-              </Link>
             </div>
 
             {dashboard?.erp_health && dashboard.erp_health.length > 0 ? (
               <div className="erp-launcher-grid">
-                {dashboard.erp_health.map((erp) => (
-                  <div key={erp.erp_id} className="erp-launcher-card">
-                    <div>
-                      <div className="erp-launcher-card-header">
-                        <div>
-                          <h3 className="erp-launcher-card-title">{erp.display_name}</h3>
-                          <span className="erp-launcher-card-key">{erp.erp_key}</span>
-                        </div>
-                        <StatusBadge status={erp.status} />
-                      </div>
+                {dashboard.erp_health.map((erp) => {
+                  const matched = erps.find((e) => e.erp_key === erp.erp_key || e.id === erp.erp_id);
+                  const hostUrl = getErpHostUrl({
+                    base_url: matched?.base_url,
+                    erp_key: erp.erp_key,
+                  });
+                  const membership = memberships.find(
+                    (m) => m.erp_instance_id === matched?.id || m.erp_instance_id === erp.erp_id
+                  );
+                  const isUnavailable = erp.status !== "ACTIVE";
+                  const isLaunching = launchingId === erp.erp_id;
 
-                      <div className="erp-launcher-card-meta">
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ color: "var(--color-muted)" }}>API Health:</span>
-                          <StatusBadge status={erp.api_health} />
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ color: "var(--color-muted)" }}>Buyer Projections:</span>
-                          <span style={{ fontWeight: 600 }}>{erp.buyer_projection_count} records</span>
-                        </div>
-                        {erp.last_seen_at && (
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span style={{ color: "var(--color-muted)" }}>Heartbeat:</span>
-                            <span>{new Date(erp.last_seen_at).toLocaleTimeString()}</span>
+                  return (
+                    <div
+                      key={erp.erp_id}
+                      className="erp-launcher-card"
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <div>
+                        <div className="erp-launcher-card-header">
+                          <div>
+                            <h3 className="erp-launcher-card-title">{erp.display_name}</h3>
+                            <span className="erp-launcher-card-key">{erp.erp_key}</span>
                           </div>
-                        )}
-                        {erp.enabled_capabilities && erp.enabled_capabilities.length > 0 && (
-                          <div style={{ marginTop: "6px" }}>
-                            <span style={{ fontSize: "11px", color: "var(--color-muted)", display: "block", marginBottom: "4px" }}>
-                              CAPABILITIES:
-                            </span>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                              {erp.enabled_capabilities.map((cap) => (
-                                <span
-                                  key={cap}
-                                  style={{
-                                    fontSize: "10px",
-                                    padding: "2px 6px",
-                                    borderRadius: "4px",
-                                    background: "#f1f5f9",
-                                    fontFamily: "monospace",
-                                  }}
-                                >
-                                  {cap}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                          <StatusBadge status={erp.status} />
+                        </div>
 
-                    <div className="erp-launcher-card-footer" style={{ marginTop: "16px" }}>
-                      <Link to={`/erps/${erp.erp_id}`} className="btn btn-secondary btn-sm">
-                        View Details
-                      </Link>
-                      {(() => {
-                        let host = (erp as any).base_url;
-                        if (!host) {
-                          const k = (erp.erp_key || "").toLowerCase();
-                          if (k === "inhyma") host = "http://localhost:5174/dashboard";
-                          else if (k === "yinglima") host = "http://localhost:5173/dashboard";
-                        }
-                        const targetUrl = host ? createSsoHandoverUrl(host) : "/erps/switcher";
-                        const isExt = targetUrl.startsWith("http");
-                        return isExt ? (
-                          <a
-                            href={targetUrl}
-                            className="btn btn-primary btn-sm"
-                            style={{ display: "flex", alignItems: "center", gap: "4px", textDecoration: "none" }}
+                        {/* Prominent Host URL Box */}
+                        {hostUrl && (
+                          <div
+                            style={{
+                              margin: "12px 0 10px",
+                              padding: "8px 12px",
+                              background: "#f8fafc",
+                              borderRadius: "8px",
+                              border: "1px solid #e2e8f0",
+                            }}
                           >
-                            Launch ERP
-                            <ICONS.externalLink width={13} height={13} />
-                          </a>
-                        ) : (
-                          <Link to={targetUrl} className="btn btn-primary btn-sm" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                            Launch ERP
-                            <ICONS.externalLink width={13} height={13} />
-                          </Link>
-                        );
-                      })()}
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  fontWeight: 700,
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.5px",
+                                  color: "#64748b",
+                                }}
+                              >
+                                Host URL
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleCopy(erp.erp_id, hostUrl);
+                                }}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: "2px 6px",
+                                  fontSize: "11px",
+                                  color: copiedId === erp.erp_id ? "#16a34a" : "#64748b",
+                                  cursor: "pointer",
+                                  borderRadius: "4px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                                title="Copy Host URL"
+                              >
+                                {copiedId === erp.erp_id ? (
+                                  <>
+                                    <ICONS.check width={12} height={12} />
+                                    <span>Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ICONS.copy width={12} height={12} />
+                                    <span>Copy</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <a
+                              href={hostUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                fontSize: "12px",
+                                fontFamily: "monospace",
+                                color: "#0061f2",
+                                textDecoration: "none",
+                                fontWeight: 600,
+                                wordBreak: "break-all",
+                              }}
+                            >
+                              <span>{hostUrl}</span>
+                              <ICONS.externalLink width={12} height={12} />
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Local Account & Super Admin Badges */}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px" }}>
+                          {membership && (
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                color: "#0284c7",
+                                background: "#e0f2fe",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                fontWeight: 500,
+                              }}
+                            >
+                              Local Account: {membership.local_user_id}
+                            </span>
+                          )}
+                          {isSuperAdmin && (
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                color: "#7c3aed",
+                                background: "#f3e8ff",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                fontWeight: 500,
+                              }}
+                            >
+                              Platform Admin Access
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="erp-launcher-card-meta">
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ color: "var(--color-muted)" }}>API Health:</span>
+                            <StatusBadge status={erp.api_health} />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ color: "var(--color-muted)" }}>Buyer Projections:</span>
+                            <span style={{ fontWeight: 600 }}>{erp.buyer_projection_count} records</span>
+                          </div>
+                          {erp.last_seen_at && (
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: "var(--color-muted)" }}>Heartbeat:</span>
+                              <span>{new Date(erp.last_seen_at).toLocaleTimeString()}</span>
+                            </div>
+                          )}
+                          {erp.enabled_capabilities && erp.enabled_capabilities.length > 0 && (
+                            <div style={{ marginTop: "6px" }}>
+                              <span style={{ fontSize: "11px", color: "var(--color-muted)", display: "block", marginBottom: "4px" }}>
+                                CAPABILITIES:
+                              </span>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                                {erp.enabled_capabilities.map((cap) => (
+                                  <span
+                                    key={cap}
+                                    style={{
+                                      fontSize: "10px",
+                                      padding: "2px 6px",
+                                      borderRadius: "4px",
+                                      background: "#f1f5f9",
+                                      fontFamily: "monospace",
+                                    }}
+                                  >
+                                    {cap}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {launchError[erp.erp_id] && (
+                          <div
+                            style={{
+                              marginTop: "10px",
+                              padding: "8px 12px",
+                              borderRadius: "6px",
+                              background: "#fee2e2",
+                              border: "1px solid #fca5a5",
+                              color: "#b91c1c",
+                              fontSize: "12px",
+                            }}
+                          >
+                            {launchError[erp.erp_id]}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="erp-launcher-card-footer" style={{ marginTop: "16px", display: "flex", gap: "8px" }}>
+                        <Link to={`/erps/${erp.erp_id}`} className="btn btn-secondary btn-sm" style={{ flex: 1, textAlign: "center" }}>
+                          View Details
+                        </Link>
+                        <button
+                          type="button"
+                          id={`btn-launch-${erp.erp_key}`}
+                          onClick={() => handleLaunchErp(erp.erp_key, erp.erp_id, erp.display_name)}
+                          disabled={isUnavailable || isLaunching || !hostUrl}
+                          className="btn btn-primary btn-sm"
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: "6px",
+                            cursor: isUnavailable || isLaunching || !hostUrl ? "not-allowed" : "pointer",
+                            opacity: isLaunching ? 0.75 : 1,
+                          }}
+                        >
+                          <span>{isLaunching ? "Signing you in…" : "Launch ERP"}</span>
+                          {!isLaunching && <ICONS.externalLink width={13} height={13} />}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="card" style={{ padding: "24px", textAlign: "center", color: "var(--color-muted)" }}>
                 No active ERP fleet instances registered yet.
-                <div style={{ marginTop: "12px" }}>
-                  <Link to="/erps/switcher" className="btn btn-primary btn-sm">
-                    Go to ERP Switcher
-                  </Link>
-                </div>
               </div>
             )}
           </div>
 
           {/* Two Columns: Projection Health & Recent Audit Activity */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "24px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))",
+              gap: "24px",
+              minWidth: 0,
+              width: "100%",
+            }}
+          >
             {/* Projection Sync Health */}
-            <div className="card" style={{ padding: "20px" }}>
+            <div className="card" style={{ padding: "20px", minWidth: 0, overflow: "hidden" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <div>
                   <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "var(--color-text)" }}>
@@ -320,7 +542,7 @@ export function Dashboard() {
               </div>
 
               {dashboard?.projection_health && dashboard.projection_health.length > 0 ? (
-                <div className="table-wrap">
+                <div className="table-wrap" style={{ width: "100%", maxWidth: "100%", overflowX: "auto" }}>
                   <table className="table">
                     <thead>
                       <tr>
@@ -385,7 +607,7 @@ export function Dashboard() {
             </div>
 
             {/* Recent Audit Actions Feed */}
-            <div className="card" style={{ padding: "20px" }}>
+            <div className="card" style={{ padding: "20px", minWidth: 0, overflow: "hidden" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <div>
                   <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "var(--color-text)" }}>
@@ -401,7 +623,7 @@ export function Dashboard() {
               </div>
 
               {recentAudit.length > 0 ? (
-                <div className="table-wrap">
+                <div className="table-wrap" style={{ width: "100%", maxWidth: "100%", overflowX: "auto" }}>
                   <table className="table">
                     <thead>
                       <tr>

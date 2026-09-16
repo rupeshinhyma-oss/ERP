@@ -23,6 +23,7 @@ from app.core.logging import get_logger
 from app.database.engine import dispose_engine, get_sessionmaker
 from app.masters.cities.models import City
 from app.masters.countries.models import Country
+from app.masters.districts.models import District  # noqa: F401
 from app.masters.states.models import State
 
 logger = get_logger(__name__)

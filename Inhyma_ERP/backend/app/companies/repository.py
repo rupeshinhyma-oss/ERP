@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ColumnElement, Select, and_, exists, or_, select
+from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -66,12 +66,15 @@ class CompanyRepository(BaseRepository[Company]):
         "country_id",
         "state_id",
         "city_id",
+        "district",
+        "sales_person_id",
         "company_type",
         "company_grade",
         "current_status",
         "potential",
         "is_active",
         "visited_factory_office",
+        "brand_description",
     )
 
     def __init__(self, session: AsyncSession) -> None:
@@ -344,6 +347,160 @@ class CompanyRepository(BaseRepository[Company]):
                 )
             )
         )
+
+    async def get_distinct_filter_options(self) -> dict[str, list]:
+        """
+        Return distinct values for filterable fields present in existing, non-deleted companies.
+        No generic master values are returned; only data present on actual company profiles.
+        """
+        # 1. Business types (Company.company_type)
+        stmt_bt = (
+            select(func.distinct(Company.company_type))
+            .where(
+                Company.deleted_at.is_(None),
+                Company.company_type.is_not(None),
+                func.trim(Company.company_type) != "",
+            )
+            .order_by(Company.company_type.asc())
+        )
+        business_types = [r[0] for r in (await self.session.execute(stmt_bt)).all() if r[0]]
+
+        # 2. Current status (Company.current_status)
+        stmt_cs = (
+            select(func.distinct(Company.current_status))
+            .where(
+                Company.deleted_at.is_(None),
+                Company.current_status.is_not(None),
+            )
+            .order_by(Company.current_status.asc())
+        )
+        current_statuses = [r[0] for r in (await self.session.execute(stmt_cs)).all() if r[0]]
+
+        # 3. States present on companies
+        stmt_st = (
+            select(func.distinct(State.id), State.name)
+            .join(Company, Company.state_id == State.id)
+            .where(
+                Company.deleted_at.is_(None),
+                State.deleted_at.is_(None),
+            )
+            .order_by(State.name.asc())
+        )
+        states = [{"id": str(r[0]), "name": r[1]} for r in (await self.session.execute(stmt_st)).all()]
+
+        # 4. Cities present on companies
+        stmt_ct = (
+            select(func.distinct(City.id), City.name, City.state_id)
+            .join(Company, Company.city_id == City.id)
+            .where(
+                Company.deleted_at.is_(None),
+                City.deleted_at.is_(None),
+            )
+            .order_by(City.name.asc())
+        )
+        cities = [
+            {"id": str(r[0]), "name": r[1], "state_id": str(r[2]) if r[2] else None}
+            for r in (await self.session.execute(stmt_ct)).all()
+        ]
+
+        # 5. Districts present on companies
+        stmt_dt = (
+            select(func.distinct(Company.district), Company.state_id)
+            .where(
+                Company.deleted_at.is_(None),
+                Company.district.is_not(None),
+                func.trim(Company.district) != "",
+            )
+            .order_by(Company.district.asc())
+        )
+        districts_raw = (await self.session.execute(stmt_dt)).all()
+        from app.masters.districts.models import District
+        d_stmt = select(District.name, District.state_id).where(District.deleted_at.is_(None))
+        d_map = {r[0].lower(): str(r[1]) for r in (await self.session.execute(d_stmt)).all() if r[0] and r[1]}
+
+        districts = []
+        seen_d = set()
+        for r in districts_raw:
+            d_name = r[0].strip()
+            if not d_name or d_name.lower() in seen_d:
+                continue
+            seen_d.add(d_name.lower())
+            st_id = str(r[1]) if r[1] else d_map.get(d_name.lower())
+            districts.append({"name": d_name, "state_id": st_id})
+
+        # 6. Categories linked to companies
+        stmt_cat = (
+            select(func.distinct(ProductCategory.id), ProductCategory.name)
+            .join(CompanyCategoryLink, CompanyCategoryLink.category_id == ProductCategory.id)
+            .join(Company, Company.id == CompanyCategoryLink.company_id)
+            .where(
+                Company.deleted_at.is_(None),
+                ProductCategory.deleted_at.is_(None),
+            )
+            .order_by(ProductCategory.name.asc())
+        )
+        categories = [{"id": str(r[0]), "name": r[1]} for r in (await self.session.execute(stmt_cat)).all()]
+
+        # 7. Client Grade
+        stmt_cg = (
+            select(func.distinct(Company.company_grade))
+            .where(
+                Company.deleted_at.is_(None),
+                Company.company_grade.is_not(None),
+            )
+            .order_by(Company.company_grade.asc())
+        )
+        client_grades = [r[0] for r in (await self.session.execute(stmt_cg)).all() if r[0]]
+
+        # 8. Potential
+        stmt_pot = (
+            select(func.distinct(Company.potential))
+            .where(
+                Company.deleted_at.is_(None),
+                Company.potential.is_not(None),
+            )
+            .order_by(Company.potential.asc())
+        )
+        potentials = [r[0] for r in (await self.session.execute(stmt_pot)).all() if r[0]]
+
+        # 9. Business Category (Company.brand_description)
+        stmt_bc = (
+            select(func.distinct(Company.brand_description))
+            .where(
+                Company.deleted_at.is_(None),
+                Company.brand_description.is_not(None),
+                func.trim(Company.brand_description) != "",
+            )
+            .order_by(Company.brand_description.asc())
+        )
+        business_categories = [r[0] for r in (await self.session.execute(stmt_bc)).all() if r[0]]
+
+        # 10. Sales Person
+        from app.users.models import User
+        stmt_sp = (
+            select(func.distinct(User.id), User.username, User.display_name, User.first_name, User.last_name)
+            .join(Company, Company.sales_person_id == User.id)
+            .where(Company.deleted_at.is_(None))
+            .order_by(User.username.asc())
+        )
+        sales_persons = []
+        for r in (await self.session.execute(stmt_sp)).all():
+            full = ((r[3] or "") + " " + (r[4] or "")).strip()
+            name = r[2] or full or r[1]
+            sales_persons.append({"id": str(r[0]), "name": name})
+
+        return {
+            "business_types": business_types,
+            "current_statuses": current_statuses,
+            "states": states,
+            "cities": cities,
+            "districts": districts,
+            "categories": categories,
+            "client_grades": client_grades,
+            "potentials": potentials,
+            "business_categories": business_categories,
+            "sales_persons": sales_persons,
+        }
 
 
 class CompanyContactRepository(BaseRepository[CompanyContact]):

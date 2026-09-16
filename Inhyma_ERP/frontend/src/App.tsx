@@ -20,6 +20,7 @@ import { setUnauthorizedHandler } from "@/lib/api";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
 
 import { LoginPage } from "@/pages/Login";
+import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { DashboardPage } from "@/pages/Dashboard";
 import { ForbiddenPage } from "@/pages/Forbidden";
 import { OrganizationPage } from "@/pages/Organization";
@@ -61,6 +62,9 @@ import { TechniciansPage } from "@/pages/masters/Technicians";
 import { BanksPage } from "@/pages/masters/Banks";
 import { TransportPage } from "@/pages/masters/Transport";
 import { PaymentTermsPage } from "@/pages/masters/PaymentTerms";
+import { LeadSourcesPage } from "@/pages/masters/LeadSources";
+import { AdjustmentPurposesPage } from "@/pages/masters/AdjustmentPurposes";
+import { CallTypesPage } from "@/pages/masters/CallTypes";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -115,6 +119,7 @@ export function App() {
       <ErrorBoundary key={location.pathname} title="This page ran into a problem.">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/quote/:token" element={<PublicSupplierQuotePage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -130,6 +135,9 @@ export function App() {
           <Route path="/employees" element={<UsersPage />} />
           <Route path="/positions" element={<PositionsPage />} />
           <Route path="/companies" element={<CompaniesPage />} />
+          <Route path="/companies/add" element={<CompaniesPage defaultAdd={true} />} />
+          <Route path="/user/addEdit" element={<CompaniesPage defaultAdd={true} />} />
+          <Route path="/user/addedit" element={<CompaniesPage defaultAdd={true} />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/buyers" element={<BuyersPage />} />
           <Route path="/inquiries" element={<InquiriesPage />} />
@@ -185,9 +193,27 @@ export function App() {
           <Route path="/masters/payment_terms" element={<Navigate to="/masters/payment-terms" replace />} />
           <Route path="/payment-terms/list" element={<Navigate to="/masters/payment-terms" replace />} />
           <Route path="/paymentterms/list" element={<Navigate to="/masters/payment-terms" replace />} />
-          <Route path="/masters/lead-sources" element={<ComingSoonPage activeKey="masters-lead-sources" title="Lead Sources" subtitle="Track acquisition channels and campaign sources" breadcrumbLabel="Lead Sources" featureName="Lead Sources" />} />
-          <Route path="/masters/adjustment-purpose" element={<ComingSoonPage activeKey="masters-adjustment-purpose" title="Adjustment Purpose" subtitle="Manage stock reconciliation reasons" breadcrumbLabel="Adjustment Purpose" featureName="Adjustment Purpose" />} />
-          <Route path="/masters/call-types" element={<ComingSoonPage activeKey="masters-call-types" title="Call Types" subtitle="Configure CRM telecalling interaction types" breadcrumbLabel="Call Types" featureName="Call Types" />} />
+          <Route path="/masters/lead-sources" element={<LeadSourcesPage />} />
+          <Route path="/masters/lead_sources" element={<Navigate to="/masters/lead-sources" replace />} />
+          <Route path="/lead-sources/list" element={<Navigate to="/masters/lead-sources" replace />} />
+          <Route path="/leadsources/list" element={<Navigate to="/masters/lead-sources" replace />} />
+          <Route path="/lead_sources/list" element={<Navigate to="/masters/lead-sources" replace />} />
+          <Route path="/masters/adjustment-purpose" element={<AdjustmentPurposesPage />} />
+          <Route path="/masters/adjustment-purposes" element={<Navigate to="/masters/adjustment-purpose" replace />} />
+          <Route path="/masters/adjustment_purpose" element={<Navigate to="/masters/adjustment-purpose" replace />} />
+          <Route path="/masters/adjustment_purposes" element={<Navigate to="/masters/adjustment-purpose" replace />} />
+          <Route path="/adjustment_purpose/list" element={<Navigate to="/masters/adjustment-purpose" replace />} />
+          <Route path="/adjustment-purpose/list" element={<Navigate to="/masters/adjustment-purpose" replace />} />
+          <Route path="/adjustmentpurpose/list" element={<Navigate to="/masters/adjustment-purpose" replace />} />
+          <Route path="/masters/call-types" element={<CallTypesPage />} />
+          <Route path="/masters/call_types" element={<Navigate to="/masters/call-types" replace />} />
+          <Route path="/masters/call-type" element={<Navigate to="/masters/call-types" replace />} />
+          <Route path="/masters/call_type" element={<Navigate to="/masters/call-types" replace />} />
+          <Route path="/call_type/list" element={<Navigate to="/masters/call-types" replace />} />
+          <Route path="/call-type/list" element={<Navigate to="/masters/call-types" replace />} />
+          <Route path="/calltype/list" element={<Navigate to="/masters/call-types" replace />} />
+          <Route path="/call_types/list" element={<Navigate to="/masters/call-types" replace />} />
+          <Route path="/call-types/list" element={<Navigate to="/masters/call-types" replace />} />
           <Route path="/call-logs/follow-up" element={<ComingSoonPage activeKey="call-logs-follow-up" title="Follow Up Logs" subtitle="View and track interaction logs and scheduled follow-ups" breadcrumbLabel="Follow Up Logs" featureName="Follow Up Logs" />} />
 
           {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (

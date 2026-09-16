@@ -39,6 +39,8 @@ from app.erp_memberships.schemas import (
     ErpMembershipRead,
     ErpMembershipStatusUpdate,
     InternalMembershipLookupResponse,
+    InternalUserRegistrationRequest,
+    InternalUserRegistrationResponse,
 )
 from app.erp_memberships.service import ErpMembershipService
 from app.platform_authz.dependencies import (
@@ -257,3 +259,50 @@ async def internal_lookup_membership(
         status=membership.status,
     )
     return build_success_response(response.model_dump(mode="json"), request_id=_request_id(request))
+
+
+@internal_router.post(
+    "/register-user",
+    status_code=status.HTTP_201_CREATED,
+    summary="Auto-register a newly created local user as a GlobalUser + ACTIVE membership (service-credential authenticated)",
+)
+async def internal_register_user(
+    request: Request,
+    payload: InternalUserRegistrationRequest,
+    credential: ErpServiceCredential = Depends(require_erp_service),
+    service: ErpMembershipService = Depends(get_erp_membership_service),
+) -> dict:
+    """
+    Register a brand-new local user with the global identity layer, called
+    by the OWNING ERP's own backend right after it creates that user.
+
+    Exactly like `internal_lookup_membership` above, the calling ERP's
+    identity comes ENTIRELY from its verified service credential
+    (`credential.erp_instance_id`) -- never from a body field -- so this
+    endpoint can only ever register a user against the ERP that is
+    actually, verifiably calling it. See `ErpMembershipService.register_from_erp`
+    for the full find-or-create + idempotency + conflict rules.
+
+    This is an ADDITIVE convenience on top of the existing human-admin
+    linking flow (`POST /global/users/{user_id}/memberships/{erp_id}`,
+    still fully functional and still the fallback if this call is ever
+    missed) -- it does not replace or require it.
+    """
+    global_user, membership, global_user_created = await service.register_from_erp(
+        erp_instance_id=credential.erp_instance_id,
+        email=payload.email,
+        display_name=payload.display_name,
+        local_user_id=payload.local_user_id,
+    )
+    response = InternalUserRegistrationResponse(
+        global_user_id=global_user.id,
+        erp_instance_id=credential.erp_instance_id,
+        local_user_id=membership.local_user_id,
+        membership_status=membership.status,
+        global_user_created=global_user_created,
+    )
+    return build_success_response(
+        response.model_dump(mode="json"),
+        request_id=_request_id(request),
+        message="User registered with the global identity layer.",
+    )

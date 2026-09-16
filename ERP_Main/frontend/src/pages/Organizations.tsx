@@ -83,7 +83,7 @@ export function Organizations() {
 
   return (
     <AppShell
-      activeKey={activeTab === "organizations" ? "organizations" : activeTab}
+      activeKey="organizations"
       pageTitle={pageTitle}
       breadcrumbs={["Organizations", pageTitle]}
     >

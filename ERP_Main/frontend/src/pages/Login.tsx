@@ -5,10 +5,16 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { apiGet } from "@/lib/api";
 import { Auth } from "@/lib/auth";
+import { authorizeErpLaunch } from "@/lib/federation";
 import { useGlobalSession } from "@/lib/session";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ErrorBanner } from "@/components/ui";
+import type { ErpInstance } from "@/types";
+
+/** Minimal shape actually needed from GET /global/erps for the single-membership redirect below. */
+type ErpInstanceLite = Pick<ErpInstance, "id" | "erp_key" | "name" | "base_url">;
 
 const BRAND_NAME = "INHYMA SOLUTIONS LLP";
 
@@ -89,7 +95,44 @@ export function Login() {
     setSubmitting(true);
 
     try {
-      await login(identifier.trim(), password);
+      const result = await login(identifier.trim(), password);
+
+      // If the person (or a link/bookmark) explicitly asked to land
+      // somewhere specific (?redirect=...), that always wins -- don't
+      // second-guess a destination they deliberately asked for.
+      const hasExplicitRedirect = queryParams.has("redirect");
+
+      if (
+        !hasExplicitRedirect &&
+        result.userType === "global_user" &&
+        result.activeMemberships.length === 1
+      ) {
+        // Exactly one ERP this person can access: skip the dashboard and
+        // take them straight there via the real, signed launch flow --
+        // never a bare link, so the target ERP recognizes them
+        // immediately (see ErpLauncher.tsx for the same mechanism and
+        // its full reasoning). If anything about this fails or is slow,
+        // catch it locally and fall back to /dashboard rather than
+        // leaving the person stuck on a spinner or a dead end -- they
+        // can always launch manually from there.
+        try {
+          const erpsRes = await apiGet<ErpInstanceLite[]>("/global/erps");
+          const erpsList = ((erpsRes as { data?: ErpInstanceLite[] })?.data || erpsRes) as ErpInstanceLite[];
+          const targetErp = Array.isArray(erpsList)
+            ? erpsList.find((e) => e.id === result.activeMemberships[0].erp_instance_id)
+            : undefined;
+
+          if (targetErp?.base_url) {
+            const { launchUrl } = await authorizeErpLaunch(targetErp as ErpInstance);
+            window.location.assign(launchUrl);
+            return; // leave `submitting` true -- the browser is navigating away
+          }
+        } catch {
+          // Fall through to the normal /dashboard redirect below --
+          // single-ERP fast-path is a convenience, never a requirement.
+        }
+      }
+
       navigate(redirectUrl, { replace: true });
     } catch (err: unknown) {
       setError(err);

@@ -34,6 +34,7 @@ from app.erp_registry.models import ErpStatus
 from app.erp_registry.repository import ErpInstanceRepository
 from app.global_audit.models import AuditActorType, AuditEventType
 from app.global_audit.service import GlobalAuditService
+from app.global_users.models import GlobalUser
 from app.global_users.repository import GlobalUserRepository
 from app.platform_auth.models import PlatformAdmin
 
@@ -154,6 +155,119 @@ class ErpMembershipService:
         if membership is None:
             raise NotFoundException("No membership found for this Global User with the calling ERP.")
         return membership
+
+    async def register_from_erp(
+        self,
+        *,
+        erp_instance_id: uuid.UUID,
+        email: str,
+        display_name: str,
+        local_user_id: str,
+    ) -> tuple[GlobalUser, ErpMembership, bool]:
+        """
+        Auto-register a brand-new local user, called by the OWNING ERP's own
+        backend right after it creates that user -- never by a browser.
+
+        This is the machine-to-machine counterpart to the human-admin
+        `create()` above, for the same reason `internal_lookup_membership`
+        exists alongside the human-gated lookup routes: a platform admin
+        manually linking accounts (via `Memberships.tsx`) remains fully
+        supported and is the deliberate fallback if this call is ever
+        missed (e.g. ERP_Main was unreachable at the moment the local user
+        was created) -- this method does not replace that path, it just
+        means most users never need it.
+
+        Deliberately more trusting than the human `create()` flow: the
+        membership starts ACTIVE, not PENDING. `create()` starts PENDING
+        because a human admin could mistype a `local_user_id` for an
+        account they can't directly verify; here, the claim IS the
+        verification -- it can only ever arrive already authenticated as
+        the ERP that just created the row, via its own service credential
+        (`erp_instance_id` comes from `credential.erp_instance_id` at the
+        route layer, never from this method's caller supplying it freely).
+
+        Idempotent by design (safe to call more than once for the same
+        person, e.g. on a caller-side retry after a network hiccup):
+        - If a GlobalUser with this email already exists (e.g. the same
+          person already has a membership in a different ERP), reuse it
+          rather than rejecting with a conflict.
+        - If a membership for this exact (global_user, erp) pair already
+          exists, return it unchanged rather than erroring.
+        - Only a genuine conflict -- this ERP's `local_user_id` already
+          bound to a DIFFERENT GlobalUser -- is rejected, since silently
+          repointing that link would be a real correctness bug, not a
+          harmless repeat.
+        """
+        erp_instance = await self.erp_instance_repository.get_by_id(erp_instance_id)
+        if erp_instance is None:
+            raise NotFoundException(f"No ERP instance found with id {erp_instance_id}.")
+
+        existing_for_local_user = await self.membership_repository.get_by_erp_and_local_user(
+            erp_instance_id, local_user_id
+        )
+        if existing_for_local_user is not None and existing_for_local_user.global_user_id:
+            global_user = await self.global_user_repository.get_by_id(existing_for_local_user.global_user_id)
+            if global_user is not None:
+                # Already registered (a retry, or this endpoint was called
+                # twice for the same user) -- return the existing state
+                # rather than erroring, so callers can treat this endpoint
+                # as safe to call more than once.
+                return global_user, existing_for_local_user, False
+
+        global_user = await self.global_user_repository.get_by_email(email)
+        created_global_user = False
+        if global_user is None:
+            global_user = GlobalUser(display_name=display_name, primary_email=email)
+            global_user = await self.global_user_repository.create(global_user)
+            created_global_user = True
+            await self.audit.record(
+                event_type=AuditEventType.GLOBAL_USER_CREATED,
+                actor_type=AuditActorType.ERP_SERVICE,
+                actor_label=erp_instance.key,
+                target_type="global_user",
+                target_id=global_user.id,
+                details={"primary_email": email, "auto_registered_from_erp": erp_instance.key},
+            )
+
+        existing_for_pair = await self.membership_repository.get_by_user_and_erp(global_user.id, erp_instance_id)
+        if existing_for_pair is not None:
+            return global_user, existing_for_pair, created_global_user
+
+        if existing_for_local_user is not None:
+            # This local_user_id is already bound to a DIFFERENT
+            # GlobalUser than the one we resolved by email -- a genuine
+            # data conflict (e.g. the local account's email was changed
+            # after its first registration), not a harmless repeat. Fail
+            # closed rather than silently repointing an existing link.
+            raise ConflictException(
+                f"Local user {local_user_id!r} in ERP {erp_instance.key!r} is already linked to a "
+                "different Global User. A platform admin must resolve this manually."
+            )
+
+        now = datetime.now(timezone.utc)
+        membership = ErpMembership(
+            global_user_id=global_user.id,
+            erp_instance_id=erp_instance_id,
+            local_user_id=local_user_id,
+            status=ErpMembershipStatus.ACTIVE,
+            linked_at=now,
+            verified_at=now,
+        )
+        created_membership = await self.membership_repository.create(membership)
+        await self.audit.record(
+            event_type=AuditEventType.MEMBERSHIP_CREATED,
+            actor_type=AuditActorType.ERP_SERVICE,
+            actor_label=erp_instance.key,
+            target_type="erp_membership",
+            target_id=created_membership.id,
+            details={
+                "global_user_id": str(global_user.id),
+                "erp_key": erp_instance.key,
+                "local_user_id": local_user_id,
+                "auto_registered": True,
+            },
+        )
+        return global_user, created_membership, created_global_user
 
     async def verify(self, membership_id: uuid.UUID, *, actor: PlatformAdmin) -> ErpMembership:
         """

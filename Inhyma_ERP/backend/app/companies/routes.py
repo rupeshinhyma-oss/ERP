@@ -284,6 +284,17 @@ async def upload_company_media(
     return {"success": True, "data": {"url": media_url}}
 
 
+@router.get("/filter-options", summary="Get filter options derived strictly from companies profiles")
+async def get_company_filter_options(
+    request: Request,
+    service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_any_permission("company.view", "supplier.view")),
+) -> dict:
+    """Return distinct filter choices present on existing companies."""
+    data = await service.get_filter_options()
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
 @router.get("/sales-persons", summary="List users for sales person selection")
 async def list_sales_persons(
     request: Request,
@@ -294,13 +305,17 @@ async def list_sales_persons(
     from app.users.models import User
     from sqlalchemy import select
     stmt = (
-        select(User.id, User.username, User.full_name)
+        select(User.id, User.username, User.display_name, User.first_name, User.last_name)
         .where(User.is_active == True, User.is_deleted == False)
-        .order_by(User.full_name.asc(), User.username.asc())
+        .order_by(User.username.asc())
     )
     result = await db.execute(stmt)
     users = [
-        {"id": str(r.id), "username": r.username, "full_name": r.full_name or r.username}
+        {
+            "id": str(r.id),
+            "username": r.username,
+            "full_name": r.display_name or f"{r.first_name or ''} {r.last_name or ''}".strip() or r.username,
+        }
         for r in result.all()
     ]
     return build_success_response(data=users, request_id=request.state.request_id)

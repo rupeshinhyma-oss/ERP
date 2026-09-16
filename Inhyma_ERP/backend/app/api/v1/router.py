@@ -47,6 +47,9 @@ from app.masters.technicians.routes import router as technicians_router
 from app.masters.banks.routes import router as banks_router
 from app.masters.transports.routes import router as transports_router
 from app.masters.payment_terms.routes import router as payment_terms_router
+from app.masters.lead_sources.routes import router as lead_sources_router
+from app.masters.adjustment_purposes.routes import router as adjustment_purposes_router
+from app.masters.call_types.routes import router as call_types_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.dependencies import get_organization_service
 from app.organizations.routes import router as organizations_router
@@ -127,6 +130,17 @@ api_router.include_router(transports_router, prefix="/masters/transport")
 api_router.include_router(payment_terms_router, prefix="/masters/payment-terms")
 api_router.include_router(payment_terms_router, prefix="/masters/payment_terms")
 api_router.include_router(payment_terms_router, prefix="/masters/payment-term")
+api_router.include_router(lead_sources_router, prefix="/masters/lead-sources")
+api_router.include_router(lead_sources_router, prefix="/masters/lead_sources")
+api_router.include_router(lead_sources_router, prefix="/masters/lead-source")
+api_router.include_router(adjustment_purposes_router, prefix="/masters/adjustment-purposes")
+api_router.include_router(adjustment_purposes_router, prefix="/masters/adjustment_purposes")
+api_router.include_router(adjustment_purposes_router, prefix="/masters/adjustment-purpose")
+api_router.include_router(adjustment_purposes_router, prefix="/masters/adjustment_purpose")
+api_router.include_router(call_types_router, prefix="/masters/call-types")
+api_router.include_router(call_types_router, prefix="/masters/call_types")
+api_router.include_router(call_types_router, prefix="/masters/call-type")
+api_router.include_router(call_types_router, prefix="/masters/call_type")
 
 # Companies Management.
 api_router.include_router(companies_router)

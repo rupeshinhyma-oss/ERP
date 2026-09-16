@@ -18,6 +18,7 @@ import type {
   ErpMembership,
   GlobalLoginResponse,
   GlobalUserProfile,
+  LoginResult,
   PlatformAdmin,
   PrincipalType,
   SessionState,
@@ -25,7 +26,7 @@ import type {
 } from "@/types";
 
 interface GlobalSessionContextType extends SessionState {
-  login: (identifier: string, password: string) => Promise<void>;
+  login: (identifier: string, password: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
   dismissExpiredModal: () => void;
@@ -41,14 +42,16 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
   const [loading, setLoading] = useState<boolean>(true);
   const [sessionExpired, setSessionExpired] = useState<boolean>(false);
 
-  const fetchMemberships = useCallback(async (userId: string) => {
+  const fetchMemberships = useCallback(async (userId: string): Promise<ErpMembership[]> => {
     try {
       const res = await apiGet<ErpMembership[]>(`/global/users/${userId}/memberships`);
       const list = Array.isArray(res) ? res : Array.isArray((res as { data?: unknown })?.data) ? (res as { data: ErpMembership[] }).data : [];
       setMemberships(list);
+      return list;
     } catch {
       // Non-blocking: memberships may be restricted or user may be admin
       setMemberships([]);
+      return [];
     }
   }, []);
 
@@ -147,11 +150,13 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
           setSessionExpired(false);
 
           if (profile?.id) {
-            await fetchMemberships(profile.id);
+            const activeMemberships = (await fetchMemberships(profile.id)).filter((m) => m.status === "ACTIVE");
+            globalUserLoginSuccess = true;
+            return { userType: "global_user" as const, activeMemberships };
           }
 
           globalUserLoginSuccess = true;
-          return;
+          return { userType: "global_user" as const, activeMemberships: [] };
         }
       } catch (err: unknown) {
         // If it's a 401 or 403 or 404, we check whether this is a Platform Administrator
@@ -188,13 +193,25 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
             setCurrentUser(adminProfile);
             setUserType("platform_admin");
             setSessionExpired(false);
-            return;
+            // Platform Admins always land on /dashboard, never redirected
+            // into a single ERP -- they can see/launch every registered
+            // ERP from there, so there is no single "the one ERP they
+            // need" to skip ahead to.
+            return { userType: "platform_admin" as const, activeMemberships: [] };
           }
         } catch (adminErr: unknown) {
           // If platform admin login also fails, throw unified invalid credentials error
           throw adminErr;
         }
       }
+
+      // Neither path returned -- both requests came back without a
+      // usable token but neither threw either (an unexpected but
+      // possible shape from a nonstandard backend response). Surface
+      // this as a real error rather than silently resolving, since the
+      // caller needs to be able to tell "login failed" from "login
+      // succeeded as X".
+      throw new Error("Login failed: no valid session was established.");
     },
     [fetchMemberships]
   );

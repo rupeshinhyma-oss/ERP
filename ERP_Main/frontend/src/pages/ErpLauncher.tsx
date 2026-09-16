@@ -12,7 +12,7 @@ import { useGlobalSession } from "@/lib/session";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge, Banner, EmptyState, SkeletonFleetGrid } from "@/components/ui";
 import { ICONS } from "@/components/icons";
-import { createSsoHandoverUrl } from "@/lib/ssoBridge";
+import { authorizeErpLaunch } from "@/lib/federation";
 import type { ErpInstance, ErpMembership } from "@/types";
 
 /**
@@ -45,6 +45,8 @@ export function ErpLauncher() {
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -125,23 +127,56 @@ export function ErpLauncher() {
     }
   };
 
+  /**
+   * Launch a target ERP via the real OIDC-style federation flow
+   * (POST /federation/authorize -> single-use authorization code ->
+   * browser redirect to the target's /auth/callback, which exchanges
+   * the code for a signed id_token server-to-server and issues a
+   * local session there).
+   *
+   * This runs identically for EVERY authorized user shown on this
+   * page -- Platform Super Admin or regular Global User -- since
+   * `authorizedErps` above already filters to only ERPs the current
+   * user has an ACTIVE membership for (or, for super admins, any
+   * non-decommissioned ERP). There is no separate, weaker "just open
+   * the host URL" path for anyone: a user who isn't authorized for an
+   * ERP simply never sees a launch button for it, and a user who IS
+   * authorized always gets a real, signed handover -- never a bare
+   * link that leaves the target app unable to recognize them.
+   */
+  const handleLaunch = async (erp: ErpInstance) => {
+    if (!erp.base_url) return;
+    setLaunchError((prev) => {
+      const next = { ...prev };
+      delete next[erp.id];
+      return next;
+    });
+    setLaunchingId(erp.id);
+    try {
+      const { launchUrl } = await authorizeErpLaunch(erp);
+      window.location.assign(launchUrl);
+      // Deliberately no `finally { setLaunchingId(null) }` on the
+      // success path -- the browser is navigating away momentarily,
+      // and clearing the spinner just before that navigation completes
+      // would only flash the button back to normal for an instant.
+    } catch (err) {
+      setLaunchingId(null);
+      const message =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message?: unknown }).message)
+          : "Could not launch this ERP. Please try again.";
+      setLaunchError((prev) => ({ ...prev, [erp.id]: message }));
+    }
+  };
+
   return (
     <AppShell
       activeKey="erp-switcher"
       pageTitle="ERP Switcher"
+      subtitle="Seamlessly switch between connected ERP applications in the fleet. Each ERP operates with autonomous workspaces and its own dedicated host address."
       breadcrumbs={["ERP Management", "ERP Switcher"]}
     >
       <Banner error={error} />
-
-      <div style={{ marginBottom: "24px" }}>
-        <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: "0 0 6px" }}>
-          ERP Switcher
-        </h2>
-        <p style={{ margin: 0, fontSize: "14px", color: "var(--color-muted, #64748b)", maxWidth: "680px" }}>
-          Seamlessly switch between connected ERP applications in the fleet. Each ERP operates with autonomous
-          workspaces and its own dedicated host address.
-        </p>
-      </div>
 
       {loading ? (
         <SkeletonFleetGrid count={2} />
@@ -365,55 +400,63 @@ export function ErpLauncher() {
                     paddingTop: "14px",
                     borderTop: "1px solid #f1f5f9",
                     display: "flex",
+                    flexDirection: "column",
                     gap: "10px",
-                    alignItems: "center",
                   }}
                 >
-                  <a
-                    id={`btn-launch-${erp.erp_key || (erp as any).key}`}
-                    href={hostUrl ? (isSuperAdmin ? createSsoHandoverUrl(hostUrl) : hostUrl) : "#"}
-                    className="btn btn-primary"
-                    style={{
-                      flex: 1,
-                      padding: "10px 16px",
-                      backgroundColor: isUnavailable ? "#94a3b8" : "#0061f2",
-                      color: "#ffffff",
-                      fontSize: "14px",
-                      fontWeight: 600,
-                      borderRadius: "6px",
-                      border: "none",
-                      textDecoration: "none",
-                      cursor: isUnavailable ? "not-allowed" : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "8px",
-                      pointerEvents: isUnavailable ? "none" : "auto",
-                      transition: "background 0.2s ease",
-                    }}
-                  >
-                    <span>Open {erp.name}</span>
-                    <ICONS.externalLink width={15} height={15} />
-                  </a>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      id={`btn-launch-${erp.erp_key || (erp as any).key}`}
+                      onClick={() => handleLaunch(erp)}
+                      disabled={isUnavailable || !hostUrl || launchingId === erp.id}
+                      className="btn btn-primary"
+                      style={{
+                        flex: 1,
+                        padding: "10px 16px",
+                        backgroundColor: isUnavailable || !hostUrl ? "#94a3b8" : "#0061f2",
+                        color: "#ffffff",
+                        fontSize: "14px",
+                        fontWeight: 600,
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: isUnavailable || !hostUrl || launchingId === erp.id ? "not-allowed" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "8px",
+                        opacity: launchingId === erp.id ? 0.75 : 1,
+                        transition: "background 0.2s ease",
+                      }}
+                    >
+                      <span>{launchingId === erp.id ? "Signing you in…" : `Open ${erp.name}`}</span>
+                      {launchingId !== erp.id && <ICONS.externalLink width={15} height={15} />}
+                    </button>
 
-                  <Link
-                    to={`/erps/${erp.id}`}
-                    className="btn btn-secondary"
-                    style={{
-                      padding: "10px 14px",
-                      fontSize: "13px",
-                      fontWeight: 500,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      textDecoration: "none",
-                      borderRadius: "6px",
-                    }}
-                    title="View ERP Details and Config"
-                  >
-                    <ICONS.settings width={14} height={14} />
-                    <span>Details</span>
-                  </Link>
+                    <Link
+                      to={`/erps/${erp.id}`}
+                      className="btn btn-secondary"
+                      style={{
+                        padding: "10px 14px",
+                        fontSize: "13px",
+                        fontWeight: 500,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        textDecoration: "none",
+                        borderRadius: "6px",
+                      }}
+                      title="View ERP Details and Config"
+                    >
+                      <ICONS.settings width={14} height={14} />
+                      <span>Details</span>
+                    </Link>
+                  </div>
+                  {launchError[erp.id] && (
+                    <div style={{ fontSize: "12px", color: "#dc2626", lineHeight: 1.4 }}>
+                      {launchError[erp.id]}
+                    </div>
+                  )}
                 </div>
               </div>
             );

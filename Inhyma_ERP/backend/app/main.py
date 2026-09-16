@@ -92,6 +92,109 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
 
+    # Reliability fallback: guarantee the bootstrap admin account exists
+    # every time this backend starts, with zero manual steps. Previously
+    # `scripts/seed.py` had to be run by hand against this app's own
+    # database (each of the three ERPs has its own, separate database --
+    # see app.core.config's Supabase settings), and nothing here ever
+    # reminded anyone to do it. A database that was freshly created,
+    # migrated, or reset without a manual reseed had no admin account at
+    # all, so every login attempt failed with a plain "Invalid
+    # username/email/phone number or password." -- indistinguishable
+    # from a real typo, which is exactly what made this confusing to
+    # diagnose from the login screen alone.
+    #
+    # Calls `seed_with_session()`, NOT `scripts.seed.seed()` -- the latter
+    # disposes the shared database engine when it finishes (correct for a
+    # one-shot CLI script, wrong here: this app's own engine must stay
+    # alive for the rest of startup and for serving requests). Gated on
+    # an existence check first purely as an optimization (skips redoing
+    # ~250 permission/role lookups on every single restart); it is not a
+    # safety requirement, since `seed_with_session()` is itself fully
+    # idempotent and -- as of this fix -- never touches an existing
+    # admin's password/status either way.
+    try:
+        from app.users.repository import UserRepository
+        from app.users.models import UserStatus
+        from app.database.engine import get_sessionmaker
+
+        async with get_sessionmaker()() as _bootstrap_session:
+            _admin_repo = UserRepository(_bootstrap_session)
+            _existing_admin = await _admin_repo.get_by_username(
+                settings.BOOTSTRAP_ADMIN_USERNAME
+            ) or await _admin_repo.get_by_email(settings.BOOTSTRAP_ADMIN_EMAIL)
+
+            if _existing_admin is None:
+                logger.warning(
+                    "No bootstrap admin account found -- running the one-time seed automatically "
+                    "so login is not blocked. This never runs again once the account exists.",
+                )
+                from scripts.seed import seed_with_session as _run_bootstrap_seed
+
+                await _run_bootstrap_seed(_bootstrap_session)
+                await _bootstrap_session.commit()
+            else:
+                # An admin ROW existing is not the same thing as an admin
+                # able to log in -- this repository lookup, unlike the
+                # real login path's `get_by_identifier`, doesn't filter
+                # out soft-deleted rows, so a row could pass this check
+                # and still be rejected at actual login time. Log exactly
+                # which condition would block login (if any), and repair
+                # the ones that are genuinely account-state bugs rather
+                # than intentional -- a soft-deleted, disabled, or
+                # temporarily-locked bootstrap admin is never a
+                # deliberate, permanent choice the way a changed password
+                # is, so these are safe to self-heal automatically.
+                # password_hash/must_change_password/email are still
+                # NEVER touched here, for the same reason as always: they
+                # may have been deliberately changed by an operator.
+                _blocking_reasons = []
+                if _existing_admin.deleted_at is not None:
+                    _blocking_reasons.append("soft-deleted")
+                    _existing_admin.deleted_at = None
+                if not _existing_admin.has_login:
+                    _blocking_reasons.append("has_login=False")
+                    _existing_admin.has_login = True
+                if _existing_admin.is_locked:
+                    _blocking_reasons.append(f"locked_until={_existing_admin.locked_until}")
+                    _existing_admin.locked_until = None
+                    _existing_admin.failed_login_count = 0
+                if _existing_admin.status == UserStatus.LOCKED:
+                    _blocking_reasons.append("status=LOCKED")
+                    _existing_admin.status = UserStatus.ACTIVE
+                if not _existing_admin.is_active:
+                    _blocking_reasons.append("is_active=False")
+                    _existing_admin.is_active = True
+                if _existing_admin.password_hash is None:
+                    # This one genuinely can't be auto-repaired without
+                    # touching credentials -- flagged loudly instead.
+                    logger.warning(
+                        "Bootstrap admin account has NO password set at all (password_hash is NULL) -- "
+                        "login will always fail until a platform admin sets one directly in the database "
+                        "or via an admin-reset flow. Not auto-repaired: setting a password here would be "
+                        "indistinguishable from silently resetting one an operator intentionally cleared.",
+                        extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME},
+                    )
+
+                if _blocking_reasons:
+                    await _bootstrap_session.commit()
+                    logger.warning(
+                        "Bootstrap admin account existed but was blocked from logging in "
+                        "(%s) -- repaired automatically. If login still fails after this, "
+                        "the password itself does not match BOOTSTRAP_ADMIN_PASSWORD in .env "
+                        "(this is intentionally never auto-corrected).",
+                        ", ".join(_blocking_reasons),
+                        extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME},
+                    )
+    except Exception:
+        # Fail-open on purpose: if this check itself can't run for any
+        # reason (e.g. a migration hasn't created the users table yet on
+        # a brand-new database), that is a separate, louder problem that
+        # will surface clearly on the very next request anyway -- this
+        # safety net must never be the thing that prevents the server
+        # from starting.
+        logger.warning("Bootstrap admin existence check failed; continuing startup regardless.", exc_info=True)
+
     # Start the background queue worker (Phase 4).
     worker = get_worker()
     await worker.start()

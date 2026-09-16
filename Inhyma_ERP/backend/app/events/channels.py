@@ -123,6 +123,16 @@ MODULE_CHANNEL_PERMISSIONS: dict[str, str] = {
     module_channel("transport"): "transport.view",
     module_channel("payment_terms"): "payment_term.view",
     module_channel("payment-terms"): "payment_term.view",
+    module_channel("lead_sources"): "lead_source.view",
+    module_channel("lead-sources"): "lead_source.view",
+    module_channel("adjustment_purposes"): "adjustment_purpose.view",
+    module_channel("adjustment-purposes"): "adjustment_purpose.view",
+    module_channel("adjustment_purpose"): "adjustment_purpose.view",
+    module_channel("adjustment-purpose"): "adjustment_purpose.view",
+    module_channel("call_types"): "call_type.view",
+    module_channel("call-types"): "call_type.view",
+    module_channel("call_type"): "call_type.view",
+    module_channel("call-type"): "call_type.view",
     # --- Task management ---
     module_channel("tasks"):         "task.view",
 }

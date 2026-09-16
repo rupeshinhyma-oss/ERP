@@ -43,6 +43,7 @@ import app.audit.models  # noqa: F401,E402
 import app.organizations.models  # noqa: F401,E402 - Phase 6
 import app.masters.countries.models  # noqa: F401,E402 - Phase 7
 import app.masters.states.models  # noqa: F401,E402 - Phase 7
+import app.masters.districts.models  # noqa: F401,E402
 import app.masters.cities.models  # noqa: F401,E402 - Phase 7
 import app.masters.company_list.models  # noqa: F401,E402
 import app.masters.currencies.models  # noqa: F401,E402 - Phase 7
@@ -59,6 +60,9 @@ import app.masters.technicians.models  # noqa: F401,E402
 import app.masters.banks.models  # noqa: F401,E402
 import app.masters.transports.models  # noqa: F401,E402
 import app.masters.payment_terms.models  # noqa: F401,E402
+import app.masters.lead_sources.models  # noqa: F401,E402
+import app.masters.adjustment_purposes.models  # noqa: F401,E402
+import app.masters.call_types.models  # noqa: F401,E402
 import app.masters.brands.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_sub_categories.models  # noqa: F401,E402 - Phase 7

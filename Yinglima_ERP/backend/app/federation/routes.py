@@ -34,7 +34,8 @@ from app.core.exceptions import ForbiddenException, UnauthorizedException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.federation.erp_main_client import MembershipLookupError, lookup_membership
-from app.federation.schemas import FederationSsoLoginRequest
+from app.federation.schemas import FederationExchangeRequest, FederationSsoLoginRequest
+from app.federation.token_exchange_client import TokenExchangeError, exchange_code_for_id_token
 from app.federation.token_verification import InvalidFederationTokenError, verify_federation_id_token
 from app.rbac.dependencies import get_rbac_service
 from app.rbac.service import RBACService
@@ -43,17 +44,21 @@ from app.users.repository import UserRepository
 router = APIRouter(prefix="/federation", tags=["Federation SSO"])
 
 
-@router.post("/sso-login", summary="Establish a local session from an ERP_Main federation ID token")
-async def sso_login(
-    payload: FederationSsoLoginRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db_session),
-    auth_service: AuthService = Depends(get_auth_service),
-    rbac_service: RBACService = Depends(get_rbac_service),
-    context: LoginContext = Depends(get_login_context),
+async def _establish_local_session_from_id_token(
+    id_token: str,
+    *,
+    db: AsyncSession,
+    auth_service: AuthService,
+    rbac_service: RBACService,
+    context: LoginContext,
 ) -> dict:
     """
-    Exchange a verified ERP_Main federation ID token for a local Yinglima session.
+    Verify a federation ID token and establish a local Yinglima session for it.
+
+    This is the shared core of both federation entry points:
+    - `/federation/sso-login`, presented an id_token the caller already holds.
+    - `/federation/exchange`, which obtains the id_token itself (server-to-server,
+      via `token_exchange_client`) before calling this same logic.
 
     Fail-closed at every step (Phase 4 Step 53): a bad token, an
     unreachable/negative membership lookup, a non-ACTIVE membership, or a
@@ -64,7 +69,7 @@ async def sso_login(
         raise ForbiddenException("SSO login is currently disabled for this ERP.")
 
     try:
-        claims = await verify_federation_id_token(payload.id_token)
+        claims = await verify_federation_id_token(id_token)
     except InvalidFederationTokenError as exc:
         raise UnauthorizedException("Invalid or expired federation token.") from exc
 
@@ -115,5 +120,77 @@ async def sso_login(
         permissions=sorted(permissions),
     )
 
-    data = _token_response(access_token, refresh_token, user=profile).model_dump(mode="json")
+    return _token_response(access_token, refresh_token, user=profile).model_dump(mode="json")
+
+
+@router.post("/sso-login", summary="Establish a local session from an ERP_Main federation ID token")
+async def sso_login(
+    payload: FederationSsoLoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    auth_service: AuthService = Depends(get_auth_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
+    context: LoginContext = Depends(get_login_context),
+) -> dict:
+    """
+    Exchange a verified ERP_Main federation ID token for a local Yinglima session.
+
+    Expects the caller to already hold a valid `id_token` (e.g. a
+    trusted server-to-server integration). Browser-based ERP switching
+    should use `/federation/exchange` instead, which never requires the
+    browser to see a raw id_token or this ERP's client_secret.
+    """
+    data = await _establish_local_session_from_id_token(
+        payload.id_token, db=db, auth_service=auth_service, rbac_service=rbac_service, context=context
+    )
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post(
+    "/exchange",
+    summary="Browser-facing: exchange an ERP_Main authorization code for a local Yinglima session",
+)
+async def exchange(
+    payload: FederationExchangeRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    auth_service: AuthService = Depends(get_auth_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
+    context: LoginContext = Depends(get_login_context),
+) -> dict:
+    """
+    Complete an ERP-switch login started by ERP_Main's `/federation/authorize`.
+
+    This is the ONE route the browser calls after being redirected here
+    with `?code=...&state=...` (the `/auth/callback` page). It never
+    touches this ERP's `client_secret` -- the browser only ever holds
+    the short-lived, single-use `code`. This backend does the
+    server-to-server exchange itself (`token_exchange_client`, using
+    `FEDERATION_CLIENT_ID`/`FEDERATION_CLIENT_SECRET`) and then runs the
+    exact same verification + session issuance as `/federation/sso-login`.
+
+    Works identically for every authorized user, including Platform
+    Super Admins -- there is no separate, weaker path for either.
+    """
+    if not settings.YINGLIMA_SSO_ENABLED:
+        raise ForbiddenException("SSO login is currently disabled for this ERP.")
+
+    if not settings.FEDERATION_CLIENT_ID or not settings.FEDERATION_CLIENT_SECRET:
+        raise ForbiddenException(
+            "This ERP is not yet registered as a federation client with ERP_Main. Contact your platform "
+            "administrator."
+        )
+
+    try:
+        id_token = await exchange_code_for_id_token(
+            code=payload.code,
+            redirect_uri=payload.redirect_uri,
+            code_verifier=payload.code_verifier,
+        )
+    except TokenExchangeError as exc:
+        raise UnauthorizedException("Invalid or expired authorization code.") from exc
+
+    data = await _establish_local_session_from_id_token(
+        id_token, db=db, auth_service=auth_service, rbac_service=rbac_service, context=context
+    )
     return build_success_response(data=data, request_id=request.state.request_id)

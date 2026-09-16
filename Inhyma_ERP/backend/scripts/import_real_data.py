@@ -23,6 +23,7 @@ Run from backend/:
 import sys
 import re
 import json
+import os
 import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -38,11 +39,21 @@ def safe_print(msg: str):
         print(msg.encode("ascii", "replace").decode("ascii"))
 
 safe_print("Connecting to database...")
+# This ERP's OWN Supabase project ref and DB password -- read from the
+# environment with THIS ERP's own values as the fallback default, never
+# another ERP's. (A prior version of this script hardcoded
+# "postgres.mpvzjzunkiqchhhvxrza", which is Yinglima_ERP's project ref,
+# not Inhyma's -- running this script as originally written would have
+# imported real Inhyma product/supplier data straight into Yinglima's
+# database instead. Matches this ERP's own DATABASE_URL / SUPABASE_PROJECT_ID
+# in .env -- keep these three in sync if the project is ever migrated.)
+DB_PROJECT_REF = os.environ.get("SUPABASE_PROJECT_ID", "kkqxkgdrmvnnvptpjpmi")
+DB_PASSWORD = os.environ.get("SUPABASE_DB_PASSWORD", "Inhyma@2026")
 conn = psycopg2.connect(
     host="aws-0-ap-south-1.pooler.supabase.com",
     port=5432,
-    user="postgres.mpvzjzunkiqchhhvxrza",
-    password="Inhyma@2026",
+    user=f"postgres.{DB_PROJECT_REF}",
+    password=DB_PASSWORD,
     dbname="postgres"
 )
 conn.autocommit = False

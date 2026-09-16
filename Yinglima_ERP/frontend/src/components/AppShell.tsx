@@ -1042,29 +1042,55 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     return cleanup;
   }, [loggedIn, navigate]);
 
+  // Whether an automatic-login mechanism might still resolve before we
+  // should give up and bounce to /login. This covers two cases:
+  //  1. A legacy `sso_handover` token is present in the URL right now.
+  //  2. `processIncomingSsoHandover()` hasn't reported its result yet
+  //     for THIS mount -- e.g. it found a still-valid ecosystem cookie
+  //     and is in the middle of exchanging it. Gating on "has it
+  //     settled" rather than only "is the query param present right
+  //     now" is what closes the original race: previously, a mount
+  //     with no `sso_handover` param in the URL (or one already
+  //     stripped by an earlier effect) fell straight through to the
+  //     /login redirect even while an auto-login was genuinely still
+  //     in flight, logging out users -- including Super Admins -- who
+  //     had a perfectly valid session about to be established.
+  const [ssoCheckPending, setSsoCheckPending] = useState(
+    () => !loggedIn && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover")
+  );
+
   useEffect(() => {
-    if (!loggedIn) {
-      processIncomingSsoHandover().then((result) => {
-        // Only a genuine fresh auto-login (a real state change) warrants a
-        // reload. "already-logged-in" means Auth was already logged in by
-        // the time this ran (e.g. AppShell remounting on a route change
-        // right after a previous reload) -- reloading again here would
-        // just repeat the same effect on the next mount, forever.
-        if (result === "logged-in") {
-          window.location.reload();
-        }
-      });
+    if (loggedIn) {
+      setSsoCheckPending(false);
+      return;
     }
+    let cancelled = false;
+    setSsoCheckPending(true);
+    processIncomingSsoHandover().then((result) => {
+      if (cancelled) return;
+      // Only a genuine fresh auto-login (a real state change) warrants a
+      // reload. "already-logged-in" means Auth was already logged in by
+      // the time this ran (e.g. AppShell remounting on a route change
+      // right after a previous reload) -- reloading again here would
+      // just repeat the same effect on the next mount, forever.
+      if (result === "logged-in") {
+        window.location.reload();
+        return; // leave ssoCheckPending true through the reload -- no flash to /login in the interim
+      }
+      setSsoCheckPending(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [loggedIn]);
 
-  const hasSsoHandover = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover");
   if (!loggedIn) {
-    if (hasSsoHandover) {
+    if (ssoCheckPending) {
       return (
         <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc" }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ width: 36, height: 36, margin: "0 auto 16px", border: "3px solid #e2e8f0", borderTopColor: "#0284c7", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Authorizing Super Admin Single Sign-On...</div>
+            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Checking your session…</div>
           </div>
         </div>
       );

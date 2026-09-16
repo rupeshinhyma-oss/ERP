@@ -321,6 +321,14 @@ class Settings(BaseSettings):
         description="This ERP's own OIDC client_id, as issued by ERP_Main at federation-client registration "
         "time. The `aud` claim on every federation ID token this ERP accepts must exactly equal this value.",
     )
+    FEDERATION_CLIENT_SECRET: str = Field(
+        default="",
+        description="This ERP's own OIDC client_secret, as issued (once, plaintext) by ERP_Main at "
+        "federation-client registration time. Used ONLY server-to-server, by this backend, to call "
+        "ERP_Main's POST /federation/token when exchanging a browser-supplied authorization code for a "
+        "signed id_token. MUST NEVER be sent to or read by frontend code, and MUST be overridden via env "
+        "in every non-local environment.",
+    )
     FEDERATION_SERVICE_CREDENTIAL: str = Field(
         default="CHANGE-ME-IN-PRODUCTION-erp-main-service-credential",
         description="This ERP's own service credential (issued by ERP_Main's app.service_identity) for "
@@ -350,8 +358,12 @@ class Settings(BaseSettings):
     # Supabase Storage
     # -------------------------------------------------------------------
     SUPABASE_PROJECT_ID: str = Field(
-        default="mpvzjzunkiqchhhvxrza",
-        description="Supabase Project ID for storage and REST endpoints",
+        default="kkqxkgdrmvnnvptpjpmi",
+        description="Supabase Project ID for storage and REST endpoints. MUST match this ERP's own "
+        "DATABASE_URL project ref (kkqxkgdrmvnnvptpjpmi) -- this default was previously copy-pasted from "
+        "Yinglima_ERP's project (mpvzjzunkiqchhhvxrza), which pointed Inhyma's Supabase Storage/REST calls "
+        "at a different ERP's project whenever this setting wasn't explicitly overridden via env. Always "
+        "still set SUPABASE_PROJECT_ID explicitly in every real .env rather than relying on this default.",
     )
     SUPABASE_SERVICE_KEY: str | None = Field(
         default=None,

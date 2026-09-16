@@ -320,6 +320,14 @@ class Settings(BaseSettings):
         description="This ERP's own OIDC client_id, as issued by ERP_Main at federation-client registration "
         "time. The `aud` claim on every federation ID token this ERP accepts must exactly equal this value.",
     )
+    FEDERATION_CLIENT_SECRET: str = Field(
+        default="",
+        description="This ERP's own OIDC client_secret, as issued (once, plaintext) by ERP_Main at "
+        "federation-client registration time. Used ONLY server-to-server, by this backend, to call "
+        "ERP_Main's POST /federation/token when exchanging a browser-supplied authorization code for a "
+        "signed id_token. MUST NEVER be sent to or read by frontend code, and MUST be overridden via env "
+        "in every non-local environment.",
+    )
     FEDERATION_SERVICE_CREDENTIAL: str = Field(
         default="CHANGE-ME-IN-PRODUCTION-erp-main-service-credential",
         description="This ERP's own service credential (issued by ERP_Main's app.service_identity) for "

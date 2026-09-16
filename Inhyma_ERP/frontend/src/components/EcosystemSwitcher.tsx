@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { createSsoHandoverUrl, ECOSYSTEM_ERPS } from "@/lib/ssoBridge";
+import { ECOSYSTEM_ERPS } from "@/lib/ssoBridge";
 
 interface EcosystemSwitcherProps {
   currentKey?: string;
@@ -30,10 +30,25 @@ export function EcosystemSwitcher({ currentKey = "inhyma" }: EcosystemSwitcherPr
     };
   }, [open]);
 
+  /**
+   * Switching to another ERP (or back to the Global Control Panel)
+   * from inside a spoke app is deliberately a PLAIN navigation, not a
+   * forged handover: this app only holds its own local session, never
+   * a Global User session on ERP_Main, so it has no way to mint a
+   * genuine, signed authorization for another app -- that would just
+   * be a second, weaker door next to the real one.
+   *
+   * The real, secure ERP-to-ERP switch (OIDC-style authorize -> code
+   * -> server-to-server token exchange -> local session) lives on
+   * ERP_Main's own ERP Switcher page, gated by that user's actual
+   * Global User session and ACTIVE membership. So this control simply
+   * takes the user there (or to the target app's normal login/session
+   * check) and lets that real flow run -- it never claims to log
+   * anyone in on their behalf.
+   */
   const handleSwitch = (hostUrl: string) => {
     setOpen(false);
-    const target = createSsoHandoverUrl(hostUrl);
-    window.location.href = target;
+    window.location.href = hostUrl;
   };
 
   return (
