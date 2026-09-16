@@ -1069,21 +1069,108 @@ export function MasterPage<T extends MasterRecord>({
     setModalOpen(false);
   }
 
-  const setField = useCallback((id: string, value: string) => {
-    setForm((prev) => ({ ...prev, [id]: value }));
-    setValidationErrors((prev) => {
-      if (!prev[id]) return prev;
-      const copy = { ...prev };
-      delete copy[id];
-      return copy;
-    });
-  }, []);
+  const checkDuplicate = useCallback(
+    (fieldId: string, val: string, currentForm: FormState): string | null => {
+      const cleanVal = (val || "").trim().toLowerCase();
+      if (!cleanVal) return null;
+
+      const isNameCheck = fieldId === "name" || fieldId === "company_name" || fieldId === "country_name";
+      const isCodeCheck = fieldId === "code" || fieldId === "country_code";
+      if (!isNameCheck && !isCodeCheck) return null;
+
+      const recordsPool = allRecords.length > 0 ? allRecords : rows;
+      if (!recordsPool || recordsPool.length === 0) return null;
+
+      const currentParentCat = currentForm.category_id;
+      const currentParentCountry = currentForm.country_id;
+      const currentParentState = currentForm.state_id;
+
+      for (const r of recordsPool) {
+        if (editingId && r.id === editingId) continue;
+
+        // Scoped parent checks (for Sub-Category, State, City)
+        if (currentParentCat && (r as any).category_id && (r as any).category_id !== currentParentCat) continue;
+        if (currentParentCountry && (r as any).country_id && (r as any).country_id !== currentParentCountry) continue;
+        if (currentParentState && (r as any).state_id && (r as any).state_id !== currentParentState) continue;
+
+        if (isNameCheck) {
+          const rName = (((r as any).name || (r as any).company_name || "") as string).trim().toLowerCase();
+          if (rName && rName === cleanVal) {
+            const displayName = ((r as any).name || (r as any).company_name || cleanVal);
+            return `${entityName ? entityName.charAt(0).toUpperCase() + entityName.slice(1) : "Record"} '${displayName}' already exists!`;
+          }
+        }
+
+        if (isCodeCheck) {
+          const rCode = (((r as any).code || (r as any).country_code || "") as string).trim().toLowerCase();
+          if (rCode && rCode === cleanVal) {
+            const displayCode = ((r as any).code || cleanVal);
+            return `Code '${displayCode}' already exists!`;
+          }
+        }
+      }
+      return null;
+    },
+    [allRecords, rows, editingId, entityName]
+  );
+
+  const setField = useCallback(
+    (id: string, value: string) => {
+      setForm((prev) => {
+        const updated = { ...prev, [id]: value };
+        const dupWarning = checkDuplicate(id, value, updated);
+
+        // If a parent field changed, also re-evaluate 'name' against the new parent
+        let parentRecheckWarning: string | null = null;
+        if (id === "category_id" || id === "state_id" || id === "country_id") {
+          if (updated.name) {
+            parentRecheckWarning = checkDuplicate("name", updated.name, updated);
+          }
+        }
+
+        setValidationErrors((prevErrs) => {
+          const nextErrs = { ...prevErrs };
+          if (dupWarning) {
+            nextErrs[id] = dupWarning;
+          } else {
+            delete nextErrs[id];
+          }
+
+          if (id === "category_id" || id === "state_id" || id === "country_id") {
+            if (parentRecheckWarning) {
+              nextErrs["name"] = parentRecheckWarning;
+            } else if (nextErrs["name"]?.includes("already exists")) {
+              delete nextErrs["name"];
+            }
+          }
+
+          return nextErrs;
+        });
+
+        return updated;
+      });
+    },
+    [checkDuplicate]
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
     setError(null);
     setAlertPopup(null);
+
+    // Live Duplicate Blocker Check
+    const dupEntry = Object.entries(validationErrors).find(([_, v]) => v && v.includes("already exists"));
+    if (dupEntry) {
+      const [fieldId, errorMsg] = dupEntry;
+      setError(errorMsg);
+      const el = document.getElementById(fieldId);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => el.focus(), 250);
+      }
+      return;
+    }
 
     if (validateForm) {
       const fieldErrors = validateForm(form);
@@ -1312,7 +1399,7 @@ export function MasterPage<T extends MasterRecord>({
   if (isImportOpen) {
     return (
       <AppShell activeKey={activeKey}>
-        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+        <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
           <Breadcrumb trail={[...breadcrumbTrail, `Import ${entityName}s`]} />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
@@ -1637,6 +1724,26 @@ export function MasterPage<T extends MasterRecord>({
           <Banner error={error} />
           <div className="card" style={{ padding: "24px", marginBottom: "500px" }}>
             <form onSubmit={handleSubmit} noValidate>
+              {Object.values(validationErrors).some((v) => v && v.includes("already exists")) && (
+                <div
+                  style={{
+                    marginBottom: "16px",
+                    padding: "10px 14px",
+                    background: "#fef2f2",
+                    border: "1.5px solid #ef4444",
+                    borderRadius: "8px",
+                    color: "#b91c1c",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <span style={{ fontSize: "16px" }}>⛔</span>
+                  <span>{Object.values(validationErrors).find((v) => v && v.includes("already exists"))}</span>
+                </div>
+              )}
               {renderFields(form, setField, validationErrors)}
               <div
                 className="form-actions"
@@ -2418,6 +2525,26 @@ export function MasterPage<T extends MasterRecord>({
             </div>
             <form onSubmit={handleSubmit} noValidate style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 60px)", overflow: "hidden" }}>
               <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+                {Object.values(validationErrors).some((v) => v && v.includes("already exists")) && (
+                  <div
+                    style={{
+                      marginBottom: "16px",
+                      padding: "10px 14px",
+                      background: "#fef2f2",
+                      border: "1.5px solid #ef4444",
+                      borderRadius: "8px",
+                      color: "#b91c1c",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span style={{ fontSize: "16px" }}>⛔</span>
+                    <span>{Object.values(validationErrors).find((v) => v && v.includes("already exists"))}</span>
+                  </div>
+                )}
                 {renderFields(form, setField, validationErrors)}
               </div>
               <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%", padding: "16px 24px", background: "#ffffff", borderTop: "1px solid #e2e8f0" }}>

@@ -82,7 +82,7 @@ class TrashPurgeWorker:
         if self.is_running:
             logger.warning("TrashPurgeWorker.start() called but worker is already running.")
             return
-        self._stop_event = asyncio.Event()
+        self._stop_event.clear()
         self._task = asyncio.create_task(self._run(), name="trash-purge-worker")
         logger.info(
             "Trash auto-purge worker started.",
@@ -96,20 +96,14 @@ class TrashPurgeWorker:
         """Signal the purge loop to stop and wait for the current iteration to finish."""
         if not self.is_running:
             return
-        if self._stop_event is not None:
-            self._stop_event.set()
-        if self._task is not None:
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            finally:
-                self._task = None
+        self._stop_event.set()
+        assert self._task is not None
+        await self._task
         logger.info("Trash auto-purge worker stopped.")
 
     async def _run(self) -> None:
         """Check for and purge expired trash items every ``interval_seconds`` until stopped."""
-        while self._stop_event is not None and not self._stop_event.is_set():
+        while not self._stop_event.is_set():
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=self._interval_seconds)
                 # stop_event was set while waiting -- exit the loop.

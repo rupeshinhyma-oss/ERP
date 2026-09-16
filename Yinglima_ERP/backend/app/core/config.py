@@ -24,7 +24,7 @@ from __future__ import annotations
 from enum import Enum
 from functools import lru_cache
 
-from pydantic import Field, PostgresDsn, field_validator
+from pydantic import Field, PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     # to JSON-decode `list[str]` fields sourced from the environment,
     # which rejects plain comma-separated values -- so we keep the raw
     # field a `str` and do the splitting ourselves.
-    CORS_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000"
+    CORS_ALLOWED_ORIGINS: str = "*"
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOWED_METHODS: str = "*"
     CORS_ALLOWED_HEADERS: str = "*"
@@ -102,15 +102,10 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------
     # Database
     # -------------------------------------------------------------------
-    DATABASE_URL: PostgresDsn = Field(
+    DATABASE_URL: PostgresDsn | str = Field(
         default="postgresql+asyncpg://erp_user:erp_password@localhost:5432/erp_db",
         description="Async SQLAlchemy connection string, e.g. "
         "postgresql+asyncpg://user:pass@host:5432/dbname",
-    )
-    DIRECT_URL: str | None = Field(
-        default=None,
-        description="Direct synchronous PostgreSQL connection string for Alembic migrations, "
-        "e.g. postgresql://user:pass@host:5432/dbname?sslmode=require",
     )
     # Sized for ~100+ concurrent active users behind a small number of
     # Uvicorn/Gunicorn worker processes. Each worker gets its OWN pool of
@@ -119,25 +114,14 @@ class Settings(BaseSettings):
     # connections -- keep this in mind alongside PostgreSQL's own
     # `max_connections` (and put PgBouncer in front in production so the
     # database itself isn't holding hundreds of idle connections).
-    DATABASE_POOL_SIZE: int = 10
-    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_SIZE: int = 50
+    DATABASE_MAX_OVERFLOW: int = 50
     DATABASE_POOL_TIMEOUT_SECONDS: int = 30
     DATABASE_POOL_RECYCLE_SECONDS: int = 1800
     DATABASE_ECHO: bool = False
     DATABASE_CONNECT_RETRIES: int = 5
     DATABASE_CONNECT_RETRY_DELAY_SECONDS: float = 2.0
     DATABASE_DISABLE_STATEMENT_CACHE: bool = False
-
-    @field_validator("DATABASE_URL", mode="before")
-    @classmethod
-    def normalize_database_url(cls, v: str) -> str:
-        if isinstance(v, str):
-            v = v.strip().strip("'\"")
-            if v.startswith("postgres://"):
-                return "postgresql+asyncpg://" + v[len("postgres://"):]
-            if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
-                return "postgresql+asyncpg://" + v[len("postgresql://"):]
-        return v
 
     # -------------------------------------------------------------------
     # Logging
@@ -210,8 +194,8 @@ class Settings(BaseSettings):
         "previously-encrypted member password unrecoverable.",
     )
     JWT_ISSUER: str = "erp-backend"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 5256000
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 3650
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 720
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # -------------------------------------------------------------------
     # Password policy
@@ -264,88 +248,6 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
 
     # -------------------------------------------------------------------
-    # ERP Identity (Multi-ERP Platform, Phase 2)
-    # -------------------------------------------------------------------
-    # This ERP instance's own stable, machine-readable identity within the
-    # future multi-ERP ecosystem (ERP_Main's control plane / ERP Registry).
-    # Deliberately just configuration -- nothing in this codebase reads
-    # ERP_KEY today, and no existing module/route/service depends on it.
-    # It exists so a *future* SSO/federation integration point has exactly
-    # one place to read "which ERP am I" from, rather than that value
-    # being hardcoded or scattered across source files (see Phase 2 Step 7
-    # of the Multi-ERP Platform brief).
-    #
-    # IMPORTANT: this is NOT the same concept as `organizations` (this
-    # ERP's own single company profile) or `master_companies` (the group
-    # operating-company lookup list referenced by Product/Planning's
-    # `organization_id`). Those two existing concepts are completely
-    # unrelated to ERP identity and must never be confused with it -- see
-    # docs/MULTI_ERP_ARCHITECTURE.md §4 for the full disambiguation.
-    ERP_KEY: str = "yinglima"
-    ERP_DISPLAY_NAME: str = "Yinglima ERP"
-
-    # Phase 4 feature flag (Section 59): when true, every call to
-    # EventDispatcher.publish_lifecycle_event also writes a durable event
-    # (see app.durable_events) in the same transaction as the business
-    # write, in addition to the existing in-memory WebSocket broadcast.
-    # Defaults to False so this pilot migration is reversible with zero
-    # code change -- flip to True only once Phase 3's durable_events
-    # tables exist in the target database (migration c3d4e5f6a7b1).
-    DURABLE_EVENTS_ENABLED: bool = False
-
-    # -------------------------------------------------------------------
-    # Federation / SSO (Multi-ERP Platform, Phase 4)
-    #
-    # Additive login option alongside the existing direct username/
-    # password login above -- see app.federation. Direct login remains
-    # fully functional; nothing here replaces app.auth's own JWT/session
-    # implementation (Phase 4 Step 28: direct login stays available
-    # during rollout).
-    # -------------------------------------------------------------------
-    YINGLIMA_SSO_ENABLED: bool = True
-    ERP_MAIN_ISSUER: str = Field(
-        default="http://127.0.0.1:8000",
-        description="ERP_Main's OIDC issuer URL. Federation ID tokens with any other `iss` are rejected.",
-    )
-    ERP_MAIN_JWKS_URL: str = Field(
-        default="http://127.0.0.1:8000/api/v1/.well-known/jwks.json",
-        description="Where this ERP fetches ERP_Main's public signing keys to verify federation ID tokens.",
-    )
-    ERP_MAIN_API_BASE_URL: str = Field(
-        default="http://127.0.0.1:8000/api/v1",
-        description="Base URL for calling ERP_Main's own API (e.g. the internal membership lookup).",
-    )
-    FEDERATION_CLIENT_ID: str = Field(
-        default="",
-        description="This ERP's own OIDC client_id, as issued by ERP_Main at federation-client registration "
-        "time. The `aud` claim on every federation ID token this ERP accepts must exactly equal this value.",
-    )
-    FEDERATION_SERVICE_CREDENTIAL: str = Field(
-        default="CHANGE-ME-IN-PRODUCTION-erp-main-service-credential",
-        description="This ERP's own service credential (issued by ERP_Main's app.service_identity) for "
-        "calling ERP_Main's internal membership-lookup endpoint. MUST be overridden via env in every "
-        "non-local environment. Never confused with FEDERATION_CLIENT_ID/secret above, which authenticate "
-        "the federation token EXCHANGE, not this separate internal API call.",
-    )
-    FEDERATION_JWKS_CACHE_TTL_SECONDS: int = 300
-
-    # Peer ERP Direct Integration Endpoints (Phase 8E - Direct runtime ERP-to-ERP delivery)
-    PEER_ERP_ENDPOINTS: str = Field(
-        default="inhyma=http://127.0.0.1:8002/api/v1,yinglima=http://127.0.0.1:8001/api/v1",
-        description="Comma-separated key=url mapping of peer ERP base URLs for direct runtime sync.",
-    )
-
-    @property
-    def peer_erp_endpoints_map(self) -> dict[str, str]:
-        """Parse PEER_ERP_ENDPOINTS into a key -> url dictionary."""
-        mapping: dict[str, str] = {}
-        for item in self.PEER_ERP_ENDPOINTS.split(","):
-            if "=" in item:
-                k, v = item.strip().split("=", 1)
-                mapping[k.strip().lower()] = v.strip().rstrip("/")
-        return mapping
-
-    # -------------------------------------------------------------------
     # Supabase Storage
     # -------------------------------------------------------------------
     SUPABASE_PROJECT_ID: str = Field(
@@ -363,6 +265,26 @@ class Settings(BaseSettings):
     SUPABASE_URL: str | None = Field(
         default=None,
         description="Optional custom Supabase base URL (defaults to https://{SUPABASE_PROJECT_ID}.supabase.co)",
+    )
+
+    # -------------------------------------------------------------------
+    # Neon S3-Compatible Object Storage
+    # -------------------------------------------------------------------
+    AWS_ENDPOINT_URL_S3: str | None = Field(
+        default=None,
+        description="Neon S3 endpoint URL",
+    )
+    AWS_ACCESS_KEY_ID: str | None = Field(
+        default=None,
+        description="Neon S3 access key ID",
+    )
+    AWS_SECRET_ACCESS_KEY: str | None = Field(
+        default=None,
+        description="Neon S3 secret access key",
+    )
+    AWS_REGION: str = Field(
+        default="us-east-2",
+        description="Neon S3 region",
     )
 
     @property
@@ -416,14 +338,6 @@ class Settings(BaseSettings):
                 "production environment. Set a strong, random MEMBER_PASSWORD_ENCRYPTION_KEY "
                 "via the environment."
             )
-        if self.is_production and ("*" in self.cors_allowed_origins_list or not self.CORS_ALLOWED_ORIGINS):
-            raise RuntimeError(
-                "CORS_ALLOWED_ORIGINS cannot be wildcard '*' or empty in production when credentials are enabled."
-            )
-        if self.is_production and "sqlite" in str(self.DATABASE_URL).lower():
-            raise RuntimeError(
-                "DATABASE_URL cannot use SQLite in a production environment. Configure Supabase PostgreSQL."
-            )
 
     @property
     def sync_database_url(self) -> str:
@@ -433,20 +347,14 @@ class Settings(BaseSettings):
         Alembic migrations run synchronously, while the application itself
         uses the async ``asyncpg`` driver. Rather than maintaining two
         separate URLs, we derive the sync URL from the single async source
-        of truth, or prioritize DIRECT_URL if provided for migrations.
+        of truth.
         """
-        import re
-
-        raw = str(self.DIRECT_URL) if self.DIRECT_URL else str(self.DATABASE_URL)
-        if raw.startswith("postgresql+asyncpg://"):
-            url = raw.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
-        elif raw.startswith("postgresql://"):
-            url = raw.replace("postgresql://", "postgresql+psycopg2://", 1)
-        else:
-            url = raw
-
-        # psycopg2 / libpq does not recognize 'ssl=require' parameter, only 'sslmode=require'
-        return re.sub(r"([?&])ssl=([a-zA-Z0-9_-]+)", r"\1sslmode=\2", url)
+        url = str(self.DATABASE_URL).replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+        if "?ssl=" in url:
+            url = url.replace("?ssl=", "?sslmode=")
+        elif "&ssl=" in url:
+            url = url.replace("&ssl=", "&sslmode=")
+        return url
 
 
 @lru_cache

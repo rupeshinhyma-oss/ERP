@@ -100,13 +100,12 @@ class AuthService:
         await self.cache.set(key, attempts, ttl_seconds=settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS)
 
     # --- Effective Permissions helper ---------------------------------------
-    async def get_user_effective_permissions(self, user_id: uuid.UUID, *, force_refresh: bool = False) -> set[str]:
+    async def get_user_effective_permissions(self, user_id: uuid.UUID) -> set[str]:
         """Fetch user's effective permissions with caching and immediate invalidation support."""
         cache_key = CacheBackend.build_key("user_perms", str(user_id))
-        if not force_refresh:
-            cached = await self.cache.get(cache_key)
-            if cached is not None and isinstance(cached, list):
-                return set(cached)
+        cached = await self.cache.get(cache_key)
+        if cached is not None and isinstance(cached, list):
+            return set(cached)
 
         perms = await self.role_repository.get_permission_codes_for_user(user_id)
         await self.cache.set(cache_key, list(perms), ttl_seconds=3600)
@@ -179,7 +178,7 @@ class AuthService:
 
     async def _issue_token_pair(self, user: User, context: LoginContext) -> tuple[str, str]:
         """Issue a fresh access + refresh token pair and persist the new session row."""
-        permissions = await self.get_user_effective_permissions(user.id, force_refresh=True)
+        permissions = await self.get_user_effective_permissions(user.id)
         access = create_access_token(user.id, permissions=list(permissions))
         refresh = create_refresh_token(user.id)
 
@@ -193,29 +192,6 @@ class AuthService:
             expires_at=refresh.expires_at,
         )
         return access.token, refresh.token
-
-    # --- Federated (SSO) login (Multi-ERP Platform, Phase 4) -------------------
-    async def issue_session_for_federated_user(self, user: User, context: LoginContext) -> tuple[str, str]:
-        """
-        Establish an existing-shape local session for a user resolved via federation (Phase 4 Step 27).
-
-        This is the ENTIRE federation adapter's touch point into
-        `app.auth`: everything before this call (verifying ERP_Main's
-        token, resolving GlobalUser -> local_user_id via the trusted
-        membership lookup) happens in `app.federation`, and everything
-        after this call (JWT shape, session table, refresh, RBAC) is
-        identical to direct password login -- this method exists only so
-        `app.federation` doesn't need to duplicate `_issue_token_pair`'s
-        logic or reach into a private method from outside this module.
-        Still enforces `user.can_login` (Step 25: local user status
-        remains authoritative even after a valid federated identity is
-        presented) -- a disabled/locked local user is rejected here
-        exactly as it would be on direct login, regardless of how valid
-        the federation token was.
-        """
-        if not user.can_login:
-            raise UnauthorizedException("This account is not active. Please contact an administrator.")
-        return await self._issue_token_pair(user, context)
 
     # --- Refresh --------------------------------------------------------------
     async def refresh(self, *, refresh_token: str, context: LoginContext) -> tuple[str, str]:

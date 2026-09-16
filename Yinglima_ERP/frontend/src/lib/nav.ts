@@ -61,6 +61,12 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: "PURCHASE",
+    items: [
+      { key: "local-purchases", label: "Local Purchase", path: "/purchase/local", icon: "shoppingBag", permission: "supplier.view" },
+    ],
+  },
+  {
     label: "PLANNING",
     items: [
       { key: "planning", label: "Shipment Planning", path: "/planning", icon: "truck", permission: "planning.view" },
@@ -137,6 +143,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "masters-subcategories": "Sub Categories",
   "masters-products": "Product Master",
   "product-prices": "Product Prices",
+  "local-purchases": "Local Purchase",
   suppliers: "Suppliers",
   audit: "Audit Log",
   rbac: "Departments & Permissions",

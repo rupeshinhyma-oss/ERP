@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.1.0 (Production)  
-> **Last Updated:** September 11, 2026 (Products Master server-side pagination & comprehensive search upgrade, Vite proxy timeout resolution, Supabase PostgreSQL aws-0-ap-south-1 architecture, OCC version column alignment migration f9a0b1c2d3e4, planning_sheets item_description support, and 100% data parity verification)  
+> **Last Updated:** September 16, 2026 (Universal Fluid Responsive Auto-Fit Layout Across All Modules: Buyers, Suppliers, Catalogs, Local Purchase & Planning at 50%-150% Zoom; Unified Living Documentation)  
 > **Repository:** `https://github.com/rupeshinhyma-oss/Yinglima_ERP.git`  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
@@ -33,10 +33,14 @@
    - 8.12. [Recycle Bin (Universal Soft-Delete & Recovery)](#812-recycle-bin-universal-soft-delete--recovery)
    - 8.13. [Organization & System Profile](#813-organization--system-profile)
    - 8.14. [Employee Directory & Organization Structure](#814-employee-directory--organization-structure-identity--access-management-upgrade)
+   - 8.15. [Inquiries, Consignments & Bidirectional WeChat / Email RFQ Ingestion](#815-inquiries-consignments--bidirectional-wechat--email-rfq-ingestion)
+   - 8.16. [Product Price Directory & Supplier Comparison Engine](#816-product-price-directory--supplier-comparison-engine)
+   - 8.17. [Local Purchase Orders & Domestic Procurement Engine](#817-local-purchase-orders--domestic-procurement-engine)
 
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
 11. [Universal Bulk Import & Export Wizard](#11-universal-bulk-import--export-wizard)
+    - 11.1. [Media & File Storage Subsystem (Supabase & Local Disk Fallback)](#111-media--file-storage-subsystem-supabase--local-disk-fallback)
 12. [Frontend Architecture & Single-Flight Token Refresh](#12-frontend-architecture--single-flight-token-refresh)
 13. [Complete API Route & Endpoint Directory](#13-complete-api-route--endpoint-directory)
 14. [Developer & AI Integration Guide (Rules of Engagement)](#14-developer--ai-integration-guide-rules-of-engagement)
@@ -145,7 +149,7 @@ ERP_Main_Claude/
 │   │   ├── users/             # User accounts, deactivation, force logout, reporting managers
 │   │   └── main.py            # Composition root, lifespan lifecycle, middleware wiring
 │   ├── alembic/               # Database schema version migrations
-│   ├── scripts/               # Seeding and maintenance tools (sync_uploads_to_supabase.py)
+│   ├── scripts/               # Migration, seeding, and maintenance tools (setup_neon_databases.py, shift_supabase_to_neon.py, sync_uploads_to_supabase.py)
 │   └── requirements.txt       # Python dependencies
 └── frontend/
     ├── src/
@@ -185,30 +189,35 @@ class VersionMixin:
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 ```
 
-### 4.1. Supabase PostgreSQL Multi-Database Architecture & Driver Engine
-- **Three Isolated Dedicated Database Projects**:
-  - `yinglima_erp`: Dedicated Supabase project (`mpvzjzunkiqchhhvxrza`) for China procurement, quotation sourcing, and container shipment planning.
-  - `inhyma_erp`: Dedicated Supabase project (`kkqxkgdrmvnnvptpjpmi`) for India domestic distribution, multi-branch, and buyer invoicing.
-  - `erp_main`: Dedicated Supabase project (`dwdqigpvkciolblcddcf`) for central master repository and identity control plane.
-- **Cloud Database Hosting**:
-  - Hosted on Supabase PostgreSQL Session Pooler (`aws-0-ap-south-1.pooler.supabase.com:5432`).
-  - Zero cross-database coupling: dedicated databases, no shared connections, no cross-database foreign keys.
-  - 100% row count, schema, and relation parity verified across all databases.
+### 4.1. Neon Serverless Multi-Database Topology & Driver Engine (`setup_neon_databases.py`, `shift_to_singapore.py`)
+- **Three Isolated Logical Databases in Single Project Cluster (`ERP-Cluster`)**:
+  - `yinglima_erp`: Dedicated to the China procurement, quotation sourcing, and container shipment planning lifecycle.
+  - `inhyma_erp`: Dedicated to the India domestic distribution, multi-branch, and buyer invoicing lifecycle.
+  - `erp_main`: Central master repository and golden template for future company deployments.
+- **Singapore (ap-southeast-1) Low-Latency Region Deployment**:
+  - Successfully migrated from Ohio (`us-east-2`, ~368ms round-trip latency) to Singapore AWS (`ap-southeast-1`, ~170ms round-trip latency, cutting network latency by >50%).
+  - Live Singapore Pooled Endpoint: `ep-twilight-base-azwy3ofw-pooler.c-3.ap-southeast-1.aws.neon.tech/yinglima_erp`.
+  - Zero data loss: All 49,848 rows across 54 tables and 93 foreign key constraints verified with 100% parity.
 - **Optimistic Concurrency & Missing Columns Alignment (`alembic/versions/f9a0b1c2d3e4_ensure_all_version_columns.py`)**:
   - Ensures `version INTEGER NOT NULL DEFAULT 1` exists across all master tables (`hsn_codes`, `units_of_measurement`, `master_companies`, `inquiry_items`, `supplier_types`, `buyer_types`, `consignment_codes`).
   - Ensures `item_description TEXT` exists on `planning_sheets`.
   - Fixes HTTP 500 errors on `/masters/hsn`, `/masters/uom`, and `/planning/sheets`.
 - **Connection Pooling & Statement Caching**:
-  - Configures `DATABASE_DISABLE_STATEMENT_CACHE=true` in `backend/.env` to safely handle multiplexed pooled connections without prepared statement conflicts.
+  - Configures `DATABASE_DISABLE_STATEMENT_CACHE=true` in `backend/.env` to avoid prepared statement conflicts with PgBouncer transaction pooling.
 - **Driver Parameter Compatibility Matrix**:
   - **`asyncpg` Engine**: Strictly requires `?ssl=require`. Passing `?sslmode=require` causes `TypeError: connect() got an unexpected keyword argument 'sslmode'`.
   - **`psycopg2` Engine / Alembic**: Strictly requires `?sslmode=require`. Passing `?ssl=require` raises an invalid keyword argument error in psycopg2.
   - **Dynamic Resolution (`app.core.config.py`)**: The `sync_database_url` property dynamically inspects query parameters and converts `?ssl=require` to `?sslmode=require` seamlessly across migrations and background sync tools.
-- **Dedicated Project Schemas**:
-  - Total tables in Yinglima Supabase project: **77** (Zero missing tables, zero missing rows).
-  - All 21 Task Management & Notification tables (`notifications`, `tasks`, `task_subtasks`, `task_assignees`, `task_comments`, `task_escalations`, `task_labels`, `task_attachments`, `task_sprints`, etc.) active with all notifications, tasks, and related attachments.
-  - All 184 country ISO2 and ISO3 codes active.
+- **Switching Databases**:
+  - Separate per-database configurations: `backend/.env.yinglima_erp`, `backend/.env.inhyma_erp`, `backend/.env.erp_main`.
+  - To activate a company's database, copy its configuration to `backend/.env` (e.g. `copy .env.yinglima_erp .env` or `copy .env.inhyma_erp .env`).
+- **Complete Supabase to Neon Migration & 100% Parity (September 2026)**:
+  - Total tables in Supabase: **77** | Total tables in Neon: **77** (Zero missing tables, zero missing rows).
+  - All 21 Task Management & Notification tables (`notifications`, `tasks`, `task_subtasks`, `task_assignees`, `task_comments`, `task_escalations`, `task_labels`, `task_attachments`, `task_sprints`, etc.) fully migrated with all 426 notifications, 196 tasks, and related attachments.
+  - All 184 country ISO2 and ISO3 codes synced.
+  - Complete sync of all 20 `inquiry_messages` records.
   - Schema alignment for `products` (`packaging_length`, `packaging_width`, `packaging_height`, `packaging_weight`, `master_box_qty`, `supplier_id`) and `planning_columns.description`.
+  - Audited via `backend/scripts/compare_supabase_and_neon.py`.
 
 ---
 
@@ -339,27 +348,75 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Cycle Prevention:** Strict validation prevents assigning an ancestor as a child or vice-versa.
 
 ### 8.4. Master Data & Generic Catalogs
-- **Modules:** Brands, Categories, Sub-Categories, Countries, States, Cities, Currencies, Units of Measurement (UOM), HSN/SAC Codes, and Operating Companies.
+- **Modules:** Brands, Categories, Sub-Categories, Countries, States, Cities, Currencies, Units of Measurement (UOM), HSN/SAC Codes, Buyer Types, Supplier Types, and Operating Companies.
 - **Features:** Built on the unified `MasterPage.tsx` engine providing uniform search, pagination, validation, modal creation, and cached lookup resolution (`nameResolver.ts`).
+- **Universal Template & Validator Alignment**:
+  - Full bidirectional alignment between UI sample templates (`sampleTemplate.ts`), import parsers, validators, and backend models across all master modules.
+  - Automatic code auto-generation during import when `code` is omitted in the file (Brands: `BR-XXX`, Categories: `CAT-XXX`, Buyer Types: `BT-XXX`, Supplier Types: `ST-XXX`, UOM: derived from name/short name), aligning with UI forms that treat `code` as optional.
+  - Multi-alias column resolution supports all UI column labels (`Brand Name`, `Category Name`, `Sub-Category Name`, `Buyer Type Name`, `Supplier Type Name`, `Organization Name`, `Country Name`, `ISO Code`, `Province / Region Name`, `City Name`, `Currency Name`, `Currency Code (ISO 4217)`, `HSN Code`, `Refund VAT %`, `GST %`, `UOM Name`, `Short Name`).
+  - Resilient relational resolution: Sub-Categories, States, and Cities resolve linked parents by both code and name with case-insensitive fallback.
+  - Name-based deduplication (`dedupe_keys=("name",)`) ensures in-file duplicate prevention reflects the natural business identifier across all masters.
 
 ### 8.5. Product Catalog & Dynamic Specification Builder
 - **Endpoints:** `GET /masters/products`, `POST /masters/products`, `GET /masters/products/{id}`, `PATCH /masters/products/{id}`, `DELETE /masters/products/{id}`, `POST /masters/products/import`, `GET /masters/products/export`.
 - **Features:** Dynamic JSON specification builder allowing arbitrary technical specifications (e.g. Dimensions, Voltage, Speed, Material), multi-image upload, primary supplier auto-detection, and ReportLab PDF datasheet generation.
+- **Primary Supplier Direct Integration & Planning Auto-Sync**:
+  - The Product Master includes a direct **Primary Supplier** (`supplier_id`) selector under the *Classification, Sourcing & Tax* card (balanced 4-column layout: Brand, Category, Sub-Category, Primary Supplier | HSN Code, Refund VAT %, Organization).
+  - **Relational Sync Engine**: Persisting a `supplier_id` on a product automatically creates/synchronizes the `SupplierProductLink` record in `supplier_product_links` and attaches the supplier company name and city.
+  - **Shipment Planning Synchronization**: Populates `Supplier Name` and `City` columns in the Shipment Planning grid (`_planning_supplier_name`, `_planning_supplier_city`) with direct priority over fallback link scans, eliminating blank supplier cells for newly created or edited products.
+  - **Supplier Master Parity**: Automatically surfaces the product in the Supplier Master under "Products Supplied".
 - **Server-Side Pagination & Subquery Search Engine:** Uses standard 50-item/page server-side pagination with `ProductRepository._apply_search`. Applies case-insensitive subqueries across direct product attributes (`product_code`, `product_name`, `product_name_tally`, `product_name_invoice`, `barcode`, `specification`, `description`, `material`, `color`) and linked masters (`Brand`, `ProductCategory`, `ProductSubCategory`, `HsnCode`, `UnitOfMeasurement`) using PostgreSQL `exists()` clauses. Completely eliminates client-side 10,000-row batch loading and Vite proxy 500 timeout crashes over cloud database connections.
+- **Product Deduplication & Suggestion Engine (Supplier Master & Tally Parity)**:
+  - **Keyword Substring Suggestions (`SearchableDropdown`)**: `Product Name (As per Tally)` utilizes `SearchableDropdown` with `allowCustomText={true}`, searching across any keyword/substring in product titles via debounced API queries (`/masters/products?search=...`). Includes clear `✕` button to wipe text and smooth keyboard/mouse selection.
+  - **Instant Visual Duplicate Warning for Product Name**: When an entered or selected name matches an existing product in the catalog (case-insensitive, ignoring extra spaces and hyphens, excluding current product ID if editing), an immediate warning displays directly beneath: `⚠️ Product "<name>" already exists!`.
+  - **Instant Visual Duplicate Warning for Product Code**: When an entered Product Code matches an existing code, an immediate warning displays directly beneath: `⚠️ Product Code "<code>" already exists (used by "<name>")!`.
+  - **Strict Form Submission Blocker**: The `validateForm` and `toPayload` handlers enforce hard validation stops if duplicate name or code warnings are active, highlighting fields in red and blocking save.
+  - **Bulk Import Dual Deduplication**: In-file duplicate checking (`seen_names` and `seen_codes`) prevents multiple spreadsheet rows from having identical names or codes, while database collision detection blocks imports of any product whose name or code already exists in the system.
 
 ### 8.6. Supplier Directory & Tokenized Public Portal
 - **Endpoints:** `GET /suppliers`, `POST /suppliers`, `PATCH /suppliers/{id}`, `POST /suppliers/{id}/contacts`, `POST /suppliers/import`, `GET /suppliers/export`.
 - **Features:** Vendor directory with multi-contact management, payment terms, and bank details. Generates secure, tokenized public quote portal links (`/quotes/public/:token`) allowing vendors to submit bids without system accounts.
+- **Strict Global Company Name Deduplication & Hard-Stop Blocker**:
+  - **Global Uniqueness (Independent of City)**: A supplier's `company_name` must be globally unique across the entire master database, eliminating duplicate vendor entries across different cities or provinces.
+  - **Live Typeahead & Substring Suggestions**: While typing the company name, `SearchableDropdown` suggests matching existing suppliers dynamically across all keywords.
+  - **Instant Visual Blocker Banner**: The moment the entered name matches an existing supplier (case-insensitive, ignoring hyphens and whitespace), an unmistakable warning banner appears: `⛔ Supplier "{exact.company_name}" already exists in Supplier Master! Cannot save duplicate.`
+  - **Client-Side Form Blocker**: `saveSupplierData()` checks both local memory cache and executes an immediate server search. If a duplicate exists, it sets `validationErrors.company_name`, scrolls to the field, and strictly prevents form submission.
+  - **Safe Self-Update**: `exclude_id` ensures that editing an existing supplier's profile preserves the record without triggering self-collision false alarms.
+  - **Backend Guardrail**: `SupplierService.create` and `SupplierService.update` verify uniqueness against active and soft-deleted records via `SupplierRepository.get_any_by_company_name`, raising HTTP 409 Conflict if a collision occurs.
 - **Dynamic Geography & Phone Dialing Code Sync:** When changing Country in the Supplier Profile (e.g., China &rarr; India), Province and City dropdowns reset automatically, and the country dialing code prefixes on Calling Number, WhatsApp Number, and WeChat Number auto-update dynamically (e.g., `+86 7304240120` &rarr; `+91 7304240120`).
+- **Product Category, Key Strength Sub-Category & Products Supplied Integration:** The Supplier Add/Edit modal embeds full multi-select panels (`SearchableDropdownMultiPanel`) for `category_ids`, `sub_category_ids`, and `product_ids` (`Products Supplied`). Suppliers can be tagged with catalog products directly from their profile, complementing the `primary_supplier_id` link configured from the Product Master side.
 
 ### 8.7. Buyer & Client Management
-- **Endpoints:** `GET /buyers`, `POST /buyers`, `PATCH /buyers/{id}`, `POST /buyers/{id}/contacts`, `POST /buyers/{id}/addresses`.
+- **Endpoints:** `GET /buyers`, `POST /buyers`, `PATCH /buyers/{id}`, `DELETE /buyers/{id}`, `POST /buyers/import`, `GET /buyers/export`.
 - **Features:** Client directory with credit limits, client grades (A, B, C, Premium), multi-address delivery matrix (Billing, Shipping, Warehouse), and bulk import/export.
+- **True 3-Way Duplicate Detection (Note 66 in `buyerclient.txt`)**:
+  - Independent, multi-factor uniqueness checking across three distinct vectors: **Company Name**, **Calling Number**, and **WhatsApp Number**.
+  - **Company Name Uniqueness**: Case-insensitive exact match check is strictly enforced in `BuyerRepository.find_duplicate` and `BuyerService.import_file` even if phone numbers are omitted or different, ensuring company names cannot be duplicated.
+  - **Cross-Phone Collision Detection**: Strips non-digit characters and ensures phone numbers ($\ge 6$ digits) cannot collide with another buyer's primary calling number OR WhatsApp number (e.g. using an existing buyer's calling number as a WhatsApp number is immediately flagged and rejected).
+  - **Real-Time Client-Side Feedback**: Form inputs display live inline warning alerts (`⚠️ {fieldDuplicates.companyWarning}`, `⚠️ {fieldDuplicates.callingWarning}`, `⚠️ {fieldDuplicates.whatsappWarning}`) as the user types, blocking form submission if any duplicate is detected.
+  - **Safe Self-Update**: `exclude_id` ensures editing a buyer's existing profile does not trigger false-positive collisions against its own record.
+  - **In-File & Database Deduplication during Import**: Pre-scans batch records and cross-references existing database entries, rejecting intra-file and cross-database duplicates with clear comparative conflict details.
 
 ### 8.8. Inquiries, RFQs & AI Quotation Extractor
-- **Endpoints:** `GET /inquiries`, `POST /inquiries`, `POST /inquiries/{id}/rfq/dispatch`, `POST /inquiries/{id}/send-email-message`, `GET /inquiries/{id}/messages`, `POST /inquiries/{id}/quotes/manual`, `POST /inquiries/{id}/quotes/extract-pdf`, `POST /inquiries/{id}/convert-to-proforma`, `GET /inquiries/{id}/compare-matrix`.
+- **Endpoints:** `GET /inquiries`, `POST /inquiries`, `POST /inquiries/{inquiry_id}/items/import`, `GET /inquiries/sample-template`, `POST /inquiries/{id}/rfq/dispatch`, `POST /inquiries/{id}/send-email-message`, `GET /inquiries/{id}/messages`, `POST /inquiries/{id}/quotes/manual`, `POST /inquiries/{id}/quotes/extract-pdf`, `POST /inquiries/{id}/convert-to-proforma`, `GET /inquiries/{id}/compare-matrix`.
 - **Features:**
   - 3-layer RFQ and Quotation management lifecycle: `Buyer Directory` $\rightarrow$ `Consignments` $\rightarrow$ `Line Items & Quotation Matrix`.
+  - **Inquiry Lifecycle Tabs & Bulk Actions Engine (Matching Product Master Pattern)**:
+    - **Layer 1 (Company Dashboard)**:
+      - **Lifecycle Filter Tabs**: `All (N)`, `Pending (N)`, `Ongoing (N)`, `Approved (N)`, `Completed (N)` rendered directly above the table card with blue indicator underline and dynamic badge counters.
+      - **Interactive KPI Cards**: The 5 top summary cards (`Pending`, `Approved`, `Ongoing`, `Completed`, `Total Order`) are clickable, interactive filter triggers with active colored borders and elevated shadows that smoothly sync with the Lifecycle Tabs.
+      - **Bulk Actions Dropdown (`BulkActionsDropdown`)**: Positioned at the top-right of the table beside `+ ADD NEW`. Provides 1-click **Bulk Delete (Move to Trash)** with confirmation dialog and pending protection across selected buyer companies.
+    - **Layer 2 (Consignments Table)**:
+      - **Lifecycle Filter Tabs**: `All (N)`, `Proposed (N)`, `Partial Approved (N)`, `Fully Approved (N)` placed above the consignment table alongside the live search input.
+      - **Master & Row Multi-Select Checkboxes**: Table header contains a master "Select All" checkbox; rows have individual checkboxes bound to `selectedInquiryIds`.
+      - **Bulk Actions Dropdown**: Positioned at the top-right beside `+ Add Inquiry Item`. Enables 1-click **Bulk Delete (Move to Trash)** for selected consignments and child items.
+  - **Inquiry Product Bulk Import (Excel .xlsx, .xls & .csv)**:
+    - Dedicated full-page import workflow in Layer 3 Consignment Workspace (`ItemsView`) modeled identically on the Supplier Import system.
+    - Unified `Imp / Exp ▾` action button: provides *Sample File* download, *Import* (navigates to the dedicated import view), and *Export* (`.xlsx` or `.csv`).
+    - Dedicated import interface featuring drag/drop file upload, instant `📥 Download Sample CSV Template` button, format limits (max 5,000 rows, max 8 MB), and clear validation guidelines.
+    - **Interactive Column Mapping Wizard (`WizardModal`)**: Pre-parses files in-browser, auto-matches sheet headers to ERP fields using normalized synonyms (`MATCHED` badge), displays a live 5-row preview table, and validates rows before uploading.
+    - **Intelligent Product Master Resolution**: Resolves items first by Product Code / SKU (exact match) and falls back to Product Name or Tally Name. Automatically assigns the product's official Unit of Measurement (`uom_id`) and sets `requires_license` flags (highlighted in red) without requiring manual data entry.
+    - **Robust Error Handling & Rollup Recomputation**: Validates positive quantities and item statuses (`Proposed` or `Approved`, default `Proposed`). Failed rows are reported with exact spreadsheet row numbers and explanations. On completion, consignment weight, CBM, and status rollups recompute immediately and dispatch real-time WebSocket events (`inquiry.updated`).
   - **Interactive Inline Email Composer (Gmail/Figma-Style)**: Located in the Inquiries -> Emails tab. Allows users to write custom follow-up emails or replies directly to suppliers, auto-selects recipient emails from known suppliers, pre-fills context-aware subject lines, attaches files, and immediately dispatches outbound SMTP emails. Dispatched emails are instantly recorded into the communication timeline.
   - **Dynamic Supplier Resolution & Email Deduplication**: `GET /inquiries/{id}/messages` and the frontend Emails tab automatically resolve unlinked raw recipient/sender emails to official Supplier company names via `supplier_emails`, unifying company names and eliminating raw email duplicates in the communication filter dropdown.
   - **Strict 1-Quote AI Extraction Policy**: The inbound AI parsing worker only extracts quotation terms from initial inbound supplier replies. Subsequent follow-up correspondence and chats between sales personnel and suppliers are logged directly to the email timeline without AI duplication or spurious quotation matrix modifications. Communication badges dynamically reflect whether a quotation record actually exists in the matrix (displaying quote number and price) or whether it represents a discussion thread.
@@ -396,8 +453,18 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Features:** Immutable audit repository capturing actor, IP, timestamp, action type, and field-level before/after JSON delta diffs across all business entities.
 
 ### 8.12. Recycle Bin (Universal Soft-Delete & Recovery)
-- **Endpoints:** `GET /trash`, `POST /trash/{entity_type}/{id}/restore`, `DELETE /trash/{entity_type}/{id}/purge`.
+- **Endpoints:** `GET /trash`, `POST /trash/restore`, `POST /trash/permanent-delete`, `POST /trash/empty`.
 - **Features:** Centralized Recycle Bin displaying soft-deleted records across all tables. One-click recovery restores records with full relational integrity. Permanent purge is restricted to Super Administrators.
+- **Trash Conflict Detection & One-Click Restore Engine (`backend/app/common/trash_conflict.py`, `TrashConflictModal.tsx`):**
+  - **Problem Solved:** When a record (e.g. Category `Test 1`) is soft-deleted, it retains its unique database constraints in PostgreSQL. If a user later attempts to create or rename an active record with that same name or code, standard repository queries (which filter `deleted_at IS NULL`) would return `None`, allowing the service to attempt an `INSERT`. This caused PostgreSQL to throw an `IntegrityError` (`UniqueViolationError`), which FastAPI's catch-all handler reported to the user as an unhandled 500 error: *"An unexpected error occurred."*
+  - **Application-Level Pre-Check (`check_trash_or_duplicate`):** Service `create()` and `update()` methods across all 12 Master Data catalogs (Categories, Sub-Categories, Brands, UOM, HSN, Countries, States, Cities, Currencies, Supplier Types, Buyer Types, Companies), Products, Buyers, Suppliers, and Inquiries perform an unfiltered table lookup before saving.
+  - **Structured Error Details:** If a match is found with `deleted_at IS NOT NULL`, the backend raises `ConflictException` with structured details: `{ "in_trash": True, "trash_id": "<uuid>", "entity_type": "<Entity>", "name": "<Name>", "code": "<Code>" }`. If an active conflict exists, it raises standard 409 Conflict.
+  - **Collision-Free Code Generators (`code_exists_anywhere`):** Code slugs (`CAT-XXX`, `BR-XXX`, `ST-XXX`, `CMP-XXX`) check both active and soft-deleted records so auto-increments never collide with soft-deleted slugs.
+  - **Interactive Frontend Modal (`TrashConflictModal.tsx`):**
+    - Surfaced across all Master pages (`MasterPage.tsx`), Product Master, Buyer Management (`Buyers.tsx`), Supplier Directory (`Suppliers.tsx`), and Quick Inquiry Drawer (`Inquiries.tsx`).
+    - **1-Click Restore Action:** Calls `POST /api/v1/trash/restore`, restores the item, invalidates the global dropdown cache via `cache_manager.invalidate_dropdown()`, refreshes the active list, and smoothly closes the modal.
+    - **Zero Form Loss Guarantee:** If the user clicks `[ Change Name / Cancel ]`, the conflict modal dismisses while leaving the user's active creation/edit form completely open with all form fields, tags, and item rows preserved.
+    - **Inquiry Workflow Integration:** In `QuickInquiryDrawer`, if a consignment code exists in Trash, the modal offers `[ 🔄 Restore & Append My Items ]`, automatically restoring the consignment and appending newly specified line items into it without losing any of the user's inputs.
 
 ### 8.13. Organization & System Profile
 - **Endpoints:** `GET /organizations/profile`, `PATCH /organizations/profile`.
@@ -416,14 +483,122 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Dynamic Org Chart (`GET /reporting/org-chart`):** Renders the multi-level reporting tree in `/org-chart` using active `PRIMARY_REPORTING` relationships resolved dynamically against `UserRepository.list_all()`, including node `relationship_id`.
 
 ### 8.15. Inquiries, Consignments & Bidirectional WeChat / Email RFQ Ingestion
-- **Endpoints:** `GET /inquiries`, `POST /inquiries`, `GET /inquiries/{id}/items`, `POST /inquiries/{id}/items`, `POST /inquiries/rfq/bulk-dispatch`, `POST /inquiries/messages/send-direct-email`, `GET /inquiries/{id}/messages`, `GET /inquiries/wechat/callback`, `POST /inquiries/wechat/callback`.
+- **Endpoints:** `GET /inquiries`, `POST /inquiries`, `GET /inquiries/{id}/items`, `POST /inquiries/{id}/items`, `POST /inquiries/rfq/bulk-dispatch`, `POST /inquiries/{id}/send-email-message`, `POST /inquiries/{id}/send-wechat-message`, `GET /inquiries/{id}/messages`, `GET /inquiries/wechat/callback`, `POST /inquiries/wechat/callback`.
 - **Features:** 3-layer consignment management hierarchy (Buyer $\rightarrow$ Consignment $\rightarrow$ Line Items), bulk RFQ dispatch, multi-channel communication (Email IMAP/SMTP and Tencent WeCom/WeChat), and automated AI quotation extraction.
+  - **Interactive WeChat Direct Reply Composer:** Inside the **WeChat Messages** tab, salespersons can type and dispatch chat messages directly back to suppliers on WeChat/WeCom via `POST /inquiries/{id}/send-wechat-message`. Automatically pre-fills the recipient contact from the active chat history (e.g. `ChenXianNing` or `13736331731`), offers a quick supplier dropdown for multi-supplier threads, includes 1-click quick negotiation prompts (bulk discount request, delivery lead time confirmation, shipping terms, proforma invoice request), dispatches via Tencent WeCom API (`cgi-bin/message/send` with `msgtype: "text"`), logs outbound messages to the database with the salesperson's name, and broadcasts live WebSocket updates across all connected clients.
   - **Strict 1st-Conversation AI Quotation Extraction Policy:** AI quotation extraction operates strictly on the initial quotation reply from a supplier for each product line item (`inquiry_item_id`, `supplier_id`). Once the initial quotation is recorded in the Quotation Matrix, all subsequent messages between the sales team and the supplier (negotiations, counter-offers, shipping questions, chit-chat) are saved directly into the conversation history without invoking the AI extractor (0 OpenAI tokens consumed, zero latency, and zero risk of overwriting or duplicating baseline quotations).
   - **Body-First Item Matching for Multi-Product RFQs:** Inbound email replies evaluate the email message body first for explicit product codes and product names before checking the subject line. This prevents email threads with multiple products from falsely inheriting the subject line's first product code, ensuring quotes for secondary items (e.g. Ink Roll vs Band Sealer) route to the correct unquoted line item.
   - **WeCom & WeChat Integration (`wechat_service.py`):** Encrypted bidirectional integration using Tencent WeCom API. Generates bilingual Markdown RFQ cards. Smart resolution resolves both Chinese (`+86`) 11-digit numbers and Indian (`+91`) 10-digit numbers, as well as direct WeCom UserIDs. Strict response validation verifies `errcode: 0` before logging success badges.
   - **Automated Inbound Email Worker (`email_inbound_worker.py`):** Listens via IMAP for incoming supplier replies. Prioritizes exact sender email matching against `SupplierEmail` and `SupplierContact` directories before fallback text search (strictly excluding host procurement company names like "Yinglima" to prevent false positive supplier resolution from email signatures). Robust consignment code matching scans all registered database consignment codes against the subject line (supporting multi-word codes with spaces like `[SEA 1]`, prefix brackets, and case variations) and falls back to explicit product code matching (`#FNB-02391`) before supplier historical RFQ lookup. When an unquoted supplier reply arrives, extracts quotation unit prices, quantities, lead times, and terms via OpenAI GPT-4o-mini, automatically inserts `Quotation` records with mandatory `quantity` fields and product-specific line item matching, and broadcasts real-time WebSocket events.
   - **WeChat Callback Ingestion (`routes.py: /wechat/callback`):** Handles incoming supplier replies from WeChat/WeCom. Decrypts XML payloads, stores conversational message history, accurately extracts consignment codes with spaces and brackets, enforces the 1st-conversation extraction policy (skipping AI for subsequent chatter), and creates initial quotation rows with real-time UI notification.
   - **Supplier Thread Resolution:** Dynamic fallback lookup maps unlinked message sender emails to registered suppliers and prevents duplicate vendor dropdown entries.
+  - **Inquiry Consignment Line-Items Export (`GET /inquiries/{id}/export`):** Exports all active line items of a consignment to Excel (`.xlsx`) or CSV (`.csv`) via `InquiryService.export_consignment`. Generates clean tabular spreadsheets with columns: `Sr No`, `Consignment Code`, `Buyer Company`, `Product Code`, `Product Name`, `Quantity`, `UOM`, `Brand Preference`, `Product Specs / Remarks`, `License Required`, `Item Status`, `Tally Entry Posted`, `Quotation Count`, `Best Quote Price`, `Best Quote Currency`, `Selected Supplier`, and `Procurement Remarks`. Automatically resolves the lowest or approved quotation bid per line item and logs immutable audit records (`AuditAction.EXPORT`).
+
+### 8.16. Product Price Directory & Supplier Comparison Engine
+- **Files:** `backend/app/masters/product_prices/` (`routes.py`, `service.py`, `repository.py`, `schemas.py`), `frontend/src/pages/ProductPrices.tsx`.
+- **Route Prefix:** `/api/v1/inventory/product-prices`.
+- **Frontend URL:** `/inventory/product-prices` (with aliases `/product-prices` and `/masters/product-prices`).
+- **Data Model:** Extends `SupplierProductLink` (`supplier_product_links`) with `unit_price` (Double Precision), `currency` (Varchar(10), default 'CNY'), `moq` (Double Precision), `notes` (Text), and `updated_at` (Timestamp with TZ).
+- **Optimized CTE Architecture (< 500ms):**
+  - Paginated CTE isolates the 50 product rows first before joining supplier aggregates, delivering high performance across 3,500+ items without database timeouts.
+  - Computes `best_price` (lowest quoting unit price), `primary_supplier_name`, and `supplier_count` in a single query.
+- **Instant 0ms Optimistic UI & Hover Pre-Fetching Performance Engine:**
+  - **Hover Pre-Fetching:** Moving the mouse cursor over table rows, `[ N Suppliers ▾ ]` badges, `+ Assign`, `+ Quote`, or `Compare ▾` buttons pre-caches quote data into memory 200–300ms before click (`prefetchProductSuppliers`), eliminating loading spinners and enabling instant 0ms accordion opening.
+  - **0ms Zero-Supplier Expansion:** If `supplier_count === 0`, the comparison drawer opens immediately with empty quotes and quick-add row with zero backend network requests.
+  - **Instant Optimistic Quote Creation & Assignment:** Saving a new quote (via modal or sub-table quick-add) updates React state in 0ms—immediately closing the modal, updating the best price badge, primary vendor, and supplier count, sorting quotes ASC, and triggering background server persistence with error rollback.
+  - **Instant 0ms Inline Editing & Deletion:** Modifying or deleting quotation prices updates the sub-table and recalculates the main row's lowest price badge in 0ms without requiring full 3,500-product table re-queries.
+- **Option 1 Expandable Sub-Table Comparison:**
+  - Main row displays Product Photo, Name, Code, Category, Brand, Best Price badge (green if priced, amber if unpriced), and Primary Supplier with an interactive `[ N Suppliers ▾ ]` badge.
+  - Expanding a row renders a dedicated comparison sub-table detailing every vendor who quoted that SKU: Supplier Name, Location, Quoted Price, Currency, MOQ, Notes/Terms, and Quote Date.
+  - Includes an inline quick-add quote bar (`+ Add Another Supplier Quote:`) to link additional suppliers and prices directly within the table.
+- **Products Master Aligned Top Filter Toolbar:**
+  - **Funnel Toggle Button (`filterOpen`):** Dedicated header action button styled in active blue (`#0061f2`) or slate (`#475569`) that toggles an expandable filter panel above the table card.
+  - **Expandable Filter Panel:** Renders `Category` (scoped to product categories), `Sub Category` (dynamically scoped to selected Category), `Brand` (brands lookup), `Pricing Status` (`All`, `Priced Items Only`, `Unpriced Items Only`), and action buttons `[Reset]` (clears all filters and search) and `[Search]` (triggers query execution).
+  - **Integrated Table Toolbar:** Relocated the catalog search bar with instant `✕` clear and the `Items/Page` selector (`10`, `50`, `100`) into the table card's top bar, matching the Products Master layout.
+- **Universal Filter-Aware Bulk Export Engine (`GET /api/v1/inventory/product-prices/export`):**
+  - **`📥 Export ▾` Dropdown:** Header toolbar dropdown supporting `📊 Export to Excel (.xlsx)` and `📄 Export to CSV (.csv)` with live loading feedback (`⏳ Exporting...`).
+  - **Filter Awareness:** Respects active filters (`search`, `category_id`, `sub_category_id`, `brand_id`, `has_price`). If filtered, exports the filtered subset; if unfiltered, streams the entire directory catalog (up to 50,000 products, eliminating the former 200-row limit).
+  - **Openpyxl Corporate Styling:** Dark Corporate Navy (`#1E3A8A`) headers with bold white text, frozen top row (`A2`), Excel auto-filters across all headers, alternating zebra striping (`#F8FAFC`), currency number formatting (`#,##0.00`), and auto-fitted column dimensions.
+  - **Authenticated Direct Download:** Employs `downloadExport` with Bearer tokens and direct blob downloads to prevent popup blockers and blank browser tabs.
+- **Universal Bulk Import & Sample Template:**
+  - Universal bulk Excel import via `POST /api/v1/inventory/product-prices/import` with in-memory product/supplier resolution, price validation, and error reporting.
+### 8.17. Local Purchase Orders & Domestic Procurement Engine
+- **Files:** `backend/app/purchases/local/` (`models.py`, `routes.py`, `service.py`, `repository.py`, `schemas.py`), `frontend/src/pages/purchases/LocalPurchases.tsx`, `frontend/src/pages/purchases/LocalPurchaseForm.tsx`, `frontend/src/types/localPurchase.ts`.
+- **Route Prefix:** `/api/v1/purchases/local`.
+- **Frontend URLs:** `/purchase/local` (List view), `/purchase/local/new` (Add Purchase form), `/purchase/local/:id/edit` (Edit Purchase form), with legacy alias `/local-purchase`.
+- **Database Tables:**
+  - `local_purchases`: Owns domestic purchase records (`organization_id`, `organization_name`, `branch_id`, `branch_name`, `supplier_id`, `supplier_name`, `invoice_no`, `invoice_date`, `currency` default 'RMB', `invoice_total_value`, `packing_forwarding`, `transport_expense`, `offloading_expense`, `other_expense`, `total_expenses`, `loading_expense_pct`, `items_total_basic`, `items_total_vat`, `items_total_landing`, `total_quantity`, `remarks`, `status`).
+  - `local_purchase_items`: Owns line items (`purchase_id`, `product_id`, `product_name`, `product_code`, `hsn_code`, `quantity`, `unit_rate`, `vat_rate`, `item_total`, `vat_amount`, `expense_per_unit`, `unit_landing_rate`, `total_landing_rate`).
+- **Cascading Organization & Branch Scope:**
+  - Replaces legacy plain warehouse dropdowns with two linked controls: **Organization List** (`master_companies` via `/masters/company-list/lookup`) and **Operating Branch** (dynamically filtered to the chosen company's branches JSON array).
+- **Strict Organization Scoping & Multi-Tenant Product Isolation:**
+  - Line-item products are strictly scoped to the chosen organization (`p.organization_id === organizationId || p.organization_ids.includes(organizationId)`).
+  - Products lacking organization assignment (`null` or empty `organization_ids`) are strictly excluded, eliminating cross-tenant product leakage (e.g. `Test Group` vs `Inhyma` vs `Darsh Impex`).
+  - When no organization is selected, product search candidates evaluate strictly to empty (`[]`).
+  - Changing organization when items are already populated prompts the user with a confirmation modal (`Changing the Organization will clear previously added line items...`) and cleanly resets items upon approval to avoid corrupted multi-org orders.
+- **Card 3 Search Lockout & Padlock Guidance:**
+  - The **`PRODUCT SEARCH`** input is completely disabled until an Organization is selected in Card 1 (`disabled={!organizationId}`).
+  - Renders a dashed amber border, padlock icon, and explicit guidance placeholder: `🔒 Select an Organization in Card 1 to enable product search & add items`.
+- **Product Master Visual Style Validation Standard:**
+  - Comprehensive client-side validation (`validateForm`) audits all mandatory fields: `organizationId`, `branchId`, `supplierId`, `invoiceNo`, `invoiceDate`, `invoiceTotalValue > 0`, non-empty `items`, and all items `unit_rate > 0`.
+  - **Top Error Summary Alert Banner:** Renders a prominent red alert box (`#fef2f2`, border `#ef4444`, text `#991b1b`) listing all missing fields and invalid line items at the top of the form, with smooth auto-scrolling to top on submit failure.
+  - **Field-Level Visual Cues:** Invalid inputs display bright red borders (`1.5px solid #ef4444` / `2px solid #ef4444`), red focus glow (`boxShadow: 0 0 0 3px rgba(239,68,68,0.15)`), and soft red background tint (`#fff5f5`).
+  - **Contextual Warning Text:** Warning annotations appear underneath invalid fields: `▲ [Field Name] is required`.
+  - **Dynamic Error Clearing & Scope Reset:** Errors dynamically clear the moment the user selects a value or types into the invalid control. Changing Organization, Branch, or Supplier immediately resets `submitAttempted = false` and wipes all validation error banners (`setErrors({})`). Typing valid positive Unit Rates automatically re-evaluates all line items and clears `unit_rates` and `discrepancy` errors in real time.
+- **Mandatory Positive Unit Rate Policy (`gt=0`):**
+  - Line items with zero unit price (`unit_rate: 0`) are strictly blocked on both tiers.
+  - **Backend Enforcement:** Pydantic schema `LocalPurchaseItemCreate` enforces `unit_rate: float = Field(..., gt=0)`, and `service.py` performs rigorous non-empty and positive price checks during `create_purchase` and `update_purchase`.
+  - **Frontend Cell Highlighting:** Rows with zero unit rate are highlighted with red cell borders (`2px solid #ef4444`), soft red cell backgrounds, and warning labels `▲ Rate > 0 req.`, with validation error reporting the exact row numbers (e.g. `Row #1 (Product Name)`).
+  - Direct typing auto-strips leading zeros, allowing intuitive price entry without manual backspacing.
+- **Inhyma ERP Style Dedicated Product Search & Click-to-Add Workflow:**
+  - Dedicated **`PRODUCT SEARCH`** card with `Enter Product Name / Model No / Product Code...` input positioned directly above consignment items.
+  - Clicking or focusing immediately opens a pure white (`#ffffff`) absolute dropdown strictly below with 0ms in-memory client filtering across up to 1,000 cached products, dynamically scoped to the selected **Organization List**, with background API fallback.
+  - Clicking any product immediately appends it into the **`PRODUCT ITEM`** consignment table, pre-filling standard cost, VAT%, HSN, and setting quantity to 1, while clearing search and closing the dropdown.
+  - Consignment table displays clean, structured product names with bordered product code badges (eliminating confusing nested in-table search popups). All items are strictly added via the central Product Search to ensure 100% catalog integrity.
+- **Single Gross Invoice Total with VAT (RMB ¥):**
+  - Consolidates separate basic/GST fields into a single header field: **`Invoice Total Value with VAT (RMB) *`**.
+  - Default currency is set to **RMB (¥)** (CNY) with selectable support for INR (₹) and USD ($).
+  - Line items inherit HSN and VAT % from Product Master (e.g. standard 13% Chinese VAT or HSN `refund_vat_percent`), calculating Basic Item Total (`Qty * Rate`) and VAT Amount (`Basic * (VAT% / 100)`).
+- **Smart Financial Reconciliation Engine & Unconditional Hard-Stop:**
+  - Live comparison calculates discrepancy: $\Delta = |\text{Invoice Total Value} - \text{Line Items Gross Total with VAT}|$.
+  - **Clean & Foolproof Financial Policy:**
+    - **Green Banner (`#f0fdf4`, border `#86efac`):** `✅ Invoice Total Matches Line Items Perfectly` when $\Delta \le 0.05$. Form submission is allowed.
+    - **Red Blocker Banner (`#fef2f2`, border `#ef4444`):** When $\Delta > 0.05$, immediately displays red alert: `⛔ Invoice Discrepancy Detected: Entered Total vs Items Sum with VAT... Submission is blocked until line items match the invoice total.`
+  - **Zero Clutter (No Status or Currency Dropdowns):** The redundant Status and Currency selector dropdowns were removed. Local domestic purchases are strictly standardized to Chinese RMB (`¥`), saving automatically with verified accounting integrity.
+  - **Backend Protection:** `service.py` strictly prevents saving unbalanced orders, raising `BadRequestException` if $\Delta > 0.05$ during both creation and update.
+- **Value-Based (VB) Proportional Landing Expense Engine:**
+  - All landing expenses (*Packing & Forwarding*, *Transport*, *Offloading*, *Other Charges*) are recorded in purchase currency.
+  - $\text{Total Expenses} = \sum \text{expenses}$.
+  - $\% \text{ Loading Expense} = (\text{Total Expenses} / \text{Basic Items Total}) \times 100$.
+  - Each item absorbs expense proportional to its basic value:
+    $$\text{Expense Per Unit} = \left(\frac{\text{Item Total}}{\text{Items Total Basic}}\right) \times \left(\frac{\text{Total Expenses}}{\text{Quantity}}\right)$$
+  - $\text{Unit Landing Rate (VB)} = \text{Unit Rate} + \text{Expense Per Unit}$.
+  - $\text{Total Landing Rate (VB)} = \text{Quantity} \times \text{Unit Landing Rate (VB)}$.
+- **Automatic Shipment Planning Integration (`GET /api/v1/purchases/local/planning-items`):**
+  - When Organization, Branch, and Supplier are selected in Card 1, the frontend automatically syncs with the active Shipment Planning sheet for that branch (e.g. matching "Inhyma Mumbai" or active sheet matching the receiving branch location).
+  - Identifies planned purchase line items where the vendor matches the selected Supplier (e.g. "Inhyma" or Supplier Name).
+  - Resolves product metadata (Product Master ID, Product Code, HSN code, Standard Cost) and planned order quantities.
+  - Auto-populates the **`PRODUCT ITEM`** consignment table with `[📦 Planned]` visual badges when the table is empty or contains prior planned items, saving purchasing officers from manual re-entry.
+  - Displays a dedicated status badge in the Card 4 Header Bar: `📦 N planned item(s) from [Sheet Name]` alongside a `[Load Planned Items]` reload action button.
+- **100% Fluid Auto-Fit Layout Standard (Zero Dead Whitespace at 80%-150% Zoom):**
+  - Replaced legacy constrained `maxWidth: 1400px` layout with a 100% fluid `.page` container (`width: 100%, padding: 16px 24px, boxSizing: border-box`).
+  - Card 1 Header uses CSS Grid with `repeat(auto-fit, minmax(200px, 1fr))` across Organization, Branch, Supplier, Invoice No, and Invoice Date.
+  - Card 1 Row 2 features 3 fluid columns: Currency, Invoice Total Value with VAT, and Bill Document Upload + Extraction.
+  - Card 2 Expenses, Card 3 Product Search, Card 4 Items Table, and Card 5 Summary Cards automatically stretch to 100% of viewport width seamlessly at any browser zoom level (50%, 80%, 100%, 125%, 150%) matching the Product Master responsive standard.
+- **Dual-Mode Automated Bill Extraction (PDF & Excel):**
+  - **Excel / CSV:** Parses `.xlsx`, `.xls`, `.csv` via `openpyxl`/`csv` to map headers (`Product/Item`, `Code/Model`, `HSN`, `Qty`, `Rate`, `VAT%`), fuzzy matching items against the Product Master.
+  - **PDF & Scanned Bills:** Extracts text via `pypdf` and executes structured AI invoice extraction via OpenAI GPT-4o-mini (with fallback pattern matching), extracting supplier name, invoice no, invoice date, currency, total value, and table lines directly into the form.
+- **Corporate Openpyxl Export Engine (`GET /api/v1/purchases/local/export`):**
+  - Exports filtered or complete purchase listings with Dark Navy (`#1E3A8A`) headers, frozen panes (`A2`), auto-filters, zebra striping, and currency formatting.
+- **Local Purchase Details Preview Modal (`LocalPurchaseDetailModal.tsx`):**
+  - Clicking the blue invoice number link or selecting `👁️ View Details` from the row kebab menu opens a comprehensive, read-only preview modal without navigating to the Edit page.
+  - Displays:
+    - **Header:** Order title with status badge (`Confirmed`/`Pending`) and dismiss button.
+    - **Top 3-Column Info Card:** Order Details (Created timestamp, Created By, Currency), From (Supplier name/details), and To (Organization name and receiving branch location).
+    - **Quick Details Strip:** Receiving warehouse, Invoice number, Bill Document download link (`📥 Download File`), Invoice Date, Basic Items Total, and Gross Invoice Total with VAT.
+    - **Expenses Breakdown Card:** Itemized Packing, Transport, Offloading, Other Charges, Total Expenses, and `% Loading Expense (VB)`.
+    - **Product Summary Table:** Consignment rows with product code badges, HSN, quantity, unit rate, basic total, allocated expense per unit, unit landing rate (VB), line landing total, and grand total footer.
+    - **Remarks & Actions:** Delivery instructions and an `✏️ Edit Local Purchase` quick action button.
 
 ---
 
@@ -451,7 +626,37 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 **Files:** `frontend/src/components/ImportWizard.tsx`, `backend/app/common/importer.py`
 
 - **Workflow:** File Upload (.xlsx / .csv) $\rightarrow$ Header Fuzzy Matching $\rightarrow$ Column Mapping UI $\rightarrow$ Client-Side Validation $\rightarrow$ Transactional Batch Insertion $\rightarrow$ Error Log Report.
-- **Duplicate Prevention:** Validates existing database records by TIN, Email, Phone, or Code before commit.
+- **Duplicate Prevention Subsystem:**
+  - **Buyers (`/buyers/import`):** 3-way deduplication across sheet rows and active database records checking `Company Name` (case-insensitive), `Calling Number`, and `WhatsApp Number`.
+  - **Suppliers (`/suppliers/import`):** Company Name deduplication against active database records and in-file batches. Null-safe validation for state code comparisons (`s.code and s.code.lower() == state_raw.lower()`).
+  - **Products (`/masters/products/import`):** Strict dual-uniqueness on `Product Name` (Tally/Standard) and `Product Code` with automatic CBM calculation from `(L x W x H) / 1,000,000`.
+  - **Inquiries (`/inquiries/{id}/items/import`):** Matches line-items by Product Code, Product Name, or Tally Name against Product Master; automatically inherits UOM and license flags; updates consignment total CBM and gross weight rollups.
+  - **Master Data (`Categories`, `Brands`, `UOM`, `Buyer Types`, `HSN`):** Auto-generates missing code fields (`CAT-XXX`, `BR-XXX`, `BT-XXX`, `UOM-XXX`) from human-readable names and properly maps `Refund VAT %` on HSN imports.
+
+### 11.2. Verification Test Suite & Excel Test Workbooks (`testingimportfile/`)
+
+A dedicated set of 8 pre-built, styled Excel workbooks (`.xlsx`) is maintained in `testingimportfile/` for end-to-end import testing, duplicate conflict validation, and regression assurance across the 4 core business modules:
+
+| Module | New Data File (Clean Import) | Duplicate Data File (Conflict / Skip Verification) | Validation & Deduplication Rules Tested |
+| :--- | :--- | :--- | :--- |
+| **Supplier Master** | `supplier_new_data.xlsx` | `supplier_duplicate_data.xlsx` | Tests valid Country/State/City hierarchy, phone formats (7-15 digits), existing DB Company Name deduplication (`ConflictException`), and intra-file batch duplicates. |
+| **Buyer (Client) Master** | `buyer_new_data.xlsx` | `buyer_duplicate_data.xlsx` | Tests valid Buyer Types, Country/City mappings, Note 66 3-way deduplication across **Company Name**, **Calling Number**, and **WhatsApp Number** ($\ge 6$ clean digits), plus intra-batch collision rejection. |
+| **Product Master** | `product_new_data.xlsx` | `product_duplicate_data.xlsx` | Tests Category/Sub-Category parent-child linkage, valid UOM and HSN codes, required packaging dimensions (Gross Weight > 0, Pack. Qty > 0, CBM > 0), and dual-uniqueness on `Product Name` and `Product Code`. |
+| **Inquiry Line Items** | `inquiry_items_new_data.xlsx` | `inquiry_items_duplicate_data.xlsx` | Tests consignment line item import matching active Product Master items by SKU/Code or Name, status assignment (`Approved`/`Proposed`), duplicate item line detection, and invalid quantity/unmatched product error reporting. |
+
+### 11.1. Media & File Storage Subsystem (Neon S3, Supabase & Local Disk Fallback)
+
+**Files:** `backend/app/common/storage.py`, `backend/app/core/config.py`, `backend/app/main.py`
+
+- **Tri-Layer Storage Engine:** Provides unified storage abstractions for product images, supplier factory media, and quotation attachments:
+  1. **Neon S3 Object Storage (Primary Cloud Storage):** When `AWS_ENDPOINT_URL_S3`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` are provided in `.env`, uploads files directly to Neon S3-compatible public buckets (`product-images`, `supplier-media`, `quotations`) via `boto3` (using path-style addressing `addressing_style: path`), returning direct high-speed CDN/public URLs (`https://<project-storage-host>/<bucket>/<filename>`).
+  2. **Supabase Cloud Storage (Secondary Cloud Fallback):** When `SUPABASE_BASE_URL` and `SUPABASE_AUTH_KEY` / `SUPABASE_SERVICE_KEY` are provided in `.env`, uploads files directly to target public buckets via async HTTP (`httpx`), automatically creating the buckets if not present.
+  3. **Local Filesystem Fallback:** When running offline or without cloud bucket credentials, `save_uploaded_file` seamlessly saves uploaded files to local disk under `uploads/<local_subfolder>/` (`uploads/products/`, `uploads/suppliers/`, `uploads/quotations/`).
+- **Static Mounting:** FastAPI mounts `uploads/` statically at both `/uploads` and `/static/uploads` via `StaticFiles(directory=uploads_dir)` in `app/main.py`, ensuring instant browser access.
+- **Filename Sanitization & MIME Resolution:**
+  - `sanitize_filename(filename)`: Strips path traversal characters (`..`, `/`, `\`), collapses repetitive delimiters, enforces safe ASCII tokens, and limits base names to 120 characters prefixed with a unique UUID (`{uuid4}_{clean_name}`).
+  - `guess_content_type(filename)`: Resolves standard MIME types (`image/jpeg`, `image/png`, `image/webp`, `video/mp4`, `application/pdf`, `.xlsx`, `.csv`).
+- **Database Persistence Model:** Database entities (`products.images`, `suppliers.media_urls`) store URL arrays (e.g. `["https://br-odd-tree-aybmdshz.storage.../product-images/xyz.webp"]` or `["/uploads/products/xyz.webp"]`), providing 100% portability across cloud and local storage backends without requiring database schema alterations.
 
 ---
 
@@ -529,6 +734,23 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Products**| `POST` | `/api/v1/products` | Create product record | `product.create` |
 | **Products**| `PATCH` | `/api/v1/products/{id}` | Update product & technical specs | `product.update` |
 | **Products**| `GET` | `/api/v1/products/{id}/datasheet-pdf` | Generate ReportLab PDF datasheet | `product.read` |
+| **Product Prices**| `GET` | `/api/v1/inventory/product-prices` | List products with best supplier prices (CTE paginated) | `product.view` |
+| **Product Prices**| `GET` | `/api/v1/inventory/product-prices/suppliers-lookup` | Fast lightweight supplier lookup for quote assignment | `product.view` |
+| **Product Prices**| `GET` | `/api/v1/inventory/product-prices/{id}/suppliers` | List all suppliers and quotes for a product | `product.view` |
+| **Product Prices**| `POST` | `/api/v1/inventory/product-prices/assign` | Assign or update supplier quote for a product | `product.update` |
+| **Product Prices**| `PATCH` | `/api/v1/inventory/product-prices/{link_id}` | Inline update price, currency, MOQ, or notes | `product.update` |
+| **Product Prices**| `DELETE` | `/api/v1/inventory/product-prices/{link_id}` | Delete supplier price quote | `product.update` |
+| **Product Prices**| `GET` | `/api/v1/inventory/product-prices/export` | Export price directory to Excel (.xlsx) or CSV | `product.export` |
+| **Product Prices**| `GET` | `/api/v1/inventory/product-prices/sample-template` | Download bulk price import template (.xlsx) | `product.import` |
+| **Product Prices**| `POST` | `/api/v1/inventory/product-prices/import` | Universal bulk import supplier prices from Excel | `product.import` |
+| **Local Purchases**| `GET` | `/api/v1/purchases/local` | List local purchases with filters & pagination | Authenticated |
+| **Local Purchases**| `POST` | `/api/v1/purchases/local` | Create local purchase with VB landing expenses | Authenticated |
+| **Local Purchases**| `GET` | `/api/v1/purchases/local/{id}` | Inspect local purchase details & line items | Authenticated |
+| **Local Purchases**| `PATCH` | `/api/v1/purchases/local/{id}` | Update purchase details & line items | Authenticated |
+| **Local Purchases**| `DELETE` | `/api/v1/purchases/local/{id}` | Soft delete local purchase order | Authenticated |
+| **Local Purchases**| `POST` | `/api/v1/purchases/local/calculate-preview` | Live Value-Based landing rates calculation preview | Authenticated |
+| **Local Purchases**| `POST` | `/api/v1/purchases/local/extract-bill` | Automated PDF & Excel bill data extraction | Authenticated |
+| **Local Purchases**| `GET` | `/api/v1/purchases/local/export` | Corporate Excel (.xlsx) export | Authenticated |
 | **Suppliers**| `GET` | `/api/v1/suppliers` | List suppliers with multi-column sort | `supplier.read` |
 | **Suppliers**| `POST` | `/api/v1/suppliers` | Create supplier record | `supplier.create` |
 | **Suppliers**| `PATCH` | `/api/v1/suppliers/{id}` | Update supplier profile & bank details | `supplier.update` |
@@ -558,6 +780,7 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Inquiries**| `POST` | `/api/v1/inquiries/inbound-webhook` | Inbound webhook for WeChat/Email auto-ingestion | Public (API / Webhook) |
 | **Inquiries**| `GET` | `/api/v1/inquiries/items/{item_id}/quotations` | List quotations with turnaround & lead times | `inquiry.read` |
 | **Inquiries**| `GET` | `/api/v1/inquiries/quotations/documents` | Fetch all quotation sheets for Gallery | `inquiry.read` |
+| **Inquiries**| `GET` | `/api/v1/inquiries/{id}/export` | Export consignment line items to Excel/CSV | `inquiry.read` |
 | **Inquiries**| `POST` | `/api/v1/inquiries/bulk-tally-post` | Bulk mark items as Tally Entry Posted | `inquiry.update` |
 | **Public** | `GET` | `/api/v1/public/quotes/{token}` | Fetch RFQ specifications for vendor | Public (Token Validated) |
 | **Public** | `POST` | `/api/v1/public/quotes/{token}` | Submit vendor quote bids & lead times | Public (Token Validated) |
@@ -603,6 +826,39 @@ When building new features, modifying endpoints, or merging external components 
 - ❌ **NEVER alter database tables manually**: Keep all migrations version-controlled in `backend/alembic/versions/`.
 - ❌ **NEVER modify user permissions without invalidating cache**: Always call `cache_manager.invalidate_user_permissions(user_id)`.
 
+### 14.3. Git Pull & Remote Merge Invariant: Universal Bulk Import & Deduplication Engine
+
+Whenever pulling from remote branches or merging collaborative Git branches, the following **Universal Bulk Import & Deduplication Engine** rules represent verified, production-grade logic that must **NEVER** be regressed, deleted, or overwritten:
+
+1. **Buyer (Client) Master Deduplication (`backend/app/buyers/service.py`, `repository.py`)**:
+   - **Note 66 3-Way Deduplication**: Incoming rows are checked across `company_name` (case-insensitive trim), `contact_calling_number`, and `contact_whatsapp_number`.
+   - **Cross-Phone Protection**: Strips non-digit characters (`re.sub(r"\D", "", phone)`); if length $\ge 6$ digits, checks that a new calling number does not collide with ANY existing calling or WhatsApp number, and vice versa.
+   - **Batch Collision Guard**: Tracks `seen_in_batch` set; duplicate company names within the same upload are rejected with `ConflictException`.
+   - **Master Links**: Strict validation of `Buyer Type` (mapped to valid enum/master values), `Country`, and `Product Categories`.
+
+2. **Supplier Master Deduplication & Hierarchy Validation (`backend/app/suppliers/service.py`, `validators.py`)**:
+   - **Company Uniqueness**: Checks `company_name` against database (`existing_map`) and in-file batch duplicates.
+   - **Null-Safe State Resolution**: Validates state by country ID and matches name or code safely: `s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower())` (prevents `AttributeError` on `None` state codes).
+   - **Phone Digits Rule**: Calling, WhatsApp, and WeChat numbers must contain between 7 and 15 digits (including international country code prefix).
+   - **City / Province / Country & Category Hierarchy**: Every supplier row must resolve to an existing Country, State, and City in geography masters, and valid Category / Sub-Category links.
+
+3. **Product Master Dual-Uniqueness & Automated Dimensions (`backend/app/masters/products/service.py`, `validators.py`)**:
+   - **Dual Uniqueness**: Both `product_name` / `product_name_tally` and `product_code` are strictly unique across active products (`seen_names` and `seen_codes`).
+   - **Parent-Child Category Verification**: Sub-category is verified to belong to the chosen category (e.g. `Band sealing Machine` under `Machines`).
+   - **Packaging Computations**: Enforces `Pack. Qty > 0`, `Pack. Gross Weight > 0`, and automatically calculates `Pack. Unit CBM = (Length x Width x Height) / 1,000,000` if Length, Width, Height are supplied.
+
+4. **Inquiry Consignment Line Items Import (`backend/app/inquiries/service.py:import_items`)**:
+   - **Flexible Product Resolution**: Matches line items by `Product Code`, `Product Name`, or `product_name_tally` against Product Master.
+   - **Auto-Inheritance**: Automatically copies `uom_id` and `requires_license` flags from the resolved product; validates positive integer/float quantity.
+   - **Rollup Synchronization**: Calling `import_items` automatically invokes `_refresh_rollup` to recalculate total CBM, gross weight, item count, and proposed/approved totals.
+
+5. **Master Data ("Etc" General Masters) Code Auto-Generation**:
+   - Across all 12 master modules (Brands, Categories, Sub-Categories, UOM, Buyer Types, Supplier Types, Cities, Countries, States, HSN, Currencies, Company List), if the `Code` column is omitted from import sheets, a unique code slug (`CAT-XXX`, `BR-XXX`, `BT-XXX`, `UOM-XXX`) is automatically synthesized from the title/name.
+   - HSN Code validator strips percent signs/commas and correctly casts `Refund VAT %` to `float`.
+
+6. **Standard Verification Workbooks (`testingimportfile/`)**:
+   - Maintain the 8 reference Excel files in `testingimportfile/` (`*_new_data.xlsx` and `*_duplicate_data.xlsx`) as the definitive regression test suite. Any code merge touching import files must pass these 8 files with zero regressions.
+
 ---
 
 ## 15. Deployment, Environment Variables & Operations
@@ -616,8 +872,8 @@ DEBUG=false
 SECRET_KEY=your-super-secret-key-32-chars-minimum
 API_V1_PREFIX=/api/v1
 
-# Database Configuration (Supabase PostgreSQL - Session Pooler port 5432)
-DATABASE_URL=postgresql+asyncpg://postgres.<PROJECT_REF>:<DB_PASSWORD>@aws-0-ap-south-1.pooler.supabase.com:5432/yinglima_erp?ssl=require
+# Database Configuration (Neon Serverless PostgreSQL)
+DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_7HTzR5qPbvmx@ep-old-fire-axzu5kp9-pooler.c-4.us-east-2.aws.neon.tech/yinglima_erp?ssl=require
 DATABASE_DISABLE_STATEMENT_CACHE=true
 
 # Database Environment Profiles (Switch via: copy .env.<db_name> .env)
@@ -678,16 +934,20 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Missing Quote Self-Healing**: If an inbound message was logged to the Emails timeline but quotation rows were interrupted or pending, the poller identifies that items remain unquoted for that supplier and automatically proceeds with AI extraction rather than discarding the message.
 - **Subsequent Follow-ups & Negotiations**: Once `QT-AUTO-XX` exists for `(inquiry_item_id, supplier_id)`, all subsequent negotiation emails, price discussions, and delivery conversations bypass AI extraction (**0 OpenAI API calls**) and are appended directly to the `Emails` timeline.
 - **Thread-Aware Item Inheritance**: Short follow-up emails without explicit SKU numbers automatically inherit the product item (`inquiry_item_id`) from the active thread history with that supplier.
-- **Dynamic Live Polling**: Frontend automatically live-syncs quotes and email messages every 2.5 seconds, ensuring updates reflect instantly without manual browser refresh.
+- **Smart Hybrid Real-Time & Fallback Sync**: The Inquiries module leverages primary real-time WebSocket push updates (`useLiveModule("inquiries")`) for sub-second zero-latency display of incoming WeChat and parsed email quotes, backed by a gentle 15-second visibility-aware fallback poll that automatically pauses when the browser tab is hidden and instantly refreshes upon window focus to eliminate network congestion and CPU overhead.
 ### Universal Search & Deep-Linking Architecture (`GET /search?q=`)
 - **Global Search Endpoint (`app.search.service`)**: Searches asynchronously across Organization, Users, Suppliers, Buyers, Products, Product Categories & Sub-Categories, Brands, HSN Codes, Geography Masters (Countries, States, Cities), Currencies & UOM, **Inquiries & Consignments** (`ConsignmentCode`, `InquiryItem`), and **Trash** (soft-deleted records across all models via `MODEL_MAP`).
 - **Client-Side Deep-Linking (`UniversalSearch.tsx`)**: Clicking a search result carries the matched record's UUID via query parameter (e.g. `/suppliers?id=8973e972-...`, `/buyers?id=...`, `/masters/products?id=...`, `/users?id=...`, `/inquiries?buyerId=...&inquiryId=...`, `/trash?q=...`).
 - **Automatic Drawer & Modal Invocation**: Destination pages (`Suppliers.tsx`, `Buyers.tsx`, `Users.tsx`, `masters/Products.tsx`, `Inquiries.tsx`, `Trash.tsx`, and `MasterPage.tsx` for shared masters) detect parameters on mount or route transition and open corresponding views/drawers automatically.
 
-### Global Paste Auto-Clean Sanitizer (`lib/pasteSanitizer.ts`)
-- **System-Wide Clipboard Interceptor**: Listens globally to all paste events on HTML `<input>` and `<textarea>` elements across all forms, tables, search bars, and modals.
-- **Artifact Stripping**: Automatically strips leading and trailing spaces, tab characters (`\t`), newlines (`\n`), and non-breaking space characters (`\u00A0`) captured when copying cells from Excel, PDFs, or web tables.
-- **Native React State Dispatch**: Seamlessly triggers React's synthetic `onChange` and `input` events so form state updates immediately without manual backspacing. Excludes password and file upload inputs.
+### Collapsible Masters Navigation Sub-Menu Architecture (`lib/nav.ts`, `components/AppShell.tsx`)
+- **Top-Level Clean Workspace**: Consolidates 12 lookup and catalog configuration masters (`Cities`, `Provinces/States`, `Countries`, `Currencies`, `UOM`, `HSN Codes`, `Categories`, `Sub Categories`, `Brands`, `Supplier Types`, `Buyer Types`, and `Organization List`) into an expandable/collapsible **`Masters ▾`** accordion menu under `SETTINGS`.
+- **Protected Primary Business Modules**: Primary daily operational tools remain directly accessible as top-level sidebar items:
+  - `Inquiries` under `SALE`
+  - `Product Master` and `Product Gallery` under `INVENTORY`
+  - `Suppliers` and `Buyers` under `CONTACT`
+- **Smart Auto-Expansion**: The sidebar inspects the active route on mount and navigation; if the user accesses any master page, the `Masters` group automatically expands and highlights the active sub-item.
+- **Responsive Collapse Mode**: Fully compatible with the 72px icon-collapsed sidebar state (`sidebarCollapsed`). Clicking the group icon expands the sidebar and group seamlessly.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 11, 2026 (Merged: Permanent User Deletion Retirement, Account Deactivation Policy & Bulk Deactivation, Unified Edit Profile with Integrated Department Management, Real-Time Force Logout, Isolated 1-on-1 RFQ Supplier Email Dispatch, WeChat/WeCom Automated AI Quotation Extraction, and 100% Supabase PostgreSQL Architecture).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 10, 2026 (Consolidated Collapsible Masters Accordion in Sidebar; Top-level Inquiries, Products, Suppliers & Buyers; Inquiry Lifecycle Tabs & Bulk Actions; zero regression).*

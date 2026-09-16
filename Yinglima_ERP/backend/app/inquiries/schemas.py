@@ -61,7 +61,6 @@ class InquiryItemCreate(BaseModel):
 
 class InquiryItemUpdate(BaseModel):
     """Partial update. Quantity is editable; UOM/weight/CBM are not (see service docstring)."""
-    model_config = ConfigDict(extra="forbid")
 
     quantity: float | None = Field(default=None, gt=0)
     brand_preference: str | None = None
@@ -156,8 +155,6 @@ class QuotationCreate(BaseModel):
 
 
 class QuotationUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     quantity: float | None = Field(default=None, gt=0)
     unit_price: float | None = Field(default=None, ge=0)
     total_cost: float | None = Field(default=None, ge=0)
@@ -330,5 +327,4 @@ class SendInquiryWeChatMessagePayload(BaseModel):
     message: str = Field(..., min_length=1, description="Text message to dispatch to supplier via WeChat/WeCom")
     inquiry_item_id: uuid.UUID | None = None
     supplier_id: uuid.UUID | None = None
-
 

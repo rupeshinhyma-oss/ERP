@@ -11,8 +11,9 @@ existing architecture's repository/service split.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
-from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select
+from sqlalchemy import Select, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -112,7 +113,7 @@ class SupplierRepository(BaseRepository[Supplier]):
             Supplier.visit_remarks,
             Supplier.overall_remarks,
         ]
-        conditions: list[ColumnElement[bool]] = [col.ilike(pattern) for col in direct_columns]
+        conditions: list[Any] = [col.ilike(pattern) for col in direct_columns]
 
         # 1. Country Name / Code
         conditions.append(

@@ -30,23 +30,3 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 def anyio_backend() -> str:
     """Restrict async tests to the asyncio backend only."""
     return "asyncio"
-
-
-@pytest.fixture(autouse=True)
-def reset_singletons():
-    """Ensure process-wide worker singletons are cleanly reset between test functions."""
-    from app.queue import worker as q_worker
-    from app.cache import dependency as c_dep
-    from app.durable_events import worker as d_worker
-    from app.durable_events import notify as d_notify
-
-    q_worker._worker = None
-    c_dep._cleanup_worker = None
-    d_worker._worker = None
-    d_notify._listener = None
-    yield
-    q_worker._worker = None
-    c_dep._cleanup_worker = None
-    d_worker._worker = None
-    d_notify._listener = None
-

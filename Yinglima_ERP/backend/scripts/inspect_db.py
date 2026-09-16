@@ -1,5 +1,4 @@
 import asyncio
-import re
 import sys
 from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -18,9 +17,6 @@ async def check():
         print(f"Total Tables: {len(tables)}")
         for t in sorted(tables):
             if t == 'alembic_version':
-                continue
-            if not re.match(r"^[a-zA-Z0-9_]+$", t) or not t.isidentifier():
-                print(f"  Skipping invalid table name: {t}")
                 continue
             c_res = await conn.execute(text(f'SELECT COUNT(*) FROM "{t}"'))
             count = c_res.scalar()

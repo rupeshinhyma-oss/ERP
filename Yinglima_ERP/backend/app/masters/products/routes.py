@@ -32,36 +32,9 @@ from app.masters.products.dependencies import get_product_service
 from app.masters.products.schemas import ImportSummaryRead, ProductCreate, ProductRead, ProductUpdate
 from app.masters.products.service import ProductService
 from app.rbac.dependencies import require_permission
-from app.integration.jobs import enqueue_dispatch
-from app.integration.repository import IntegrationOutboxRepository
-from app.integration.service import IntegrationService
-from app.queue.service import QueueService
 
 router = APIRouter(prefix="/masters/products", tags=["Masters - Products"])
 logger = get_logger(__name__)
-
-
-async def _publish_product_integration_event(
-    *,
-    db: AsyncSession,
-    event_type: str,
-    product_id: uuid.UUID,
-    user_id: uuid.UUID,
-    payload: dict,
-) -> None:
-    """Write one Phase 6 cross-ERP integration outbox row for a product."""
-    service = IntegrationService(IntegrationOutboxRepository(db))
-    outbox_event = service.publish_event(
-        event_type=event_type,
-        aggregate_type="product",
-        aggregate_id=product_id,
-        payload=payload,
-        actor_type="user",
-        actor_id=user_id,
-    )
-    await db.flush()
-    queue_service = QueueService(db)
-    await enqueue_dispatch(queue_service, outbox_event_id=outbox_event.id)
 
 
 async def _publish_product_event(
@@ -145,20 +118,6 @@ async def create_product(
         entity_id=product.id,
         description=f"Created product {product.product_name!r} ({product.product_code}).",
         new_values=payload.model_dump(mode="json"),
-    )
-    await _publish_product_integration_event(
-        db=db,
-        event_type="product.created",
-        product_id=product.id,
-        user_id=current_user.id,
-        payload={
-            "product_id": str(product.id),
-            "product_code": product.product_code,
-            "product_name": product.product_name,
-            "category": getattr(product, "category_id", None) and str(product.category_id),
-            "is_active": product.is_active,
-            "version": getattr(product, "version", 1),
-        },
     )
     await _publish_product_event(
         db=db,
@@ -244,14 +203,14 @@ async def upload_product_image(
     _current_user: CurrentUser = Depends(require_permission("product.create")),
 ) -> dict:
     """
-    Upload a product image to Supabase Storage (bucket 'product-images'),
-    falling back to local disk (uploads/products/) if Supabase is unavailable.
+    Upload a product image to Cloud Storage (bucket 'yinglima-product-images'),
+    falling back to local disk (uploads/products/) if cloud storage is unavailable.
     """
     content = await file.read()
     image_url, _ = await save_uploaded_file(
         content=content,
         original_filename=file.filename or "product_image.jpg",
-        bucket="product-images",
+        bucket="yinglima-product-images",
         local_subfolder="products",
         content_type=file.content_type,
     )
@@ -292,20 +251,6 @@ async def update_product(
         entity_id=product.id,
         description=f"Updated product {product.product_name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
-    )
-    await _publish_product_integration_event(
-        db=db,
-        event_type="product.updated",
-        product_id=product.id,
-        user_id=current_user.id,
-        payload={
-            "product_id": str(product.id),
-            "product_code": product.product_code,
-            "product_name": product.product_name,
-            "category": getattr(product, "category_id", None) and str(product.category_id),
-            "is_active": product.is_active,
-            "version": getattr(product, "version", 1),
-        },
     )
     await _publish_product_event(
         db=db,

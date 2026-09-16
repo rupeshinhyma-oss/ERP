@@ -184,6 +184,8 @@ export interface Product extends MasterRecord {
   organization_id?: string | null;
   organization_ids?: string[] | null;
   branch_ids?: string[] | null;
+  supplier_id?: string | null;
+  supplier_name?: string | null;
 
   refund_vat_percent?: number | null;
   license_certificate_required?: string | null;

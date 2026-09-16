@@ -3,7 +3,8 @@
 > **Document Type:** Master Regression Testing Specification & Feature Catalog  
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
-> **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.
+> **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
+> **Last Updated:** September 16, 2026 (Synchronized with Version 1.1.0 & Local Purchases Domestic Procurement Engine, Universal Live Duplicate Blockers & 100% Fluid Layout Standard)
 
 ---
 
@@ -22,6 +23,7 @@
 10. [INVENTORY: Brands Master Module](#10-inventory-brands-master-module)
 11. [INVENTORY: Supplier Types Master Module](#11-inventory-supplier-types-master-module)
 12. [INVENTORY: Buyer Types Master Module](#12-inventory-buyer-types-master-module)
+12.1. [PURCHASE: Local Purchase Module](#121-purchase-local-purchase-module)
 13. [SALE: Inquiries & Proforma Workflow Module](#13-sale-inquiries--proforma-workflow-module)
 14. [PLANNING: Master Shipment Planning Grid Module](#14-planning-master-shipment-planning-grid-module)
 15. [USER MANAGEMENT: Users Module](#15-user-management-users-module)
@@ -51,6 +53,7 @@
 2. **Form Completeness**: Every form must retain all specified fields, dropdown data loaders, maskings (e.g. phone country codes), and conditional locks (e.g. 1-way status lock from `New` $\rightarrow$ `Existing`).
 3. **Data Integrity**: Soft-deletion must always move records to Trash (`/trash`) and never physically purge rows from active tables.
 4. **Optimistic Locking & Concurrency**: Modifying entities must send and check `version` increments to avoid dirty concurrent overwrites.
+5. **Universal Fluid Responsive Auto-Fit**: All top-level page views, tables, cards, and drawers must use 100% fluid auto-fit layouts (`width: 100%`, `max-width: 100%`, `box-sizing: border-box`). When browser zoom is zoomed out (50%, 67%, 80%) or zoomed in (110%, 125%, 150%), the entire screen width is utilized edge-to-edge with zero dead white space on the sides and seamless responsive column expansion.
 
 ---
 
@@ -64,6 +67,7 @@
 | **INVENTORY** | Product Master | Direct | `/masters/products` | `masters-products` | `box` | `product.view` |
 | **INVENTORY** | Product Prices | Direct | `/inventory/product-prices` | `product-prices` | `coins` | `product.view` |
 | **INVENTORY** | Product Gallery | Direct | `/product-gallery` | `product-gallery` | `image` | `productgallery.view` |
+| **PURCHASE** | Local Purchase | Direct | `/purchase/local` | `local-purchases` | `shoppingCart` | `purchase.view` |
 | **SALE** | Inquiries | Direct | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
 | **PLANNING** | Shipment Planning | Direct | `/planning` | `planning` | `truck` | `planning.view` |
 | **USER MANAGEMENT** | Users | Direct | `/users` | `users` | `user` | `user.view` |
@@ -179,9 +183,10 @@ Opens a focused single-screen modal for rapid vendor entry.
 #### Fields in Quick Add Form:
 | Field Label | Field Name | Type | Options / Source | Mandatory | Default / Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Company Name** | `company_name` | Text | — | **YES** | Auto Title-cased; checks real-time duplicate suggestions |
+| **Company Name** | `company_name` | Text / Typeahead | — | **YES** | Auto Title-cased; typeahead substring suggestions, instant red warning banner on duplicate match, strict hard-stop submission blocker |
 | **Product Category** | `category_ids` | Multi-Select Dropdown | `/masters/product-categories` | No | Searchable multi-panel with checkboxes |
 | **Key Strength Sub-Category** | `sub_category_ids` | Multi-Select Dropdown | `/masters/product-sub-categories` | No | Dynamically filtered by chosen Category |
+| **Products Supplied** | `product_ids` | Multi-Select Dropdown | `/masters/products` | No | Searchable multi-panel linking products directly to supplier |
 | **Country** | `country_id` | Select Dropdown | `/masters/countries` | **YES** | Defaults to **China** (`+86`) |
 | **State / Province** | `state_id` | Select Dropdown | `/masters/states` | **YES** | Scoped to Country; supports custom text typing |
 | **City** | `city_id` | Select Dropdown | `/masters/cities` | **YES** | Scoped to State; supports custom text typing |
@@ -202,7 +207,10 @@ Opens a focused single-screen modal for rapid vendor entry.
 Multi-tab comprehensive modal for vendor master lifecycle.
 
 #### Tab 1: 👤 First Data Form (Basic Profile)
-- **Company Name** (*Required*): Auto title-case + 3-way duplicate detection (Company + Phone + WhatsApp).
+- **Company Name** (*Required*): Searchable dropdown with typeahead suggestions + strict global company name uniqueness (independent of city) and hard-stop blocker preventing duplicate saves.
+- **Product Category (multiple)**: Multi-select searchable panel from Product Categories Master.
+- **Key Strength Sub-Category (multiple)**: Multi-select searchable panel from Sub-Categories Master.
+- **Products Supplied (multiple)**: Multi-select searchable panel with typeahead directly linking products from Product Master.
 - **Brand / Factory Description**: Text Area for capabilities, factory size, machinery.
 - **Supplier Type**: Dropdown from Supplier Types Master.
 - **Geography Selection**:
@@ -224,7 +232,7 @@ Multi-tab comprehensive modal for vendor master lifecycle.
 - **Factory / Office Visit Record**:
   - **Visited Factory / Office**: Radio/Select `Yes` / `No`.
   - **Visit Remarks**: Notes from physical plant inspection.
-  - **Visit Photos / Media Upload**: Multi-file uploader supporting **S3-compatible Object Storage** (`supplier-media` bucket) with transparent Supabase and local disk fallback (`uploads/suppliers/`) served statically by FastAPI (`/uploads/suppliers/`), complete with preview thumbnails and delete action.
+  - **Visit Photos / Media Upload**: Multi-file uploader supporting **Neon S3 Object Storage** (`supplier-media` bucket) with transparent Supabase and local disk fallback (`uploads/suppliers/`) served statically by FastAPI (`/uploads/suppliers/`), complete with preview thumbnails and delete action.
   - **Visit Video URL**: Link to factory inspection video (YouTube, Youku, Cloud Storage).
 - **Overall Remarks**: General procurement notes.
 
@@ -258,6 +266,7 @@ Manage complete vendor team directory:
 - [ ] Click `+ QUICK ADD`, fill Company Name, Country, State, City and save. Verify record appears in table.
 - [ ] Click `+ ADD NEW`, navigate all 3 tabs, upload factory visit photo, add contact person, and save.
 - [ ] Test Country Dial Code Auto-Update: Change Country (e.g. China -> India) and verify Calling Number, WhatsApp Number, and WeChat Number dialing codes automatically update (e.g. `+86` -> `+91`) while resetting Province/City dropdowns.
+- [ ] Test Strict Duplicate Company Name Blocker: Enter an existing supplier name (e.g. "Test 55"). Verify live red alert banner (⛔) appears beneath field. Click Save and verify submission is strictly blocked, focusing the input field. Verify backend rejects duplicate creates/renames with HTTP 409 Conflict.
 - [ ] Test 1-Way Status Lock: Change status to `Existing`, save, edit again and verify `New` cannot be chosen.
 - [ ] Verify soft-delete moves vendor to `/trash`.
 
@@ -365,11 +374,12 @@ Manage complete vendor team directory:
 6. **INVOICE NAME:** Commercial description used on billing documents.
 7. **CATEGORY / SUB-CATEGORY:** Hierarchy badges.
 8. **BRAND:** Manufacturer brand name.
-9. **HSN / SAC:** Customs code with VAT Refund rate indicator.
-10. **PRIMARY UOM:** Base unit (e.g. PCS, SET, KG).
-11. **PACKAGING CBM:** Calculated volume ($L \times W \times H / 1,000,000$).
-12. **STATUS:** `Active` / `Inactive` badge.
-13. **ACTIONS:** View Detail Drawer, Edit Product, Download PDF Datasheet, Delete.
+9. **PRIMARY SUPPLIER:** Sourcing vendor name (auto-synced with Supplier Master & Shipment Planning).
+10. **HSN / SAC:** Customs code with VAT Refund rate indicator.
+11. **PRIMARY UOM:** Base unit (e.g. PCS, SET, KG).
+12. **PACKAGING CBM:** Calculated volume ($L \times W \times H / 1,000,000$).
+13. **STATUS:** `Active` / `Inactive` badge.
+14. **ACTIONS:** View Detail Drawer, Edit Product, Download PDF Datasheet, Delete.
 
 ### 6.3. Add / Edit Product Form Fields
 - **Basic Details:**
@@ -377,11 +387,15 @@ Manage complete vendor team directory:
   - **Product Name (Tally / Internal)** (*Required*): Primary product title.
   - **Product Name (Invoice / Export)**: Commercial description.
   - **Barcode / EAN / UPC**: Barcode number.
-- **Classification & Taxonomy:**
-  - **Category** (*Required*): Dropdown from `/masters/product-categories`.
-  - **Sub-Category**: Dynamically filtered by chosen Category.
+- **Classification, Sourcing & Taxonomy (Balanced 4-Column Responsive Layout):**
   - **Brand**: Dropdown from `/masters/brands`.
-  - **HSN Code**: Dropdown from `/masters/hsn` (auto-fills Refund VAT %).
+  - **Category** (*Required*): Dropdown from `/masters/product-categories`.
+  - **Sub-Category** (*Required*): Dynamically filtered by chosen Category.
+  - **Primary Supplier** (*Optional*): Sourcing vendor dropdown from `/suppliers`. Automatically synchronizes with `supplier_product_links`, establishes primary vendor assignment, and populates the `Supplier Name` and `City` columns in the Shipment Planning grid.
+  - **HSN Code** (*Required*): Dropdown from `/masters/hsn` (auto-fills Refund VAT %).
+  - **Refund VAT %**: Auto-filled from HSN or custom override.
+  - **Organization** (*Multi-select*): Multi-tenant company ownership selector (spans 2 columns).
+  - **Branches / Operating Locations**: Dependent branch selection scoped to selected organization(s).
 - **Units & Conversions:**
   - **Primary Unit of Measurement (UOM)** (*Required*): Base unit.
   - **Secondary UOM**: Alternative packaging unit.
@@ -401,16 +415,41 @@ Manage complete vendor team directory:
 - **Dynamic Technical Specifications Builder:**
   - Key-Value attribute table (e.g. `Voltage: 380V`, `Power: 4.5kW`, `Speed: 120 pcs/min`).
 - **Cloud Media & Photo Upload:**
-  - Multi-image uploader supporting **S3-compatible Object Storage** (`product-images` bucket) with automatic Supabase and local filesystem fallback (`uploads/products/`) served statically by FastAPI (`/uploads/products/`), ensuring zero broken images even in air-gapped deployments.
+  - Multi-image uploader supporting **Neon S3 Object Storage** (`product-images` bucket) with automatic Supabase and local filesystem fallback (`uploads/products/`) served statically by FastAPI (`/uploads/products/`), ensuring zero broken images even in air-gapped deployments.
+
+### 6.4. Deduplication Engine (Manual Entry & Bulk Import Parity with Supplier Master)
+- **Manual Entry (`SearchableDropdown` with Substring Suggestions)**:
+  - When typing into **Product Name (As per Tally)**, an autocomplete suggestion dropdown appears right below the field.
+  - Searches across **any part of the name** (substring / keyword match, not just prefix, identical to Tally and Supplier Master).
+  - Includes clear `✕` button to wipe text, and clicking a suggestion auto-fills the name.
+- **Instant Visual Duplicate Warning for Product Name**:
+  - If the entered name matches an existing product in Product Master (case-insensitive, ignoring extra spaces/hyphens, excluding current product ID if editing):
+    - Shows a bold red warning directly beneath the field:  
+      `⚠️ Product "[Product Name]" already exists!`
+- **Instant Visual Duplicate Warning for Product Code**:
+  - If the entered **Product Code** matches an existing code in Product Master:
+    - Shows a bold red warning directly beneath the code field:  
+      `⚠️ Product Code "[Code]" already exists (used by "[Product Name]")!`
+- **Hard-Stop Form Submission Blocker**:
+  - The form strictly **blocks saving** in `validateForm` and `toPayload` if either the Product Name or Product Code matches an existing record.
+- **Bulk Import Duplicate Protection**:
+  - **In-File Collision Check**: Rejects the file if multiple rows in the same spreadsheet have the same Product Name or Product Code (`seen_names` and `seen_codes`).
+  - **Database Collision Check**: Blocks import for any row whose Product Name or Product Code already exists in the database.
 
 ### Test Cases
 - [ ] Create a product, enter Length: `100`, Width: `50`, Height: `40`. Verify CBM calculates to `0.200000`.
 - [ ] Select HSN code with 13% Refund VAT and confirm Refund VAT % field auto-populates with `13`.
+- [ ] Select a Primary Supplier from the dropdown, save the product, and verify the supplier's name appears in the Product Master table, detail drawer, Shipment Planning grid (`Supplier Name` & `City`), and Supplier Master ("Products Supplied").
 - [ ] Click "Download PDF Datasheet" (`GET /api/v1/products/{id}/datasheet-pdf`) and verify ReportLab PDF generates.
 - [ ] Open `/masters/products` and verify the table loads under 3 seconds with standard pagination (`Showing 1-50 of 3556`, `Page 1 of 72`) and zero 500 error banners.
 - [ ] Navigate through pages (`Next`, `Page 2`, `Page 3`) and verify 50 products render reliably per page.
 - [ ] Filter by Category, Sub-Category, or Brand using the toolbar dropdowns; confirm the table updates immediately with matching filtered count.
 - [ ] Test Comprehensive Server Search: Search by Product Code (`DAR-01849`), Product Name (`Ink Cup`), Brand Name (`Supreme`), or Category; confirm matching items display instantly without proxy timeout.
+- [ ] In Add Product modal, type part of an existing product name into Product Name (As per Tally). Verify substring suggestions appear in a dropdown list matching any part of the name (e.g. typing "sealer" finds "FR900 MSH Band Sealer").
+- [ ] Type or select an exact existing product name into Product Name (As per Tally). Verify bold red warning appears directly beneath: `⚠️ Product "[Name]" already exists!` and clicking Save blocks submission.
+- [ ] In Add Product modal, type an existing Product Code. Verify bold red warning appears directly beneath: `⚠️ Product Code "[Code]" already exists (used by "[Name]")!` and clicking Save blocks submission.
+- [ ] Edit an existing product without changing its name or code. Verify no duplicate warning appears and product saves successfully.
+- [ ] Import an Excel/CSV file containing duplicate product names or codes; verify batch rejection with clear duplicate collision error.
 
 ---
 
@@ -568,6 +607,238 @@ Manage complete vendor team directory:
 
 - **Route:** `/masters/buyer-types`
 - **Add / Edit Form Fields:** Buyer Type Name (*Required*, e.g. Wholesaler, Retailer, Direct Importer, Institutional Client), Code, Description, Status.
+
+---
+
+## 12.1. PURCHASE: Local Purchase Module
+
+- **Route:** `/purchase/local` (List View), `/purchase/local/new` (Add New Order), `/purchase/local/:id/edit` (Edit Order), `/local-purchase` (Direct Alias)
+- **Active Key:** `local-purchases`
+- **Icon:** `shoppingCart`
+- **Required Permissions:** `purchase.view` (read), `purchase.create` (create), `purchase.edit` (update), `purchase.delete` (delete), `purchase.export` (export)
+- **Purpose:** Domestic procurement lifecycle management for Chinese factory orders and domestic vendor billing. Features cascading Organization & Branch dropdowns, single "Invoice Total Value with VAT" input in RMB (¥ CNY) / INR / USD, Value-Based (VB) landing expense distribution across line items, AI & Regex Dual-Mode Bill Document Extraction (PDF/Excel), and real-time Smart Financial Reconciliation alerts.
+
+### 12.1.1. Visual Elements & Actions (List View `/purchase/local`)
+1. **Header & Summary Cards / Top KPIs:**
+   - Heading: `Local Purchases`
+   - Subtitle: `Domestic procurement, factory invoices, landing costs & bill extractions`
+   - Top KPI Stat Cards:
+     - **Total Purchases:** Total domestic purchase records count.
+     - **Total Landing Value:** Sum of `(Invoice Total + Total Expenses)` displayed in RMB (`¥`).
+     - **Total Expenses Disbursed:** Total domestic logistics, packing, transport & offloading expenses.
+2. **Action Bar & Global Controls:**
+   - **`+ Add Local Purchase` Button:** Blue primary button routing to `/purchase/local/new`.
+   - **`🔍 Filter` Toggle Button:** Funnel icon button toggling the collapsible filter drawer. Displays active badge count when filters are applied.
+   - **`📥 Export ▾` Dropdown:**
+     - `📊 Export to Excel (.xlsx)`: Corporate navy `#1E3A8A` header, white bold text, auto-fit column widths, and proper currency format.
+     - `📄 Export to CSV (.csv)`: UTF-8 with BOM encoding for seamless Excel import.
+3. **Collapsible Top Filter Box:**
+   - Toggled open/closed by the funnel button.
+   - **Organization Dropdown:** Filter by organization from `/masters/company-list/lookup`.
+   - **Supplier Dropdown:** Filter by domestic vendor from `/suppliers/lookup`.
+   - **Currency Dropdown:** Filter by `CNY (¥)`, `INR (₹)`, `USD ($)`.
+   - **Status Dropdown:** Filter by `Draft`, `Approved`, `In Transit`, `Delivered`, `Cancelled`.
+   - **Date Range:** `From Date` and `To Date` inputs.
+   - **Action Buttons:** `[Reset]` (clears all filters and search) and `[Apply Filters]`.
+4. **Table Card Toolbar:**
+   - **Items/Page Selector:** `20`, `50`, `100`, `200` rows per page.
+   - **Debounced Search Catalog Input:** Real-time search matching Invoice Number, Supplier Company Name, Organization Name, Branch, or Product Name with `🔍` icon and `✕` clear button.
+5. **Main Table Columns:**
+   - **Sr. No.:** Global 1-indexed sequential running number across paginated results `((page - 1) * pageSize + index + 1)`.
+   - **Invoice No & Date:**
+     - Clickable blue invoice number text. Clicking opens the **Local Purchase Details Preview Modal** (without redirecting to edit mode).
+     - Subtitle showing formatted invoice date (`YYYY-MM-DD`).
+   - **Organization & Branch:**
+     - Organization company name.
+     - Sub-badge displaying the assigned operational branch location.
+   - **Supplier:** Supplier company name with link/indicator.
+   - **Invoice Total (with VAT):** Formatted total invoice value with currency symbol (e.g. `¥ 45,000.00`).
+   - **Total Expenses:** Sum of domestic landing expenses (`Packaging + Transport + Offloading + Other`).
+   - **Total Landing Value:** `Invoice Total + Total Expenses` with bold emphasis.
+   - **Status:** Color-coded status badge:
+     - `Draft`: Slate / Neutral grey (`#64748B`)
+     - `Approved`: Tech Blue (`#2563EB`)
+     - `In Transit`: Amber (`#D97706`)
+     - `Delivered`: Emerald Green (`#059669`)
+     - `Cancelled`: Rose Red (`#DC2626`)
+   - **Actions:** Kebab menu (`⋮`) containing:
+     - `👁️ View Details`: Opens the **Local Purchase Details Preview Modal**.
+     - `✏️ Edit`: Opens `/purchase/local/{id}/edit`.
+     - `🗑️ Delete`: Triggers confirmation modal and soft-deletes the purchase order.
+     - **Smart Dropup Positioning:** The menu automatically opens upwards (`bottom: 100%`) when on bottom rows to prevent container overflow, vertical scrollbars, or clipping. Closes automatically on outside click.
+6. **Local Purchase Details Preview Modal (`LocalPurchaseDetailModal.tsx`):**
+   - **Trigger:** Clicking the blue invoice number link or selecting `👁️ View Details` from the action menu.
+   - **Modal Header:** Title `Local Purchase Details` with status badge and close `✕` button.
+   - **Order Detail (Card 1):** Created timestamp, Created By user, and active currency.
+   - **From (Supplier):** Supplier name and domestic vendor role.
+   - **To (Receiving Location):** Organization name and receiving branch badge (`📍 [Branch]`).
+   - **Quick Details Strip:** Receiving Warehouse, Invoice No, Invoice Date, Bill Document download link (`📥 Download File`), Basic Items Total, and Gross Invoice Total with VAT.
+   - **Expenses Card:** Itemized Packing, Transport, Offloading, Other Misc, Total All Expenses, and `% Loading Expense (VB)`.
+   - **Product Summary Table:** Consignment rows with product code badge, HSN, quantity, unit rate, basic total, expense per unit, unit landing rate (VB), line landing total, and grand total footer.
+   - **Remarks Box:** Factory delivery notes / remarks if present on the purchase.
+   - **Actions:** `[✏️ Edit Local Purchase]` button (navigates to `/purchase/local/:id/edit`) and `[Close]` button.
+
+---
+
+### 12.1.2. Add / Edit Local Purchase Order Form (`/purchase/local/new` & `/purchase/local/:id/edit`)
+
+1. **Breadcrumb Navigation:** `Purchase` &rarr; `Local Purchase` &rarr; `New Local Purchase` (or `Edit Local Purchase`).
+2. **100% Fluid Full-Width Responsive Layout (Product Master Standard):**
+   - Renders across 100% width (`width: 100%`, `boxSizing: 'border-box'`) without rigid max-width clamps, ensuring seamless full-screen scaling at any browser zoom level (e.g. 80%, 90%, 100%, 125%) and across all monitor resolutions without dead whitespace on the sides.
+   - **Card 1 Row 1:** 5 responsive auto-adjusting columns (`repeat(auto-fit, minmax(200px, 1fr))`) cleanly aligning Organization List, Operating Branch, Supplier, Invoice No, and Invoice Date.
+   - **Card 1 Row 2:** 2 clean, proportional fluid columns (`minmax(280px, 1fr) minmax(360px, 1.4fr)`): Invoice Total Value with VAT (RMB ¥), and Bill Document Upload + Extract Bill Data.
+3. **Top Validation Error Banner (Product Master Visual Style):**
+   - **Render Trigger:** When the user clicks `[Submit Local Purchase]` and one or more mandatory fields, line items, or financial reconciliation fail validation (`Object.keys(errors).length > 0`).
+   - **Visual Styling:** Premium prominent red alert container (`#fef2f2`, border `1.5px solid #ef4444`, text `#991b1b`, border radius `8px`, shadow `0 2px 8px rgba(239,68,68,0.08)`).
+   - **Header:** `❌ Please correct the following errors before submitting:` in bold `#991b1b`.
+   - **Itemized Error List:** Bulleted list displaying all active validation failures (e.g. `Organization is required.`, `Operating Branch is required.`, `Unit Rate must be greater than 0 for all items...`, `Invoice total does not match calculated items total with VAT...`).
+   - **Auto-Scroll & Dynamic Error Clearance:** Automatically scrolls the window smoothly to the top (`window.scrollTo({ top: 0, behavior: 'smooth' })`) on failed submission so the user immediately sees what needs correction. Changing Organization, Branch, or Supplier automatically resets `submitAttempted` and clears all stale errors. In addition, editing Unit Rates, Invoice Number, or Invoice Total dynamically clears active field and reconciliation errors in real time.
+4. **Card 1: Procurement & Organization Details:**
+   - **Organization List * (`company_id`):** Mandatory dropdown sourced from `master_companies` via `/masters/company-list/lookup`.
+     - Selecting an organization cascades and populates operating branches.
+     - Dynamically controls and unlocks Card 3 Product Search.
+     - **Switch Protection:** If items exist in the table, changing Organization triggers a confirmation prompt: *"Changing the Organization will clear previously added line items, as products are strictly scoped to the chosen organization. Proceed?"*. If confirmed, existing items are cleanly cleared.
+   - **Branch * (`branch_name`):** Mandatory dropdown dynamically populated with branch locations belonging to the chosen organization.
+   - **Supplier * (`supplier_id`):** Mandatory searchable vendor selector querying Supplier Master (`/suppliers/lookup`).
+   - **Invoice Number * (`invoice_no`):** Unique invoice identifier string (e.g., `INV-2026-CH-089`).
+   - **Invoice Date * (`invoice_date`):** Date picker for invoice date (defaults to current date).
+   - **Fixed Domestic Currency:** Standardized to Chinese RMB (`¥`) for all local purchases (no redundant dropdown required).
+   - **Invoice Total Value with VAT * (`invoice_total_value`):** Single consolidated financial input field for the total vendor invoice amount in RMB (¥) including domestic VAT. Strictly reconciled against line items with VAT ($\Delta \le 0.05$).
+   - **Unconditional Reconciliation Policy:** Status dropdown is removed from the form. Submission strictly requires exact invoice balancing ($\Delta \le 0.05$) to safeguard accounting integrity and prevent unbalanced inventory ledger postings.
+   - **Product Master Visual Style Field Cues:**
+     - Invalid empty inputs display bold red borders (`1.5px solid #ef4444`), soft red background tint (`#fff5f5`), and focus glow (`boxShadow: 0 0 0 3px rgba(239,68,68,0.15)`).
+     - Sub-field warning labels: `▲ [Field] is required` rendered in bold `#ef4444` directly underneath the input.
+     - Real-time error clearing: Field errors clear automatically as soon as the user selects or types a value.
+5. **Card 2: AI & Dual-Mode Bill Data Extraction Engine:**
+   - **Upload Zone:** Drag & drop or browse file input accepting `.pdf`, `.xlsx`, `.xls`, `.csv` vendor bill files.
+   - **`⚡ Extract Bill Data` Action Button:** Sends document to `POST /api/v1/purchases/local/extract-bill`.
+   - **Extraction Engine Workflow:**
+     - **Excel Parser:** Uses `openpyxl` / `csv` to extract invoice number, invoice date, supplier name, currency, total value, and consignment rows (`Product Name`, `Quantity`, `Unit Price`, `HSN Code`, `VAT %`).
+     - **PDF Parser:** Uses `pypdf` to extract raw text, followed by OpenAI GPT-4o-mini structured JSON extraction (with regex fallback if API key is not configured or network fails).
+     - **Fuzzy Product & Supplier Resolution:** Extracted product names are matched against the Product Master (`/masters/products`) to resolve `product_id`, `product_code`, `hsn_code`, and `uom`. Extracted supplier name is fuzzy-matched against Supplier Master.
+     - **Auto-Populate:** Upon extraction, the form's invoice number, date, supplier, currency, invoice total, and product line items table are instantly filled for user review.
+6. **Card 3: PRODUCT SEARCH (Organization Scoped & Locked Workflow):**
+   - **Locked State (No Organization Selected):**
+     - When `!organizationId`, the search input is strictly disabled (`disabled={!organizationId}`).
+     - Renders a dashed amber border (`1.5px dashed #f59e0b`), soft amber background (`#fffbeb`), and padlock guidance placeholder: `🔒 Select an Organization in Card 1 to enable product search & add items`.
+     - Informational badge displays `🔒 Select Organization above to unlock search`.
+   - **Unlocked State (Organization Selected):**
+     - Border switches to solid `#93c5fd` and placeholder updates to `Enter Product Name / Model No / Product Code...`.
+     - Sub-badge displays `🏢 Showing products for: [Organization Name]`.
+   - **Strict Multi-Tenant Organization Product Scoping:**
+     - Products are filtered strictly by `p.organization_id === organizationId || p.organization_ids.includes(organizationId)`.
+     - Zero unassigned / null-organization products are permitted into dropdowns.
+     - In-memory client search operates with 0ms latency across cached products with automatic API fallback.
+   - **Instant Click-to-Add:**
+     - Clicking any matching product immediately appends it to Card 4 Consignment Table with quantity = 1, standard cost, VAT%, HSN, and product code badge.
+     - Auto-clears the search input and closes the dropdown ready for the next product.
+7. **Card 4: PRODUCT ITEM Consignment Table:**
+   - **Header Display:** Renders dynamic count badge `PRODUCT ITEM (N) *` and currency label. Catalog products are added via Card 3 `PRODUCT SEARCH`.
+   - **Table Columns:**
+     - `#`: Sequential 1-indexed row number.
+     - `Product Name`: Displays product name in bold (`#0f172a`) with a gray bordered `product_code` badge.
+     - `HSN Code`: Editable input pre-filled from master.
+     - `Qty`: Number input (`min="0.01"`, `step="0.01"`, bold right-aligned).
+     - `Unit Rate`: Number input (`step="0.01"`, bold right-aligned in purchase currency).
+       - **Mandatory Positive Rate (`> 0`):** Entering `0` or leaving rate empty highlights the cell with a red border (`2px solid #ef4444`), soft red background (`#fff5f5`), and warning label `▲ Rate > 0 req.`.
+       - Direct typing automatically strips leading zeros so the user does not need to backspace.
+     - `VAT %`: Tax rate input (defaults to product VAT% or 13%).
+     - `Item Total`: Auto-computed basic total (`Qty × Unit Rate`).
+     - `Expense Per Unit`: Auto-computed value-based proportional landing expense.
+     - `Unit Landing Rate (VB)`: Auto-computed (`Unit Rate + Expense Per Unit`).
+     - `Total Landing Rate (VB)`: Auto-computed (`Qty × Unit Landing Rate`).
+     - `Action`: Red `🗑️` delete icon to remove row.
+   - **Grand Totals Table Footer:** Sticky footer calculating total quantity, basic items total, total expenses disbursed, and grand total landing cost.
+8. **Card 5: Value-Based (VB) Landing Expense Distribution Engine:**
+   - Four distinct expense input fields (in purchase currency):
+     - `Packaging Charges`
+     - `Transport / Freight Charges`
+     - `Loading / Offloading Charges`
+     - `Other Misc / Custom Charges`
+   - **Auto-Computed Summary:** Displays `Total Landing Expenses = Packaging + Transport + Offloading + Other`.
+   - **Value-Based (VB) Mathematical Formula:**
+     Expenses are distributed proportionally across consignment line items based on basic product value:
+     $$\text{Line Basic} = \text{Quantity} \times \text{Unit Price}$$
+     $$\text{Total Basic} = \sum \text{Line Basic}$$
+     $$\text{Expense Ratio} = \frac{\text{Total Landing Expenses}}{\text{Total Basic}}$$
+     $$\text{Landing Rate / Unit} = \text{Unit Price} \times (1 + \text{Expense Ratio})$$
+     $$\text{Line Landing Cost} = \text{Quantity} \times \text{Landing Rate / Unit}$$
+9. **Card 6: Smart Financial Reconciliation & Grand Totals:**
+   - **Live Financial Comparison:** Calculates discrepancy $\Delta = |\text{Invoice Total Value} - \text{Line Items Gross Total with VAT}|$.
+   - **Color-Coded Visual States:**
+     - **Green Banner (`#f0fdf4`, border `#86efac`):** `✅ Invoice Total Matches Line Items Perfectly` displayed when $\Delta \le 0.05$.
+     - **Red Banner (`#fef2f2`, border `2px solid #ef4444`):** Displayed whenever $\Delta > 0.05$. Renders unconditional hard-stop blocker alert: `⛔ Discrepancy Detected: Entered invoice total differs from items total with VAT by [diff]. Adjust line items or invoice total to match before submitting.` and strictly blocks submission.
+     - **Blue Banner (`#eff6ff`, border `#3b82f6`):** Helpful prompt before invoice total value is entered.
+10. **Card 7: Remarks & Delivery Notes:**
+    - Textarea for supplier payment terms, factory delivery instructions, or inspection notes.
+11. **Form Actions:**
+    - `[Cancel]`: Returns to `/purchase/local` without saving.
+    - `[Submit Local Purchase]`: Audits client validations, verifies non-zero unit rates and strict financial reconciliation ($\Delta \le 0.05$), persists purchase order and line items, displays success toast, and redirects to list view.
+
+---
+
+### 12.1.3. Test Checklist for Quality Assurance
+
+- [ ] **TC-LP-01: Locked Product Search without Organization:**
+  - Navigate to `/purchase/local/new`.
+  - Leave `Organization List` unselected in Card 1.
+  - In Card 3, verify `PRODUCT SEARCH` input is completely disabled with dashed border (`#f59e0b`), soft amber background, and placeholder `🔒 Select an Organization in Card 1 to enable product search & add items`.
+  - Verify user cannot type or search any products before selecting an organization.
+- [ ] **TC-LP-02: Organization Switching Item Clear Confirmation:**
+  - Select an Organization (e.g. `Darsh Impex`) and choose an Operating Branch.
+  - Add 2 products to the consignment table.
+  - In Card 1, select a different Organization (e.g. `Inhyma`).
+  - Verify browser confirmation dialog appears: *"Changing the Organization will clear previously added line items, as products are strictly scoped to the chosen organization. Proceed?"*.
+  - Click `Cancel` &rarr; verify existing line items remain intact and Organization selection does not change.
+  - Switch Organization again and click `OK` &rarr; verify line items are cleared and operating branch dropdown resets.
+- [ ] **TC-LP-03: Product Master Visual Style Validation on Submit:**
+  - On `/purchase/local/new`, leave all Card 1 fields blank and click `[Submit Local Purchase]`.
+  - Verify page smoothly auto-scrolls to top (`window.scrollTo({ top: 0, behavior: 'smooth' })`).
+  - Verify top red alert banner displays: `❌ Please correct the following errors before submitting:` with itemized bullet points.
+  - Verify invalid fields in Card 1 display bold red borders (`1.5px solid #ef4444`), soft red backgrounds (`#fff5f5`), and warning labels `▲ [Field] is required`.
+  - Select an Organization &rarr; verify Organization red border and warning label clear immediately.
+  - Select an Operating Branch &rarr; verify Branch error clears immediately.
+  - Fill Supplier, Invoice No, Invoice Date, and Invoice Total &rarr; verify all respective errors clear in real time.
+- [ ] **TC-LP-04: Strict Multi-Tenant Organization Product Scoping:**
+  - Select `Test Group` in Card 1 Organization List.
+  - Focus `PRODUCT SEARCH` &rarr; verify search results only display products strictly belonging to `Test Group` (or associated with its organization ID).
+  - Verify products belonging solely to `Inhyma` or unassigned products (null organization) NEVER appear.
+  - Select `Inhyma` in Card 1 &rarr; verify search dropdown only presents Inhyma's products.
+- [ ] **TC-LP-05: Mandatory Positive Unit Rate Validation:**
+  - Select Organization, Branch, Supplier, and fill invoice header details.
+  - Click `+ Add Blank Row` or add a catalog product and set `Unit Rate = 0`.
+  - Click `[Submit Local Purchase]`.
+  - Verify form submission is rejected.
+  - Verify the invalid row's Unit Rate cell displays a red border (`2px solid #ef4444`), soft red background, and `▲ Rate > 0 req.` warning.
+  - Verify top red alert banner reports: `Unit Rate must be greater than 0 for all items. Please check row(s): #1...`.
+  - Direct typing into Unit Rate replaces the zero cleanly without manual backspacing.
+  - Enter Unit Rate = `150.00` &rarr; verify red cell border and warning disappear.
+- [ ] **TC-LP-06: Unconditional Financial Reconciliation Discrepancy Hard-Stop:**
+  - Add 1 line item: Qty = `10`, Unit Rate = `100.00`, VAT = `13%` (Line Total with VAT = `¥ 1,130.00`).
+  - Enter `Invoice Total Value with VAT = 1130.00`.
+  - Verify Card 6 renders Green Banner: `✅ Invoice Total Matches Line Items Perfectly`.
+  - Change `Invoice Total Value with VAT = 1200.00` (discrepancy = `¥ 70.00`).
+  - Verify Card 6 turns Red with blocker alert: `⛔ Discrepancy Detected: Entered invoice total differs from items total with VAT by ¥ 70.00. Adjust line items or invoice total to match before submitting.`.
+  - Click `[Submit Local Purchase]` &rarr; verify form submission is strictly blocked and top error banner flags: `Invoice total (¥ 1200.00) does not match calculated items total with VAT (¥ 1130.00). Difference: ¥ 70.00.`.
+  - Adjust Invoice Total to `1130.00` (matching line items) &rarr; verify banner turns green and submit succeeds.
+- [ ] **TC-LP-07: Value-Based Landing Cost Distribution:**
+  - In Landing Expenses, enter Transport = `¥ 200.00`, Offloading = `¥ 50.00` (Total Expenses = `¥ 250.00`).
+  - Add Line Item 1: Qty = 10, Unit Price = 100 (Basic = 1,000).
+  - Add Line Item 2: Qty = 5, Unit Price = 200 (Basic = 1,000).
+  - Total Basic = 2,000. Expense Ratio = 250 / 2,000 = 12.5%.
+  - Verify Line Item 1 Landing Rate = `112.50 / unit`, Line Landing Cost = `¥ 1,125.00`.
+  - Verify Line Item 2 Landing Rate = `225.00 / unit`, Line Landing Cost = `¥ 1,125.00`.
+  - Verify Total Landing Cost = `(Item Total with VAT) + Total Expenses`.
+- [ ] **TC-LP-08: Bill File Data Extraction (PDF & Excel):**
+  - Upload a sample invoice file (PDF or Excel).
+  - Click `⚡ Extract Bill Data` &rarr; verify invoice fields and item rows extract and auto-populate into the form.
+- [ ] **TC-LP-09: Create, Edit & Delete Flow:**
+  - Complete form and click `[Submit Local Purchase]` &rarr; verify record saves and appears in list table.
+  - Click invoice link or `✏️ Edit` kebab action &rarr; verify edit form loads with saved data &rarr; update a field &rarr; save &rarr; verify changes persist.
+  - In list table, click kebab menu `⋮` &rarr; `🗑️ Delete Purchase` &rarr; confirm modal &rarr; verify record is soft-deleted.
+- [ ] **TC-LP-10: Corporate Excel & CSV Export:**
+  - Click `📥 Export ▾` &rarr; `📊 Export to Excel (.xlsx)` &rarr; verify `.xlsx` downloads with navy `#1E3A8A` header and complete purchase data.
+  - Click `📥 Export ▾` &rarr; `📄 Export to CSV (.csv)` &rarr; verify `.csv` downloads with UTF-8 BOM encoding.
 
 ---
 
@@ -1323,6 +1594,57 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
     - Row 4: "Non-Existent Mystery Widget 999" (Code `NON-EXISTENT-SKU-999`) -> Triggers "Product not found in Product Master" failure.
     - Row 5: "Motor (Tdy 380)" with Quantity `0` -> Triggers "Invalid quantity. Must be a positive number" failure.
   - **Expected Result:** 2 valid rows imported; 2 invalid rows accurately flagged with exact row numbers and error descriptions.
+
+
+## 34. Local Purchases & Domestic Procurement Engine (`/purchase/local`)
+
+### 34.1. Module Overview & UI Layout Specifications
+- **Navigation:** Main Sidebar -> Purchases -> **Local Purchases** (`/purchase/local`).
+- **New Record Entry:** `/purchase/local/new`.
+- **Edit Existing Record:** `/purchase/local/:id/edit`.
+- **Responsive Standard:** 100% Fluid Auto-Fit layout without fixed width locks (`width: 100%, padding: 16px 24px`). Zero dead whitespace across 50%, 80%, 100%, 125%, and 150% browser zoom levels, matching the Product Master design system.
+
+### 34.2. Form Cards & Interaction Specifications
+1. **Card 1: Purchase Order & Invoice Information**
+   - **Row 1 (5 Fluid Columns):**
+     - `Organization List *`: Mandatory dropdown populated from `master_companies`.
+     - `Operating Branch *`: Dynamically scoped to branches of chosen organization.
+     - `Supplier *`: Searchable supplier directory dropdown.
+     - `Invoice No *`: Vendor invoice number text input.
+     - `Invoice Date *`: Invoice date picker.
+   - **Row 2 (3 Fluid Columns):**
+     - `Currency *`: Standardized to Chinese RMB (`¥`), INR (`₹`), USD (`$`).
+     - `Invoice Total Value with VAT (Currency) *`: Header gross amount with VAT.
+     - `Bill Document File Upload`: Supports PDF and Excel bill files with integrated `Extract Bill Data` button.
+2. **Card 2: Additional Landing Expenses (VB Proportional Allocation)**
+   - Inputs for `Packing & Forwarding`, `Transport Expense`, `Offloading Expense`, `Other Expense`.
+   - Real-time display of `Total Expenses` and `% Loading Expense (VB)`.
+3. **Card 3: Dedicated Product Search & Padlock Lockout**
+   - Disabled with padlock icon when no Organization is selected.
+   - 0ms in-memory instant search across catalog items strictly scoped to the active Organization.
+   - Single click appends item to table, sets standard cost, VAT%, HSN, and quantity to 1.
+4. **Card 4: Product Items Consignment Table & Shipment Planning Sync**
+   - **Shipment Planning Integration:** Automatically queries active Shipment Planning sheet when Organization, Branch, and Supplier are chosen.
+   - Auto-populates planned products, quantities, and HSN codes with `[📦 Planned]` visual badges.
+   - Displays header status badge `📦 N planned item(s) from [Sheet Name]` with `Load Planned Items` reload trigger.
+   - Mandatory positive unit rate policy (`unit_rate > 0`). Rows with 0 rate show red cell borders and warning `▲ Rate > 0 req.`.
+5. **Card 5: Financial Reconciliation & Summary Cards**
+   - Displays `Basic Items Total`, `Total VAT`, `Landing Total`, and `Total Quantity`.
+   - **Strict Financial Discrepancy Hard-Stop:**
+     - When entered Invoice Total matches line items with VAT ($\Delta \le 0.05$): Green banner displays `✅ Invoice Total Matches Line Items Perfectly`. Form submission enabled.
+     - When discrepancy exists ($\Delta > 0.05$): Red banner displays `⛔ Invoice Discrepancy Detected: Entered Total vs Items Sum with VAT... Submission is blocked until line items match the invoice total.` Form submission strictly disabled.
+
+### 34.3. Test Cases & Verification Checklist
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-LP-01** | Fluid Auto-Fit Zoom Test | Open `/purchase/local/new` and set browser zoom to 80%, 100%, and 125%. | Form cards and table seamlessly stretch across the entire viewport width. Zero white margins or cutoffs. |
+| **TC-LP-02** | Organization Padlock Lockout | Open new form without selecting Organization. | Product search input in Card 3 is disabled with dashed border and guidance message. |
+| **TC-LP-03** | Shipment Planning Auto-Population | Select Organization "Inhyma", Branch "Inhyma Mumbai", and Supplier "Inhyma". | Background worker checks active Shipment Planning sheet, finds planned items, and auto-populates table with `[📦 Planned]` badges. |
+| **TC-LP-04** | Positive Rate Validation | Add an item and set unit rate to `0`. Click Save. | Form scrolls to top error banner; item row shows red border with `▲ Rate > 0 req.`; submission blocked. |
+| **TC-LP-05** | Financial Discrepancy Hard-Stop | Enter Invoice Total `10,000` with line items totaling `9,500`. | Red blocker banner displays `⛔ Invoice Discrepancy Detected`; Save button is disabled; submission prevented. |
+| **TC-LP-06** | Balanced Reconciliation Approval | Update line item rate or quantity so line items gross total equals `10,000`. | Red banner converts to green `✅ Invoice Total Matches Line Items Perfectly`; Save button is enabled. |
+| **TC-LP-07** | Detail Modal Inspection | On `/purchase/local` list, click invoice link or `👁️ View Details`. | Detail modal opens displaying supplier, receiving branch, expenses breakdown, line items landing rates, and download link. |
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP.*

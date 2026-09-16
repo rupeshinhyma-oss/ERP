@@ -163,8 +163,6 @@ class CountryService:
                 "id": str(c.id),
                 "name": c.name,
                 "code": c.code,
-                "iso2": c.iso2,
-                "iso3": c.iso3,
                 "phone_code": c.phone_code,
                 "nationality": c.nationality,
                 "currency": c.currency,

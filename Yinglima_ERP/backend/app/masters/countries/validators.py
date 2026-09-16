@@ -47,8 +47,6 @@ def validate_country_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     return {
         "name": name,
         "code": code,
-        "iso2": (raw_row.get("iso2") or raw_row.get("ISO2") or "").strip().upper() or None,
-        "iso3": (raw_row.get("iso3") or raw_row.get("ISO3") or "").strip().upper() or None,
         "phone_code": (raw_row.get("phone_code") or raw_row.get("Phone Code") or "").strip() or None,
         "nationality": (raw_row.get("nationality") or raw_row.get("Nationality") or "").strip() or None,
         "currency": (raw_row.get("currency") or raw_row.get("Currency Code") or raw_row.get("Currency") or "").strip().upper() or None,

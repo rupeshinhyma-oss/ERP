@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -31,6 +32,7 @@ import {
 } from "@/components/SearchableDropdown";
 import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteField, autoTitleCase } from "@/components/fields";
 import { useLookup } from "@/lib/lookups";
+import { useBodyScrollLock } from "@/lib/hooks";
 import { useLiveModule } from "@/lib/live/useLive";
 
 function resolveImageUrl(url: string | null | undefined): string {
@@ -829,6 +831,21 @@ export function SuppliersPage() {
   const [drawerError, setDrawerError] = useState<unknown>(null);
   const [contactSubmitting, setContactSubmitting] = useState(false);
 
+  // Lock background scroll when contact drawer is active
+  useBodyScrollLock(contactFormOpen);
+
+  // Close contact drawer on Escape key
+  useEffect(() => {
+    if (!contactFormOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setContactFormOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [contactFormOpen]);
+
   useEffect(() => {
     if (!contactCountryId) {
       setContactPhoneCode("");
@@ -1234,10 +1251,7 @@ export function SuppliersPage() {
         if (cancelled) return;
         setRows([]);
         setError(err);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     })();
     return () => {
@@ -1269,21 +1283,6 @@ export function SuppliersPage() {
   }, [loading, rows]);
 
   const reload = () => setReloadCounter((n) => n + 1);
-
-  /* --- bfcache restoration handler --- */
-  useEffect(() => {
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) {
-        // Page was restored from Back-Forward Cache (bfcache).
-        // Trigger a fresh list reload so table data is refreshed and loading skeleton is cleared.
-        reload();
-      }
-    };
-    window.addEventListener("pageshow", handlePageShow);
-    return () => {
-      window.removeEventListener("pageshow", handlePageShow);
-    };
-  }, []);
 
   /**
    * Live sync (Phase 9): Suppliers list receives real-time updates from
@@ -1619,6 +1618,16 @@ export function SuppliersPage() {
     const initialErrors: Record<string, string> = {};
     if (!form.company_name.trim()) {
       initialErrors.company_name = "Company Name is required.";
+    } else {
+      const cleanTyped = form.company_name.trim().toLowerCase().replace(/[\s-]/g, "");
+      const localDuplicate = existingSuppliers.items.find((s) => {
+        if (currentSupplierId && String(s.id).toLowerCase() === String(currentSupplierId).toLowerCase()) return false;
+        const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
+        return sName === cleanTyped;
+      });
+      if (localDuplicate) {
+        initialErrors.company_name = `Supplier "${localDuplicate.company_name}" already exists in Supplier Master. Cannot save duplicate.`;
+      }
     }
     if (!formCountryId) {
       initialErrors["field-country"] = "Country is required.";
@@ -1639,6 +1648,26 @@ export function SuppliersPage() {
       const whatsappErr = validatePhoneNumber(form.contact_whatsapp_number, "WhatsApp number");
       if (whatsappErr) {
         initialErrors["field-whatsapp-number"] = whatsappErr;
+      }
+    }
+
+    // Check full database via server search if not already caught locally
+    if (!initialErrors.company_name && form.company_name.trim()) {
+      try {
+        const { data: searchResults } = await apiGet<Supplier[]>(
+          "/suppliers" + toQueryString({ search: form.company_name.trim(), page: 1, page_size: 10 })
+        );
+        const cleanTyped = form.company_name.trim().toLowerCase().replace(/[\s-]/g, "");
+        const serverDuplicate = (searchResults || []).find((s) => {
+          if (currentSupplierId && String(s.id).toLowerCase() === String(currentSupplierId).toLowerCase()) return false;
+          const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
+          return sName === cleanTyped;
+        });
+        if (serverDuplicate) {
+          initialErrors.company_name = `Supplier "${serverDuplicate.company_name}" already exists in Supplier Master. Cannot save duplicate.`;
+        }
+      } catch {
+        // Fallback to backend POST/PATCH validation
       }
     }
 
@@ -1739,7 +1768,13 @@ export function SuppliersPage() {
         focusAndScrollToField("field-calling-number");
         return false;
       }
-      if (lower.includes("company_name") || lower.includes("company name")) {
+      if (
+        lower.includes("company_name") ||
+        lower.includes("company name") ||
+        lower.includes("supplier '") ||
+        lower.includes("already exists in supplier master") ||
+        lower.includes("already exists in the trash")
+      ) {
         setValidationErrors((prev) => ({ ...prev, company_name: msg }));
         focusAndScrollToField("company_name");
         return false;
@@ -1807,8 +1842,8 @@ export function SuppliersPage() {
     setContactFormOpen(true);
   }
 
-  async function handleContactSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleContactSubmit(e?: React.FormEvent) {
+    if (e) e.preventDefault();
     setDrawerError(null);
 
     if (!currentSupplierId) return;
@@ -1973,7 +2008,7 @@ export function SuppliersPage() {
   if (isImportPageOpen) {
     return (
       <AppShell activeKey="suppliers" pageClassName="page-suppliers">
-        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+        <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
           <Breadcrumb trail={["Supplier Profiles", "Import Suppliers"]} />
 
           {/* Header */}
@@ -2399,8 +2434,8 @@ export function SuppliersPage() {
                         return (
                           <>
                             {exact && (
-                              <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
-                                <span>⚠️</span> Supplier "{exact.company_name}" already exists!
+                              <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px", background: "#fef2f2", padding: "6px 10px", borderRadius: "6px", border: "1px solid #fecaca" }}>
+                                <span>⛔</span> Supplier "{exact.company_name}" already exists in Supplier Master! Cannot save duplicate.
                               </div>
                             )}
                             {matches.length > 0 && !exact && (
@@ -2432,6 +2467,30 @@ export function SuppliersPage() {
                         placeholder="-- Select Categories --"
                         fetchOptions={searchFetcher("/masters/product-categories")}
                         fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 1.5: Key Strength Sub-Category + Products Supplied (2 columns) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Key Strength Sub-Category (multiple)</label>
+                      <SearchableDropdownMultiPanel
+                        values={formSubCategoryIds}
+                        onChange={setFormSubCategoryIds}
+                        placeholder="-- Select Sub-Categories --"
+                        fetchOptions={searchFetcher("/masters/product-sub-categories")}
+                        fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
+                      />
+                    </div>
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Products Supplied (multiple)</label>
+                      <SearchableDropdownMultiPanel
+                        values={formProductIds}
+                        onChange={setFormProductIds}
+                        placeholder="-- Select Products Supplied --"
+                        fetchOptions={productFetcher}
+                        fetchLabelForValue={fetchProductLabel}
                       />
                     </div>
                   </div>
@@ -3014,72 +3073,86 @@ export function SuppliersPage() {
                 </div>
 
                 {/* RIGHT SIDE DRAWER MODAL FOR ADD/EDIT CONTACT */}
-                {contactFormOpen && (
-                  <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", justifyContent: "flex-end" }}>
-                    {/* Dark Backdrop Overlay */}
+                {contactFormOpen &&
+                  createPortal(
                     <div
-                      onClick={() => setContactFormOpen(false)}
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label={contactForm.id ? "Edit Contact Person" : "Add New Contact"}
                       style={{
-                        position: "absolute",
+                        position: "fixed",
                         inset: 0,
-                        background: "rgba(15, 23, 42, 0.45)",
-                        backdropFilter: "blur(2px)",
-                        transition: "opacity 0.2s ease",
-                      }}
-                    />
-
-                    {/* Side Drawer Panel */}
-                    <div
-                      style={{
-                        position: "relative",
-                        width: "460px",
-                        maxWidth: "92vw",
-                        height: "100%",
-                        background: "#ffffff",
-                        boxShadow: "-8px 0 30px rgba(0, 0, 0, 0.18)",
+                        zIndex: 99999,
                         display: "flex",
-                        flexDirection: "column",
-                        zIndex: 10000,
+                        justifyContent: "flex-end",
                       }}
                     >
-                      {/* Drawer Header */}
+                      {/* Dark Backdrop Overlay with smooth fade */}
+                      <div
+                        onClick={() => setContactFormOpen(false)}
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background: "rgba(15, 23, 42, 0.45)",
+                          backdropFilter: "blur(2px)",
+                          animation: "backdropFadeIn 0.2s ease forwards",
+                        }}
+                      />
+
+                      {/* Side Drawer Panel with smooth slide-in */}
                       <div
                         style={{
-                          padding: "18px 24px",
-                          borderBottom: "1px solid #e2e8f0",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
+                          position: "relative",
+                          width: "460px",
+                          maxWidth: "92vw",
+                          height: "100%",
                           background: "#ffffff",
+                          boxShadow: "-8px 0 30px rgba(0, 0, 0, 0.18)",
+                          display: "flex",
+                          flexDirection: "column",
+                          zIndex: 100000,
+                          animation: "slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards",
                         }}
                       >
-                        <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
-                          {contactForm.id ? "Edit Contact Person" : "Add New Contact"}
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={() => setContactFormOpen(false)}
+                        {/* Drawer Header */}
+                        <div
                           style={{
-                            background: "none",
-                            border: "none",
-                            fontSize: "20px",
-                            color: "#64748b",
-                            cursor: "pointer",
-                            padding: "4px 8px",
-                            borderRadius: "4px",
-                            lineHeight: 1,
+                            padding: "18px 24px",
+                            borderBottom: "1px solid #e2e8f0",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            background: "#ffffff",
                           }}
                         >
-                          ✕
-                        </button>
-                      </div>
+                          <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                            {contactForm.id ? "Edit Contact Person" : "Add New Contact"}
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={() => setContactFormOpen(false)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              fontSize: "20px",
+                              color: "#64748b",
+                              cursor: "pointer",
+                              padding: "4px 8px",
+                              borderRadius: "4px",
+                              lineHeight: 1,
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
 
-                      {/* Drawer Form Content (Scrollable) */}
-                      <form
-                        autoComplete="none"
-                        onSubmit={(e) => { void handleContactSubmit(e); }}
-                        style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}
-                      >
+                        {/* Drawer Form Content (Scrollable) */}
+                        <form
+                          id="supplier-contact-drawer-form"
+                          autoComplete="none"
+                          onSubmit={(e) => { void handleContactSubmit(e); }}
+                          style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}
+                        >
                         {Boolean(drawerError) && (
                           <div style={{ marginBottom: "6px" }}>
                             <Banner error={drawerError} />
@@ -3398,9 +3471,9 @@ export function SuppliersPage() {
                           Cancel
                         </button>
                         <button
-                          type="button"
+                          type="submit"
+                          form="supplier-contact-drawer-form"
                           disabled={contactSubmitting}
-                          onClick={(e) => { void handleContactSubmit(e); }}
                           style={{
                             flex: 1,
                             padding: "11px",
@@ -3419,7 +3492,8 @@ export function SuppliersPage() {
                         </button>
                       </div>
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
 
                 {/* CONTACTS LIST TABLE */}
