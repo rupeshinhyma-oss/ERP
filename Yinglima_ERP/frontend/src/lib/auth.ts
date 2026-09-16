@@ -160,3 +160,5 @@ export function roleLabel(profile: Profile | null): string {
   }
   return "User";
 }
+export { useAuth } from "./hooks";
+export { Can } from "@/components/ui";

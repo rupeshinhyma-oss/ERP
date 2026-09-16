@@ -7,13 +7,14 @@
  * (250 for small tables, 500/1000 where the table is expected to be larger).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet, toQueryString } from "./api";
 
 export interface LookupResult<T> {
   items: T[];
   /** Flips once the request settles; used to force a table reload. */
   loaded: boolean;
+  reload?: () => void;
 }
 
 /**
@@ -97,6 +98,12 @@ export function invalidateLookupCache(apiBase?: string) {
 }
 
 export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = false): LookupResult<T> {
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => {
+    invalidateLookupCache(apiBase);
+    setVersion((v) => v + 1);
+  }, [apiBase]);
+
   const cacheKey = `${apiBase}?page=1&page_size=${pageSize}&sort_order=asc${includeInactive ? "" : "&status=active"}`;
   const cached = lookupCache.get(cacheKey);
   const isFresh = cached && Date.now() - cached.timestamp < CACHE_TTL_MS;
@@ -105,8 +112,10 @@ export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = 
   const [loaded, setLoaded] = useState<boolean>(Boolean(isFresh));
 
   useEffect(() => {
-    if (isFresh) {
-      setItems(cached.items as T[]);
+    const cachedEntry = lookupCache.get(cacheKey);
+    const fresh = cachedEntry && Date.now() - cachedEntry.timestamp < CACHE_TTL_MS;
+    if (fresh) {
+      setItems(cachedEntry.items as T[]);
       setLoaded(true);
       return;
     }
@@ -152,9 +161,9 @@ export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = 
     return () => {
       cancelled = true;
     };
-  }, [apiBase, pageSize, cacheKey, isFresh, includeInactive]);
+  }, [apiBase, pageSize, cacheKey, includeInactive, version]);
 
-  return useMemo(() => ({ items, loaded }), [items, loaded]);
+  return useMemo(() => ({ items, loaded, reload }), [items, loaded, reload]);
 }
 
 /** Builds an id -> label map for O(1) name lookups while rendering rows. */

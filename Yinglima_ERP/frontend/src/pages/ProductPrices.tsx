@@ -8,6 +8,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { useAuth } from "@/lib/auth";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
@@ -93,6 +94,7 @@ function formatCurrency(amount: number | null | undefined, currency = "CNY"): st
 }
 
 export function ProductPricesPage() {
+  const { hasPermission } = useAuth();
   // Query Filters & Pagination State
   const [items, setItems] = useState<ProductPriceRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -812,37 +814,19 @@ export function ProductPricesPage() {
 
           {/* Action Toolbar */}
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            {/* Export and Bulk Import options temporarily hidden per user request */}
-            {false && (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => handleExport("xlsx")}
-                  title="Export complete pricing directory to Excel"
-                >
-                  📊 Export Excel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => handleExport("csv")}
-                  title="Export complete pricing directory to CSV"
-                >
-                  📄 Export CSV
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    setImportModalOpen(true);
-                    setImportResult(null);
-                    setImportFile(null);
-                  }}
-                >
-                  📥 Bulk Import Prices
-                </button>
-              </>
+            {hasPermission("product_price.import") && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setImportModalOpen(true);
+                  setImportFile(null);
+                  setImportResult(null);
+                }}
+                title="Bulk import product prices from Excel"
+              >
+                📥 Bulk Import
+              </button>
             )}
             {/* Filter Funnel Toggle */}
             <button
@@ -869,7 +853,8 @@ export function ProductPricesPage() {
             </button>
 
             {/* Export Dropdown */}
-            <div ref={exportMenuRef} style={{ position: "relative", display: "inline-block" }}>
+            {hasPermission("product_price.export") && (
+              <div ref={exportMenuRef} style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -1001,6 +986,7 @@ export function ProductPricesPage() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Refresh Button */}
             <button
@@ -1509,7 +1495,13 @@ export function ProductPricesPage() {
                                 </div>
                               ) : (
                                 <div
-                                  onClick={() => row.primary_link_id ? startInlineEdit(row.primary_link_id, row.best_price) : openAssignModal(row)}
+                                  onClick={() => {
+                                    if (row.primary_link_id) {
+                                      if (hasPermission("product_price.update")) startInlineEdit(row.primary_link_id, row.best_price);
+                                    } else {
+                                      if (hasPermission("product_price.create")) openAssignModal(row);
+                                    }
+                                  }}
                                   style={{
                                     display: "inline-flex",
                                     alignItems: "center",
@@ -1521,15 +1513,15 @@ export function ProductPricesPage() {
                                     color: "#15803d",
                                     fontWeight: 700,
                                     fontSize: "13.5px",
-                                    cursor: "pointer",
+                                    cursor: hasPermission("product_price.update") ? "pointer" : "default",
                                   }}
-                                  title="Click to inline-edit best price"
+                                  title={hasPermission("product_price.update") ? "Click to inline-edit best price" : "Best Price"}
                                 >
                                   <span>{formatCurrency(row.best_price, row.best_currency || "CNY")}</span>
-                                  <span style={{ fontSize: "11px", opacity: 0.7 }}>✏️</span>
+                                  {hasPermission("product_price.update") && <span style={{ fontSize: "11px", opacity: 0.7 }}>✏️</span>}
                                 </div>
                               )
-                            ) : (
+                            ) : hasPermission("product_price.create") ? (
                               <button
                                 type="button"
                                 onClick={() => openAssignModal(row)}
@@ -1546,6 +1538,8 @@ export function ProductPricesPage() {
                               >
                                 + Add Price
                               </button>
+                            ) : (
+                              <span style={{ color: "#94a3b8", fontSize: "12px" }}>—</span>
                             )}
                           </td>
 
@@ -1586,15 +1580,17 @@ export function ProductPricesPage() {
                             ) : (
                               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                 <span style={{ color: "#94a3b8" }}>—</span>
-                                <button
-                                  type="button"
-                                  onClick={() => openAssignModal(row)}
-                                  onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
-                                  className="btn btn-tiny btn-outline"
-                                  style={{ fontSize: "11px", padding: "2px 6px" }}
-                                >
-                                  + Assign
-                                </button>
+                                {hasPermission("product_price.create") && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openAssignModal(row)}
+                                    onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
+                                    className="btn btn-tiny btn-outline"
+                                    style={{ fontSize: "11px", padding: "2px 6px" }}
+                                  >
+                                    + Assign
+                                  </button>
+                                )}
                               </div>
                             )}
                           </td>
@@ -1602,16 +1598,18 @@ export function ProductPricesPage() {
                           {/* Row Actions */}
                           <td style={{ padding: "12px 14px", textAlign: "center" }}>
                             <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-                              <button
-                                type="button"
-                                onClick={() => openAssignModal(row)}
-                                onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
-                                className="btn btn-small btn-secondary"
-                                style={{ fontSize: "12px", padding: "4px 8px" }}
-                                title="Add another supplier quote for this product"
-                              >
-                                + Quote
-                              </button>
+                              {hasPermission("product_price.create") && (
+                                <button
+                                  type="button"
+                                  onClick={() => openAssignModal(row)}
+                                  onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
+                                  className="btn btn-small btn-secondary"
+                                  style={{ fontSize: "12px", padding: "4px 8px" }}
+                                  title="Add another supplier quote for this product"
+                                >
+                                  + Quote
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => toggleRowExpansion(row.product_id, row.supplier_count)}
@@ -1736,7 +1734,7 @@ export function ProductPricesPage() {
 
                                             {/* Unit Price (Inline Editable) */}
                                             <td style={{ padding: "8px 10px" }}>
-                                              {isSubEditing ? (
+                                              {hasPermission("product_price.update") && isSubEditing ? (
                                                 <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                                                   <input
                                                     type="number"
@@ -1796,7 +1794,7 @@ export function ProductPricesPage() {
                                                     ✕
                                                   </button>
                                                 </div>
-                                              ) : (
+                                              ) : hasPermission("product_price.update") ? (
                                                 <span
                                                   onClick={() => startInlineEdit(q.link_id, q.unit_price)}
                                                   style={{
@@ -1808,6 +1806,16 @@ export function ProductPricesPage() {
                                                   title="Click to inline-edit this quote"
                                                 >
                                                   {formatCurrency(q.unit_price, q.currency)} ✏️
+                                                </span>
+                                              ) : (
+                                                <span
+                                                  style={{
+                                                    cursor: "default",
+                                                    fontWeight: 700,
+                                                    color: isLowest ? "#15803d" : "#0f172a",
+                                                  }}
+                                                >
+                                                  {formatCurrency(q.unit_price, q.currency)}
                                                 </span>
                                               )}
                                             </td>
@@ -1834,6 +1842,7 @@ export function ProductPricesPage() {
 
                                             {/* Actions */}
                                             <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                                              {hasPermission("product_price.delete") && (
                                               <button
                                                 type="button"
                                                 onClick={() => handleDeleteQuote(q.link_id, row.product_id, q.supplier_name)}
@@ -1848,6 +1857,7 @@ export function ProductPricesPage() {
                                               >
                                                 🗑️
                                               </button>
+                                              )}
                                             </td>
                                           </tr>
                                         );
@@ -1857,6 +1867,7 @@ export function ProductPricesPage() {
                                 )}
 
                                 {/* Inline Row: Add Another Supplier Quote */}
+                                {hasPermission("product_price.create") && (
                                 <div
                                   style={{
                                     background: "#f1f5f9",
@@ -1986,6 +1997,7 @@ export function ProductPricesPage() {
                                     {subTableSaving[row.product_id] ? "Saving..." : "Save Quote"}
                                   </button>
                                 </div>
+                                )}
                               </div>
                             </td>
                           </tr>

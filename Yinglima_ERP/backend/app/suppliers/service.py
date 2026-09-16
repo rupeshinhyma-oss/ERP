@@ -269,7 +269,7 @@ class SupplierService:
             field_values.get("visited_factory_office", False), field_values.get("visit_remarks")
         )
 
-        existing_match = await self.repository.get_any_by_name_city(company_name, city_id)
+        existing_match = await self.repository.get_any_by_company_name(company_name)
         if existing_match is not None:
             if existing_match.deleted_at is not None:
                 raise ConflictException(
@@ -282,8 +282,7 @@ class SupplierService:
                     },
                 )
             raise ConflictException(
-                f"A supplier named {company_name!r} already exists in this city (duplicate check: "
-                "Company Name + City).",
+                f"Supplier '{company_name}' already exists in Supplier Master.",
                 details={"existing": model_to_dict(existing_match)},
             )
 
@@ -337,11 +336,10 @@ class SupplierService:
         if product_ids is not None:
             await self._validate_products(product_ids)
 
-        new_company_name = field_values.get("company_name") or supplier.company_name
-        new_city_id = field_values.get("city_id") or supplier.city_id
-        if field_values.get("company_name") is not None or field_values.get("city_id") is not None:
-            existing_match = await self.repository.get_any_by_name_city(
-                new_company_name, new_city_id, exclude_id=supplier_id
+        new_company_name = field_values.get("company_name")
+        if new_company_name is not None and new_company_name.strip():
+            existing_match = await self.repository.get_any_by_company_name(
+                new_company_name, exclude_id=supplier_id
             )
             if existing_match is not None:
                 if existing_match.deleted_at is not None:
@@ -355,8 +353,7 @@ class SupplierService:
                         },
                     )
                 raise ConflictException(
-                    f"A supplier named {new_company_name!r} already exists in this city "
-                    "(duplicate check: Company Name + City).",
+                    f"Supplier '{new_company_name}' already exists in Supplier Master.",
                     details={"existing": model_to_dict(existing_match)},
                 )
 
@@ -563,8 +560,11 @@ class SupplierService:
                 "WeChat Number": s.contact_wechat_number or "—",
                 "Email": s.emails[0].email if s.emails else (getattr(s, "email", "—") or "—"),
                 "Tax ID Number": s.tax_id_number or "—",
-                "Primary Website": s.primary_website or "—",
-                "Status": (s.current_status.value if hasattr(s.current_status, "value") else str(s.current_status or "active")).capitalize(),
+                "Status": (
+                    s.current_status.value
+                    if s.current_status is not None and hasattr(s.current_status, "value")
+                    else str(s.current_status or "active")
+                ).capitalize(),
             }
 
         async def _create(field_values: dict[str, Any]) -> Supplier:

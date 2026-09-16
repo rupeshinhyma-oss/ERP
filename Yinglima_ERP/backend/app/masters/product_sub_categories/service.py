@@ -204,24 +204,26 @@ class ProductSubCategoryService:
                 raise BadRequestException(f"Category '{category_code}' does not exist.")
             field_values["category_id"] = category.id
 
-            name = field_values["name"]
-            code = field_values.get("code")
-            if not code and name:
+            name = str(field_values.get("name") or "").strip()
+            code_raw = field_values.get("code")
+            code_val: str = str(code_raw).strip() if code_raw else ""
+            if not code_val and name:
                 clean_name = "".join(c if c.isalnum() else "-" for c in name.upper())
                 base_code = "-".join(filter(None, clean_name.split("-")))[:45] or "SUB-CAT"
-                code = base_code
+                code_val = base_code
                 counter = 1
-                while await self.repository.get_by_code(code):
-                    code = f"{base_code}-{counter}"
+                while await self.repository.get_by_code(code_val):
+                    code_val = f"{base_code}-{counter}"
                     counter += 1
-                field_values["code"] = code
+                field_values["code"] = code_val
 
-            existing_by_code = await self.repository.get_by_code(code)
-            if existing_by_code is not None:
-                raise ConflictException(
-                    f"Sub-category code {code!r} already exists.",
-                    details={"existing": model_to_dict(existing_by_code)},
-                )
+            if code_val:
+                existing_by_code = await self.repository.get_by_code(code_val)
+                if existing_by_code is not None:
+                    raise ConflictException(
+                        f"Sub-category code {code_val!r} already exists.",
+                        details={"existing": model_to_dict(existing_by_code)},
+                    )
             existing_by_name = await self.repository.get_by_name_in_category(category.id, name)
             if existing_by_name is not None:
                 raise ConflictException(

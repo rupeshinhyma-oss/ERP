@@ -377,6 +377,7 @@ export function BuyersPage() {
   const categoryNamesFallback = useLookupNames("/masters/product-categories");
   const subCategoryNamesFallback = useLookupNames("/masters/product-sub-categories");
   const buyerTypes = useLookup<{ id: string; name: string }>("/masters/buyer-types", 250);
+  const allBuyersLookup = useLookup<Buyer>("/buyers", 1000);
 
   /* Modal state for viewing full list of categories/subcategories via Eye Icon */
   const [chipModalData, setChipModalData] = useState<{ title: string; items: string[] } | null>(null);
@@ -418,11 +419,72 @@ export function BuyersPage() {
     });
   }, [sortDirection]);
 
+  const sortedRows = useMemo(() => {
+    if (sortColIndex === null) return rows;
+    const list = [...rows];
+    list.sort((a, b) => {
+      let valA: string | number = "";
+      let valB: string | number = "";
+      switch (sortColIndex) {
+        case 1: {
+          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+          return sortDirection === "asc" ? tA - tB : tB - tA;
+        }
+        case 2:
+          valA = a.company_name || "";
+          valB = b.company_name || "";
+          break;
+        case 3:
+          valA = a.buyer_type || "";
+          valB = b.buyer_type || "";
+          break;
+        case 4:
+          valA = (a.category_ids || []).map((id) => categories.items.find((c) => c.id === id)?.name || categoryNamesFallback.items.find((c) => c.id === id)?.name || "").filter(Boolean).join(", ");
+          valB = (b.category_ids || []).map((id) => categories.items.find((c) => c.id === id)?.name || categoryNamesFallback.items.find((c) => c.id === id)?.name || "").filter(Boolean).join(", ");
+          break;
+        case 5:
+          valA = (a.sub_category_ids || []).map((id) => subCategories.items.find((sc) => sc.id === id)?.name || subCategoryNamesFallback.items.find((sc) => sc.id === id)?.name || "").filter(Boolean).join(", ");
+          valB = (b.sub_category_ids || []).map((id) => subCategories.items.find((sc) => sc.id === id)?.name || subCategoryNamesFallback.items.find((sc) => sc.id === id)?.name || "").filter(Boolean).join(", ");
+          break;
+        case 6:
+          valA = countries.items.find((c) => c.id === a.country_id)?.name || "";
+          valB = countries.items.find((c) => c.id === b.country_id)?.name || "";
+          break;
+        case 7:
+          valA = a.current_status || "";
+          valB = b.current_status || "";
+          break;
+        case 8:
+          valA = a.potential || "";
+          valB = b.potential || "";
+          break;
+        case 9:
+          valA = a.buyer_grade || "";
+          valB = b.buyer_grade || "";
+          break;
+        case 10: {
+          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+          return sortDirection === "asc" ? tA - tB : tB - tA;
+        }
+        default:
+          return 0;
+      }
+      const strA = String(valA).trim().toLowerCase();
+      const strB = String(valB).trim().toLowerCase();
+      return sortDirection === "asc"
+        ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: "base" })
+        : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: "base" });
+    });
+    return list;
+  }, [rows, sortColIndex, sortDirection, categories.items, subCategories.items, countries.items, categoryNamesFallback.items, subCategoryNamesFallback.items]);
+
   /* Selection & Detail View */
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [detailBuyer, setDetailBuyer] = useState<Buyer | null>(null);
 
-  /* Modal State */
+  /* Form & Tabs State */
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [trashConflict, setTrashConflict] = useState<TrashConflictInfo | null>(null);
 
@@ -512,21 +574,6 @@ export function BuyersPage() {
   const tableRef = useRef<HTMLTableElement>(null);
 
   const reload = () => setReloadCounter((n) => n + 1);
-
-  /* --- bfcache restoration handler --- */
-  useEffect(() => {
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) {
-        // Page was restored from Back-Forward Cache (bfcache).
-        // Trigger a fresh list reload so table data is refreshed and loading skeleton is cleared.
-        reload();
-      }
-    };
-    window.addEventListener("pageshow", handlePageShow);
-    return () => {
-      window.removeEventListener("pageshow", handlePageShow);
-    };
-  }, []);
 
   /* Close Freeze menu on click outside */
   useEffect(() => {
@@ -946,7 +993,8 @@ export function BuyersPage() {
     if (id === "company_name") {
       const query = value.trim().toLowerCase();
       if (query.length > 0) {
-        const matches = Array.from(new Set(rows.map((r) => r.company_name))).filter((name) =>
+        const pool = allBuyersLookup.items.length > 0 ? allBuyersLookup.items : rows;
+        const matches = Array.from(new Set(pool.map((r) => r.company_name))).filter((name) =>
           name.toLowerCase().includes(query)
         );
         setCompanySuggestions(matches);
@@ -961,7 +1009,8 @@ export function BuyersPage() {
   function selectCompanySuggestion(name: string) {
     setField("company_name", name);
     setShowCompanySuggestions(false);
-    const existing = rows.find((r) => r.company_name.toLowerCase() === name.toLowerCase());
+    const pool = allBuyersLookup.items.length > 0 ? allBuyersLookup.items : rows;
+    const existing = pool.find((r) => r.company_name.toLowerCase() === name.toLowerCase());
     if (existing && modalMode === "create") {
       if (window.confirm(`Buyer "${name}" already exists in Master. Would you like to open it to edit?`)) {
         openEdit(existing);
@@ -1067,12 +1116,22 @@ export function BuyersPage() {
           reload();
         }
       }
+      allBuyersLookup.reload?.();
       setError(null);
       setModalMode(null);
     } catch (err: any) {
       if (err?.details?.in_trash) {
         setTrashConflict(err.details);
         return;
+      }
+      const msg = err instanceof Error ? err.message : String(err || "");
+      const lower = msg.toLowerCase();
+      if (lower.includes("company name") || lower.includes("company_name")) {
+        focusAndScrollField("company_name", msg);
+      } else if (lower.includes("calling number") || lower.includes("contact_calling_number")) {
+        focusAndScrollField("contact_calling_number", msg);
+      } else if (lower.includes("whatsapp")) {
+        focusAndScrollField("contact_whatsapp_number", msg);
       }
       setError(err);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1354,7 +1413,8 @@ export function BuyersPage() {
       return { companyWarning, callingWarning, whatsappWarning };
     }
 
-    for (const r of rows) {
+    const buyerPool = allBuyersLookup.items.length > 0 ? allBuyersLookup.items : rows;
+    for (const r of buyerPool) {
       if (modalMode === "edit" && r.id === editingId) continue;
 
       const rComp = r.company_name.toLowerCase().replace(/[\s-]/g, "");
@@ -1382,7 +1442,7 @@ export function BuyersPage() {
     }
 
     return { companyWarning, callingWarning, whatsappWarning };
-  }, [form.company_name, form.contact_calling_number, form.contact_whatsapp_number, rows, modalMode, editingId]);
+  }, [form.company_name, form.contact_calling_number, form.contact_whatsapp_number, rows, allBuyersLookup.items, modalMode, editingId]);
 
   /* ------------------------------------------------------------------------- */
   /* RENDER: DEDICATED FULL-PAGE IMPORT BUYERS VIEW (Matching Image 1)         */
@@ -1390,7 +1450,7 @@ export function BuyersPage() {
   if (modalMode === "import") {
     return (
       <AppShell activeKey="buyers">
-        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+        <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
           <Breadcrumb trail={["Buyer Profiles", "Import Buyers"]} />
 
           {/* Header */}
@@ -1667,7 +1727,7 @@ export function BuyersPage() {
   if (modalMode) {
     return (
       <AppShell activeKey="buyers">
-        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+        <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
           <Breadcrumb trail={["Buyer Profiles", modalMode === "create" ? "Add Buyer" : "Edit Buyer"]} />
 
           {/* Form Header */}
@@ -2401,70 +2461,9 @@ export function BuyersPage() {
   /* ------------------------------------------------------------------------- */
   /* RENDER: MAIN BUYER MASTER LIST VIEW                                        */
   /* ------------------------------------------------------------------------- */
-  const sortedRows = useMemo(() => {
-    if (sortColIndex === null) return rows;
-    const list = [...rows];
-    list.sort((a, b) => {
-      let valA: string | number = "";
-      let valB: string | number = "";
-      switch (sortColIndex) {
-        case 1: {
-          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
-          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
-          return sortDirection === "asc" ? tA - tB : tB - tA;
-        }
-        case 2:
-          valA = a.company_name || "";
-          valB = b.company_name || "";
-          break;
-        case 3:
-          valA = a.buyer_type || "";
-          valB = b.buyer_type || "";
-          break;
-        case 4:
-          valA = (a.category_ids || []).map((id) => categories.items.find((c) => c.id === id)?.name || categoryNamesFallback.items.find((c) => c.id === id)?.name || "").filter(Boolean).join(", ");
-          valB = (b.category_ids || []).map((id) => categories.items.find((c) => c.id === id)?.name || categoryNamesFallback.items.find((c) => c.id === id)?.name || "").filter(Boolean).join(", ");
-          break;
-        case 5:
-          valA = (a.sub_category_ids || []).map((id) => subCategories.items.find((sc) => sc.id === id)?.name || subCategoryNamesFallback.items.find((sc) => sc.id === id)?.name || "").filter(Boolean).join(", ");
-          valB = (b.sub_category_ids || []).map((id) => subCategories.items.find((sc) => sc.id === id)?.name || subCategoryNamesFallback.items.find((sc) => sc.id === id)?.name || "").filter(Boolean).join(", ");
-          break;
-        case 6:
-          valA = countries.items.find((c) => c.id === a.country_id)?.name || "";
-          valB = countries.items.find((c) => c.id === b.country_id)?.name || "";
-          break;
-        case 7:
-          valA = a.current_status || "";
-          valB = b.current_status || "";
-          break;
-        case 8:
-          valA = a.potential || "";
-          valB = b.potential || "";
-          break;
-        case 9:
-          valA = a.buyer_grade || "";
-          valB = b.buyer_grade || "";
-          break;
-        case 10: {
-          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
-          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
-          return sortDirection === "asc" ? tA - tB : tB - tA;
-        }
-        default:
-          return 0;
-      }
-      const strA = String(valA).trim().toLowerCase();
-      const strB = String(valB).trim().toLowerCase();
-      return sortDirection === "asc"
-        ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: "base" })
-        : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: "base" });
-    });
-    return list;
-  }, [rows, sortColIndex, sortDirection, categories.items, subCategories.items, countries.items, categoryNamesFallback.items, subCategoryNamesFallback.items]);
-
   return (
     <AppShell activeKey="buyers">
-      <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+      <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
         <Breadcrumb trail={["Buyer Profiles"]} />
 
         {/* Page Header matching Supplier Master Top Header Bar */}

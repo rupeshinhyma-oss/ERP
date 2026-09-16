@@ -64,6 +64,9 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     )
     organization_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] of organization UUIDs
     branch_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] of branch IDs/UUIDs
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
     # --- Tax & Compliance ---------------------------------------------------------
@@ -114,6 +117,8 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     __allow_unmapped__ = True
     _planning_supplier_name: str | None = None
     _planning_supplier_city: str | None = None
+    supplier_name: str | None = None
+    hsn_code: str | None = None
 
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""

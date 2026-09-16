@@ -36,9 +36,9 @@ async def check_trash_or_duplicate(
     - If found and deleted_at is NOT None -> raises ConflictException with in_trash=True.
     - If found and deleted_at IS None -> raises standard ConflictException.
     """
-    if name and str(name).strip() and hasattr(model_cls, name_field):
+    if name and name.strip() and hasattr(model_cls, name_field):
         col = getattr(model_cls, name_field)
-        clean_name = str(name).strip()
+        clean_name = name.strip()
         stmt = select(model_cls).where(func.lower(func.trim(col)) == clean_name.lower())
         if extra_filters:
             for k, v in extra_filters.items():
@@ -65,9 +65,9 @@ async def check_trash_or_duplicate(
                 details={"existing": {"id": str(existing.id), "name": getattr(existing, name_field, clean_name)}},
             )
 
-    if code and str(code).strip() and hasattr(model_cls, code_field):
+    if code and code.strip() and hasattr(model_cls, code_field):
         col = getattr(model_cls, code_field)
-        clean_code = str(code).strip()
+        clean_code = code.strip()
         stmt = select(model_cls).where(func.lower(func.trim(col)) == clean_code.lower())
         if extra_filters:
             for k, v in extra_filters.items():
@@ -108,7 +108,7 @@ async def code_exists_anywhere(
     if not hasattr(model_cls, code_field):
         return False
     col = getattr(model_cls, code_field)
-    clean_code = str(code).strip()
+    clean_code = code.strip()
     stmt = select(model_cls.id).where(func.lower(func.trim(col)) == clean_code.lower())
     if extra_filters:
         for k, v in extra_filters.items():

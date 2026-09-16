@@ -113,6 +113,10 @@ api_router.include_router(public_quotes_router)
 # Shipment Planning: dynamic branch-sheet grid (Mum Branch, MP Branch, ...).
 api_router.include_router(planning_router)
 
+# Purchases: Local Purchase Orders & Domestic Procurement
+from app.purchases.local.routes import router as local_purchases_router
+api_router.include_router(local_purchases_router)
+
 # Phase 1 (Live Events): generic real-time WebSocket infrastructure --
 # see app/events/ and doc/EVENTS_ARCHITECTURE.md. Not module-specific;
 # any future module's routes/services publish through this without

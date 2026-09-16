@@ -66,11 +66,25 @@ class ProductService:
         product = await self.repository.get_by_id(product_id)
         if product is None:
             raise NotFoundException(self.not_found_message)
+        if product.hsn_id:
+            hsn = await self.hsn_repository.get_by_id(product.hsn_id)
+            if hsn:
+                product.hsn_code = hsn.code
+        await self.repository.attach_planning_supplier_info([product])
         return product
 
     async def list_paginated(self, query: ListQueryParams) -> tuple[list[Product], int]:
         """Return a page of products matching the given search/sort/filter parameters."""
-        return await self.repository.paginated_list(query)
+        products, total = await self.repository.paginated_list(query)
+        hsn_ids = {p.hsn_id for p in products if p.hsn_id}
+        if hsn_ids:
+            hsns = await self.hsn_repository.list_all()
+            hsns_map = {h.id: h.code for h in hsns}
+            for p in products:
+                if p.hsn_id and p.hsn_id in hsns_map:
+                    p.hsn_code = hsns_map[p.hsn_id]
+        await self.repository.attach_planning_supplier_info(products)
+        return products, total
 
     async def list_all_cached(self) -> list[Product]:
         """Return every active product, using the shared dropdown cache."""
@@ -78,6 +92,14 @@ class ProductService:
         if cached is not None:
             return cached
         products = await self.repository.list_all()
+        hsn_ids = {p.hsn_id for p in products if p.hsn_id}
+        if hsn_ids:
+            hsns = await self.hsn_repository.list_all()
+            hsns_map = {h.id: h.code for h in hsns}
+            for p in products:
+                if p.hsn_id and p.hsn_id in hsns_map:
+                    p.hsn_code = hsns_map[p.hsn_id]
+        await self.repository.attach_planning_supplier_info(products)
         await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, products)
         return products
 
@@ -186,8 +208,30 @@ class ProductService:
             field_values["organization_ids"] = [str(x) for x in field_values["organization_ids"]]
 
         product = await self.repository.create(**field_values)
+        if product.supplier_id:
+            await self._sync_supplier_link(product.id, product.supplier_id)
         await self._invalidate_cache()
         return product
+
+    async def _sync_supplier_link(self, product_id: uuid.UUID, supplier_id: uuid.UUID | None) -> None:
+        """Ensure SupplierProductLink exists for this primary supplier."""
+        if not supplier_id:
+            return
+        from sqlalchemy import select
+        from app.suppliers.models import SupplierProductLink
+
+        stmt = select(SupplierProductLink).where(
+            SupplierProductLink.product_id == product_id,
+            SupplierProductLink.supplier_id == supplier_id,
+        )
+        res = await self.repository.session.execute(stmt)
+        if res.scalar_one_or_none() is None:
+            link = SupplierProductLink(
+                product_id=product_id,
+                supplier_id=supplier_id,
+            )
+            self.repository.session.add(link)
+            await self.repository.session.flush()
 
     async def update(self, product_id: uuid.UUID, **field_values: Any) -> Product:
         """Update an existing product, validating code uniqueness and every foreign-key reference."""
@@ -231,6 +275,8 @@ class ProductService:
 
         if field_values:
             await self.repository.update(product, **field_values)
+            if "supplier_id" in field_values and field_values["supplier_id"]:
+                await self._sync_supplier_link(product.id, field_values["supplier_id"])
         await self._invalidate_cache()
         # Best-effort, never raises: tells any already-open Shipment
         # Planning tab whose ITEM column (or any other LINKED_LOOKUP/

@@ -21,6 +21,7 @@ import { MasterPage, type FormState, type MasterPageHandle } from "@/components/
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { StatusBadge } from "@/components/ui";
 import { ItemPopoverCell } from "@/components/ItemPopoverCell";
+import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import {
   MultiSelectField,
   SelectField,
@@ -30,7 +31,7 @@ import {
   nullIfBlank,
   numOrNull,
 } from "@/components/fields";
-import { API_ORIGIN, apiGet, apiPostMultipart } from "@/lib/api";
+import { API_ORIGIN, apiGet, apiPostMultipart, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type {
   Brand,
@@ -53,6 +54,7 @@ const EMPTY: FormState = {
   uom_id: "",
   secondary_uom_id: "",
   organization_id: "",
+  supplier_id: "",
   organization_ids_json: "[]",
   branch_ids_json: "[]",
   refund_vat_percent: "",
@@ -136,6 +138,238 @@ function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
   );
 }
 
+interface ProductIdentityFieldsProps {
+  f: FormState;
+  set: (key: string, value: string) => void;
+  errors?: Record<string, string>;
+  exactNameDuplicate: string | null;
+  setExactNameDuplicate: (name: string | null) => void;
+  exactCodeDuplicate: { code: string; name: string } | null;
+  setExactCodeDuplicate: (info: { code: string; name: string } | null) => void;
+  catalogProducts: Product[];
+}
+
+function ProductIdentityFields({
+  f,
+  set,
+  errors = {},
+  exactNameDuplicate,
+  setExactNameDuplicate,
+  exactCodeDuplicate,
+  setExactCodeDuplicate,
+  catalogProducts,
+}: ProductIdentityFieldsProps) {
+  const nameCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const codeCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const checkDuplicateName = useCallback(
+    (val: string) => {
+      if (nameCheckTimer.current) clearTimeout(nameCheckTimer.current);
+      const trimmed = val.trim();
+      if (!trimmed) {
+        setExactNameDuplicate(null);
+        return;
+      }
+      const cleanTyped = trimmed.toLowerCase().replace(/[\s-]/g, "");
+      const editingId = (f._editing_id || "").trim().toLowerCase();
+      const initialClean = (f._initial_product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
+
+      if (editingId && cleanTyped === initialClean) {
+        setExactNameDuplicate(null);
+        return;
+      }
+
+      // Fast check in local catalog
+      const localMatch = catalogProducts.find((p) => {
+        if (editingId && String(p.id).toLowerCase() === editingId) return false;
+        const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
+        return pName === cleanTyped;
+      });
+      if (localMatch) {
+        setExactNameDuplicate(localMatch.product_name_tally || localMatch.product_name || trimmed);
+        return;
+      }
+
+      nameCheckTimer.current = setTimeout(async () => {
+        try {
+          const { data } = await apiGet<Product[]>(
+            "/masters/products" + toQueryString({ search: trimmed, page: 1, page_size: 25 })
+          );
+          const list = data || [];
+          const exact = list.find((p) => {
+            if (editingId && String(p.id).toLowerCase() === editingId) return false;
+            const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
+            return pName === cleanTyped;
+          });
+          if (exact) {
+            setExactNameDuplicate(exact.product_name_tally || exact.product_name || trimmed);
+          } else {
+            setExactNameDuplicate(null);
+          }
+        } catch {
+          // ignore network error
+        }
+      }, 150);
+    },
+    [f._editing_id, f._initial_product_name_tally, catalogProducts, setExactNameDuplicate]
+  );
+
+  const checkDuplicateCode = useCallback(
+    (val: string) => {
+      if (codeCheckTimer.current) clearTimeout(codeCheckTimer.current);
+      const trimmed = val.trim();
+      if (!trimmed) {
+        setExactCodeDuplicate(null);
+        return;
+      }
+      const cleanCode = trimmed.toLowerCase();
+      const editingId = (f._editing_id || "").trim().toLowerCase();
+      const initialCodeClean = (f._initial_product_code || "").trim().toLowerCase();
+
+      if (editingId && cleanCode === initialCodeClean) {
+        setExactCodeDuplicate(null);
+        return;
+      }
+
+      // Fast check in local catalog
+      const localMatch = catalogProducts.find((p) => {
+        if (editingId && String(p.id).toLowerCase() === editingId) return false;
+        return (p.product_code || "").trim().toLowerCase() === cleanCode;
+      });
+      if (localMatch) {
+        setExactCodeDuplicate({
+          code: localMatch.product_code || trimmed,
+          name: localMatch.product_name_tally || localMatch.product_name || "Existing Product",
+        });
+        return;
+      }
+
+      codeCheckTimer.current = setTimeout(async () => {
+        try {
+          const { data } = await apiGet<Product[]>(
+            "/masters/products" + toQueryString({ search: trimmed, page: 1, page_size: 25 })
+          );
+          const list = data || [];
+          const exact = list.find((p) => {
+            if (editingId && String(p.id).toLowerCase() === editingId) return false;
+            return (p.product_code || "").trim().toLowerCase() === cleanCode;
+          });
+          if (exact) {
+            setExactCodeDuplicate({
+              code: exact.product_code || trimmed,
+              name: exact.product_name_tally || exact.product_name || "Existing Product",
+            });
+          } else {
+            setExactCodeDuplicate(null);
+          }
+        } catch {
+          // ignore network error
+        }
+      }, 150);
+    },
+    [f._editing_id, f._initial_product_code, catalogProducts, setExactCodeDuplicate]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (nameCheckTimer.current) clearTimeout(nameCheckTimer.current);
+      if (codeCheckTimer.current) clearTimeout(codeCheckTimer.current);
+    };
+  }, []);
+
+  const fetchProductNameOptions = useCallback(
+    async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
+      if (!term.trim()) return [];
+      try {
+        const { data } = await apiGet<Product[]>(
+          "/masters/products" + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc" }),
+          { signal }
+        );
+        const list = data || [];
+        return list.map((p) => {
+          const name = p.product_name_tally || p.product_name || "";
+          return {
+            value: name,
+            label: name,
+          };
+        });
+      } catch {
+        return [];
+      }
+    },
+    []
+  );
+
+  return (
+    <>
+      <div className="section-title">Identity</div>
+      <div className="form-grid">
+        <div className="field" style={{ position: "relative" }}>
+          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+            Product Name (As per Tally) <span style={{ color: "#ef4444" }}>*</span>
+          </label>
+          <SearchableDropdown
+            id="product_name_tally"
+            hasError={Boolean(errors.product_name_tally || exactNameDuplicate)}
+            value={f.product_name_tally}
+            onChange={(_, label) => {
+              set("product_name_tally", label);
+              checkDuplicateName(label);
+            }}
+            allowCustomText={true}
+            onTextChange={(v) => {
+              set("product_name_tally", v);
+              checkDuplicateName(v);
+            }}
+            placeholder="Search existing or type product name..."
+            fetchOptions={fetchProductNameOptions}
+            fetchLabelForValue={async (v) => v}
+          />
+          {errors.product_name_tally && !exactNameDuplicate && (
+            <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
+              <span>⚠️</span> {errors.product_name_tally}
+            </div>
+          )}
+          {exactNameDuplicate && (
+            <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
+              <span>⚠️</span> Product "{exactNameDuplicate}" already exists!
+            </div>
+          )}
+        </div>
+
+        <TextField
+          id="product_name_invoice"
+          label="Product Name (As per Invoice)"
+          maxLength={255}
+          placeholder="Name for Tax Invoices"
+          value={f.product_name_invoice}
+          onChange={(v) => set("product_name_invoice", v)}
+        />
+
+        <div style={{ position: "relative" }}>
+          <TextField
+            id="product_code"
+            label="Product Code"
+            maxLength={50}
+            placeholder="e.g. PRD-001"
+            value={f.product_code}
+            onChange={(v) => {
+              set("product_code", v);
+              checkDuplicateCode(v);
+            }}
+            error={errors.product_code}
+          />
+          {exactCodeDuplicate && (
+            <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
+              <span>⚠️</span> Product Code "{exactCodeDuplicate.code}" already exists (used by "{exactCodeDuplicate.name}")!
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function ProductsPage() {
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250, true);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500, true);
@@ -143,13 +377,60 @@ export function ProductsPage() {
   const hsnCodes = useLookup<Hsn>("/masters/hsn", 250, true);
   const uoms = useLookup<Uom>("/masters/uom", 250, true);
   const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250, true);
+  const [suppliersList, setSuppliersList] = useState<{ id: string; company_name: string; supplier_type?: string }[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+  const [exactNameDuplicate, setExactNameDuplicate] = useState<string | null>(null);
+  const [exactCodeDuplicate, setExactCodeDuplicate] = useState<{ code: string; name: string } | null>(null);
   const [liveReloadToken, setLiveReloadToken] = useState(0);
+
+  /* Load suppliers list for Primary Supplier dropdown */
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const { data } = await apiGet<{ id: string; company_name: string }[]>("/inventory/product-prices/suppliers-lookup");
+        if (active && Array.isArray(data) && data.length > 0) {
+          setSuppliersList(data);
+          return;
+        }
+      } catch {
+        /* fallback to /suppliers */
+      }
+      try {
+        const res = await apiGet<any>("/suppliers?page_size=500");
+        if (active && res.data) {
+          const list = Array.isArray(res.data) ? res.data : (res.data.items || []);
+          setSuppliersList(list);
+        }
+      } catch (err) {
+        console.error("Failed to load suppliers lookup:", err);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   /* Live Real-time cross-tab synchronization for Products */
   useLiveModule("inventory", () => {
     setLiveReloadToken((k) => k + 1);
   });
+
+  /* Preload initial products for instant duplicate name & code checking */
+  const loadCatalogProducts = useCallback(async () => {
+    try {
+      const { data } = await apiGet<Product[]>("/masters/products?page=1&page_size=500&sort_order=desc");
+      if (Array.isArray(data)) {
+        setCatalogProducts(data);
+      }
+    } catch (err) {
+      console.error("Failed to load catalog products:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCatalogProducts();
+  }, [loadCatalogProducts, liveReloadToken]);
 
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
@@ -161,14 +442,6 @@ export function ProductsPage() {
     current: null,
   }))[0];
 
-  const lookupsReady = [
-    categories.loaded,
-    subCategories.loaded,
-    brands.loaded,
-    hsnCodes.loaded,
-    uoms.loaded,
-    organizations.loaded,
-  ].join("-");
 
   const scopedFilterSubCategories = categoryFilter
     ? subCategories.items.filter((sc) => sc.category_id === categoryFilter)
@@ -256,59 +529,13 @@ export function ProductsPage() {
       bulkActionPermission="product.bulk_action"
       liveModule="inventory"
       entityName="product"
-      clientSideSearch={true}
-      customSearchMatcher={(p: Product, term: string, cleanTerm: string) => {
-        const brand = brands.items.find((x) => x.id === p.brand_id);
-        const cat = categories.items.find((x) => x.id === p.category_id);
-        const subCat = subCategories.items.find((x) => x.id === p.sub_category_id);
-        const hsn = hsnCodes.items.find((x) => x.id === p.hsn_id);
-        const uom = uoms.items.find((x) => x.id === p.uom_id);
-
-        const orgIds = p.organization_ids && p.organization_ids.length > 0
-          ? p.organization_ids
-          : (p.organization_id ? [p.organization_id] : []);
-        const orgNames = orgIds
-          .map((id: string) => organizations.items.find((x) => x.id === id)?.name)
-          .filter(Boolean);
-
-        const searchBlob = [
-          p.product_name,
-          p.product_name_tally,
-          p.product_name_invoice,
-          p.product_code,
-          p.barcode,
-          p.description,
-          p.specification,
-          p.material,
-          p.color,
-          brand?.name,
-          brand?.code,
-          cat?.name,
-          cat?.code,
-          subCat?.name,
-          subCat?.code,
-          hsn?.code,
-          hsn?.description,
-          uom?.name,
-          uom?.code,
-          uom?.short_name,
-          ...orgNames,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-
-        return (
-          searchBlob.includes(term) ||
-          searchBlob.replace(/[\s-]/g, "").includes(cleanTerm)
-        );
-      }}
+      clientSideSearch={false}
       heading="Products Master"
       subtitle="Manage items, packaging weights, CBM, refund VAT, and license warnings."
       breadcrumbTrail={["Master Data", "Products"]}
       newButtonLabel="+ New Product"
-      searchPlaceholder="Search code, name, or barcode or Sr. No..."
-      reloadToken={`${lookupsReady}-${liveReloadToken}`}
+      searchPlaceholder="Search code, name, barcode, or Sr. No..."
+      reloadToken={String(liveReloadToken)}
       onItemsLoaded={setCatalogProducts}
       useFullPageForm={true}
       hideQuickAdd={true}
@@ -504,6 +731,20 @@ export function ProductsPage() {
           },
         },
         {
+          header: "Primary Supplier",
+          sortValue: (p) => p.supplier_name || suppliersList.find((x) => x.id === p.supplier_id)?.company_name || "",
+          render: (p) => {
+            const sName = p.supplier_name || suppliersList.find((x) => x.id === p.supplier_id)?.company_name;
+            return sName ? (
+              <span className="cell-truncate" title={sName} style={{ maxWidth: "160px", color: "#0f172a", fontWeight: 500 }}>
+                {sName}
+              </span>
+            ) : (
+              <span style={{ color: "#94a3b8" }}>—</span>
+            );
+          },
+        },
+        {
           header: "HSN Code",
           sortValue: (p) => hsnCodes.items.find((x) => x.id === p.hsn_id)?.code || "",
           render: (p) => {
@@ -608,6 +849,8 @@ export function ProductsPage() {
       emptyForm={EMPTY}
       fillForm={(item) => {
         const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+        setExactNameDuplicate(null);
+        setExactCodeDuplicate(null);
         return {
           product_code: str(item?.product_code),
           product_name_tally: str(item ? item.product_name_tally || item.product_name : ""),
@@ -620,6 +863,7 @@ export function ProductsPage() {
           uom_id: str(item?.uom_id),
           secondary_uom_id: str(item?.secondary_uom_id),
           organization_id: str(item?.organization_id),
+          supplier_id: str(item?.supplier_id),
           organization_ids_json: JSON.stringify(
             item
               ? (item.organization_ids && item.organization_ids.length > 0
@@ -687,6 +931,13 @@ export function ProductsPage() {
         const tallyName = f.product_name_tally.trim();
         if (!tallyName) throw new Error("Product Name (As per Tally) is required.");
 
+        if (exactNameDuplicate) {
+          throw new Error(`Product "${exactNameDuplicate}" already exists in Product Master! Duplicate products are not allowed.`);
+        }
+        if (exactCodeDuplicate) {
+          throw new Error(`Product Code "${exactCodeDuplicate.code}" already exists in Product Master (used by "${exactCodeDuplicate.name}")! Duplicate Product Code is not allowed.`);
+        }
+
         const cleanTally = tallyName.toLowerCase().replace(/[\s-]/g, "");
         const editingId = (f._editing_id || "").trim().toLowerCase();
         const initialClean = (f._initial_product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
@@ -729,6 +980,7 @@ export function ProductsPage() {
           hsn_id: f.hsn_id || null,
           uom_id: f.uom_id,
           secondary_uom_id: secUomId,
+          supplier_id: f.supplier_id || null,
 
           organization_id: (() => {
             try {
@@ -781,6 +1033,11 @@ export function ProductsPage() {
         const errs: Record<string, string> = {};
         if (!f.product_name_tally?.trim()) {
           errs.product_name_tally = "Product Name (As per Tally) is required.";
+        } else if (exactNameDuplicate) {
+          errs.product_name_tally = `Product "${exactNameDuplicate}" already exists!`;
+        }
+        if (exactCodeDuplicate) {
+          errs.product_code = `Product Code "${exactCodeDuplicate.code}" already exists!`;
         }
         if (!f.category_id) {
           errs.category_id = "Please select a Category.";
@@ -829,133 +1086,20 @@ export function ProductsPage() {
 
         return (
           <>
-            <div className="section-title">Identity</div>
-            <div className="form-grid">
-              <div style={{ position: "relative" }}>
-                <TextField
-                  id="product_name_tally"
-                  label="Product Name (As per Tally) *"
-                  required
-                  maxLength={255}
-                  placeholder="Name as in Tally"
-                  value={f.product_name_tally}
-                  onChange={(v) => set("product_name_tally", v)}
-                  error={errors.product_name_tally}
-                />
-                {(() => {
-                  const cleanTyped = (f.product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
-                  if (!cleanTyped) return null;
-                  const editingId = (f._editing_id || "").trim().toLowerCase();
-                  const initialClean = (f._initial_product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
+            <ProductIdentityFields
+              f={f}
+              set={set}
+              errors={errors}
+              exactNameDuplicate={exactNameDuplicate}
+              setExactNameDuplicate={setExactNameDuplicate}
+              exactCodeDuplicate={exactCodeDuplicate}
+              setExactCodeDuplicate={setExactCodeDuplicate}
+              catalogProducts={catalogProducts}
+            />
 
-                  // When editing an existing product and name is unchanged, do not show duplicate warning
-                  if (editingId && cleanTyped === initialClean) {
-                    return null;
-                  }
-
-                  const matches = catalogProducts.filter((p) => {
-                    if (editingId && String(p.id).toLowerCase() === editingId) return false;
-                    const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
-                    const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
-                    return pName.includes(cleanTyped) || pCode.includes(cleanTyped);
-                  }).slice(0, 5);
-                  const exact = catalogProducts.find((p) => {
-                    if (editingId && String(p.id).toLowerCase() === editingId) return false;
-                    const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
-                    const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
-                    return pName === cleanTyped || pCode === cleanTyped;
-                  });
-
-                  if (matches.length === 0) return null;
-
-                  return (
-                    <>
-                      {exact && (
-                        <div style={{ marginTop: "4px", fontSize: "12px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
-                          <span>⚠️</span> Product Name "{exact.product_name_tally || exact.product_name}" already exists!
-                        </div>
-                      )}
-                      {!exact && matches.length > 0 && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            top: "calc(100% + 2px)",
-                            left: 0,
-                            right: 0,
-                            zIndex: 100,
-                            background: "#ffffff",
-                            border: "1px solid #cbd5e1",
-                            borderRadius: "6px",
-                            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-                            maxHeight: "150px",
-                            overflowY: "auto",
-                            padding: "4px",
-                          }}
-                        >
-                          <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", padding: "4px 8px", borderBottom: "1px solid #f1f5f9" }}>
-                            Similar Products ({matches.length})
-                          </div>
-                          {matches.map((p) => (
-                            <div
-                              key={p.id}
-                              style={{
-                                padding: "6px 8px",
-                                fontSize: "12.5px",
-                                cursor: "pointer",
-                                borderRadius: "4px",
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
-                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                              onClick={() => {
-                                set("product_name_tally", p.product_name_tally || p.product_name || "");
-                              }}
-                            >
-                              <span style={{ fontWeight: 600, color: "#1e293b" }}>{p.product_name_tally || p.product_name}</span>
-                              <span style={{ color: "#64748b", fontSize: "11.5px" }}>Code: {p.product_code || "—"}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-              <TextField id="product_name_invoice" label="Product Name (As per Invoice)" maxLength={255} placeholder="Name for Tax Invoices" value={f.product_name_invoice} onChange={(v) => set("product_name_invoice", v)} />
-              <div style={{ position: "relative" }}>
-                <TextField id="product_code" label="Product Code" maxLength={50} placeholder="e.g. PRD-001" value={f.product_code} onChange={(v) => set("product_code", v)} error={errors.product_code} />
-                {(() => {
-                  const cleanCode = (f.product_code || "").trim().toLowerCase();
-                  if (!cleanCode) return null;
-                  const editingId = (f._editing_id || "").trim().toLowerCase();
-                  const initialCodeClean = (f._initial_product_code || "").trim().toLowerCase();
-
-                  // When editing and code is unchanged, do not show duplicate warning
-                  if (editingId && cleanCode === initialCodeClean) {
-                    return null;
-                  }
-
-                  const exactCode = catalogProducts.find((p) => {
-                    if (editingId && String(p.id).toLowerCase() === editingId) return false;
-                    return (p.product_code || "").trim().toLowerCase() === cleanCode;
-                  });
-                  if (exactCode) {
-                    return (
-                      <div style={{ marginTop: "4px", fontSize: "12px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
-                        <span>⚠️</span> Product Code "{exactCode.product_code}" already exists (used by "{exactCode.product_name_tally || exactCode.product_name}")!
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
-            </div>
-
-            <div className="section-title">Classification &amp; Tax</div>
-            <div className="form-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-              {/* Row 2: Brand, Category, Sub-Category */}
+            <div className="section-title">Classification, Sourcing &amp; Tax</div>
+            <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              {/* Row 1: Brand, Category, Sub-Category, Primary Supplier */}
               <SelectField id="brand_id" label="Brand" value={f.brand_id} onChange={(v) => set("brand_id", v)} error={errors.brand_id}>
                 <option value="">-- Select Brand --</option>
                 {brands.items
@@ -994,8 +1138,21 @@ export function ProductsPage() {
                   </option>
                 ))}
               </SelectField>
+              <SelectField
+                id="supplier_id"
+                label="Primary Supplier"
+                value={f.supplier_id}
+                onChange={(v) => set("supplier_id", v)}
+              >
+                <option value="">-- Select Primary Supplier (Optional) --</option>
+                {suppliersList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.company_name}
+                  </option>
+                ))}
+              </SelectField>
 
-              {/* Row 3: HSN Code, Refund VAT %, Organization, UOM */}
+              {/* Row 2: HSN Code, Refund VAT %, Organization (spans 2 columns) */}
               <SelectField
                 id="hsn_id"
                 label="HSN Code *"
@@ -1015,28 +1172,30 @@ export function ProductsPage() {
                 ))}
               </SelectField>
               <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
-              <MultiSelectField
-                id="organization_ids_json"
-                label="Organization"
-                placeholder="-- Select Organizations --"
-                values={(() => {
-                  try { return JSON.parse(f.organization_ids_json || "[]"); }
-                  catch { return []; }
-                })()}
-                options={organizations.items.map((org) => ({ id: org.id, name: org.name }))}
-                onChange={(newVals) => {
-                  set("organization_ids_json", JSON.stringify(newVals));
-                  set("organization_id", newVals[0] || "");
+              <div style={{ gridColumn: "span 2" }}>
+                <MultiSelectField
+                  id="organization_ids_json"
+                  label="Organization"
+                  placeholder="-- Select Organizations --"
+                  values={(() => {
+                    try { return JSON.parse(f.organization_ids_json || "[]"); }
+                    catch { return []; }
+                  })()}
+                  options={organizations.items.map((org) => ({ id: org.id, name: org.name }))}
+                  onChange={(newVals) => {
+                    set("organization_ids_json", JSON.stringify(newVals));
+                    set("organization_id", newVals[0] || "");
 
-                  // Automatically check / pre-select all branches belonging to the selected organization(s)
-                  const selectedOrgs = organizations.items.filter((org) => newVals.includes(org.id));
-                  const autoBranchIds: string[] = selectedOrgs.flatMap((org: any) => {
-                    const branches: any[] = org.branches || [];
-                    return branches.map((b: any) => b.id || `${org.id}_${b.name}`);
-                  });
-                  set("branch_ids_json", JSON.stringify(autoBranchIds));
-                }}
-              />
+                    // Automatically check / pre-select all branches belonging to the selected organization(s)
+                    const selectedOrgs = organizations.items.filter((org) => newVals.includes(org.id));
+                    const autoBranchIds: string[] = selectedOrgs.flatMap((org: any) => {
+                      const branches: any[] = org.branches || [];
+                      return branches.map((b: any) => b.id || `${org.id}_${b.name}`);
+                    });
+                    set("branch_ids_json", JSON.stringify(autoBranchIds));
+                  }}
+                />
+              </div>
 
               {/* Dependent Branch Selection */}
               {(() => {
@@ -1395,6 +1554,10 @@ export function ProductsPage() {
                 { label: "Brand", value: brand ? `${brand.name}${brand.status === "inactive" ? " (Inactive)" : ""}` : "—" },
                 { label: "Category", value: cat ? `${cat.name}${cat.status === "inactive" ? " (Inactive)" : ""}` : "—" },
                 { label: "Sub Category", value: subCat ? `${subCat.name}${subCat.status === "inactive" ? " (Inactive)" : ""}` : "—" },
+                {
+                  label: "Primary Supplier",
+                  value: p.supplier_name || suppliersList.find((s) => s.id === p.supplier_id)?.company_name || "—",
+                },
                 { label: "HSN Code", value: hsn ? hsn.code : "—" },
                 {
                   label: "Organization",

@@ -86,7 +86,7 @@ class BackgroundWorker:
             logger.warning("BackgroundWorker.start() called but worker is already running.")
             return
 
-        self._stop_event = asyncio.Event()
+        self._stop_event.clear()
         self._task = asyncio.create_task(self._run(), name="queue-worker")
         self._task.add_done_callback(self._on_task_done)
         logger.info("Background queue worker started.")
@@ -102,8 +102,7 @@ class BackgroundWorker:
             return
 
         logger.info("Stopping background queue worker (graceful)...")
-        if self._stop_event is not None:
-            self._stop_event.set()
+        self._stop_event.set()
 
         if self._task is not None:
             try:
@@ -113,8 +112,6 @@ class BackgroundWorker:
                 self._task.cancel()
             except asyncio.CancelledError:
                 pass
-            finally:
-                self._task = None
 
         logger.info("Background queue worker stopped.")
 
@@ -135,7 +132,7 @@ class BackgroundWorker:
         """Main poll loop: claim and execute jobs until stop() is called."""
         poll_interval = _IDLE_POLL_INTERVAL
 
-        while self._stop_event is not None and not self._stop_event.is_set():
+        while not self._stop_event.is_set():
             # Periodic stuck-job recovery.
             await self._maybe_recover_stuck_jobs()
 
@@ -184,7 +181,7 @@ class BackgroundWorker:
             job_id_str = str(job.id)
             logger.info(
                 "Executing job.",
-                extra={"job_id": job_id_str, "job_name": job.job_name, "job_module": job.module},
+                extra={"job_id": job_id_str, "job_name": job.job_name, "module": job.module},
             )
 
             # Look up the registered handler.
@@ -273,41 +270,3 @@ def get_worker() -> BackgroundWorker:
     if _worker is None:
         _worker = BackgroundWorker()
     return _worker
-
-
-async def run_worker_standalone() -> None:
-    """Run the worker loop as a standalone process with graceful signal handling."""
-    import signal
-
-    worker = get_worker()
-    stop_event = asyncio.Event()
-
-    try:
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, stop_event.set)
-            except (NotImplementedError, AttributeError):
-                pass
-    except Exception:
-        pass
-
-    await worker.start()
-    logger.info("Standalone queue worker started.")
-    try:
-        await stop_event.wait()
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        pass
-    finally:
-        await worker.stop()
-        logger.info("Standalone queue worker stopped cleanly.")
-
-
-if __name__ == "__main__":
-    import logging
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    try:
-        asyncio.run(run_worker_standalone())
-    except (KeyboardInterrupt, SystemExit):
-        pass

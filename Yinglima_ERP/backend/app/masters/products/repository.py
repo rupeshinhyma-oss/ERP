@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -21,6 +23,24 @@ class ProductRepository(BaseRepository[Product]):
         """Bind to a DB session, operating on the ``Product`` model."""
         super().__init__(session, Product)
 
+    def _apply_filters(self, stmt: Select, filters: dict[str, Any] | None) -> Select:
+        """Apply filters, matching organization_id against both single and multi-org fields."""
+        if not filters:
+            return stmt
+        from sqlalchemy import String, cast, or_
+        filters_copy = dict(filters)
+        org_id = filters_copy.pop("organization_id", None)
+        stmt = super()._apply_filters(stmt, filters_copy)
+        if org_id is not None:
+            org_str = str(org_id)
+            stmt = stmt.where(
+                or_(
+                    Product.organization_id == org_id,
+                    Product.organization_ids.cast(String).ilike(f"%{org_str}%"),
+                )
+            )
+        return stmt
+
     async def get_by_id(self, id_: uuid.UUID) -> Product | None:
         """Fetch a single product by primary key, with its primary supplier's name/city attached."""
         product = await super().get_by_id(id_)
@@ -37,29 +57,12 @@ class ProductRepository(BaseRepository[Product]):
 
     async def attach_planning_supplier_info(self, products: list[Product]) -> None:
         """
-        Attach each product's supplier's name/city as transient attributes.
+        Attach each product's primary supplier's name/city.
 
-        ``Product`` has no direct supplier FK -- the only link between a
-        product and a supplier is ``SupplierProductLink``, a many-to-many
-        table (a product can have several candidate/alternate suppliers,
-        and a supplier can supply several products). Since Shipment
-        Planning's "Supplier Name"/"City" columns are single-value, we
-        need one deterministic choice when a product has more than one
-        linked supplier: the FIRST supplier ever linked to that product
-        (earliest ``SupplierProductLink.created_at``), so the column
-        stays stable over time rather than flipping if a new alternate
-        supplier is linked later.
-
-        Sets ``_planning_supplier_name`` / ``_planning_supplier_city`` on
-        each product in place (``None`` when the product has no linked
-        supplier, or that supplier has no city set); read back via
-        ``app.planning.source_registry``'s product value_getter.
-
-        One query total regardless of how many products are passed in
-        (a ``DISTINCT ON``-style "earliest link per product" via window
-        function, then joined to Supplier/City), so this is safe to call
-        for a whole sheet's worth of rows without turning "load the
-        grid" into N+1 queries.
+        Supports both direct ``Product.supplier_id`` and fallback to the
+        earliest ``SupplierProductLink`` created for that product. Sets
+        ``supplier_name``, ``_planning_supplier_name``, and ``_planning_supplier_city``
+        on each product in place.
         """
         if not products:
             return
@@ -67,53 +70,74 @@ class ProductRepository(BaseRepository[Product]):
         for product in products:
             setattr(product, "_planning_supplier_name", None)
             setattr(product, "_planning_supplier_city", None)
-
-        product_ids = [p.id for p in products]
-        if not product_ids:
-            return
+            setattr(product, "supplier_name", None)
 
         from sqlalchemy import func, select
-
         from app.masters.cities.models import City
         from app.suppliers.models import Supplier, SupplierProductLink
 
-        # Rank each product's links by created_at (earliest = 1), then keep only rank 1.
-        ranked = (
-            select(
-                SupplierProductLink.product_id,
-                SupplierProductLink.supplier_id,
-                func.row_number()
-                .over(
-                    partition_by=SupplierProductLink.product_id,
-                    order_by=SupplierProductLink.created_at.asc(),
+        # 1. For products with an explicit product.supplier_id, query directly
+        direct_supplier_ids = [p.supplier_id for p in products if p.supplier_id]
+        supplier_info_by_supplier_id: dict[uuid.UUID, tuple[str, str | None]] = {}
+        if direct_supplier_ids:
+            stmt_direct = (
+                select(Supplier.id, Supplier.company_name, City.name.label("city_name"))
+                .outerjoin(City, City.id == Supplier.city_id)
+                .where(Supplier.id.in_(direct_supplier_ids))
+            )
+            res_direct = await self.session.execute(stmt_direct)
+            supplier_info_by_supplier_id = {
+                row.id: (row.company_name, row.city_name) for row in res_direct.all()
+            }
+
+        # 2. For products without explicit product.supplier_id, fallback to earliest SupplierProductLink
+        products_needing_link = [p for p in products if not p.supplier_id]
+        supplier_info_by_product_id: dict[uuid.UUID, tuple[uuid.UUID, str, str | None]] = {}
+        if products_needing_link:
+            needing_ids = [p.id for p in products_needing_link]
+            ranked = (
+                select(
+                    SupplierProductLink.product_id,
+                    SupplierProductLink.supplier_id,
+                    func.row_number()
+                    .over(
+                        partition_by=SupplierProductLink.product_id,
+                        order_by=SupplierProductLink.created_at.asc(),
+                    )
+                    .label("rn"),
                 )
-                .label("rn"),
+                .where(SupplierProductLink.product_id.in_(needing_ids))
+                .subquery()
             )
-            .where(SupplierProductLink.product_id.in_(product_ids))
-            .subquery()
-        )
-
-        stmt = (
-            select(
-                ranked.c.product_id,
-                Supplier.company_name,
-                City.name.label("city_name"),
+            stmt_link = (
+                select(
+                    ranked.c.product_id,
+                    Supplier.id.label("supplier_id"),
+                    Supplier.company_name,
+                    City.name.label("city_name"),
+                )
+                .join(Supplier, Supplier.id == ranked.c.supplier_id)
+                .outerjoin(City, City.id == Supplier.city_id)
+                .where(ranked.c.rn == 1)
             )
-            .join(Supplier, Supplier.id == ranked.c.supplier_id)
-            .outerjoin(City, City.id == Supplier.city_id)
-            .where(ranked.c.rn == 1)
-        )
-        result = await self.session.execute(stmt)
+            res_link = await self.session.execute(stmt_link)
+            supplier_info_by_product_id = {
+                row.product_id: (row.supplier_id, row.company_name, row.city_name) for row in res_link.all()
+            }
 
-        supplier_info_by_product_id = {
-            row.product_id: (row.company_name, row.city_name) for row in result.all()
-        }
-
+        # 3. Attach info to products
         for product in products:
-            info = supplier_info_by_product_id.get(product.id)
-            if info is not None:
+            if product.supplier_id and product.supplier_id in supplier_info_by_supplier_id:
+                info = supplier_info_by_supplier_id[product.supplier_id]
+                setattr(product, "supplier_name", info[0])
                 setattr(product, "_planning_supplier_name", info[0])
                 setattr(product, "_planning_supplier_city", info[1])
+            elif product.id in supplier_info_by_product_id:
+                info = supplier_info_by_product_id[product.id]
+                product.supplier_id = info[0]
+                setattr(product, "supplier_name", info[1])
+                setattr(product, "_planning_supplier_name", info[1])
+                setattr(product, "_planning_supplier_city", info[2])
 
     def _apply_search(self, stmt, term: str | None):
         """

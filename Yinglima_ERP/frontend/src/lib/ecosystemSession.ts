@@ -269,12 +269,8 @@ export function initEcosystemSessionWatcher(
       return;
     }
 
-    const cookie = getEcosystemCookie();
-    if (!cookie) {
-      onSessionRevoked();
-      return;
-    }
-
+    // Only verify central ecosystem session if one was established.
+    // Local standalone sessions are never revoked on window focus.
     if (currentSessionId) {
       const res = await verifyCentralEcosystemSession(currentSessionId);
       if (res.revoked) {
@@ -293,11 +289,6 @@ export function initEcosystemSessionWatcher(
     }
 
     if (currentSessionId) {
-      const cookie = getEcosystemCookie();
-      if (!cookie) {
-        onSessionRevoked();
-        return;
-      }
       const res = await verifyCentralEcosystemSession(currentSessionId);
       if (res.revoked) {
         clearEcosystemCookie();

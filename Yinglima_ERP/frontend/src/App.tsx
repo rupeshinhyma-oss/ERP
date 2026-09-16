@@ -54,13 +54,22 @@ import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LiveConnectionLifecycle } from "@/lib/live/liveConnectionLifecycle";
 import { ProductGalleryPage } from "@/pages/ProductGallery";
+import { LocalPurchasesPage } from "@/pages/purchases/LocalPurchases";
+import { LocalPurchaseFormPage } from "@/pages/purchases/LocalPurchaseForm";
+import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { TrashPage } from "@/pages/Trash";
 import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
-import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 
 export function App() {
   const navigate = useNavigate();
+
+  // Initialize global paste auto-clean across all inputs and forms
+  useEffect(() => {
+    initGlobalPasteSanitizer();
+  }, []);
+
+
 
   // Process incoming cross-ERP SSO handover immediately on load. Only a
   // genuine fresh auto-login ("logged-in") should redirect to /dashboard;
@@ -74,10 +83,7 @@ export function App() {
     });
   }, [navigate]);
 
-  // Initialize global paste auto-clean across all inputs and forms
-  useEffect(() => {
-    return initGlobalPasteSanitizer();
-  }, []);
+
 
   // Let the API client bounce expired sessions through the router rather than
   // a full page load.
@@ -121,6 +127,12 @@ export function App() {
           <Route path="/buyers" element={<BuyersPage />} />
           <Route path="/inquiries" element={<InquiriesPage />} />
           <Route path="/planning" element={<PlanningPage />} />
+
+          {/* Purchases */}
+          <Route path="/purchase/local" element={<LocalPurchasesPage />} />
+          <Route path="/purchase/local/new" element={<LocalPurchaseFormPage />} />
+          <Route path="/purchase/local/:id/edit" element={<LocalPurchaseFormPage />} />
+          <Route path="/local-purchase" element={<Navigate to="/purchase/local" replace />} />
 
           <Route path="/masters/company-list" element={<CompanyListPage />} />
           <Route path="/masters/countries" element={<CountriesPage />} />

@@ -1,3 +1,4 @@
+import { setEcosystemCookie } from "@/lib/ecosystemSession";
 /**
  * Sign-in page. Exact replica of INHYMA ERP Login Page.
  */
@@ -7,7 +8,6 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { setBrandName } from "@/lib/brand";
-import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ErrorBanner } from "@/components/ui";
 import type { Profile, TokenPair } from "@/types";
 
@@ -52,8 +52,6 @@ function LoginIllustration() {
 
 const BRAND_CACHE_KEY = "erp_brand_name";
 
-import { establishCentralEcosystemSession } from "@/lib/ecosystemSession";
-
 export function LoginPage() {
   const navigate = useNavigate();
   const [brand, setBrand] = useState(() => {
@@ -73,7 +71,7 @@ export function LoginPage() {
 
   useEffect(() => {
     let cancelled = false;
-    document.title = `Sign In - ${brand}`;
+    document.title = `Sign In — ${brand}`;
 
     // Fast background pre-warm & brand check
     (async () => {
@@ -87,7 +85,7 @@ export function LoginPage() {
         } catch {
           /* ignore */
         }
-        document.title = `Sign In - ${data.company_name}`;
+        document.title = `Sign In — ${data.company_name}`;
       } catch {
         /* fallback to default */
       }
@@ -100,16 +98,7 @@ export function LoginPage() {
 
   useEffect(() => {
     identifierRef.current?.focus();
-    processIncomingSsoHandover().then((result) => {
-      // Unlike AppShell/App, being on the Login page itself means either
-      // outcome ("logged-in" or "already-logged-in") should move on to
-      // /dashboard -- there's no reason to stay on the login form once we
-      // know the user is authenticated either way.
-      if (result === "logged-in" || result === "already-logged-in") {
-        navigate("/dashboard", { replace: true });
-      }
-    });
-  }, [navigate]);
+  }, []);
 
   if (Auth.isLoggedIn()) {
     return <Navigate to="/dashboard" replace />;
@@ -118,11 +107,6 @@ export function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!identifier.trim() || !password) return;
-
-    if (typeof sessionStorage !== "undefined") {
-      sessionStorage.removeItem("ihm_explicit_logout");
-    }
-
     setError(null);
     setSubmitting(true);
 
@@ -133,20 +117,15 @@ export function LoginPage() {
         password,
       });
 
-      // 2. Establish / sync unified Ecosystem Session
-      const email = identifier.trim().includes("@") ? identifier.trim() : `${identifier.trim()}@example.com`;
-      const ecosystemSession = await establishCentralEcosystemSession({
-        email,
-        password,
-        source_erp: "yinglima",
-      });
-      const sessionId = ecosystemSession?.session_id || `ihm-sess-${Date.now()}`;
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("ihm_explicit_logout");
+      }
 
+      const localSessionId = `ihm-sess-${Date.now()}`;
       if (tokens.user) {
-        Auth.setSession(tokens, tokens.user, sessionId);
+        Auth.setSession(tokens, tokens.user, localSessionId);
       } else {
-        // Fallback for legacy responses missing user profile
-        Auth.setSession(tokens, undefined, sessionId);
+        Auth.setSession(tokens, undefined, localSessionId);
         try {
           const { data: profile } = await apiGet<Profile>("/auth/profile");
           Auth.updateProfile(profile);
@@ -154,6 +133,15 @@ export function LoginPage() {
           /* navigate to dashboard regardless */
         }
       }
+
+      setEcosystemCookie({
+        session_id: localSessionId,
+        email: tokens.user?.email || "admin@example.com",
+        display_name: tokens.user?.username || "Admin",
+        role: "super_admin",
+        user_type: "platform_admin",
+        allowed_erps: ["*"],
+      });
 
       navigate("/dashboard", { replace: true });
     } catch (err) {

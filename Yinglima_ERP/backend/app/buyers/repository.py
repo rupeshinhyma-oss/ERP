@@ -12,8 +12,9 @@ WhatsApp Number; Supplier: Company Name + City).
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
-from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select
+from sqlalchemy import Select, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.buyers.models import Buyer, BuyerCategoryLink, BuyerContact, BuyerEmail, BuyerSubCategoryLink
@@ -85,7 +86,7 @@ class BuyerRepository(BaseRepository[Buyer]):
             Buyer.currently_buying_from,
             Buyer.overall_remarks,
         ]
-        conditions: list[ColumnElement[bool]] = [col.ilike(pattern) for col in direct_columns]
+        conditions: list[Any] = [col.ilike(pattern) for col in direct_columns]
 
         # 1. Country Name / Code
         conditions.append(
@@ -158,47 +159,17 @@ class BuyerRepository(BaseRepository[Buyer]):
         """
         import re
 
-        clean_call = re.sub(r"\D", "", calling_number) if calling_number else ""
-        clean_wa = re.sub(r"\D", "", whatsapp_number) if whatsapp_number else ""
-
-        # Note 66: Duplicate criteria requires matching with Company Name AND Phone (calling or whatsapp).
-        # When no phone number is provided at all, find_duplicate returns None unconditionally.
-        if not clean_call and not clean_wa:
-            return None
-
         clean_name = company_name.strip()
         if clean_name:
-            phone_conds = []
-            if clean_call and len(clean_call) >= 6:
-                phone_conds.append(
-                    or_(
-                        Buyer.contact_calling_number == calling_number,
-                        Buyer.contact_whatsapp_number == calling_number,
-                        func.regexp_replace(func.coalesce(Buyer.contact_calling_number, ""), r"\D", "", "g") == clean_call,
-                        func.regexp_replace(func.coalesce(Buyer.contact_whatsapp_number, ""), r"\D", "", "g") == clean_call,
-                    )
-                )
-            if clean_wa and len(clean_wa) >= 6:
-                phone_conds.append(
-                    or_(
-                        Buyer.contact_whatsapp_number == whatsapp_number,
-                        Buyer.contact_calling_number == whatsapp_number,
-                        func.regexp_replace(func.coalesce(Buyer.contact_whatsapp_number, ""), r"\D", "", "g") == clean_wa,
-                        func.regexp_replace(func.coalesce(Buyer.contact_calling_number, ""), r"\D", "", "g") == clean_wa,
-                    )
-                )
-            if phone_conds:
-                stmt = select(Buyer).where(
-                    func.lower(func.trim(Buyer.company_name)) == clean_name.lower(),
-                    or_(*phone_conds),
-                )
-                if exclude_id is not None:
-                    stmt = stmt.where(Buyer.id != exclude_id)
-                result = await self.session.execute(stmt)
-                b = result.scalars().first()
-                if b is not None:
-                    return b, f"Buyer '{clean_name}' already exists with matching phone number"
+            stmt = select(Buyer).where(func.lower(func.trim(Buyer.company_name)) == clean_name.lower())
+            if exclude_id is not None:
+                stmt = stmt.where(Buyer.id != exclude_id)
+            result = await self.session.execute(stmt)
+            b = result.scalars().first()
+            if b is not None:
+                return b, f"Company name '{clean_name}' already exists in Buyer Master"
 
+        clean_call = re.sub(r"\D", "", calling_number) if calling_number else ""
         if clean_call and len(clean_call) >= 6:
             stmt = select(Buyer).where(
                 or_(
@@ -215,6 +186,7 @@ class BuyerRepository(BaseRepository[Buyer]):
             if b is not None:
                 return b, f"Calling number '{calling_number}' already exists in Buyer Master (used by '{b.company_name}')"
 
+        clean_wa = re.sub(r"\D", "", whatsapp_number) if whatsapp_number else ""
         if clean_wa and len(clean_wa) >= 6:
             stmt = select(Buyer).where(
                 or_(
