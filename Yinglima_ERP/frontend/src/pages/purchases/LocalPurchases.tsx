@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
@@ -18,6 +19,7 @@ import { LocalPurchaseDetailModal } from "./LocalPurchaseDetailModal";
 
 export function LocalPurchasesPage() {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const toast = useToast();
 
   const [purchases, setPurchases] = useState<LocalPurchaseSummary[]>([]);
@@ -252,6 +254,7 @@ export function LocalPurchasesPage() {
             </button>
 
             {/* Export Dropdown */}
+            {hasPermission("local_purchase.export") && (
             <div style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
@@ -348,9 +351,11 @@ export function LocalPurchasesPage() {
                 </div>
               )}
             </div>
+            )}
 
 
             {/* Add New Local Purchase Button */}
+            {hasPermission("local_purchase.create") && (
             <button
               type="button"
               className="btn btn-add-new"
@@ -372,6 +377,7 @@ export function LocalPurchasesPage() {
             >
               <span>+</span> ADD LOCAL PURCHASE
             </button>
+            )}
           </div>
         </div>
 
@@ -930,6 +936,7 @@ export function LocalPurchasesPage() {
                               >
                                 👁️ View Details
                               </button>
+                              {hasPermission("local_purchase.update") && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -955,6 +962,8 @@ export function LocalPurchasesPage() {
                               >
                                 ✏️ Edit
                               </button>
+                              )}
+                              {hasPermission("local_purchase.delete") && (
                               <button
                                 type="button"
                                 onClick={() => handleDelete(p.id, p.invoice_no)}
@@ -977,6 +986,7 @@ export function LocalPurchasesPage() {
                               >
                                 🗑️ Delete
                               </button>
+                              )}
                             </div>
                           );
                         })()}

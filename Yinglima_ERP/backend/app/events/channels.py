@@ -95,7 +95,8 @@ MODULE_CHANNEL_PERMISSIONS: dict[str, str] = {
     module_channel("buyers"):        "buyer.view",
     module_channel("suppliers"):     "supplier.view",
     module_channel("planning"):      "planning.read",
-    module_channel("inquiries"):     "inquiry.read",
+    module_channel("inquiries"):     "inquiry.view",
+    module_channel("local_purchases"): "local_purchase.view",
     # --- Product catalog ---
     module_channel("inventory"):     "product.view",   # Product Master (entity="product")
     module_channel("products"):      "product.view",   # Product Gallery alias

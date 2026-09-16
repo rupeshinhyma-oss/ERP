@@ -875,33 +875,39 @@ function CompaniesView({
                   <td style={tdStyle}>{s.updated_at ? new Date(s.updated_at).toLocaleDateString() : "-"}</td>
                   <td style={{ ...tdStyle, textAlign: "center" }}>
                     <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
-                      <button
-                        type="button"
-                        onClick={() => onOpenCompany(s.buyer_id)}
-                        className="btn btn-secondary"
-                        style={{ padding: "4px 8px", fontSize: "12px" }}
-                        title="View Details"
-                      >
-                        👁️ View
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onOpenQuickAdd(s.buyer_id)}
-                        className="btn btn-secondary"
-                        style={{ padding: "4px 8px", fontSize: "12px" }}
-                        title="Edit / Add New Item"
-                      >
-                        ✏️ Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteCompanyInquiries(s.buyer_id)}
-                        className="btn btn-secondary"
-                        style={{ padding: "4px 8px", fontSize: "12px", color: "#ef4444" }}
-                        title="Delete All Consignments"
-                      >
-                        🗑️ Delete
-                      </button>
+                      <Can permission="inquiry.view">
+                        <button
+                          type="button"
+                          onClick={() => onOpenCompany(s.buyer_id)}
+                          className="btn btn-secondary"
+                          style={{ padding: "4px 8px", fontSize: "12px" }}
+                          title="View Details"
+                        >
+                          👁️ View
+                        </button>
+                      </Can>
+                      <Can permission="inquiry.update">
+                        <button
+                          type="button"
+                          onClick={() => onOpenQuickAdd(s.buyer_id)}
+                          className="btn btn-secondary"
+                          style={{ padding: "4px 8px", fontSize: "12px" }}
+                          title="Edit / Add New Item"
+                        >
+                          ✏️ Edit
+                        </button>
+                      </Can>
+                      <Can permission="inquiry.delete">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCompanyInquiries(s.buyer_id)}
+                          className="btn btn-secondary"
+                          style={{ padding: "4px 8px", fontSize: "12px", color: "#ef4444" }}
+                          title="Delete All Consignments"
+                        >
+                          🗑️ Delete
+                        </button>
+                      </Can>
                     </div>
                   </td>
                 </tr>
@@ -2525,31 +2531,33 @@ function ItemsView({
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                           </svg>
                         </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleDeleteItem(item);
-                          }}
-                          title="Delete Product Item"
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "#ef4444",
-                            padding: "4px",
-                            borderRadius: "6px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M3 6h18" />
-                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                          </svg>
-                        </button>
+                        <Can permission="inquiry.delete">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleDeleteItem(item);
+                            }}
+                            title="Delete Product Item"
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              cursor: "pointer",
+                              color: "#ef4444",
+                              padding: "4px",
+                              borderRadius: "6px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3 6h18" />
+                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                            </svg>
+                          </button>
+                        </Can>
                       </div>
                     </div>
 

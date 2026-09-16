@@ -50,7 +50,7 @@ async def list_product_prices(
     sort_by: str = Query(default="product_name_tally"),
     sort_dir: str = Query(default="asc"),
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.view")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.view")),
 ) -> dict:
     items, total = await service.list_prices(
         page=page,
@@ -82,7 +82,7 @@ async def list_product_prices(
 async def get_suppliers_lookup(
     request: Request,
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.view")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.view")),
 ) -> dict:
     suppliers = await service.list_suppliers_lookup()
     return build_success_response(
@@ -96,7 +96,7 @@ async def get_product_suppliers(
     request: Request,
     product_id: uuid.UUID,
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.view")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.view")),
 ) -> dict:
     suppliers = await service.get_product_suppliers(product_id)
     return build_success_response(
@@ -110,7 +110,7 @@ async def assign_supplier_price(
     request: Request,
     payload: AssignSupplierPricePayload,
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.update")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.create")),
 ) -> dict:
     link_id = await service.assign_price(payload)
     return build_success_response(
@@ -125,7 +125,7 @@ async def update_supplier_price(
     link_id: uuid.UUID,
     payload: UpdatePricePayload,
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.update")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.update")),
 ) -> dict:
     await service.update_price(link_id, payload)
     return build_success_response(
@@ -139,7 +139,7 @@ async def delete_supplier_price(
     request: Request,
     link_id: uuid.UUID,
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.update")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.delete")),
 ) -> dict:
     await service.delete_price(link_id)
     return build_success_response(
@@ -157,7 +157,7 @@ async def export_product_prices(
     brand_id: uuid.UUID | None = Query(default=None),
     has_price: bool | None = Query(default=None),
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.export")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.export")),
 ) -> Response:
     content, media_type, filename = await service.export_prices(
         file_format=format,
@@ -177,7 +177,7 @@ async def export_product_prices(
 @router.get("/sample-template", summary="Download bulk price import template")
 async def download_price_import_template(
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.import")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.import")),
 ) -> Response:
     content, media_type, filename = await service.generate_template()
     return Response(
@@ -192,7 +192,7 @@ async def import_product_prices(
     request: Request,
     file: UploadFile = File(...),
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product.import")),
+    _current_user: CurrentUser = Depends(require_permission("product_price.import")),
 ) -> dict:
     content = await file.read()
     summary = await service.import_prices(content)

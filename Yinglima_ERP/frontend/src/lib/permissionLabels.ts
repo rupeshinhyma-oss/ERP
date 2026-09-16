@@ -35,6 +35,9 @@ export const MODULE_NAMES: Record<string, string> = {
   audit: "System Audit Logs",
   trash: "Trash",
   roles_permissions: "Departments & Permissions",
+  inquiry: "Inquiries & Quotations",
+  product_price: "Product Prices",
+  local_purchase: "Local Purchase",
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -45,7 +48,8 @@ const ACTION_LABELS: Record<string, string> = {
   delete: "Delete",
   export: "Export",
   import: "Import",
-  approve: "Approve",
+  approve: "Approve Quotation",
+  send_message: "Send Messages",
   manage: "Manage All",
   action: "Actions",
   bulk_action: "Bulk Actions",
@@ -70,6 +74,9 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "buyer.currentstatus": "Current Status",
   "buyer.potential": "Potential",
   "buyer.clientgrade": "Client Grade",
+  "inquiry.approve": "Approve Quotation",
+  "inquiry.send_message": "Send Messages (Email/WeChat)",
+  "local_purchase.export": "Export / Print",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */

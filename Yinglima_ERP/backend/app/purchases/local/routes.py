@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
+from app.rbac.dependencies import require_permission
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -64,7 +65,7 @@ async def list_local_purchases(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     service: LocalPurchaseService = Depends(get_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('local_purchase.create')),
 ) -> dict:
     offset = (page - 1) * page_size
     records, total = await service.repo.list_with_filters(
@@ -127,7 +128,7 @@ async def create_local_purchase(
     payload: LocalPurchaseCreate,
     request: Request,
     service: LocalPurchaseService = Depends(get_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('local_purchase.create')),
 ) -> dict:
     user_name = current_user.username if current_user and current_user.username else "Admin"
     created = await service.create_purchase(
@@ -148,7 +149,7 @@ async def calculate_preview(
     payload: CalculatePreviewPayload,
     request: Request,
     service: LocalPurchaseService = Depends(get_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.view')),
 ) -> dict:
     result = service.calculate_landing_rates(
         packing_forwarding=payload.packing_forwarding,
@@ -168,7 +169,7 @@ async def extract_bill(
     request: Request,
     file: UploadFile = File(...),
     service: LocalPurchaseService = Depends(get_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.view')),
 ) -> dict:
     file_bytes = await file.read()
     filename = file.filename or "uploaded_bill.pdf"
@@ -191,7 +192,7 @@ async def export_local_purchases(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     service: LocalPurchaseService = Depends(get_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.export')),
 ) -> Response:
     records, _ = await service.repo.list_with_filters(
         search=search,
@@ -223,7 +224,7 @@ async def get_planning_items(
     supplier_name: str | None = Query(default=None, description="Supplier company name"),
     supplier_id: uuid.UUID | None = Query(default=None, description="Supplier UUID"),
     service: LocalPurchaseService = Depends(get_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.view')),
 ) -> dict:
     """Fetch matching planned items from Shipment Planning sheet."""
     result = await service.get_planning_items(
@@ -245,7 +246,7 @@ async def get_local_purchase(
     purchase_id: uuid.UUID,
     request: Request,
     service: LocalPurchaseService = Depends(get_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.view')),
 ) -> dict:
     purchase = await service.get_purchase(purchase_id)
     detail = LocalPurchaseDetailResponse.model_validate(purchase)
@@ -261,7 +262,7 @@ async def update_local_purchase(
     payload: LocalPurchaseUpdate,
     request: Request,
     service: LocalPurchaseService = Depends(get_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.update')),
 ) -> dict:
     updated = await service.update_purchase(purchase_id, payload)
     detail = LocalPurchaseDetailResponse.model_validate(updated)
@@ -277,7 +278,7 @@ async def delete_local_purchase(
     purchase_id: uuid.UUID,
     request: Request,
     service: LocalPurchaseService = Depends(get_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.delete')),
 ) -> dict:
     await service.delete_purchase(purchase_id)
     return build_success_response(

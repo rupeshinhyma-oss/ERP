@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { useAuth } from "@/lib/auth";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPatch, apiPost, apiPostMultipart, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
@@ -22,6 +23,7 @@ import type { LocalPurchaseDetail, LocalPurchaseItem } from "@/types/localPurcha
 
 export function LocalPurchaseFormPage() {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
   const toast = useToast();
@@ -1893,6 +1895,7 @@ export function LocalPurchaseFormPage() {
               Cancel
             </button>
 
+            {(isEdit ? hasPermission("local_purchase.update") : hasPermission("local_purchase.create")) && (
             <button
               type="submit"
               disabled={submitting}
@@ -1913,6 +1916,7 @@ export function LocalPurchaseFormPage() {
             >
               {submitting ? "Saving Local Purchase..." : isEdit ? "Save Changes" : "Submit Local Purchase"}
             </button>
+            )}
           </div>
         </form>
       </main>

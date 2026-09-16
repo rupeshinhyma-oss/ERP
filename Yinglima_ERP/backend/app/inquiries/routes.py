@@ -36,6 +36,7 @@ from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
+from app.rbac.dependencies import require_permission
 from app.auth.service import CurrentUser
 from app.core.config import settings
 from app.core.responses import build_success_response
@@ -152,7 +153,7 @@ async def _record_action(
 async def get_all_quotation_documents(
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     """Fetch all quotations with product and supplier metadata for the Product & Supplier Gallery."""
     if not service.quotation_repository:
@@ -174,7 +175,7 @@ async def create_consignment_code(
     payload: ConsignmentCodeCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.create')),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Document: "Master to create and choose from dropdown menu"."""
@@ -199,7 +200,7 @@ async def list_consignment_codes(
     request: Request,
     buyer_id: uuid.UUID | None = None,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     """
     List consignment codes, optionally scoped to one buyer (for the create-inquiry dropdown).
@@ -214,7 +215,7 @@ async def deactivate_consignment_code(
     consignment_code_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.update')),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     code = await service.deactivate_consignment_code(consignment_code_id)
@@ -239,7 +240,7 @@ async def deactivate_consignment_code(
 async def list_companies_summary(
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     """Document: "1st layer summary is company wise (for example, F&B, One Stop, Inhyma etc)"."""
     summaries = await service.list_companies_summary()
@@ -252,7 +253,7 @@ async def list_consignments_for_buyer(
     buyer_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     """Document: "once we click company, then it opens ... with all columns" (FB1, FB2, ...)."""
     inquiries = await service.list_consignments_for_buyer(buyer_id)
@@ -265,7 +266,7 @@ async def delete_consignment(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.delete')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -301,7 +302,7 @@ async def create_item(
     payload: InquiryItemCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.create')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -349,7 +350,7 @@ async def create_items_bulk(
     payload: BulkInquiryItemCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.create')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -378,7 +379,7 @@ async def list_items(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     """Document: "go inside and see all items of that consignment with details"."""
     items = await service.list_items(inquiry_id)
@@ -391,7 +392,7 @@ async def get_inquiry(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     inquiry_data = await service.get_inquiry_with_details(inquiry_id)
     data = InquiryRead.model_validate(inquiry_data).model_dump(mode="json")
@@ -404,7 +405,7 @@ async def export_consignment(
     request: Request,
     format: str = "xlsx",
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.export')),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export all line items for an inquiry consignment as an Excel (.xlsx) or CSV file."""
@@ -447,7 +448,7 @@ async def import_inquiry_items(
     request: Request,
     file: UploadFile = File(...),
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.import')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -490,7 +491,9 @@ async def import_inquiry_items(
 
 
 @router.get("/sample-template", summary="Download inquiry product items CSV template")
-async def download_sample_template() -> Response:
+async def download_sample_template(
+    _current_user: CurrentUser = Depends(require_permission('inquiry.view')),
+) -> Response:
     """Download standard CSV template for importing inquiry product items."""
     content = (
         "Product Name,Product Code,Quantity,UOM,Brand Preference,Product Specs / Remarks,Status\r\n"
@@ -511,7 +514,7 @@ async def update_item(
     payload: InquiryItemUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.update')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -546,7 +549,7 @@ async def shift_item(
     payload: InquiryItemShift,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.update')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -581,7 +584,7 @@ async def approve_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.approve')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -614,7 +617,7 @@ async def revert_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.approve')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -647,7 +650,7 @@ async def set_procurement_remarks(
     payload: InquiryItemProcurementRemarksUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.update')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -681,7 +684,7 @@ async def delete_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.delete')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -716,7 +719,7 @@ async def bulk_mark_tally_posted(
     payload: BulkTallyPostRequest,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.update')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -763,7 +766,7 @@ async def get_product_last_purchase(
     product_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     """Return latest approved purchase or quote details for a product."""
     data = await service.get_last_purchase_for_product(product_id)
@@ -775,7 +778,7 @@ async def list_item_quotations(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     """Return all supplier quotations received for a specific inquiry line item."""
     quotes = await service.list_quotations_for_item(item_id)
@@ -788,7 +791,7 @@ async def create_item_quotation(
     payload: QuotationCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.create')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -825,7 +828,7 @@ async def update_quotation_status(
     payload: QuotationStatusUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.approve')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -862,7 +865,7 @@ async def update_quotation_details(
     payload: QuotationUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.update')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -898,7 +901,7 @@ async def delete_quotation(
     quotation_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.delete')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -934,7 +937,7 @@ async def create_item_rfq(
     payload: RFQCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.create')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -1060,7 +1063,7 @@ class RFQManualEmailSendPayload(BaseModel):
 async def send_rfq_email_manual(
     payload: RFQManualEmailSendPayload,
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.send_message')),
 ) -> dict:
     """Send an automated RFQ email with the quotation link to a supplier via SMTP."""
     success = await send_rfq_email(
@@ -1094,7 +1097,7 @@ async def create_bulk_rfqs(
     payload: BulkRFQCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.create')),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -1636,7 +1639,7 @@ async def get_inquiry_messages(
     inquiry_id: uuid.UUID,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.view')),
 ) -> dict:
     """Returns chronological communication messages (WeChat, Email, System) for the Messages tab."""
     stmt = (
@@ -1711,7 +1714,7 @@ async def send_inquiry_email_message(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
     event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.send_message')),
 ) -> dict:
     """Dispatches a direct email to recipient suppliers via SMTP and records it in the communication timeline."""
     clean_recipients = [e.strip() for e in payload.to_emails if e and "@" in e]
@@ -1859,7 +1862,7 @@ async def send_inquiry_wechat_message(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
     event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission('inquiry.send_message')),
 ) -> dict:
     """Dispatches a direct chat message to recipient supplier(s) via Tencent WeCom API and records it in the communication timeline."""
     clean_recipients = [w.strip() for w in payload.to_wechat if w and w.strip()]

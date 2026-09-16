@@ -50,20 +50,20 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "INVENTORY",
     items: [
       { key: "masters-products", label: "Product Master", path: "/masters/products", icon: "box", permission: "product.view" },
-      { key: "product-prices", label: "Product Prices", path: "/inventory/product-prices", icon: "coins", permission: "product.view" },
+      { key: "product-prices", label: "Product Prices", path: "/inventory/product-prices", icon: "coins", permission: "product_price.view" },
       { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "productgallery.view" },
     ],
   },
   {
     label: "SALE",
     items: [
-      { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText" },
+      { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText", permission: "inquiry.view" },
     ],
   },
   {
     label: "PURCHASE",
     items: [
-      { key: "local-purchases", label: "Local Purchase", path: "/purchase/local", icon: "shoppingBag", permission: "supplier.view" },
+      { key: "local-purchases", label: "Local Purchase", path: "/purchase/local", icon: "shoppingBag", permission: "local_purchase.view" },
     ],
   },
   {

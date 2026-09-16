@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.1.0 (Production)  
-> **Last Updated:** September 16, 2026 (Universal Fluid Responsive Auto-Fit Layout Across All Modules: Buyers, Suppliers, Catalogs, Local Purchase & Planning at 50%-150% Zoom; Unified Living Documentation)  
+> **Last Updated:** September 16, 2026 (Granular RBAC Protection for Inquiries, Product Prices & Local Purchases) (Universal Fluid Responsive Auto-Fit Layout Across All Modules: Buyers, Suppliers, Catalogs, Local Purchase & Planning at 50%-150% Zoom; Unified Living Documentation)  
 > **Repository:** `https://github.com/rupeshinhyma-oss/Yinglima_ERP.git`  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
@@ -316,6 +316,31 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **DAG Cycle Prevention**: Traversing both `department_hierarchy` and legacy `roles.parent_department_id` via breadth-first search prevents direct or indirect recursive loops across the departmental graph. Attempted cycles fail fast with HTTP `409 Conflict` ("This would create a circular department hierarchy.").
 - **Backward Compatibility**: Automatically mirrors and backfills the primary parent to `roles.parent_department_id` for legacy single-parent queries.
 
+### 7.4. Granular Permission Catalog & Protected Modules (169 Total Permissions)
+The RBAC engine secures every endpoint via `require_permission(code)` dependencies and protects frontend UI actions with `<Can>`, `useAuth().hasPermission`, and `Auth.hasPermission`:
+
+| Module Category | Module Code | Permission Codes | Action / Scope |
+| :--- | :--- | :--- | :--- |
+| **Inquiries & Quotations** | `inquiry` | `inquiry.view` | View inquiries list, consignment drill-downs, line items, and audit timelines |
+| | | `inquiry.create` | Create new inquiries, buyer requirements, and consignments |
+| | | `inquiry.update` | Edit inquiry details, consignment codes, item prices, and workflow stages |
+| | | `inquiry.delete` | Delete inquiries, items, or supplier quotes |
+| | | `inquiry.approve` | Approve quotation lines, lock pricing, and convert to purchase orders |
+| | | `inquiry.export` | Export consignment line items and quotes to Excel (.xlsx) and CSV |
+| | | `inquiry.import` | Bulk import inquiry line items from Excel templates |
+| | | `inquiry.send_message` | Send outbound supplier/buyer emails and Tencent WeChat/WeCom messages |
+| **Product Prices** | `product_price` | `product_price.view` | View Product Price Directory, price histories, and supplier quotes |
+| | | `product_price.create` | Add new supplier quotation entries to products |
+| | | `product_price.update` | Inline edit purchase prices, currencies, and remarks |
+| | | `product_price.delete` | Delete supplier quote records from the pricing catalog |
+| | | `product_price.export` | Export entire product pricing catalog to Excel / CSV |
+| | | `product_price.import` | Bulk import supplier price sheets via spreadsheet |
+| **Local Purchase** | `local_purchase` | `local_purchase.view` | View local purchases list, summary metrics, and detail modals |
+| | | `local_purchase.create` | Create new domestic purchase orders and run bill data extraction |
+| | | `local_purchase.update` | Edit purchase orders, item VAT allocations, and landing expense distributions |
+| | | `local_purchase.delete` | Cancel or permanently delete local purchase orders |
+| | | `local_purchase.export` | Export local purchase orders or download printable summaries |
+
 ---
 
 ## 8. Module-by-Module Technical Breakdown
@@ -522,6 +547,13 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Authenticated Direct Download:** Employs `downloadExport` with Bearer tokens and direct blob downloads to prevent popup blockers and blank browser tabs.
 - **Universal Bulk Import & Sample Template:**
   - Universal bulk Excel import via `POST /api/v1/inventory/product-prices/import` with in-memory product/supplier resolution, price validation, and error reporting.
+- **Granular RBAC Action Button & Feature Gates:**
+  - product_price.view: Grants read-only access to catalog items, best prices, and the Compare ▾ accordion comparison drawer.
+  - product_price.export: Gates visibility of the top 📥 Export ▾ dropdown menu (Excel and CSV).
+  - product_price.import: Gates visibility of the 📥 Bulk Import button and modal.
+  - product_price.create: Gates visibility of + Quote in table actions, + Assign on unlinked items, and the sub-table + Add Another Supplier Quote: inline entry drawer.
+  - product_price.update: Gates click-to-edit inline pricing (main row best price badge and sub-table quoted price), rendering clean read-only currency text without pencil icons or pointer cursors when absent.
+  - product_price.delete: Gates the 🗑️ delete supplier quote button within the comparison sub-table.
 ### 8.17. Local Purchase Orders & Domestic Procurement Engine
 - **Files:** `backend/app/purchases/local/` (`models.py`, `routes.py`, `service.py`, `repository.py`, `schemas.py`), `frontend/src/pages/purchases/LocalPurchases.tsx`, `frontend/src/pages/purchases/LocalPurchaseForm.tsx`, `frontend/src/types/localPurchase.ts`.
 - **Route Prefix:** `/api/v1/purchases/local`.

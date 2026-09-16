@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** September 16, 2026 (Synchronized with Version 1.1.0 & Local Purchases Domestic Procurement Engine, Universal Live Duplicate Blockers & 100% Fluid Layout Standard)
+> **Last Updated:** September 16, 2026 (Added End-to-End Granular RBAC Permissions for Inquiries, Product Prices & Local Purchases) (Synchronized with Version 1.1.0 & Local Purchases Domestic Procurement Engine, Universal Live Duplicate Blockers & 100% Fluid Layout Standard)
 
 ---
 
@@ -545,6 +545,13 @@ Manage complete vendor team directory:
 7. **Product Detail SideDrawer:**
    - Slides in from right upon clicking product name or code.
    - High-resolution photo, Tally Name, Brand, Category, Sub-Category, HSN Code, UOM, Packaging Quantity, Refund VAT %, Packaging Net/Gross Weight, Dimensions (L x W x H cm), auto-computed Packaging Unit CBM, License Warning banner, and Technical Specifications.
+8. **Granular RBAC Action Button & Feature Permissions:**
+   - **product_price.view:** Controls access to the Product Price Directory page, catalog product listing, and the Compare ▾ accordion comparison table.
+   - **product_price.export:** Controls visibility of the header 📥 Export ▾ dropdown button (Excel and CSV download).
+   - **product_price.import:** Controls visibility of the 📥 Bulk Import button and modal.
+   - **product_price.create:** Controls visibility of the + Quote button under Actions, the + Assign button on unlinked products, and the sub-table + Add Another Supplier Quote: inline entry drawer.
+   - **product_price.update:** Controls click-to-edit inline pricing (main row best price badge and sub-table quoted price), rendering clean read-only currency text without pencil icons or pointer cursors when absent.
+   - **product_price.delete:** Controls visibility of the 🗑️ delete quote button within the comparison sub-table.
 
 ### Test Checklist for Quality Assurance
 - [ ] **Table Render**: Verify all 3,500+ products load smoothly under 1.5s with Sr. No., Product Name & Code, Category & Brand, Best Price, Primary Supplier, and Actions.
@@ -1281,13 +1288,28 @@ Manage complete vendor team directory:
 - **Bidirectional Live Auto-Sync:** Connecting a child department under a parent (e.g. Sales under Operations) immediately updates both departments' rosters so Operations lists Sales as a child, and Sales lists Operations as a parent.
 - **DAG Cycle Detection:** Server-side validation prevents circular hierarchies (e.g. A -> B -> A or A -> B -> C -> A) and returns HTTP 409 Conflict with an alert.
 - **Permission Matrix Grid:**
-  - Grouped by module cards: `Dashboard`, `Contact`, `Inventory`, `Sale`, `Planning`, `User Management`, `Configurations`, `Audit`, `Trash`.
-  - `Select All` / `Deselect All` toggles per module.
-  - Checkboxes for granular permissions (`.view`, `.create`, `.update`, `.delete`, `.export`, `.import`, `.bulk_action`, etc.).
+  - Grouped by module cards: `Dashboard`, `Contact`, `Inventory`, `Inquiries & Quotations`, `Product Prices`, `Local Purchase`, `Sale`, `Planning`, `User Management`, `Configurations`, `Audit`, `Trash`.
+  - `Select All` / `Deselect All` toggles per module card.
+  - Granular operation checkboxes:
+    - **Inquiries & Quotations (`inquiry.*`):** View, Create, Update, Delete, Approve Quotation, Export Line Items, Import Line Items, Send Messages (Email/WeChat).
+    - **Product Prices (`product_price.*`):** View, Create, Update, Delete, Export, Import.
+    - **Local Purchase (`local_purchase.*`):** View, Create, Update, Delete, Export / Print.
+  - Checkboxes for all other core platform modules (`.view`, `.create`, `.update`, `.delete`, `.export`, `.import`, `.bulk_action`, etc.).
 - **Clone Department Button:** Creates a copy of the department with all permissions pre-checked.
 - **Safe Delete with Reassignment Modal:** If users exist in a department scheduled for deletion, prompts administrator to select a replacement department to reassign those employees before deletion proceeds.
 
 ### 16.3. Test Cases for Departments & Permissions Module
+- [ ] **RBAC Module Cards Verification:** Open `/rbac`, create or open any test department (e.g. `Procurement & Quotations`). Verify that dedicated permission cards appear for:
+  - **Inquiries & Quotations:** Displays 8 checkboxes (`View`, `Create`, `Update`, `Delete`, `Approve Quotation`, `Export Line Items`, `Import Line Items`, `Send Messages (Email/WeChat)`).
+  - **Product Prices:** Displays 6 checkboxes (`View`, `Create`, `Update`, `Delete`, `Export`, `Import`).
+  - **Local Purchase:** Displays 5 checkboxes (`View`, `Create`, `Update`, `Delete`, `Export / Print`).
+- [ ] **Restricted User Navigation & Action Gating Test:**
+  1. Assign a test user to a department possessing only `inquiry.view`, `product_price.view`, and `local_purchase.view` (read-only).
+  2. Log in as that user: verify the sidebar items for `Inquiries`, `Product Prices`, and `Local Purchases` are visible.
+  3. Navigate to `Product Prices`: verify "+ Add Price" and inline price editing are disabled/hidden, but the catalog is visible.
+  4. Navigate to `Local Purchases`: verify "+ New Purchase Order", "Edit", and "Delete" actions are hidden, and export is hidden if `local_purchase.export` is unchecked.
+  5. Navigate to `Inquiries`: verify that outbound email sending, WeChat sending, and bulk Excel import buttons are hidden or disabled without respective permissions.
+  6. Attempt to perform direct REST calls without permissions (e.g., `POST /api/v1/purchases/local`): verify backend strictly returns `403 Forbidden`.
 - [ ] Open `/rbac`, click on a department (e.g. `Operations`), verify Left Column renders:
   1. Department Details (Name, Description, Code, Parent Departments)
   2. Managers in this Department
