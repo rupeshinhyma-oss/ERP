@@ -50,9 +50,9 @@ async def sync_all_uploads():
 
     # Map of local subfolders -> Supabase bucket
     targets = [
-        ("products", "product-images"),
-        ("suppliers", "supplier-media"),
-        ("quotations", "quotations"),
+        ("products", "yinglima-product-images"),
+        ("suppliers", "yinglima-supplier-media"),
+        ("quotations", "yinglima-quotations"),
     ]
 
     url_mappings: dict[str, str] = {}  # local_url_pattern -> public_supabase_url

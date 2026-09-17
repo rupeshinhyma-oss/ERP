@@ -301,7 +301,7 @@ async def upload_to_supabase(
 async def save_uploaded_file(
     content: bytes,
     original_filename: str,
-    bucket: str = "product-images",
+    bucket: str = "yinglima-product-images",
     local_subfolder: str = "products",
     content_type: str | None = None,
 ) -> Tuple[str, str]:
