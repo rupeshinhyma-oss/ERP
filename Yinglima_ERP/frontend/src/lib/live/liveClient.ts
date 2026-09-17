@@ -28,7 +28,7 @@
  */
 
 import { Auth } from "@/lib/auth";
-import { API_BASE, handleSessionExpired } from "@/lib/api";
+import { API_BASE, handleSessionExpired, tryRefresh } from "@/lib/api";
 import type { LiveClientMessage, LiveControlMessage, LiveEvent } from "./liveEvent";
 import { isLiveEvent } from "./liveEvent";
 
@@ -76,6 +76,7 @@ export class LiveClient {
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyClosed = true;
+  private isPageHidden = false;
   /** Channels the caller wants active. Restored automatically after every (re)connect -- see `_flushSubscriptions`. */
   private desiredChannels = new Set<string>();
   /** Channels the SERVER has actually acknowledged for the CURRENT socket. Reset to empty on every new connection. */
@@ -90,7 +91,57 @@ export class LiveClient {
    *             Overridable mainly for tests; production code should
    *             always use the default.
    */
-  constructor(private readonly path: string = "/events/live") {}
+  constructor(private readonly path: string = "/events/live") {
+    if (typeof window !== "undefined") {
+      window.addEventListener("pagehide", this.handlePageHide);
+      window.addEventListener("pageshow", this.handlePageShow);
+      document.addEventListener("visibilitychange", this.handleVisibilityChange);
+    }
+  }
+
+  private handlePageHide = (): void => {
+    // When a page enters bfcache or begins unloading, the browser forcefully terminates
+    // active WebSockets with "failed: Page entered Back-Forward Cache."
+    // Mark isPageHidden so socket.onclose does NOT attempt to reconnect while the page
+    // is frozen in bfcache, avoiding duplicate errors and runaway backoff loops.
+    this.isPageHidden = true;
+    this.clearReconnectTimer();
+    if (this.socket) {
+      try {
+        this.socket.close(1000, "pagehide");
+      } catch {
+        // ignore
+      }
+      this.socket = null;
+    }
+    this.confirmedChannels.clear();
+    this._setStatus("disconnected");
+  };
+
+  private handlePageShow = (): void => {
+    // When a page is restored from bfcache (event.persisted === true), React components
+    // are NOT remounted, and frozen timers do not reliably re-schedule.
+    // Reset backoff count and reconnect immediately if logged in.
+    this.isPageHidden = false;
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    if (Auth.isLoggedIn() && !this.intentionallyClosed) {
+      this.connect();
+    }
+  };
+
+  private handleVisibilityChange = (): void => {
+    if (document.visibilityState === "visible") {
+      this.isPageHidden = false;
+      if (Auth.isLoggedIn() && !this.intentionallyClosed) {
+        if (!this.socket || this.socket.readyState === WebSocket.CLOSED) {
+          this.reconnectAttempt = 0;
+          this.clearReconnectTimer();
+          this.connect();
+        }
+      }
+    }
+  };
 
   getStatus(): ConnectionStatus {
     return this.status;
@@ -104,6 +155,9 @@ export class LiveClient {
    */
   connect(): void {
     if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    if (this.isPageHidden || (typeof document !== "undefined" && document.visibilityState === "hidden")) {
       return;
     }
     const token = Auth.getAccessToken();
@@ -155,13 +209,33 @@ export class LiveClient {
     socket.onclose = (ev) => {
       this.socket = null;
       this.confirmedChannels.clear();
-      if (ev.code === 4001 || ev.reason === "force_logout") {
+      if (
+        ev.code === 4001 ||
+        ev.code === 4401 ||
+        ev.reason === "force_logout" ||
+        ev.reason === "Invalid or expired token."
+      ) {
+        this.clearReconnectTimer();
+        if (ev.reason === "Invalid or expired token." || ev.code === 4401) {
+          // Token may have expired during bfcache freeze or idle time -- attempt refresh before logging out
+          void tryRefresh().then((ok) => {
+            if (ok) {
+              this.reconnectAttempt = 0;
+              this.connect();
+            } else {
+              this.intentionallyClosed = true;
+              this._setStatus("disconnected");
+              handleSessionExpired(true);
+            }
+          });
+          return;
+        }
         this.intentionallyClosed = true;
         this._setStatus("disconnected");
-        handleSessionExpired();
+        handleSessionExpired(true);
         return;
       }
-      if (this.intentionallyClosed) {
+      if (this.intentionallyClosed || this.isPageHidden || !Auth.isLoggedIn()) {
         this._setStatus("disconnected");
         return;
       }
@@ -248,7 +322,7 @@ export class LiveClient {
       const msg = parsed as Record<string, unknown>;
       if (msg.type === "FORCE_LOGOUT") {
         this.disconnect();
-        handleSessionExpired();
+        handleSessionExpired(true);
         return;
       }
       const control = parsed as LiveControlMessage;
@@ -279,7 +353,7 @@ export class LiveClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.intentionallyClosed) return;
+    if (this.intentionallyClosed || this.isPageHidden || !Auth.isLoggedIn()) return;
     this.clearReconnectTimer();
     const delay = computeBackoffDelay(this.reconnectAttempt);
     this.reconnectAttempt += 1;
@@ -297,6 +371,15 @@ export class LiveClient {
     if (this.status === status) return;
     this.status = status;
     for (const listener of this.connectionListeners) listener(status);
+  }
+
+  destroy(): void {
+    this.disconnect();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("pagehide", this.handlePageHide);
+      window.removeEventListener("pageshow", this.handlePageShow);
+      document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    }
   }
 }
 

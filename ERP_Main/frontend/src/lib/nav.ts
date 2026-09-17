@@ -38,15 +38,28 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: "ERPS",
+    items: [
+      { key: "erp-switcher", label: "ERP Switcher", path: "/erps/switcher", icon: "layers" },
+    ],
+  },
+  {
     label: "USERS & ACCESS",
     items: [
-      { key: "users", label: "Users & Access", path: "/access/users", icon: "users" },
+      { key: "users", label: "Global Users", path: "/access/users", icon: "users" },
+      { key: "roles", label: "Roles", path: "/access/roles", icon: "userCheck", superAdminOnly: true },
+      { key: "permissions", label: "Permissions", path: "/access/permissions", icon: "key", superAdminOnly: true },
+      { key: "memberships", label: "ERP Memberships", path: "/access/memberships", icon: "link" },
+      { key: "access-policies", label: "Access Policies", path: "/access/policies", icon: "lock", superAdminOnly: true },
     ],
   },
   {
     label: "ORGANIZATIONS",
     items: [
+      { key: "companies", label: "Companies", path: "/organizations/companies", icon: "building" },
       { key: "organizations", label: "Organizations", path: "/organizations", icon: "orgChart" },
+      { key: "departments", label: "Departments", path: "/organizations/departments", icon: "briefcase" },
+      { key: "business-units", label: "Business Units", path: "/organizations/business-units", icon: "factory" },
     ],
   },
   {
@@ -104,7 +117,6 @@ for (const section of NAV_SECTIONS) {
 }
 
 // Support legacy keys in NAV_ITEMS_BY_KEY for backwards compatibility
-NAV_ITEMS_BY_KEY["erp-switcher"] = { key: "erp-switcher", label: "Dashboard", path: "/dashboard", icon: "dashboard" };
 NAV_ITEMS_BY_KEY["erps"] = NAV_ITEMS_BY_KEY["erp-switcher"];
 NAV_ITEMS_BY_KEY["my-erps"] = NAV_ITEMS_BY_KEY["erp-switcher"];
 NAV_ITEMS_BY_KEY["integration"] = NAV_ITEMS_BY_KEY["integrations"];
@@ -112,13 +124,6 @@ NAV_ITEMS_BY_KEY["health"] = NAV_ITEMS_BY_KEY["system-health"];
 NAV_ITEMS_BY_KEY["authz"] = NAV_ITEMS_BY_KEY["roles"];
 NAV_ITEMS_BY_KEY["reporting"] = { key: "reporting", label: "Reports & Exports", path: "/reporting", icon: "barChart" };
 NAV_ITEMS_BY_KEY["search"] = { key: "search", label: "Federated Search", path: "/search", icon: "search" };
-NAV_ITEMS_BY_KEY["companies"] = { key: "companies", label: "Companies", path: "/organizations/companies", icon: "building" };
-NAV_ITEMS_BY_KEY["departments"] = { key: "departments", label: "Departments", path: "/organizations/departments", icon: "briefcase" };
-NAV_ITEMS_BY_KEY["business-units"] = { key: "business-units", label: "Business Units", path: "/organizations/business-units", icon: "factory" };
-NAV_ITEMS_BY_KEY["roles"] = { key: "roles", label: "Roles", path: "/access/roles", icon: "userCheck", superAdminOnly: true };
-NAV_ITEMS_BY_KEY["permissions"] = { key: "permissions", label: "Permissions", path: "/access/permissions", icon: "key", superAdminOnly: true };
-NAV_ITEMS_BY_KEY["memberships"] = { key: "memberships", label: "ERP Memberships", path: "/access/memberships", icon: "link" };
-NAV_ITEMS_BY_KEY["access-policies"] = { key: "access-policies", label: "Access Policies", path: "/access/policies", icon: "lock", superAdminOnly: true };
 NAV_ITEMS_BY_KEY["access"] = NAV_ITEMS_BY_KEY["users"];
 
 export const PAGE_TITLES: Record<string, string> = {
@@ -200,19 +205,8 @@ export function getSectionTabs(sectionLabel: string): NavItem[] {
 }
 
 export const ERP_SECTION_TABS = getSectionTabs("ERPS");
-export const ACCESS_SECTION_TABS: NavItem[] = [
-  { key: "users", label: "Global Users", path: "/access/users", icon: "users" },
-  { key: "roles", label: "Roles", path: "/access/roles", icon: "userCheck", superAdminOnly: true },
-  { key: "permissions", label: "Permissions", path: "/access/permissions", icon: "key", superAdminOnly: true },
-  { key: "memberships", label: "ERP Memberships", path: "/access/memberships", icon: "link" },
-  { key: "access-policies", label: "Access Policies", path: "/access/policies", icon: "lock", superAdminOnly: true },
-];
-export const ORG_SECTION_TABS: NavItem[] = [
-  { key: "companies", label: "Companies", path: "/organizations/companies", icon: "building" },
-  { key: "organizations", label: "Organizations", path: "/organizations", icon: "orgChart" },
-  { key: "departments", label: "Departments", path: "/organizations/departments", icon: "briefcase" },
-  { key: "business-units", label: "Business Units", path: "/organizations/business-units", icon: "factory" },
-];
+export const ACCESS_SECTION_TABS = getSectionTabs("USERS & ACCESS");
+export const ORG_SECTION_TABS = getSectionTabs("ORGANIZATIONS");
 export const INTEGRATION_SECTION_TABS = getSectionTabs("INTEGRATIONS");
 export const SYNC_SECTION_TABS = getSectionTabs("SYNCHRONIZATION");
 export const MONITORING_SECTION_TABS = getSectionTabs("MONITORING & AUDIT");
