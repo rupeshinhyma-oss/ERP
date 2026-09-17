@@ -36,6 +36,7 @@ import { BuyersPage } from "@/pages/Buyers";
 import { InquiriesPage } from "@/pages/Inquiries";
 import { PlanningPage } from "@/pages/Planning";
 import { TasksPage } from "@/pages/tasks/TasksPage";
+import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
 
 import { CountriesPage } from "@/pages/masters/Countries";
 import { StatesPage } from "@/pages/masters/States";
@@ -146,6 +147,21 @@ export function App() {
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/tasks/kanban" element={<Navigate to="/tasks?tab=kanban" replace />} />
           <Route path="/tasks/calendar" element={<Navigate to="/tasks?tab=calendar" replace />} />
+          <Route path="/technical-task/list" element={<TechnicalTasksPage />} />
+          <Route path="/technical-tasks" element={<Navigate to="/technical-task/list" replace />} />
+          <Route
+            path="/marketing-task/list"
+            element={
+              <ComingSoonPage
+                activeKey="marketing-tasks"
+                title="Marketing Tasks"
+                subtitle="Track and manage client outreach and marketing activities"
+                breadcrumbLabel="Marketing Tasks"
+                featureName="Marketing Tasks"
+              />
+            }
+          />
+          <Route path="/marketing-tasks" element={<Navigate to="/marketing-task/list" replace />} />
 
           <Route path="/masters/company-list" element={<CompanyListPage />} />
           <Route path="/masters/countries" element={<CountriesPage />} />

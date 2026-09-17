@@ -42,7 +42,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "CONTACT",
     items: [
-      { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "supplier.view" },
+      { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "company.view" },
       { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
       { key: "buyers", label: "Buyers", path: "/buyers", icon: "shoppingBag", permission: "buyer.view" },
     ],
@@ -72,9 +72,11 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: "WORK MANAGEMENT",
+    label: "TASK",
     items: [
-      { key: "tasks", label: "Tasks", path: "/tasks", icon: "task", permission: "task.view" },
+      { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
+      { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
+      { key: "marketing-tasks", label: "Marketing Tasks", path: "/marketing-task/list", icon: "messageSquare" },
     ],
   },
   {
@@ -83,6 +85,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
       { key: "positions", label: "Positions", path: "/positions", icon: "briefcase", permission: "position.view" },
       { key: "rbac", label: "Departments & Permissions", path: "/rbac", icon: "shield", permission: "roles_permissions.view" },
+      { key: "effective-permissions", label: "Effective Permissions", path: "/effective-permissions", icon: "shield", permission: "roles_permissions.view" },
     ],
   },
   {
@@ -172,6 +175,8 @@ export const PAGE_TITLES: Record<string, string> = {
   "403": "Access Restricted",
   "my-tasks": "My Tasks",
   tasks: "Task Management",
+  "technical-tasks": "Technical Task List",
+  "marketing-tasks": "Marketing Tasks",
   "tasks-kanban": "Tasks Kanban Board",
   "tasks-calendar": "Tasks Calendar",
 
@@ -264,6 +269,10 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/masters/bank": "/masters/banks",
   "/trash.html": "/trash",
   "/tasks.html": "/tasks",
+  "/technical-tasks": "/technical-task/list",
+  "/technical-tasks.html": "/technical-task/list",
+  "/marketing-tasks": "/marketing-task/list",
+  "/marketing-tasks.html": "/marketing-task/list",
   // Both of these were already redirect-only stubs in the original.
   "/employee-detail.html": "/users",
   "/employee-form.html": "/users",

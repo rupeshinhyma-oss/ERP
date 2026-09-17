@@ -65,6 +65,7 @@ from app.companies.routes import router as companies_router
 from app.suppliers.routes import router as suppliers_router
 from app.notifications.routes import router as notifications_router
 from app.tasks.routes import router as tasks_router
+from app.technical_tasks.routes import router as technical_tasks_router
 from app.trash.routes import router as trash_router
 from app.users.routes import router as users_router
 
@@ -164,6 +165,7 @@ api_router.include_router(planning_router)
 # needing their own router entry here.
 # Standalone Task Management & In-App Notifications
 api_router.include_router(tasks_router)
+api_router.include_router(technical_tasks_router)
 api_router.include_router(notifications_router)
 
 api_router.include_router(events_router)

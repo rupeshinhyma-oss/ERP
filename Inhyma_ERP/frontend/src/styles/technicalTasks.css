@@ -1,0 +1,793 @@
+/* ==========================================================================
+   Technical Tasks Module Styles (Exact Match to Reference Screenshot & Inhyma ERP)
+   ========================================================================== */
+
+.page-technical-tasks {
+  padding: 0 4px;
+  width: 100%;
+}
+
+/* Header & Top Bar */
+.page-technical-tasks .tech-tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  margin-bottom: 12px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-technical-tasks .tech-tasks-title {
+  font-size: 19px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.page-technical-tasks .tech-tasks-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Header Action Buttons (Exact match to screenshot) */
+.page-technical-tasks .tech-btn-filter {
+  width: 38px;
+  height: 35px;
+  background-color: #3b5998;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.page-technical-tasks .tech-btn-filter:hover {
+  background-color: #2d4373;
+}
+
+.page-technical-tasks .tech-btn-filter.active {
+  background-color: #1e3a8a;
+}
+
+.page-technical-tasks .tech-btn-add {
+  height: 35px;
+  padding: 0 16px;
+  background-color: #007bff;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 123, 255, 0.2);
+  white-space: nowrap;
+}
+
+.page-technical-tasks .tech-btn-add:hover {
+  background-color: #0069d9;
+}
+
+.page-technical-tasks .tech-btn-delete {
+  height: 35px;
+  padding: 0 16px;
+  background-color: #28a745;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+  box-shadow: 0 1px 2px rgba(40, 167, 69, 0.2);
+  white-space: nowrap;
+}
+
+.page-technical-tasks .tech-btn-delete:hover:not(:disabled) {
+  background-color: #218838;
+}
+
+.page-technical-tasks .tech-btn-delete:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Tabs Navigation matching screenshot */
+.page-technical-tasks .tech-tabs-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1.5px solid #dee2e6;
+  margin-bottom: 14px;
+  overflow-x: auto;
+}
+
+.page-technical-tasks .tech-tab-item {
+  background: none;
+  border: none;
+  padding: 8px 4px 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #495057;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.15s ease;
+  white-space: nowrap;
+}
+
+.page-technical-tasks .tech-tab-item:hover {
+  color: #007bff;
+}
+
+.page-technical-tasks .tech-tab-item.active {
+  color: #007bff;
+  font-weight: 700;
+  border-bottom: 2.5px solid #007bff;
+  margin-bottom: -1.5px;
+}
+
+/* Sub-toolbar: Items per page & Search */
+.page-technical-tasks .tech-subbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-technical-tasks .select-items-page {
+  height: 34px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  padding: 0 28px 0 10px;
+  font-size: 13px;
+  color: #495057;
+  background-color: #ffffff;
+  outline: none;
+  cursor: pointer;
+}
+
+.page-technical-tasks .search-input-wrapper {
+  position: relative;
+  width: 220px;
+  max-width: 100%;
+}
+
+.page-technical-tasks .search-input-wrapper input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px 0 30px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  color: #495057;
+  background-color: #ffffff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.page-technical-tasks .search-input-wrapper input:focus {
+  border-color: #80bdff;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.2);
+}
+
+.page-technical-tasks .search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6c757d;
+  pointer-events: none;
+}
+
+/* Filter Card Panel */
+.page-technical-tasks .filter-card-panel {
+  background: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.page-technical-tasks .filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)) auto;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.page-technical-tasks .filter-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.page-technical-tasks .filter-control label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6c757d;
+}
+
+.page-technical-tasks .filter-control select,
+.page-technical-tasks .filter-control input {
+  height: 34px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 13px;
+  background-color: #ffffff;
+  color: #212529;
+  outline: none;
+}
+
+.page-technical-tasks .filter-control select:focus,
+.page-technical-tasks .filter-control input:focus {
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.15);
+}
+
+.page-technical-tasks .btn-filter-reset {
+  height: 34px;
+  padding: 0 14px;
+  background: #f8f9fa;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #495057;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.page-technical-tasks .btn-filter-reset:hover {
+  background: #e9ecef;
+}
+
+/* Main Table Styling matching exact screenshot */
+.page-technical-tasks .tech-table-card {
+  background: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.page-technical-tasks .table-scroll-container {
+  overflow-x: auto;
+  max-height: calc(100vh - 270px);
+  overflow-y: auto;
+}
+
+.page-technical-tasks .tech-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: #212529;
+  background: #ffffff;
+}
+
+.page-technical-tasks .tech-data-table th,
+.page-technical-tasks .tech-data-table td {
+  padding: 8px 10px;
+  border: 1px solid #dee2e6;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.page-technical-tasks .tech-data-table th {
+  background-color: #f8f9fa;
+  color: #212529;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  user-select: none;
+}
+
+.page-technical-tasks .tech-data-table th.col-status-header {
+  background-color: #e9ecef;
+}
+
+.page-technical-tasks .tech-data-table th.sortable {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.page-technical-tasks .tech-data-table th.sortable:hover {
+  background-color: #e9ecef;
+}
+
+.page-technical-tasks .th-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-technical-tasks .sort-indicator {
+  color: #adb5bd;
+  font-size: 11px;
+}
+
+.page-technical-tasks .tech-data-table tbody tr:hover td {
+  background-color: #f1f7fe !important;
+}
+
+.page-technical-tasks .tech-data-table tbody tr.row-selected td {
+  background-color: #e8f0fe !important;
+}
+
+/* Company link */
+.page-technical-tasks .company-link {
+  color: #007bff;
+  font-weight: 600;
+  text-decoration: none;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.page-technical-tasks .company-link:hover {
+  text-decoration: underline;
+}
+
+/* Detail eye button */
+.page-technical-tasks .btn-detail-eye {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: #007bff;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.page-technical-tasks .btn-detail-eye:hover {
+  text-decoration: underline;
+}
+
+/* Multiline cells */
+.page-technical-tasks .multiline-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.35;
+}
+
+.page-technical-tasks .primary-line {
+  font-weight: 600;
+  color: #212529;
+}
+
+.page-technical-tasks .secondary-line {
+  font-size: 11.5px;
+  color: #6c757d;
+}
+
+.page-technical-tasks .tertiary-line {
+  font-size: 11.5px;
+  color: #007bff;
+}
+
+/* Badges matching Screenshots */
+.badge-tech,
+.page-technical-tasks .badge-tech {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Task Type Badges */
+.badge-inhouse,
+.page-technical-tasks .badge-inhouse {
+  background-color: #f8f9fa;
+  color: #495057;
+  border: 1px solid #ced4da;
+}
+
+.badge-onsite,
+.page-technical-tasks .badge-onsite {
+  background-color: #e8f0fe;
+  color: #1a73e8;
+  border: 1px solid #c2dbff;
+}
+
+.badge-telecall,
+.page-technical-tasks .badge-telecall {
+  background-color: #e6f4ea;
+  color: #137333;
+  border: 1px solid #b7e1cd;
+}
+
+/* Service Type Badges */
+.badge-free,
+.page-technical-tasks .badge-free {
+  background-color: #e0f2fe;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
+}
+
+.badge-chargeable-box,
+.page-technical-tasks .badge-chargeable-box {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.badge-chargeable,
+.page-technical-tasks .badge-chargeable {
+  background-color: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.charge-amount,
+.page-technical-tasks .charge-amount {
+  font-size: 11px;
+  font-weight: 700;
+  color: #15803d;
+}
+
+/* Payment Badges */
+.badge-payment-pending,
+.page-technical-tasks .badge-payment-pending {
+  background-color: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeeba;
+}
+
+.badge-payment-paid,
+.page-technical-tasks .badge-payment-paid {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+/* Status Badges */
+.status-wrapper,
+.page-technical-tasks .status-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.badge-status-pending,
+.page-technical-tasks .badge-status-pending {
+  background-color: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeeba;
+}
+
+.badge-status-approved,
+.page-technical-tasks .badge-status-approved {
+  background-color: #cce5ff;
+  color: #004085;
+  border: 1px solid #b8daff;
+}
+
+.badge-status-completed,
+.page-technical-tasks .badge-status-completed {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.badge-status-cancel,
+.page-technical-tasks .badge-status-cancel {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.page-technical-tasks .status-date {
+  font-size: 11px;
+  color: #155724;
+  font-weight: 600;
+}
+
+/* Action Dropdown Menu */
+.page-technical-tasks .action-cell-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.page-technical-tasks .btn-action-dots {
+  background: none;
+  border: none;
+  color: #6c757d;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.page-technical-tasks .btn-action-dots:hover {
+  background-color: #e9ecef;
+  color: #212529;
+}
+
+.page-technical-tasks .action-menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 150px;
+  z-index: 100;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-technical-tasks .action-menu-dropdown button {
+  background: none;
+  border: none;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #212529;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  transition: background 0.12s ease;
+}
+
+.page-technical-tasks .action-menu-dropdown button:hover {
+  background-color: #f8f9fa;
+  color: #007bff;
+}
+
+.page-technical-tasks .action-menu-dropdown button.action-delete {
+  color: #dc3545;
+}
+
+.page-technical-tasks .action-menu-dropdown button.action-delete:hover {
+  background-color: #f8d7da;
+}
+
+.page-technical-tasks .action-menu-divider {
+  height: 1px;
+  background-color: #dee2e6;
+  margin: 4px 0;
+}
+
+/* Pagination container */
+.page-technical-tasks .tech-table-pagination-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-top: 1px solid #dee2e6;
+  background: #ffffff;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Modals & Drawers */
+.page-technical-tasks .tech-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(1px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+}
+
+.page-technical-tasks .tech-modal-overlay.drawer-mode {
+  justify-content: flex-end;
+  padding: 0;
+}
+
+.page-technical-tasks .tech-modal-card {
+  background: #ffffff;
+  border-radius: 6px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.page-technical-tasks .tech-modal-overlay.drawer-mode .tech-modal-card {
+  max-width: 620px;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+}
+
+.page-technical-tasks .tech-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #dee2e6;
+  background: #ffffff;
+}
+
+.page-technical-tasks .tech-modal-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #212529;
+  margin: 0;
+}
+
+.page-technical-tasks .btn-close-modal {
+  background: none;
+  border: none;
+  color: #6c757d;
+  font-size: 18px;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.page-technical-tasks .btn-close-modal:hover {
+  background-color: #f8f9fa;
+  color: #212529;
+}
+
+.page-technical-tasks .tech-modal-body {
+  padding: 18px;
+  overflow-y: auto;
+  flex: 1;
+  background: #fdfdfd;
+}
+
+.page-technical-tasks .tech-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid #dee2e6;
+  background: #ffffff;
+}
+
+/* Detail Card Items */
+.page-technical-tasks .detail-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  background: #ffffff;
+  padding: 14px;
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+}
+
+.page-technical-tasks .detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.page-technical-tasks .detail-row.col-span-2 {
+  grid-column: span 2;
+}
+
+.page-technical-tasks .detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6c757d;
+}
+
+.page-technical-tasks .detail-value {
+  font-size: 13px;
+  color: #212529;
+  font-weight: 500;
+}
+
+.page-technical-tasks .detail-desc-box {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-top: 4px;
+  color: #334155;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+/* Skeleton Shimmer Loading States */
+.skeleton-row td {
+  background-color: #ffffff;
+}
+
+.skeleton-row:hover td {
+  background-color: #f8fafc !important;
+}
+
+.skeleton-line {
+  display: inline-block;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+  background-size: 400% 100%;
+  animation: techShimmer 1.3s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes techShimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
+/* Fallback & Error State Enhancements */
+.tech-empty-state-card,
+.tech-error-state-card {
+  position: sticky;
+  left: 0;
+  width: calc(100vw - 320px);
+  max-width: calc(100vw - 320px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 30px 16px;
+}
+
