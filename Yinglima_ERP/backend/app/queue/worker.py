@@ -181,7 +181,7 @@ class BackgroundWorker:
             job_id_str = str(job.id)
             logger.info(
                 "Executing job.",
-                extra={"job_id": job_id_str, "job_name": job.job_name, "module": job.module},
+                extra={"job_id": job_id_str, "job_name": job.job_name, "job_module": job.module},
             )
 
             # Look up the registered handler.

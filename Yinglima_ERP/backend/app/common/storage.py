@@ -32,9 +32,11 @@ _VERIFIED_BUCKETS: set[str] = set()
 # Whitelist of allowed file extensions
 ALLOWED_EXTENSIONS: set[str] = {
     # Images
-    "png", "jpg", "jpeg", "webp", "gif",
+    "png", "jpg", "jpeg", "webp", "gif", "svg",
     # Documents
-    "pdf", "csv", "xlsx", "xls", "doc", "docx", "txt",
+    "pdf", "csv", "xlsx", "xls", "doc", "docx", "txt", "xml", "json",
+    # Archives (quotation packages, CAD files, supplier drawing bundles)
+    "zip", "rar", "7z", "tar", "gz",
     # Media
     "mp4", "webm", "mov",
 }
@@ -43,12 +45,23 @@ ALLOWED_EXTENSIONS: set[str] = {
 MAX_FILE_SIZE: int = 50 * 1024 * 1024
 
 # Buckets intended for public access; all other buckets default to private/confidential
-PUBLIC_BUCKETS: set[str] = {"product-images", "supplier-media", "public-assets"}
+PUBLIC_BUCKETS: set[str] = {
+    "product-images",
+    "supplier-media",
+    "public-assets",
+    "quotations",
+    "yinglima-product-images",
+    "yinglima-supplier-media",
+    "yinglima-quotations",
+}
 
 
 def is_bucket_public(bucket: str) -> bool:
     """Return True if the bucket is configured as public, False if confidential."""
-    return bucket.lower() in PUBLIC_BUCKETS
+    b = bucket.lower()
+    if b in PUBLIC_BUCKETS:
+        return True
+    return any(keyword in b for keyword in ("product", "supplier", "media", "asset", "public"))
 
 
 def validate_file_upload(
@@ -110,6 +123,13 @@ def guess_content_type(filename: str, default: str = "application/octet-stream")
         "doc": "application/msword",
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "txt": "text/plain",
+        "xml": "application/xml",
+        "json": "application/json",
+        "zip": "application/zip",
+        "rar": "application/x-rar-compressed",
+        "7z": "application/x-7z-compressed",
+        "tar": "application/x-tar",
+        "gz": "application/gzip",
     }
     return extension_map.get(ext, default)
 
@@ -281,7 +301,7 @@ async def upload_to_supabase(
 async def save_uploaded_file(
     content: bytes,
     original_filename: str,
-    bucket: str = "product-images",
+    bucket: str = "yinglima-product-images",
     local_subfolder: str = "products",
     content_type: str | None = None,
 ) -> Tuple[str, str]:

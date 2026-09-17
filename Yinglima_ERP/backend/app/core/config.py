@@ -107,6 +107,10 @@ class Settings(BaseSettings):
         description="Async SQLAlchemy connection string, e.g. "
         "postgresql+asyncpg://user:pass@host:5432/dbname",
     )
+    DIRECT_URL: str | None = Field(
+        default=None,
+        description="Direct PostgreSQL connection string for LISTEN/NOTIFY or migration scripts (bypassing poolers)",
+    )
     # Sized for ~100+ concurrent active users behind a small number of
     # Uvicorn/Gunicorn worker processes. Each worker gets its OWN pool of
     # this size (SQLAlchemy pools are per-process), so with e.g. 4 workers

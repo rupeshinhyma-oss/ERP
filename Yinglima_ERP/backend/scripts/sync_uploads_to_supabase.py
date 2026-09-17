@@ -50,9 +50,9 @@ async def sync_all_uploads():
 
     # Map of local subfolders -> Supabase bucket
     targets = [
-        ("products", "product-images"),
-        ("suppliers", "supplier-media"),
-        ("quotations", "quotations"),
+        ("products", "yinglima-product-images"),
+        ("suppliers", "yinglima-supplier-media"),
+        ("quotations", "yinglima-quotations"),
     ]
 
     url_mappings: dict[str, str] = {}  # local_url_pattern -> public_supabase_url
@@ -126,24 +126,15 @@ async def sync_all_uploads():
         p_updated = 0
         for p in products:
             changed = False
-            if p.image_url:
-                if p.image_url in url_mappings:
-                    p.image_url = url_mappings[p.image_url]
-                    changed = True
-                elif "/uploads/products/" in p.image_url:
-                    fname = p.image_url.split("/")[-1]
-                    if fname in url_mappings:
-                        p.image_url = url_mappings[fname]
-                        changed = True
-
             if p.images and isinstance(p.images, list):
                 new_imgs = []
                 for img in p.images:
-                    if img in url_mappings:
-                        new_imgs.append(url_mappings[img])
+                    img_str = str(img)
+                    if img_str in url_mappings:
+                        new_imgs.append(url_mappings[img_str])
                         changed = True
-                    elif "/uploads/products/" in str(img):
-                        fname = str(img).split("/")[-1]
+                    elif "/uploads/products/" in img_str:
+                        fname = img_str.split("/")[-1]
                         if fname in url_mappings:
                             new_imgs.append(url_mappings[fname])
                             changed = True
