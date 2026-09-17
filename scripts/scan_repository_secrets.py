@@ -29,6 +29,7 @@ EXCLUDE_DIRS = {
 EXCLUDE_FILES = {
     ".env",            # Local development env (ignored by git)
     ".env.local",      # Local dev
+    ".env.defaults",   # Multi-ERP local bootstrap defaults
     "cacert.pem",      # Standard CA cert bundle inside pip
 }
 

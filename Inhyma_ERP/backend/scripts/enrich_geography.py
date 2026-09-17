@@ -1,8 +1,12 @@
 import asyncio
+import os
 import uuid
 import asyncpg
 
-DATABASE_URL = "postgresql://postgres.kkqxkgdrmvnnvptpjpmi:Inhyma%402026@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?sslmode=require"
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres.<PROJECT_REF>:<DB_PASSWORD>@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?sslmode=require"
+)
 
 async def main():
     conn = await asyncpg.connect(DATABASE_URL, statement_cache_size=0)

@@ -36,7 +36,7 @@ from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 from app.auth.service import CurrentUser
 from app.core.config import settings
 from app.core.responses import build_success_response
@@ -144,6 +144,42 @@ async def _record_action(
     request.state.audit_logged = True
 
 
+async def _publish_inquiry_message_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    inquiry_id: uuid.UUID | str,
+    extra_payload: dict | None = None,
+) -> None:
+    """Durably record + broadcast an inquiry.message.created event."""
+    changes = {"inquiry_id": str(inquiry_id), **(extra_payload or {})}
+
+    if settings.DURABLE_EVENTS_ENABLED:
+        try:
+            from app.durable_events.service import DurableEventService
+
+            await DurableEventService(db).publish_durable_event(
+                event_type="inquiry.message.created",
+                source=settings.ERP_KEY,
+                entity="inquiry",
+                entity_id=str(inquiry_id),
+                payload=changes,
+            )
+            await db.commit()
+        except Exception:
+            logger.exception("Failed to write durable event for inquiry.message.created.")
+
+    await dispatcher.publish(
+        module_channel("inquiries"),
+        Event(
+            entity="inquiry",
+            entity_id=str(inquiry_id),
+            event_type="inquiry.message.created",
+            changes=changes,
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Gallery Quotation Documents (Must be declared before /{inquiry_id} wildcards!)
 # ---------------------------------------------------------------------------
@@ -153,7 +189,7 @@ async def _record_action(
 async def get_all_quotation_documents(
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(require_permission('inquiry.view')),
+    _current_user: CurrentUser = Depends(require_any_permission("product.view", "productgallery.view", "inquiry.view")),
 ) -> dict:
     """Fetch all quotations with product and supplier metadata for the Product & Supplier Gallery."""
     if not service.quotation_repository:

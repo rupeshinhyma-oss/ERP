@@ -148,7 +148,11 @@ def validate_project_config(project_name: str, config: dict, target_env: str) ->
     warnings = []
 
     env_file = config["env_file"]
-    if not env_file.exists() and config.get("example_file") and config["example_file"].exists():
+    defaults_file = config["dir"] / ".env.defaults"
+    if not env_file.exists() and defaults_file.exists():
+        print(f"  Note: '{env_file.name}' not found; validating '{defaults_file.name}' in CI mode.")
+        env_vars = load_env_file(defaults_file)
+    elif not env_file.exists() and config.get("example_file") and config["example_file"].exists():
         print(f"  Note: '{env_file.name}' not found; validating template '{config['example_file'].name}' in CI mode.")
         env_vars = load_env_file(config["example_file"])
     else:

@@ -24,6 +24,10 @@ from app.common.pagination import PageMeta, PageParams
 from app.core.exceptions import BadRequestException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
+from app.integration.jobs import enqueue_dispatch
+from app.integration.repository import IntegrationOutboxRepository
+from app.integration.service import IntegrationService
+from app.queue.service import QueueService
 from app.rbac.dependencies import get_rbac_service, require_permission
 from app.rbac.repository import UserRoleRepository
 from app.rbac.service import RBACService
@@ -149,6 +153,43 @@ async def _record_user_action(
     request.state.audit_logged = True
 
 
+async def _publish_user_integration_event(
+    *,
+    db: AsyncSession,
+    user: User,
+    actor_id: uuid.UUID,
+) -> None:
+    """Publish user.created event to outbox within the same transaction."""
+    if not user.email:
+        return
+    service = IntegrationService(IntegrationOutboxRepository(db))
+    payload = {
+        "local_user_id": str(user.id),
+        "email": user.email.strip().lower(),
+        "username": user.username,
+        "display_name": user.display_name,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "employee_code": user.employee_code,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "metadata": {
+            "status": user.status.value if hasattr(user.status, "value") else str(user.status),
+            "is_active": user.is_active,
+        },
+    }
+    outbox_event = service.publish_event(
+        event_type="user.created",
+        aggregate_type="user",
+        aggregate_id=user.id,
+        payload=payload,
+        actor_type="user",
+        actor_id=actor_id,
+    )
+    await db.flush()
+    queue_service = QueueService(db)
+    await enqueue_dispatch(queue_service, outbox_event_id=outbox_event.id)
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, summary="Create a user (admin)")
 async def create_user(
     payload: UserCreate,
@@ -204,6 +245,11 @@ async def create_user(
             "phone": payload.phone,
             "role_ids": [str(rid) for rid in (payload.role_ids or [])],
         },
+    )
+    await _publish_user_integration_event(
+        db=db,
+        user=user,
+        actor_id=current_user.id,
     )
     data = {**user_data.model_dump(mode="json"), "temporary_password": temporary_password}
     return build_success_response(data=data, request_id=request.state.request_id)

@@ -893,7 +893,7 @@ SECRET_KEY=your-super-secret-key-32-chars-minimum
 API_V1_PREFIX=/api/v1
 
 # Database Configuration (PostgreSQL with asyncpg)
-DATABASE_URL=postgresql+asyncpg://postgres:your-db-password@db.your-project-ref.supabase.co:5432/postgres?ssl=require
+DATABASE_URL=postgresql+asyncpg://postgres:<DB_PASSWORD>@db.<PROJECT_REF>.supabase.co:5432/postgres?ssl=require
 DATABASE_DISABLE_STATEMENT_CACHE=true
 
 # Database Environment Profiles (Switch via: copy .env.<db_name> .env)

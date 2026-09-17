@@ -159,17 +159,46 @@ class BuyerRepository(BaseRepository[Buyer]):
         """
         import re
 
+        clean_call = re.sub(r"\D", "", calling_number) if calling_number else ""
+        clean_wa = re.sub(r"\D", "", whatsapp_number) if whatsapp_number else ""
+
+        # When no phone number is provided at all, find_duplicate returns None unconditionally.
+        if not clean_call and not clean_wa:
+            return None
+
         clean_name = company_name.strip()
         if clean_name:
-            stmt = select(Buyer).where(func.lower(func.trim(Buyer.company_name)) == clean_name.lower())
-            if exclude_id is not None:
-                stmt = stmt.where(Buyer.id != exclude_id)
-            result = await self.session.execute(stmt)
-            b = result.scalars().first()
-            if b is not None:
-                return b, f"Company name '{clean_name}' already exists in Buyer Master"
+            phone_conds = []
+            if clean_call and len(clean_call) >= 6:
+                phone_conds.append(
+                    or_(
+                        Buyer.contact_calling_number == calling_number,
+                        Buyer.contact_whatsapp_number == calling_number,
+                        func.regexp_replace(func.coalesce(Buyer.contact_calling_number, ""), r"\D", "", "g") == clean_call,
+                        func.regexp_replace(func.coalesce(Buyer.contact_whatsapp_number, ""), r"\D", "", "g") == clean_call,
+                    )
+                )
+            if clean_wa and len(clean_wa) >= 6:
+                phone_conds.append(
+                    or_(
+                        Buyer.contact_whatsapp_number == whatsapp_number,
+                        Buyer.contact_calling_number == whatsapp_number,
+                        func.regexp_replace(func.coalesce(Buyer.contact_whatsapp_number, ""), r"\D", "", "g") == clean_wa,
+                        func.regexp_replace(func.coalesce(Buyer.contact_calling_number, ""), r"\D", "", "g") == clean_wa,
+                    )
+                )
+            if phone_conds:
+                stmt = select(Buyer).where(
+                    func.lower(func.trim(Buyer.company_name)) == clean_name.lower(),
+                    or_(*phone_conds),
+                )
+                if exclude_id is not None:
+                    stmt = stmt.where(Buyer.id != exclude_id)
+                result = await self.session.execute(stmt)
+                b = result.scalars().first()
+                if b is not None:
+                    return b, f"Buyer '{clean_name}' already exists with matching phone number"
 
-        clean_call = re.sub(r"\D", "", calling_number) if calling_number else ""
         if clean_call and len(clean_call) >= 6:
             stmt = select(Buyer).where(
                 or_(
@@ -186,7 +215,6 @@ class BuyerRepository(BaseRepository[Buyer]):
             if b is not None:
                 return b, f"Calling number '{calling_number}' already exists in Buyer Master (used by '{b.company_name}')"
 
-        clean_wa = re.sub(r"\D", "", whatsapp_number) if whatsapp_number else ""
         if clean_wa and len(clean_wa) >= 6:
             stmt = select(Buyer).where(
                 or_(

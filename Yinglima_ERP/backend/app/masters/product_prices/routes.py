@@ -150,7 +150,7 @@ async def delete_supplier_price(
 
 @router.get("/export", summary="Export product prices to Excel or CSV")
 async def export_product_prices(
-    format: str = Query(default="xlsx", regex="^(xlsx|csv)$"),
+    format: str = Query(default="xlsx", pattern="^(xlsx|csv)$"),
     search: str | None = Query(default=None),
     category_id: uuid.UUID | None = Query(default=None),
     sub_category_id: uuid.UUID | None = Query(default=None),
