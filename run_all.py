@@ -25,6 +25,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+
 ROOT_DIR = Path(__file__).resolve().parent
 
 # ANSI Colors for terminal output
@@ -90,12 +93,32 @@ SERVICES = [
 
 # How long to wait for a backend's health endpoint before giving up and
 # moving on anyway (never blocks forever -- see wait_for_backend_health's
-# own docstring for the reasoning).
-BACKEND_HEALTH_TIMEOUT_SECONDS = 60
+# own docstring for the reasoning). Set to 180s to allow adequate time for
+# initial dependency installation on new setups.
+BACKEND_HEALTH_TIMEOUT_SECONDS = 180
 BACKEND_HEALTH_POLL_INTERVAL_SECONDS = 0.5
 
 processes = []
 shutting_down = False
+
+
+def resolve_service_cmd(svc: dict) -> list[str]:
+    """
+    Resolve the command to run for a service.
+    If the service directory contains a self-bootstrapping runner (run.bat on Windows,
+    run.sh on POSIX), delegates to it so that .env creation, .venv activation,
+    dependency installation, and migrations are handled self-contained inside each ERP.
+    """
+    cwd = svc["cwd"]
+    if os.name == "nt":
+        bat_file = cwd / "run.bat"
+        if bat_file.exists():
+            return ["cmd.exe", "/c", str(bat_file)]
+    else:
+        sh_file = cwd / "run.sh"
+        if sh_file.exists():
+            return ["bash", str(sh_file)]
+    return svc["cmd"]
 
 
 def print_banner():
@@ -231,9 +254,10 @@ def run_in_terminal():
         if wait_for_name and wait_for_name in launched_health_urls:
             wait_for_backend_health(wait_for_name, launched_health_urls[wait_for_name], svc["color"])
 
+        cmd_to_run = resolve_service_cmd(svc)
         try:
             proc = subprocess.Popen(
-                svc["cmd"],
+                cmd_to_run,
                 cwd=str(svc["cwd"]),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -289,7 +313,8 @@ def run_in_windows():
         if wait_for_name and wait_for_name in launched_health_urls:
             wait_for_backend_health(wait_for_name, launched_health_urls[wait_for_name], svc["color"])
 
-        cmd_str = " ".join(f'"{c}"' if " " in c else c for c in svc["cmd"])
+        cmd_list = resolve_service_cmd(svc)
+        cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmd_list)
         full_cmd = f'start "{svc["name"]} ({svc["url"]})" cmd /k "cd /d "{svc["cwd"]}" && {cmd_str}"'
         subprocess.run(full_cmd, shell=True)
         if svc.get("health_url"):

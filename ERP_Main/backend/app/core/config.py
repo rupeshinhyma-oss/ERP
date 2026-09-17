@@ -106,6 +106,18 @@ class Settings(BaseSettings):
                 return "postgresql+asyncpg://" + v[len("postgresql://"):]
         return v
 
+    @property
+    def sync_database_url(self) -> str:
+        """Return a synchronous (psycopg2) variant of DATABASE_URL for migrations."""
+        url = str(self.DATABASE_URL).replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+        if url.startswith("sqlite+aiosqlite:///"):
+            return url.replace("sqlite+aiosqlite:///", "sqlite:///")
+        if "?ssl=" in url:
+            url = url.replace("?ssl=", "?sslmode=")
+        elif "&ssl=" in url:
+            url = url.replace("&ssl=", "&sslmode=")
+        return url
+
     # -------------------------------------------------------------------
     # CORS
     #
