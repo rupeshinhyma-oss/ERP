@@ -198,7 +198,7 @@ class Settings(BaseSettings):
         "previously-encrypted member password unrecoverable.",
     )
     JWT_ISSUER: str = "erp-backend"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 720
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 5256000
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # -------------------------------------------------------------------

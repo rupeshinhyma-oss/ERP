@@ -1,4 +1,4 @@
-import { setEcosystemCookie } from "@/lib/ecosystemSession";
+import { establishCentralEcosystemSession, getEcosystemCookie } from "@/lib/ecosystemSession";
 /**
  * Sign-in page. Exact replica of INHYMA ERP Login Page.
  */
@@ -121,11 +121,21 @@ export function LoginPage() {
         sessionStorage.removeItem("ihm_explicit_logout");
       }
 
-      const localSessionId = `ihm-sess-${Date.now()}`;
+      // 2. Establish / sync unified Ecosystem Session if ERP_Main is available
+      const email = identifier.trim().includes("@") ? identifier.trim() : `${identifier.trim()}@example.com`;
+      const existingSessionId = getEcosystemCookie()?.session_id;
+      const ecosystemSession = await establishCentralEcosystemSession({
+        email,
+        password,
+        source_erp: "yinglima",
+        existing_session_id: existingSessionId && !existingSessionId.startsWith("ihm-sess-") ? existingSessionId : undefined,
+      });
+      const sessionId = ecosystemSession?.session_id || `ihm-sess-${Date.now()}`;
+
       if (tokens.user) {
-        Auth.setSession(tokens, tokens.user, localSessionId);
+        Auth.setSession(tokens, tokens.user, sessionId);
       } else {
-        Auth.setSession(tokens, undefined, localSessionId);
+        Auth.setSession(tokens, undefined, sessionId);
         try {
           const { data: profile } = await apiGet<Profile>("/auth/profile");
           Auth.updateProfile(profile);
@@ -133,15 +143,6 @@ export function LoginPage() {
           /* navigate to dashboard regardless */
         }
       }
-
-      setEcosystemCookie({
-        session_id: localSessionId,
-        email: tokens.user?.email || "admin@example.com",
-        display_name: tokens.user?.username || "Admin",
-        role: "super_admin",
-        user_type: "platform_admin",
-        allowed_erps: ["*"],
-      });
 
       navigate("/dashboard", { replace: true });
     } catch (err) {

@@ -161,6 +161,12 @@ export async function establishCentralEcosystemSession(params: {
  * Validates whether an ecosystem session is currently active or revoked.
  */
 export async function verifyCentralEcosystemSession(sessionId: string): Promise<{ active: boolean; revoked?: boolean; session?: EcosystemSessionData }> {
+  // Local standalone sessions (ihm-sess-*) are strictly internal to this ERP
+  // and must NEVER be queried against ERP_Main or considered revoked.
+  if (!sessionId || sessionId.startsWith("ihm-sess-")) {
+    return { active: true, revoked: false };
+  }
+
   try {
     const res = await fetch(`${CENTRAL_AUTH_API}/${sessionId}`, {
       method: "GET",
@@ -168,17 +174,20 @@ export async function verifyCentralEcosystemSession(sessionId: string): Promise<
     });
 
     if (!res.ok) {
-      return { active: false };
+      // Offline, network hiccup, or non-200 from central server must never kill an active session
+      return { active: true, revoked: false };
     }
 
     const body = await res.json();
     const data = body.data || body;
-    if (data?.revoked || data?.active === false) {
+    // ONLY revoke if the central control plane explicitly confirmed revocation
+    if (data?.revoked === true) {
       return { active: false, revoked: true };
     }
-    return { active: true, session: data };
+    return { active: true, session: data, revoked: false };
   } catch {
-    return { active: true };
+    // ERP_Main offline / network failure -> maintain current local session
+    return { active: true, revoked: false };
   }
 }
 
@@ -199,7 +208,7 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
   // Notify all open tabs across all ports immediately (0ms perceived latency)
   broadcastEcosystemEvent({ type: "LOGOUT", session_id: idToRevoke });
 
-  if (idToRevoke) {
+  if (idToRevoke && !idToRevoke.startsWith("ihm-sess-")) {
     try {
       await fetch(`${CENTRAL_AUTH_API}/${idToRevoke}/revoke`, {
         method: "POST",
@@ -218,18 +227,6 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
 
 /**
  * Module-level guard against duplicate watchers.
- *
- * initEcosystemSessionWatcher() sets up a `setInterval` (every 15s) plus
- * `focus`/BroadcastChannel listeners. It's only ever meant to have ONE
- * live instance per tab. If something calls it again before the previous
- * instance's cleanup has run (e.g. AppShell re-mounting in quick succession
- * during an SSO redirect chain, before React has committed the prior
- * instance's unmount), the old interval/listeners were previously leaked
- * forever -- each stacking up its own independent 15s polling loop, so N
- * overlapping calls produced requests roughly every (15000/N) ms instead of
- * one every 15s. Tearing down any existing watcher before creating a new
- * one makes it impossible to ever have more than one live at a time,
- * regardless of what triggered the extra call.
  */
 let activeWatcherCleanup: (() => void) | null = null;
 
@@ -247,15 +244,24 @@ export function initEcosystemSessionWatcher(
     activeWatcherCleanup = null;
   }
 
+  // Active session exists: clear any stale logout flags
+  if (typeof sessionStorage !== "undefined") {
+    sessionStorage.removeItem("ihm_explicit_logout");
+  }
+
   const ch = getAuthChannel();
 
   const handleMessage = (msg: MessageEvent) => {
     if (msg.data?.type === "LOGOUT") {
-      if (typeof sessionStorage !== "undefined") {
-        sessionStorage.setItem("ihm_explicit_logout", "true");
+      const targetSessionId = msg.data?.session_id;
+      // Only revoke if global or targeting this exact session
+      if (!targetSessionId || !currentSessionId || targetSessionId === currentSessionId) {
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.setItem("ihm_explicit_logout", "true");
+        }
+        clearEcosystemCookie();
+        onSessionRevoked();
       }
-      clearEcosystemCookie();
-      onSessionRevoked();
     }
   };
 
@@ -264,20 +270,14 @@ export function initEcosystemSessionWatcher(
   }
 
   const handleFocus = async () => {
-    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true") {
-      onSessionRevoked();
-      return;
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("ihm_explicit_logout");
     }
 
-    const cookie = getEcosystemCookie();
-    if (!cookie) {
-      onSessionRevoked();
-      return;
-    }
-
-    if (currentSessionId) {
+    // Only verify central ecosystem session if one was established (not local standalone)
+    if (currentSessionId && !currentSessionId.startsWith("ihm-sess-")) {
       const res = await verifyCentralEcosystemSession(currentSessionId);
-      if (res.revoked) {
+      if (res.revoked === true) {
         clearEcosystemCookie();
         onSessionRevoked();
       }
@@ -287,19 +287,13 @@ export function initEcosystemSessionWatcher(
   window.addEventListener("focus", handleFocus);
 
   const intervalId = setInterval(async () => {
-    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true") {
-      onSessionRevoked();
-      return;
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("ihm_explicit_logout");
     }
 
-    if (currentSessionId) {
-      const cookie = getEcosystemCookie();
-      if (!cookie) {
-        onSessionRevoked();
-        return;
-      }
+    if (currentSessionId && !currentSessionId.startsWith("ihm-sess-")) {
       const res = await verifyCentralEcosystemSession(currentSessionId);
-      if (res.revoked) {
+      if (res.revoked === true) {
         clearEcosystemCookie();
         onSessionRevoked();
       }

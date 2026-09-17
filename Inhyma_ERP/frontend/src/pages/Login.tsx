@@ -52,7 +52,7 @@ function LoginIllustration() {
 
 const BRAND_CACHE_KEY = "erp_brand_name";
 
-import { establishCentralEcosystemSession } from "@/lib/ecosystemSession";
+import { establishCentralEcosystemSession, getEcosystemCookie } from "@/lib/ecosystemSession";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -135,10 +135,12 @@ export function LoginPage() {
 
       // 2. Establish / sync unified Ecosystem Session
       const email = identifier.trim().includes("@") ? identifier.trim() : `${identifier.trim()}@example.com`;
+      const existingSessionId = getEcosystemCookie()?.session_id;
       const ecosystemSession = await establishCentralEcosystemSession({
         email,
         password,
         source_erp: "inhyma",
+        existing_session_id: existingSessionId && !existingSessionId.startsWith("ihm-sess-") ? existingSessionId : undefined,
       });
       const sessionId = ecosystemSession?.session_id || `ihm-sess-${Date.now()}`;
 
