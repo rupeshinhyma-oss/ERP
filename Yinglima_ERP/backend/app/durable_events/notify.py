@@ -54,9 +54,10 @@ def _asyncpg_dsn() -> str | None:
     treat that as "LISTEN/NOTIFY unavailable, fall back to polling
     only", never as an error.
     """
-    if not settings.DIRECT_URL:
+    direct_url = getattr(settings, "DIRECT_URL", None)
+    if not direct_url:
         return None
-    return settings.DIRECT_URL.replace("postgresql+psycopg2://", "postgresql://")
+    return str(direct_url).replace("postgresql+psycopg2://", "postgresql://")
 
 
 async def notify_event_ready(connection_or_session) -> None:
