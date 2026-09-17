@@ -149,7 +149,7 @@ ERP_Main_Claude/
 │   │   ├── users/             # User accounts, deactivation, force logout, reporting managers
 │   │   └── main.py            # Composition root, lifespan lifecycle, middleware wiring
 │   ├── alembic/               # Database schema version migrations
-│   ├── scripts/               # Migration, seeding, and maintenance tools (setup_neon_databases.py, shift_supabase_to_neon.py, sync_uploads_to_supabase.py)
+│   ├── scripts/               # Seeding, migration, and maintenance tools (seed.py, sync_uploads_to_supabase.py)
 │   └── requirements.txt       # Python dependencies
 └── frontend/
     ├── src/
@@ -189,15 +189,11 @@ class VersionMixin:
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 ```
 
-### 4.1. Neon Serverless Multi-Database Topology & Driver Engine (`setup_neon_databases.py`, `shift_to_singapore.py`)
-- **Three Isolated Logical Databases in Single Project Cluster (`ERP-Cluster`)**:
+### 4.1. Database Topology & Driver Engine
+- **Three Isolated Logical Databases**:
   - `yinglima_erp`: Dedicated to the China procurement, quotation sourcing, and container shipment planning lifecycle.
   - `inhyma_erp`: Dedicated to the India domestic distribution, multi-branch, and buyer invoicing lifecycle.
   - `erp_main`: Central master repository and golden template for future company deployments.
-- **Singapore (ap-southeast-1) Low-Latency Region Deployment**:
-  - Successfully migrated from Ohio (`us-east-2`, ~368ms round-trip latency) to Singapore AWS (`ap-southeast-1`, ~170ms round-trip latency, cutting network latency by >50%).
-  - Live Singapore Pooled Endpoint: `ep-twilight-base-azwy3ofw-pooler.c-3.ap-southeast-1.aws.neon.tech/yinglima_erp`.
-  - Zero data loss: All 49,848 rows across 54 tables and 93 foreign key constraints verified with 100% parity.
 - **Optimistic Concurrency & Missing Columns Alignment (`alembic/versions/f9a0b1c2d3e4_ensure_all_version_columns.py`)**:
   - Ensures `version INTEGER NOT NULL DEFAULT 1` exists across all master tables (`hsn_codes`, `units_of_measurement`, `master_companies`, `inquiry_items`, `supplier_types`, `buyer_types`, `consignment_codes`).
   - Ensures `item_description TEXT` exists on `planning_sheets`.
@@ -211,13 +207,6 @@ class VersionMixin:
 - **Switching Databases**:
   - Separate per-database configurations: `backend/.env.yinglima_erp`, `backend/.env.inhyma_erp`, `backend/.env.erp_main`.
   - To activate a company's database, copy its configuration to `backend/.env` (e.g. `copy .env.yinglima_erp .env` or `copy .env.inhyma_erp .env`).
-- **Complete Supabase to Neon Migration & 100% Parity (September 2026)**:
-  - Total tables in Supabase: **77** | Total tables in Neon: **77** (Zero missing tables, zero missing rows).
-  - All 21 Task Management & Notification tables (`notifications`, `tasks`, `task_subtasks`, `task_assignees`, `task_comments`, `task_escalations`, `task_labels`, `task_attachments`, `task_sprints`, etc.) fully migrated with all 426 notifications, 196 tasks, and related attachments.
-  - All 184 country ISO2 and ISO3 codes synced.
-  - Complete sync of all 20 `inquiry_messages` records.
-  - Schema alignment for `products` (`packaging_length`, `packaging_width`, `packaging_height`, `packaging_weight`, `master_box_qty`, `supplier_id`) and `planning_columns.description`.
-  - Audited via `backend/scripts/compare_supabase_and_neon.py`.
 
 ---
 
@@ -676,19 +665,18 @@ A dedicated set of 8 pre-built, styled Excel workbooks (`.xlsx`) is maintained i
 | **Product Master** | `product_new_data.xlsx` | `product_duplicate_data.xlsx` | Tests Category/Sub-Category parent-child linkage, valid UOM and HSN codes, required packaging dimensions (Gross Weight > 0, Pack. Qty > 0, CBM > 0), and dual-uniqueness on `Product Name` and `Product Code`. |
 | **Inquiry Line Items** | `inquiry_items_new_data.xlsx` | `inquiry_items_duplicate_data.xlsx` | Tests consignment line item import matching active Product Master items by SKU/Code or Name, status assignment (`Approved`/`Proposed`), duplicate item line detection, and invalid quantity/unmatched product error reporting. |
 
-### 11.1. Media & File Storage Subsystem (Neon S3, Supabase & Local Disk Fallback)
+### 11.1. Media & File Storage Subsystem (Supabase & Local Disk Fallback)
 
 **Files:** `backend/app/common/storage.py`, `backend/app/core/config.py`, `backend/app/main.py`
 
-- **Tri-Layer Storage Engine:** Provides unified storage abstractions for product images, supplier factory media, and quotation attachments:
-  1. **Neon S3 Object Storage (Primary Cloud Storage):** When `AWS_ENDPOINT_URL_S3`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` are provided in `.env`, uploads files directly to Neon S3-compatible public buckets (`product-images`, `supplier-media`, `quotations`) via `boto3` (using path-style addressing `addressing_style: path`), returning direct high-speed CDN/public URLs (`https://<project-storage-host>/<bucket>/<filename>`).
-  2. **Supabase Cloud Storage (Secondary Cloud Fallback):** When `SUPABASE_BASE_URL` and `SUPABASE_AUTH_KEY` / `SUPABASE_SERVICE_KEY` are provided in `.env`, uploads files directly to target public buckets via async HTTP (`httpx`), automatically creating the buckets if not present.
-  3. **Local Filesystem Fallback:** When running offline or without cloud bucket credentials, `save_uploaded_file` seamlessly saves uploaded files to local disk under `uploads/<local_subfolder>/` (`uploads/products/`, `uploads/suppliers/`, `uploads/quotations/`).
+- **Dual Storage Engine:** Provides unified storage abstractions for product images, supplier factory media, and quotation attachments:
+  1. **Supabase Cloud Storage (Primary Cloud Storage):** When `SUPABASE_BASE_URL` and `SUPABASE_AUTH_KEY` / `SUPABASE_SERVICE_KEY` are provided in `.env`, uploads files directly to target public buckets via async HTTP (`httpx`), automatically creating the buckets if not present.
+  2. **Local Filesystem Fallback:** When running offline or without cloud bucket credentials, `save_uploaded_file` seamlessly saves uploaded files to local disk under `uploads/<local_subfolder>/` (`uploads/products/`, `uploads/suppliers/`, `uploads/quotations/`).
 - **Static Mounting:** FastAPI mounts `uploads/` statically at both `/uploads` and `/static/uploads` via `StaticFiles(directory=uploads_dir)` in `app/main.py`, ensuring instant browser access.
 - **Filename Sanitization & MIME Resolution:**
   - `sanitize_filename(filename)`: Strips path traversal characters (`..`, `/`, `\`), collapses repetitive delimiters, enforces safe ASCII tokens, and limits base names to 120 characters prefixed with a unique UUID (`{uuid4}_{clean_name}`).
   - `guess_content_type(filename)`: Resolves standard MIME types (`image/jpeg`, `image/png`, `image/webp`, `video/mp4`, `application/pdf`, `.xlsx`, `.csv`).
-- **Database Persistence Model:** Database entities (`products.images`, `suppliers.media_urls`) store URL arrays (e.g. `["https://br-odd-tree-aybmdshz.storage.../product-images/xyz.webp"]` or `["/uploads/products/xyz.webp"]`), providing 100% portability across cloud and local storage backends without requiring database schema alterations.
+- **Database Persistence Model:** Database entities (`products.images`, `suppliers.media_urls`) store URL arrays (e.g. `["https://<supabase-project>.supabase.co/storage/v1/object/public/product-images/xyz.webp"]` or `["/uploads/products/xyz.webp"]`), providing 100% portability across cloud and local storage backends without requiring database schema alterations.
 
 ---
 
@@ -904,8 +892,8 @@ DEBUG=false
 SECRET_KEY=your-super-secret-key-32-chars-minimum
 API_V1_PREFIX=/api/v1
 
-# Database Configuration (Neon Serverless PostgreSQL)
-DATABASE_URL=postgresql+asyncpg://neondb_owner:npg_7HTzR5qPbvmx@ep-old-fire-axzu5kp9-pooler.c-4.us-east-2.aws.neon.tech/yinglima_erp?ssl=require
+# Database Configuration (PostgreSQL with asyncpg)
+DATABASE_URL=postgresql+asyncpg://postgres:your-db-password@db.your-project-ref.supabase.co:5432/postgres?ssl=require
 DATABASE_DISABLE_STATEMENT_CACHE=true
 
 # Database Environment Profiles (Switch via: copy .env.<db_name> .env)
