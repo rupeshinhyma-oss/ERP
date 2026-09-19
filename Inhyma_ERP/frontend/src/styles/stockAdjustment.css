@@ -392,50 +392,84 @@
   display: block;
 }
 
-/* Action Menu Button */
+/* Action Cell & Menu Button */
+.adjustment-action-cell {
+  position: relative;
+  text-align: center;
+  width: 60px;
+}
+
 .adjustment-action-btn {
   background: transparent;
-  border: none;
-  font-size: 18px;
+  border: 1px solid transparent;
+  font-size: 16px;
   line-height: 1;
   color: #64748b;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 3px 6px;
   border-radius: 4px;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
 }
 
 .adjustment-action-btn:hover {
-  background-color: #e2e8f0;
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
   color: #1e293b;
+}
+
+.adjustment-action-btn.active {
+  background-color: #ffffff;
+  border-color: #64748b;
+  color: #0f172a;
 }
 
 .adjustment-action-menu {
   position: absolute;
-  right: 16px;
+  right: 12px;
+  top: calc(100% + 2px);
   background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-  z-index: 40;
-  min-width: 140px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  z-index: 60;
+  min-width: 125px;
   padding: 4px 0;
+  text-align: left;
+  animation: filterSlideDown 0.12s ease-out;
 }
 
 .adjustment-action-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-  padding: 7px 14px;
-  font-size: 12.5px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
   color: #334155;
   background: transparent;
   border: none;
   text-align: left;
   cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.adjustment-action-item svg {
+  color: #475569;
+  flex-shrink: 0;
 }
 
 .adjustment-action-item:hover {
   background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+.adjustment-action-item:hover svg {
   color: #0f172a;
 }
 

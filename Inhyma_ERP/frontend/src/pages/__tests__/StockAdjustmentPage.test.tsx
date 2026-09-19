@@ -220,4 +220,55 @@ describe("StockAdjustmentPage", () => {
     expect(screen.queryByTestId("date-range-popover")).toBeNull();
     expect(dateInput.value).toBe("");
   });
+
+  it("opens Action dropdown menu when clicking 3-dots button showing Delete and Download", () => {
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+
+    // Initial state: action menus are not rendered
+    expect(screen.queryByTestId("action-menu-adj-1")).toBeNull();
+
+    // Find all action 3-dots buttons
+    const actionButtons = screen.getAllByRole("button", { name: "Actions" });
+    expect(actionButtons.length).toBeGreaterThan(0);
+
+    // Click on the first row's 3-dots action button
+    fireEvent.click(actionButtons[0]);
+
+    // Action menu should now be shown
+    const menu = screen.getByTestId("action-menu-adj-1");
+    expect(menu).toBeTruthy();
+
+    // Verify Delete and Download options are present
+    expect(screen.getByRole("button", { name: /Delete/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download/i })).toBeTruthy();
+
+    // Clicking the button again toggles it closed
+    fireEvent.click(actionButtons[0]);
+    expect(screen.queryByTestId("action-menu-adj-1")).toBeNull();
+  });
+
+  it("deletes record when clicking Delete in action dropdown", () => {
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+
+    expect(screen.getByText("GARUDA ENGINEERS")).toBeTruthy();
+
+    // Click 3 dots on first row
+    const actionButtons = screen.getAllByRole("button", { name: "Actions" });
+    fireEvent.click(actionButtons[0]);
+
+    // Click Delete
+    const deleteBtn = screen.getByRole("button", { name: /Delete/i });
+    fireEvent.click(deleteBtn);
+
+    // GARUDA ENGINEERS should now be removed
+    expect(screen.queryByText("GARUDA ENGINEERS")).toBeNull();
+  });
 });

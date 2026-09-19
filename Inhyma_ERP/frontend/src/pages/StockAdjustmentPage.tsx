@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -231,6 +231,81 @@ export const INITIAL_ADJUSTMENTS: StockAdjustmentItem[] = [
       },
     ],
   },
+  {
+    id: "adj-9",
+    adjustment_date: "15-09-2026",
+    client_name: "",
+    invoice_no: "",
+    warehouse: "Ahmedabad",
+    type: "Stock IN",
+    purpose: "Split",
+    total_amount: 105000,
+    created_by: "Akshata Wadekar",
+    remarks: "Stock inward split for packaging sub-assembly",
+    items: [
+      {
+        product_name: "Packaging Line Conveyor Belt & Assembly",
+        product_code: "CONV-001",
+        category: "Machines",
+        hsn_code: "84223000",
+        gst_rate: "18%",
+        qty: 1,
+        uom: "SET",
+        rate: 105000,
+        amount: 105000,
+      },
+    ],
+  },
+  {
+    id: "adj-10",
+    adjustment_date: "15-09-2026",
+    client_name: "",
+    invoice_no: "",
+    warehouse: "Ahmedabad",
+    type: "Stock OUT",
+    purpose: "Split",
+    total_amount: 105000,
+    created_by: "Akshata Wadekar",
+    remarks: "Stock outward split for assembly transfer",
+    items: [
+      {
+        product_name: "Packaging Line Conveyor Belt & Assembly",
+        product_code: "CONV-001",
+        category: "Machines",
+        hsn_code: "84223000",
+        gst_rate: "18%",
+        qty: 1,
+        uom: "SET",
+        rate: 105000,
+        amount: 105000,
+      },
+    ],
+  },
+  {
+    id: "adj-11",
+    adjustment_date: "12-09-2026",
+    client_name: "",
+    invoice_no: "",
+    warehouse: "Mumbai",
+    type: "Stock OUT",
+    purpose: "Damage",
+    total_amount: 347349,
+    created_by: "Akshata Wadekar",
+    remarks: "Damaged during transit inspection",
+    items: [
+      {
+        product_name: "Automatic Liquid Nitrogen Dosing System",
+        product_code: "DOS-002",
+        category: "Machines",
+        hsn_code: "84224000",
+        gst_rate: "18%",
+        qty: 1,
+        uom: "SET",
+        rate: 347349,
+        amount: 347349,
+      },
+    ],
+  },
 ];
 
 // Helper to format Indian currency
@@ -265,6 +340,38 @@ export function StockAdjustmentPage() {
 
   // Active drawer item for viewing details
   const [activeItem, setActiveItem] = useState<StockAdjustmentItem | null>(null);
+
+  // Action dropdown menu state (opened for specific item id)
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+
+  // Close action dropdown menu on outside click
+  useEffect(() => {
+    function handleDocClick() {
+      setOpenActionMenuId(null);
+    }
+    if (openActionMenuId) {
+      document.addEventListener("click", handleDocClick);
+    }
+    return () => {
+      document.removeEventListener("click", handleDocClick);
+    };
+  }, [openActionMenuId]);
+
+  // Handle item deletion
+  const handleDeleteItem = useCallback((id: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  // Handle item download
+  const handleDownloadItem = useCallback((item: StockAdjustmentItem) => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(item, null, 2));
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `StockAdjustment_${item.id}_${item.adjustment_date}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  }, []);
 
   // Add New Adjustment modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -647,15 +754,56 @@ export function StockAdjustmentPage() {
                         {formatIndianCurrency(item.total_amount)}
                       </td>
                       <td>{item.created_by}</td>
-                      <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                      <td className="adjustment-action-cell" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
-                          className="adjustment-action-btn"
+                          className={`adjustment-action-btn ${openActionMenuId === item.id ? "active" : ""}`}
                           title="Actions"
-                          onClick={() => setActiveItem(item)}
+                          aria-label="Actions"
+                          aria-expanded={openActionMenuId === item.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
+                          }}
                         >
                           ⋮
                         </button>
+
+                        {openActionMenuId === item.id && (
+                          <div className="adjustment-action-menu" data-testid={`action-menu-${item.id}`}>
+                            <button
+                              type="button"
+                              className="adjustment-action-item"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteItem(item.id);
+                                setOpenActionMenuId(null);
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                              </svg>
+                              <span>Delete</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="adjustment-action-item"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadItem(item);
+                                setOpenActionMenuId(null);
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                              </svg>
+                              <span>Download</span>
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))
