@@ -147,4 +147,77 @@ describe("StockAdjustmentPage", () => {
       expect(screen.getByText("18%")).toBeTruthy();
     });
   });
+
+  it("opens DateRangePicker popover on clicking date input and allows preset selection", async () => {
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+
+    // Open filter panel
+    fireEvent.click(screen.getByTitle("Filter stock adjustments"));
+
+    // Date range input should have initial value "08/21/2026 - 09/19/2026"
+    const dateInput = screen.getByTestId("date-range-input") as HTMLInputElement;
+    expect(dateInput.value).toBe("08/21/2026 - 09/19/2026");
+
+    // Popover is not open initially
+    expect(screen.queryByTestId("date-range-popover")).toBeNull();
+
+    // Click date input to open popover
+    fireEvent.click(dateInput);
+
+    // Popover should now appear
+    expect(screen.getByTestId("date-range-popover")).toBeTruthy();
+
+    // Verify all 7 presets are rendered
+    expect(screen.getByRole("button", { name: "Today" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Yesterday" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Last 7 Days" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Last 30 Days" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "This Month" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Last Month" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Custom Range" })).toBeTruthy();
+
+    // Check footer Clear and Apply buttons
+    expect(screen.getByRole("button", { name: "Clear" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeTruthy();
+
+    // Click Today preset
+    fireEvent.click(screen.getByRole("button", { name: "Today" }));
+
+    // Click Apply
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Popover should close and date input should be updated to Today
+    expect(screen.queryByTestId("date-range-popover")).toBeNull();
+    expect(dateInput.value).toBe("09/19/2026 - 09/19/2026");
+
+    // Only adjustments from today (19-09-2026) should remain
+    expect(screen.getByText("GARUDA ENGINEERS")).toBeTruthy();
+    // 18-09-2026 and 17-09-2026 items should be filtered out
+    expect(screen.queryByText("61,250.00")).toBeNull();
+  });
+
+  it("clears date range filter on clicking Clear in the DateRangePicker popover", () => {
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+
+    // Open filter panel
+    fireEvent.click(screen.getByTitle("Filter stock adjustments"));
+
+    const dateInput = screen.getByTestId("date-range-input") as HTMLInputElement;
+    fireEvent.click(dateInput);
+
+    // Click Clear
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    // Popover closes and input is cleared
+    expect(screen.queryByTestId("date-range-popover")).toBeNull();
+    expect(dateInput.value).toBe("");
+  });
 });

@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { DateRangePicker } from "@/components/DateRangePicker";
 import "@/styles/stockAdjustment.css";
 
 export interface StockAdjustmentLineItem {
@@ -251,6 +252,7 @@ export function StockAdjustmentPage() {
   const [warehouseFilter, setWarehouseFilter] = useState("All");
 
   // Applied filter states
+  const [appliedDateRange, setAppliedDateRange] = useState("08/21/2026 - 09/19/2026");
   const [appliedType, setAppliedType] = useState("All");
   const [appliedPurpose, setAppliedPurpose] = useState("All");
   const [appliedWarehouse, setAppliedWarehouse] = useState("All");
@@ -280,10 +282,11 @@ export function StockAdjustmentPage() {
 
   // Handle filter submission
   const handleApplyFilters = useCallback(() => {
+    setAppliedDateRange(dateRangeFilter);
     setAppliedType(typeFilter);
     setAppliedPurpose(purposeFilter);
     setAppliedWarehouse(warehouseFilter);
-  }, [typeFilter, purposeFilter, warehouseFilter]);
+  }, [dateRangeFilter, typeFilter, purposeFilter, warehouseFilter]);
 
   // Handle filter reset
   const handleResetFilters = useCallback(() => {
@@ -291,6 +294,7 @@ export function StockAdjustmentPage() {
     setTypeFilter("All");
     setPurposeFilter("All");
     setWarehouseFilter("All");
+    setAppliedDateRange("08/21/2026 - 09/19/2026");
     setAppliedType("All");
     setAppliedPurpose("All");
     setAppliedWarehouse("All");
@@ -314,6 +318,24 @@ export function StockAdjustmentPage() {
         }
       }
 
+      // Applied Date Range
+      if (appliedDateRange && appliedDateRange.includes("-")) {
+        const [sStr, eStr] = appliedDateRange.split("-").map((s) => s.trim());
+        const [sm, sd, sy] = sStr.split("/").map((n) => parseInt(n, 10));
+        const [em, ed, ey] = eStr.split("/").map((n) => parseInt(n, 10));
+        if (!isNaN(sm) && !isNaN(sd) && !isNaN(sy) && !isNaN(em) && !isNaN(ed) && !isNaN(ey)) {
+          const startDate = new Date(sy, sm - 1, sd, 0, 0, 0);
+          const endDate = new Date(ey, em - 1, ed, 23, 59, 59);
+          const itemParts = item.adjustment_date.split("-").map((n) => parseInt(n, 10));
+          if (itemParts.length === 3) {
+            const itemDate = new Date(itemParts[2], itemParts[1] - 1, itemParts[0], 12, 0, 0);
+            if (itemDate < startDate || itemDate > endDate) {
+              return false;
+            }
+          }
+        }
+      }
+
       // Applied Type
       if (appliedType !== "All" && item.type !== appliedType) {
         return false;
@@ -331,16 +353,17 @@ export function StockAdjustmentPage() {
 
       return true;
     });
-  }, [items, searchTerm, appliedType, appliedPurpose, appliedWarehouse]);
+  }, [items, searchTerm, appliedDateRange, appliedType, appliedPurpose, appliedWarehouse]);
 
   // Active filter badge count
   const activeFilterCount = useMemo(() => {
     let count = 0;
+    if (appliedDateRange !== "08/21/2026 - 09/19/2026" && appliedDateRange !== "") count++;
     if (appliedType !== "All") count++;
     if (appliedPurpose !== "All") count++;
     if (appliedWarehouse !== "All") count++;
     return count;
-  }, [appliedType, appliedPurpose, appliedWarehouse]);
+  }, [appliedDateRange, appliedType, appliedPurpose, appliedWarehouse]);
 
   // Handle saving new adjustment
   const handleCreateAdjustment = (e: React.FormEvent) => {
@@ -457,13 +480,14 @@ export function StockAdjustmentPage() {
             <div className="adjustment-filter-grid">
               <div className="adjustment-filter-field">
                 <label htmlFor="filter-adjustment-date">Adjustment Date Range</label>
-                <input
+                <DateRangePicker
                   id="filter-adjustment-date"
-                  type="text"
-                  className="adjustment-filter-input"
-                  placeholder="MM/DD/YYYY - MM/DD/YYYY"
                   value={dateRangeFilter}
-                  onChange={(e) => setDateRangeFilter(e.target.value)}
+                  onChange={(val) => setDateRangeFilter(val)}
+                  onApply={(val) => {
+                    setDateRangeFilter(val);
+                    setAppliedDateRange(val);
+                  }}
                 />
               </div>
 
