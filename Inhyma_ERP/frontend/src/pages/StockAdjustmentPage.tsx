@@ -28,6 +28,7 @@ export interface StockAdjustmentItem {
   purpose: "Return From Client" | "Split" | "Damage" | "Return from client";
   total_amount: number;
   created_by: string;
+  created_at?: string;
   remarks?: string;
   items?: StockAdjustmentLineItem[];
 }
@@ -44,6 +45,7 @@ export const INITIAL_ADJUSTMENTS: StockAdjustmentItem[] = [
     purpose: "Return From Client",
     total_amount: 275000,
     created_by: "Akshata Wadekar",
+    created_at: "19-09-2026",
     remarks: "Party required another machine, but salesperson give the other machine",
     items: [
       {
@@ -479,6 +481,7 @@ export function StockAdjustmentPage() {
     const newRecord: StockAdjustmentItem = {
       id: `adj-${Date.now()}`,
       adjustment_date: formattedDate,
+      created_at: formattedDate,
       client_name: newClientName.trim() || undefined,
       invoice_no: newInvoiceNo.trim() || undefined,
       warehouse: newWarehouse,
@@ -821,27 +824,40 @@ export function StockAdjustmentPage() {
         <SideDrawer
           open={Boolean(activeItem)}
           onClose={() => setActiveItem(null)}
-          title={`Adjustment - ${activeItem?.adjustment_date}`}
-          subtitle={`${activeItem?.warehouse} • ${activeItem?.type}`}
+          title="Stock Adjustment Details"
+          subtitle={activeItem ? `${activeItem.warehouse} • ${activeItem.type} • ${activeItem.adjustment_date}` : ""}
         >
           {activeItem && (
             <div>
               <DetailFieldGrid
                 fields={[
-                  { label: "Adjustment Date", value: activeItem.adjustment_date },
-                  { label: "Warehouse", value: activeItem.warehouse },
-                  { label: "Type", value: activeItem.type },
-                  { label: "Purpose", value: activeItem.purpose },
                   { label: "Client Name", value: activeItem.client_name || "—" },
+                  { label: "Warehouse", value: activeItem.warehouse },
                   { label: "Invoice No.", value: activeItem.invoice_no || "—" },
-                  { label: "Total Amount", value: formatIndianCurrency(activeItem.total_amount) },
+                  { label: "Adjustment Type", value: activeItem.type },
+                  { label: "Date", value: activeItem.adjustment_date },
+                  { label: "Purpose", value: activeItem.purpose },
                   { label: "Created By", value: activeItem.created_by },
+                  { label: "Created At", value: activeItem.created_at || activeItem.adjustment_date },
+                  { label: "Total Amount", value: formatIndianCurrency(activeItem.total_amount) },
                 ]}
               />
 
               {activeItem.remarks && (
-                <div style={{ marginTop: "14px", fontSize: "13px", color: "#64748b" }}>
-                  <strong>Remarks:</strong> {activeItem.remarks}
+                <div
+                  style={{
+                    marginTop: "16px",
+                    padding: "10px 14px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    backgroundColor: "#f8fafc",
+                    fontSize: "12.5px",
+                    color: "#334155",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <strong style={{ color: "#1e293b" }}>Remarks: </strong>
+                  {activeItem.remarks}
                 </div>
               )}
 
@@ -860,19 +876,21 @@ export function StockAdjustmentPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                      <th style={{ padding: "8px 10px", textAlign: "left" }}>Product</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center", width: "50px" }}>Sr No.</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>Item(S)</th>
                       <th style={{ padding: "8px 10px", textAlign: "center" }}>Category</th>
                       <th style={{ padding: "8px 10px", textAlign: "center" }}>HSN</th>
                       <th style={{ padding: "8px 10px", textAlign: "center" }}>GST</th>
-                      <th style={{ padding: "8px 10px", textAlign: "center" }}>Qty</th>
-                      <th style={{ padding: "8px 10px", textAlign: "right" }}>Rate</th>
-                      <th style={{ padding: "8px 10px", textAlign: "right" }}>Amount</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center" }}>Quantity</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right" }}>Unit Price</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right" }}>Total Price</th>
                     </tr>
                   </thead>
                   <tbody>
                     {activeItem.items && activeItem.items.length > 0 ? (
                       activeItem.items.map((line, idx) => (
                         <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "8px 10px", textAlign: "center", color: "#64748b" }}>{idx + 1}</td>
                           <td style={{ padding: "8px 10px", fontWeight: 600 }}>{line.product_name}</td>
                           <td style={{ padding: "8px 10px", textAlign: "center" }}>{line.category || "Machines"}</td>
                           <td style={{ padding: "8px 10px", textAlign: "center" }}>{line.hsn_code || "84224000"}</td>
@@ -890,12 +908,24 @@ export function StockAdjustmentPage() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={7} style={{ padding: "14px", textAlign: "center", color: "#94a3b8" }}>
+                        <td colSpan={8} style={{ padding: "14px", textAlign: "center", color: "#94a3b8" }}>
                           No line items recorded.
                         </td>
                       </tr>
                     )}
                   </tbody>
+                  {activeItem.items && activeItem.items.length > 0 && (
+                    <tfoot>
+                      <tr style={{ background: "#e2e8f0", borderTop: "2px solid #cbd5e1" }}>
+                        <td colSpan={7} style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontSize: "12.5px", color: "#1e293b" }}>
+                          Grand Total
+                        </td>
+                        <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontSize: "13px", color: "#15803d" }}>
+                          {formatIndianCurrency(activeItem.total_amount)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>

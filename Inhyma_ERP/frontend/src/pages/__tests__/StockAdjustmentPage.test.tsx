@@ -132,7 +132,7 @@ describe("StockAdjustmentPage", () => {
     expect(screen.getByText("GARUDA ENGINEERS")).toBeTruthy();
   });
 
-  it("opens SideDrawer on row click and shows Category, HSN, and GST in breakdown", async () => {
+  it("opens SideDrawer on row click and shows all detail fields from the template", async () => {
     render(
       <BrowserRouter>
         <StockAdjustmentPage />
@@ -143,13 +143,39 @@ describe("StockAdjustmentPage", () => {
     fireEvent.click(clientRow);
 
     await waitFor(() => {
+      // Drawer title
+      expect(screen.getByText("Stock Adjustment Details")).toBeTruthy();
+
+      // Top detail fields
+      expect(screen.getByText("Client Name")).toBeTruthy();
+      expect(screen.getByText("Invoice No.")).toBeTruthy();
+      expect(screen.getAllByText("Adjustment Type").length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Purpose/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Date/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Created By").length).toBeGreaterThan(0);
+      expect(screen.getByText("Created At")).toBeTruthy();
+      expect(screen.getAllByText("Warehouse").length).toBeGreaterThan(0);
+      expect(screen.getByText("Total Amount")).toBeTruthy();
+
+      // Breakdown table headers & contents
       expect(screen.getByText("Adjusted Items Breakdown")).toBeTruthy();
-      expect(screen.getByText("ISL450XDAN Flow Wrap machine w/o end seal chain")).toBeTruthy();
+      expect(screen.getByText("Sr No.")).toBeTruthy();
+      expect(screen.getByText("Item(S)")).toBeTruthy();
       expect(screen.getByText("Category")).toBeTruthy();
       expect(screen.getByText("HSN")).toBeTruthy();
       expect(screen.getByText("GST")).toBeTruthy();
+      expect(screen.getByText("Quantity")).toBeTruthy();
+      expect(screen.getByText("Unit Price")).toBeTruthy();
+      expect(screen.getByText("Total Price")).toBeTruthy();
+      expect(screen.getByText("Grand Total")).toBeTruthy();
+
+      // Values
+      expect(screen.getByText("ISL450XDAN Flow Wrap machine w/o end seal chain")).toBeTruthy();
       expect(screen.getByText("84224000")).toBeTruthy();
       expect(screen.getByText("18%")).toBeTruthy();
+
+      // Remarks box
+      expect(screen.getByText(/Party required another machine/i)).toBeTruthy();
     });
   });
 
