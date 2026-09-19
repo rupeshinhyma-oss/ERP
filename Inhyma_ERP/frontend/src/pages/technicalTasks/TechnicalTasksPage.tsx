@@ -23,21 +23,20 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import "@/styles/technicalTasks.css";
 
 const TASK_TYPE_OPTIONS = [
-  "In-House",
-  "Onsite Visit - Client Location",
   "Telecall",
+  "Onsite Visit - Client Location",
+  "Onsite Visit - Third-Party Location",
+  "In-house",
 ];
 
 const CALL_TYPE_OPTIONS = [
   "Demo",
   "Repair",
   "Trial",
-  "Installation",
-  "Maintenance",
 ];
 
 const PRIORITY_OPTIONS = ["A", "B", "C"];
-const SERVICE_TYPE_OPTIONS = ["Free", "Chargeable"];
+const SERVICE_TYPE_OPTIONS = ["Chargeable", "Free"];
 const STATUS_OPTIONS = ["Pending", "Approved", "Completed", "Cancel"];
 
 const DEFAULT_CITIES = [
@@ -329,6 +328,215 @@ function TechnicalTaskSkeletonRows({
   );
 }
 
+/**
+ * Typable & Selectable Combobox.
+ * Allows the user to type freely (to filter or enter a custom value)
+ * as well as open a dropdown menu to select from predefined options.
+ */
+function TypableCombobox({
+  value,
+  onChange,
+  options,
+  placeholder = "Select or type...",
+  style,
+  id,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  options: string[];
+  placeholder?: string;
+  style?: React.CSSProperties;
+  id?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Filter options based on typed input
+  const filteredOptions = useMemo(() => {
+    if (!value) return options;
+    const clean = value.trim().toLowerCase();
+    return options.filter((opt) => opt.toLowerCase().includes(clean));
+  }, [options, value]);
+
+  // Click outside to close
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelect = (val: string) => {
+    onChange(val);
+    setIsOpen(false);
+    setHighlightedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setHighlightedIndex(0);
+      } else {
+        setHighlightedIndex((prev) =>
+          prev < filteredOptions.length - 1 ? prev + 1 : 0
+        );
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setHighlightedIndex(filteredOptions.length - 1);
+      } else {
+        setHighlightedIndex((prev) =>
+          prev > 0 ? prev - 1 : filteredOptions.length - 1
+        );
+      }
+    } else if (e.key === "Enter") {
+      if (isOpen && highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
+        e.preventDefault();
+        handleSelect(filteredOptions[highlightedIndex]);
+      } else {
+        setIsOpen(false);
+      }
+    } else if (e.key === "Escape") {
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: "relative", width: "100%", ...style }}
+    >
+      <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+        <input
+          id={id}
+          ref={inputRef}
+          type="text"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            onChange(e.target.value);
+            if (!isOpen) setIsOpen(true);
+            setHighlightedIndex(-1);
+          }}
+          onFocus={() => setIsOpen(true)}
+          onKeyDown={handleKeyDown}
+          style={{
+            width: "100%",
+            height: "38px",
+            borderRadius: "5px",
+            border: "1px solid #cbd5e1",
+            padding: "0 34px 0 12px",
+            fontSize: "13.5px",
+            color: "#1e293b",
+            background: "#ffffff",
+            boxSizing: "border-box",
+            outline: "none",
+            transition: "border-color 0.2s, box-shadow 0.2s",
+          }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => {
+            setIsOpen((prev) => !prev);
+            inputRef.current?.focus();
+          }}
+          style={{
+            position: "absolute",
+            right: "2px",
+            top: "2px",
+            bottom: "2px",
+            width: "30px",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#64748b",
+            fontSize: "10px",
+            userSelect: "none",
+          }}
+          title="Toggle dropdown"
+        >
+          {isOpen ? "▲" : "▼"}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            maxHeight: "220px",
+            overflowY: "auto",
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "6px",
+            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+            zIndex: 1050,
+            padding: "4px 0",
+          }}
+        >
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((opt, idx) => {
+              const isSelected = opt.toLowerCase() === (value || "").toLowerCase();
+              const isHighlighted = idx === highlightedIndex;
+              return (
+                <div
+                  key={opt}
+                  onClick={() => handleSelect(opt)}
+                  onMouseEnter={() => setHighlightedIndex(idx)}
+                  style={{
+                    padding: "8px 12px",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    background: isHighlighted
+                      ? "#eff6ff"
+                      : isSelected
+                      ? "#f8fafc"
+                      : "transparent",
+                    color: isSelected ? "#0061f2" : "#1e293b",
+                    fontWeight: isSelected ? 600 : 400,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>{opt}</span>
+                  {isSelected && <span style={{ color: "#0061f2", fontSize: "12px" }}>✓</span>}
+                </div>
+              );
+            })
+          ) : (
+            <div
+              style={{
+                padding: "8px 12px",
+                fontSize: "12.5px",
+                color: "#64748b",
+                fontStyle: "italic",
+              }}
+            >
+              {value ? `Use "${value}" as custom city` : "No cities available"}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TechnicalTasksPageContent() {
   // Tabs & Data State
   const [activeTab, setActiveTab] = useState<string>("all");
@@ -412,7 +620,7 @@ function TechnicalTasksPageContent() {
   // Form State for Add / Edit
   const [formData, setFormData] = useState<TechnicalTaskCreatePayload>({
     company_name: "",
-    task_type: "In-House",
+    task_type: "",
     city: "",
     third_party: "",
     priority: "A",
@@ -421,9 +629,9 @@ function TechnicalTasksPageContent() {
     contact_person_name: "",
     contact_designation: "",
     contact_phone: "",
-    service_type: "Free",
+    service_type: "",
     service_charge: 0,
-    call_type: "Demo",
+    call_type: "",
     task_allotted_to: "",
     payment_status: "Pending",
     status: "Pending",
@@ -504,8 +712,10 @@ function TechnicalTasksPageContent() {
         sort_desc: sortDesc,
       };
 
-      if (activeTab !== "all") {
-        params.status = activeTab;
+      if (filterStatus) {
+        params.status = filterStatus.toLowerCase();
+      } else if (activeTab && activeTab.toLowerCase() !== "all") {
+        params.status = activeTab.toLowerCase();
       }
       if (debouncedSearch) {
         params.search = debouncedSearch;
@@ -524,9 +734,6 @@ function TechnicalTasksPageContent() {
       }
       if (filterPriority) {
         params.priority = filterPriority;
-      }
-      if (filterStatus) {
-        params.status = filterStatus;
       }
 
       const res = await fetchTechnicalTasks(params);
@@ -720,7 +927,7 @@ function TechnicalTasksPageContent() {
     setFormData({
       company_name: "",
       task_type: "",
-      city: cityOptions[0] || "",
+      city: "",
       third_party: "",
       priority: "A",
       machine_model: "",
@@ -966,10 +1173,13 @@ function TechnicalTasksPageContent() {
 
   // Badges
   const renderTaskTypeBadge = (type: string) => {
+    if (!type) return <span>—</span>;
     let cls = "badge-tech";
     const lower = type.toLowerCase();
-    if (lower.includes("in-house")) {
+    if (lower.includes("in-house") || lower.includes("inhouse")) {
       cls += " badge-inhouse";
+    } else if (lower.includes("third-party") || lower.includes("third party")) {
+      cls += " badge-onsite-third-party";
     } else if (lower.includes("onsite")) {
       cls += " badge-onsite";
     } else if (lower.includes("telecall")) {
@@ -1381,18 +1591,12 @@ function TechnicalTasksPageContent() {
                 <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
                   City
                 </label>
-                <select
+                <TypableCombobox
                   value={filterCity}
-                  onChange={(e) => setFilterCity(e.target.value)}
-                  style={selectStyle}
-                >
-                  <option value="">All</option>
-                  {cityOptions.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(city) => setFilterCity(city)}
+                  options={cityOptions}
+                  placeholder="All / Select or type city..."
+                />
               </div>
 
               <div>
@@ -1407,7 +1611,7 @@ function TechnicalTasksPageContent() {
                   <option value="">All</option>
                   {CALL_TYPE_OPTIONS.map((c) => (
                     <option key={c} value={c}>
-                      {c}
+                      {c === "Trial" ? "trial" : c}
                     </option>
                   ))}
                 </select>
@@ -1534,7 +1738,7 @@ function TechnicalTasksPageContent() {
               { key: "completed", label: `Completed (${counts.completed})` },
               { key: "cancel", label: `Cancel (${counts.cancel})` },
             ].map((tab) => {
-              const isActive = activeTab === tab.key;
+              const isActive = activeTab.toLowerCase() === tab.key.toLowerCase();
               return (
                 <button
                   key={tab.key}
@@ -1553,6 +1757,7 @@ function TechnicalTasksPageContent() {
                   onClick={() => {
                     setCurrentPage(1);
                     setSelectedIds(new Set());
+                    setFilterStatus("");
                     setActiveTab(tab.key);
                   }}
                 >
@@ -2853,11 +3058,14 @@ function TechnicalTasksPageContent() {
                 </div>
               </div>
 
-              {/* Task Type * & City */}
+              {/* Task Type * & City (and Third-Party if selected) */}
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
+                  gridTemplateColumns:
+                    formData.task_type === "Onsite Visit - Third-Party Location"
+                      ? "1fr 1fr 1fr"
+                      : "1fr 1fr",
                   gap: "14px",
                 }}
               >
@@ -2869,7 +3077,14 @@ function TechnicalTasksPageContent() {
                     required
                     value={formData.task_type}
                     onChange={(e) =>
-                      setFormData({ ...formData, task_type: e.target.value })
+                      setFormData({
+                        ...formData,
+                        task_type: e.target.value,
+                        third_party:
+                          e.target.value === "Onsite Visit - Third-Party Location"
+                            ? formData.third_party
+                            : "",
+                      })
                     }
                     style={selectStyle}
                   >
@@ -2883,21 +3098,35 @@ function TechnicalTasksPageContent() {
                 </div>
                 <div>
                   <label style={fieldLabelStyle}>City</label>
-                  <select
+                  <TypableCombobox
                     value={formData.city}
-                    onChange={(e) =>
-                      setFormData({ ...formData, city: e.target.value })
+                    onChange={(city) =>
+                      setFormData({ ...formData, city })
                     }
-                    style={selectStyle}
-                  >
-                    <option value="">Select</option>
-                    {cityOptions.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
+                    options={cityOptions}
+                    placeholder="Select or type city..."
+                  />
                 </div>
+                {formData.task_type === "Onsite Visit - Third-Party Location" && (
+                  <div>
+                    <label style={fieldLabelStyle}>
+                      Third-Party <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Enter Third-Party Location"
+                      value={formData.third_party || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          third_party: e.target.value,
+                        })
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Priority */}
@@ -3061,7 +3290,7 @@ function TechnicalTasksPageContent() {
                     <option value="">Select</option>
                     {CALL_TYPE_OPTIONS.map((c) => (
                       <option key={c} value={c}>
-                        {c}
+                        {c === "Trial" ? "trial" : c}
                       </option>
                     ))}
                   </select>

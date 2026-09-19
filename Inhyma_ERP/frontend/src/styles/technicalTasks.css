@@ -423,6 +423,13 @@
   border: 1px solid #c2dbff;
 }
 
+.badge-onsite-third-party,
+.page-technical-tasks .badge-onsite-third-party {
+  background-color: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+}
+
 .badge-telecall,
 .page-technical-tasks .badge-telecall {
   background-color: #e6f4ea;

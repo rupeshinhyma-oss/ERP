@@ -91,6 +91,16 @@ async def test_technical_task_crud(test_db: AsyncSession, test_client: AsyncClie
     assert counts["all"] >= 1
     assert counts["pending"] >= 1
 
+    # Check tab & status filtering for pending
+    pending_tab_resp = await test_client.get("/api/v1/technical-tasks?tab=pending")
+    assert pending_tab_resp.status_code == 200
+    assert all(t["status"].lower() == "pending" for t in pending_tab_resp.json()["data"])
+    assert pending_tab_resp.json()["meta"]["total"] >= 1
+
+    pending_status_resp = await test_client.get("/api/v1/technical-tasks?status=Pending")
+    assert pending_status_resp.status_code == 200
+    assert all(t["status"].lower() == "pending" for t in pending_status_resp.json()["data"])
+
     # 3. Status update to Approved
     status_resp = await test_client.patch(
         f"/api/v1/technical-tasks/{task_id}/status",
@@ -101,6 +111,12 @@ async def test_technical_task_crud(test_db: AsyncSession, test_client: AsyncClie
     assert updated_data["status"] == "Approved"
     assert updated_data["task_allotted_to"] == "Mangal Pandey"
     assert updated_data["task_approved_by"] is not None
+
+    # Check tab & status filtering for approved
+    app_tab_resp = await test_client.get("/api/v1/technical-tasks?tab=approved")
+    assert app_tab_resp.status_code == 200
+    assert all(t["status"].lower() == "approved" for t in app_tab_resp.json()["data"])
+    assert app_tab_resp.json()["meta"]["total"] >= 1
 
     # 4. Status update to Completed
     complete_resp = await test_client.patch(

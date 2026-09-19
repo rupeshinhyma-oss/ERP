@@ -12,6 +12,7 @@ import type { ApiResult } from "@/types";
 
 export interface TechnicalTaskListParams {
   status?: string;
+  tab?: string;
   task_type?: string;
   priority?: string;
   service_type?: string;
@@ -29,18 +30,28 @@ export async function fetchTechnicalTasks(
   params: TechnicalTaskListParams = {}
 ): Promise<ApiResult<TechnicalTask[]>> {
   const query = new URLSearchParams();
-  if (params.status && params.status !== "all") query.set("status", params.status);
+  const statusOrTab = params.status || params.tab;
+  if (statusOrTab && statusOrTab.toLowerCase() !== "all") {
+    query.set("status", statusOrTab);
+    query.set("tab", statusOrTab);
+  }
   if (params.task_type) query.set("task_type", params.task_type);
   if (params.priority) query.set("priority", params.priority);
   if (params.service_type) query.set("service_type", params.service_type);
   if (params.call_type) query.set("call_type", params.call_type);
   if (params.city) query.set("city", params.city);
-  if (params.task_allotted_to) query.set("task_allotted_to", params.task_allotted_to);
+  if (params.task_allotted_to) {
+    query.set("task_allotted_to", params.task_allotted_to);
+    query.set("technician", params.task_allotted_to);
+  }
   if (params.search) query.set("search", params.search);
   if (params.sort_by) query.set("sort_by", params.sort_by);
   if (params.sort_desc !== undefined) query.set("sort_desc", String(params.sort_desc));
   if (params.page !== undefined) query.set("page", String(params.page));
-  if (params.page_size !== undefined) query.set("page_size", String(params.page_size));
+  if (params.page_size !== undefined) {
+    query.set("page_size", String(params.page_size));
+    query.set("limit", String(params.page_size));
+  }
 
   const qs = query.toString();
   return apiGet<TechnicalTask[]>(`/technical-tasks${qs ? `?${qs}` : ""}`);

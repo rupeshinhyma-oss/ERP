@@ -51,13 +51,14 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         )
         res = (await self.session.execute(status_stmt)).all()
         counts_map = {row[0]: row[1] for row in res}
+        cancel_count = counts_map.get("cancel", 0) + counts_map.get("cancelled", 0)
 
         return {
             "all": total,
             "pending": counts_map.get("pending", 0),
             "approved": counts_map.get("approved", 0),
             "completed": counts_map.get("completed", 0),
-            "cancel": counts_map.get("cancel", 0),
+            "cancel": cancel_count,
         }
 
     async def list_tasks(
@@ -68,6 +69,8 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         city: str | None = None,
         task_type: str | None = None,
         call_type: str | None = None,
+        service_type: str | None = None,
+        priority: str | None = None,
         technician: str | None = None,
         sort_by: str = "created_at",
         sort_dir: str = "desc",
@@ -77,17 +80,25 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         """Fetch filtered and paginated technical tasks with total matching count."""
         stmt = self._base_select()
 
-        # Filter by tab
+        # Filter by tab / status
         if tab and tab.lower() != "all":
-            stmt = stmt.where(func.lower(TechnicalTask.status) == tab.strip().lower())
+            clean_tab = tab.strip().lower()
+            if clean_tab in ("cancel", "cancelled"):
+                stmt = stmt.where(func.lower(TechnicalTask.status).in_(["cancel", "cancelled"]))
+            else:
+                stmt = stmt.where(func.lower(TechnicalTask.status) == clean_tab)
 
-        # Exact filters
+        # Filters
         if city:
             stmt = stmt.where(TechnicalTask.city.ilike(f"%{city.strip()}%"))
         if task_type:
             stmt = stmt.where(TechnicalTask.task_type.ilike(f"%{task_type.strip()}%"))
         if call_type:
             stmt = stmt.where(TechnicalTask.call_type.ilike(f"%{call_type.strip()}%"))
+        if service_type:
+            stmt = stmt.where(TechnicalTask.service_type.ilike(f"%{service_type.strip()}%"))
+        if priority:
+            stmt = stmt.where(func.lower(TechnicalTask.priority) == priority.strip().lower())
         if technician:
             stmt = stmt.where(TechnicalTask.task_allotted_to.ilike(f"%{technician.strip()}%"))
 
