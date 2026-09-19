@@ -77,6 +77,7 @@ import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { ComingSoonPage } from "@/components/ComingSoon";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ProductStockPage } from "@/pages/ProductStockPage";
+import { StockAdjustmentPage } from "@/pages/StockAdjustmentPage";
 
 export function App() {
   const navigate = useNavigate();
@@ -181,18 +182,9 @@ export function App() {
           <Route path="/product-stock" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock/list" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock" element={<Navigate to="/product-stock/list" replace />} />
-          <Route
-            path="/stock-adjustment"
-            element={
-              <ComingSoonPage
-                activeKey="stock-adjustment"
-                title="Stock Adjustment"
-                subtitle="Track physical stock counts, variances, and write-offs"
-                breadcrumbLabel="Stock Adjustment"
-                featureName="Stock Adjustment"
-              />
-            }
-          />
+          <Route path="/stock-adjustment" element={<StockAdjustmentPage />} />
+          <Route path="/adjustment/list" element={<StockAdjustmentPage />} />
+          <Route path="/adjustment" element={<Navigate to="/adjustment/list" replace />} />
           <Route
             path="/stock-transfer"
             element={
