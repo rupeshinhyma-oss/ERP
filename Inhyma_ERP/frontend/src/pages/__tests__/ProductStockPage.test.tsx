@@ -136,4 +136,63 @@ describe("ProductStockPage", () => {
       expect(XLSX.writeFile).toHaveBeenCalledWith(expect.anything(), "Product_Stock_List.xlsx");
     });
   });
+
+  it("filter panel is off by default and only opens when filter button is clicked", () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    // Filter panel should be OFF initially
+    expect(screen.queryByTestId("stock-filter-panel")).toBeNull();
+
+    // Click filter button
+    const filterBtn = screen.getByTitle("Filter stock list");
+    fireEvent.click(filterBtn);
+
+    // Filter panel should now be visible
+    expect(screen.getByTestId("stock-filter-panel")).toBeTruthy();
+    expect(screen.getByLabelText("Category")).toBeTruthy();
+    expect(screen.getByLabelText("Sub Category")).toBeTruthy();
+    expect(screen.getByLabelText("Brand")).toBeTruthy();
+    expect(screen.getByLabelText("Is Negative Stock")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset" })).toBeTruthy();
+
+    // Clicking filter button again toggles it off
+    fireEvent.click(filterBtn);
+    expect(screen.queryByTestId("stock-filter-panel")).toBeNull();
+  });
+
+  it("applies category and brand filters when Search is clicked and resets on Reset", () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    // Open filter panel
+    fireEvent.click(screen.getByTitle("Filter stock list"));
+    expect(screen.getByTestId("stock-filter-panel")).toBeTruthy();
+
+    // Select Category "Spares"
+    const categorySelect = screen.getByLabelText("Category");
+    fireEvent.change(categorySelect, { target: { value: "Spares" } });
+
+    // Click Search to apply filter
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    // Only Sensor (Banding) is in Spares
+    expect(screen.getByText("Sensor (Banding)")).toBeTruthy();
+    expect(screen.queryByText("XLSG36100 Capping Machine")).toBeNull();
+
+    // Click Reset
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    // All items should be restored
+    expect(screen.getByText("Sensor (Banding)")).toBeTruthy();
+    expect(screen.getByText("XLSG36100 Capping Machine")).toBeTruthy();
+  });
 });
+

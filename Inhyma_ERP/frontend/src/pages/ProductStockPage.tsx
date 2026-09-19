@@ -16,6 +16,7 @@ export interface ProductStockItem {
   product_name_tally: string;
   product_code: string;
   brand: string;
+  category?: string;
   sub_category: string;
   mumbai: number;
   mumbai_transit: number;
@@ -39,6 +40,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "Sensor (Banding)",
     product_code: "-",
     brand: "-",
+    category: "Spares",
     sub_category: "Spares For Banding Machine",
     mumbai: 1,
     mumbai_transit: 0,
@@ -59,6 +61,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "Miscellaneous",
     mumbai: 0,
     mumbai_transit: 0,
@@ -82,6 +85,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "XLSG36100 Capping Machine",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "Capping Machine",
     mumbai: 0,
     mumbai_transit: 0,
@@ -105,6 +109,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "Automatic Tube Filling & Sealing Machine",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "Tube Sealer",
     mumbai: 0,
     mumbai_transit: 0,
@@ -128,6 +133,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "Semi Automatic MAP (Vacuum + 2 Gases) Tray/Cup Sealing Machine",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "Vacuum Sealer Machine",
     mumbai: 0,
     mumbai_transit: 0,
@@ -151,6 +157,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "Cup Filler 16LTR",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "Cup Sealer",
     mumbai: 0,
     mumbai_transit: 0,
@@ -174,6 +181,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "AF1000T Auto Auger Filler Conveyor 30LTR",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "Conveyor Machine",
     mumbai: 0,
     mumbai_transit: 0,
@@ -197,6 +205,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "PFFS200 Pneumatic 4 Side Sealer 240mm PLC",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "FFS / Weighing Machines",
     mumbai: 0,
     mumbai_transit: 0,
@@ -220,6 +229,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "PFFS1000 Pneumatic Centre Sealer 420mm PLC",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "FFS / Weighing Machines",
     mumbai: 0,
     mumbai_transit: 0,
@@ -243,6 +253,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "PFFS200 Pneumatic Centre Sealer 240mm PLC",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "FFS / Weighing Machines",
     mumbai: 0,
     mumbai_transit: 0,
@@ -266,6 +277,7 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
     product_name_tally: "PFFS200 Pneumatic Side Sealer 240mm PLC",
     product_code: "-",
     brand: "Yinglima",
+    category: "Machines",
     sub_category: "FFS / Weighing Machines",
     mumbai: 0,
     mumbai_transit: 0,
@@ -288,10 +300,20 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
 export function ProductStockPage() {
   const [items] = useState<ProductStockItem[]>(INITIAL_STOCK_ITEMS);
   const [searchTerm, setSearchTerm] = useState("");
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  const [selectedBrand, setSelectedBrand] = useState("");
-  const [selectedSubCategory, setSelectedSubCategory] = useState("");
-  const [selectedStockStatus, setSelectedStockStatus] = useState("all");
+  // Collapsible inline filter panel - off by default until clicked
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+
+  // Filter draft input states (for the filter panel controls)
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [subCategoryFilter, setSubCategoryFilter] = useState("All");
+  const [brandFilter, setBrandFilter] = useState("All");
+  const [negativeStockFilter, setNegativeStockFilter] = useState("Select");
+
+  // Applied filter states (applied to table when user clicks Search)
+  const [appliedCategory, setAppliedCategory] = useState("All");
+  const [appliedSubCategory, setAppliedSubCategory] = useState("All");
+  const [appliedBrand, setAppliedBrand] = useState("All");
+  const [appliedNegativeStock, setAppliedNegativeStock] = useState("Select");
 
   // Active drawer for detailed product view
   const [activeItem, setActiveItem] = useState<ProductStockItem | null>(null);
@@ -304,7 +326,16 @@ export function ProductStockPage() {
     details?: OrderDetail[];
   } | null>(null);
 
-  // Extract unique options for filter modal
+  // Extract unique Category options
+  const categoryOptions = useMemo(() => {
+    const cats = new Set<string>();
+    items.forEach((item) => {
+      if (item.category && item.category !== "-") cats.add(item.category);
+    });
+    return Array.from(cats).sort();
+  }, [items]);
+
+  // Extract unique Brand options
   const brandOptions = useMemo(() => {
     const brands = new Set<string>();
     items.forEach((item) => {
@@ -313,15 +344,36 @@ export function ProductStockPage() {
     return Array.from(brands).sort();
   }, [items]);
 
+  // Extract unique Sub Category options
   const subCategoryOptions = useMemo(() => {
     const subs = new Set<string>();
     items.forEach((item) => {
-      if (item.sub_category) subs.add(item.sub_category);
+      if (item.sub_category && item.sub_category !== "-") subs.add(item.sub_category);
     });
     return Array.from(subs).sort();
   }, [items]);
 
-  // Filter items based on search and modal filters
+  // Apply filters button action
+  const handleApplyFilters = useCallback(() => {
+    setAppliedCategory(categoryFilter);
+    setAppliedSubCategory(subCategoryFilter);
+    setAppliedBrand(brandFilter);
+    setAppliedNegativeStock(negativeStockFilter);
+  }, [categoryFilter, subCategoryFilter, brandFilter, negativeStockFilter]);
+
+  // Reset filters button action
+  const handleResetFilters = useCallback(() => {
+    setCategoryFilter("All");
+    setSubCategoryFilter("All");
+    setBrandFilter("All");
+    setNegativeStockFilter("Select");
+    setAppliedCategory("All");
+    setAppliedSubCategory("All");
+    setAppliedBrand("All");
+    setAppliedNegativeStock("Select");
+  }, []);
+
+  // Filter items based on search and applied panel filters
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       // Search term matching: name, code, brand, sub-category
@@ -334,42 +386,42 @@ export function ProductStockPage() {
         if (!matchName && !matchCode && !matchBrand && !matchSub) return false;
       }
 
-      // Brand filter
-      if (selectedBrand && item.brand !== selectedBrand) {
+      // Category filter
+      if (appliedCategory !== "All" && item.category !== appliedCategory) {
         return false;
       }
 
       // Sub Category filter
-      if (selectedSubCategory && item.sub_category !== selectedSubCategory) {
+      if (appliedSubCategory !== "All" && item.sub_category !== appliedSubCategory) {
         return false;
       }
 
-      // Stock status filter
-      if (selectedStockStatus === "in_stock" && item.total_qty <= 0) {
+      // Brand filter
+      if (appliedBrand !== "All" && item.brand !== appliedBrand) {
         return false;
       }
-      if (selectedStockStatus === "mumbai" && item.mumbai <= 0) {
+
+      // Is Negative Stock filter
+      if (appliedNegativeStock === "Yes" && item.total_qty >= 0) {
         return false;
       }
-      if (selectedStockStatus === "ordered" && item.mumbai_ordered <= 0 && item.ahmedabad_ordered <= 0 && item.indore_ordered <= 0) {
-        return false;
-      }
-      if (selectedStockStatus === "transit" && item.mumbai_transit <= 0 && item.ahmedabad_transit <= 0 && item.indore_transit <= 0) {
+      if (appliedNegativeStock === "No" && item.total_qty < 0) {
         return false;
       }
 
       return true;
     });
-  }, [items, searchTerm, selectedBrand, selectedSubCategory, selectedStockStatus]);
+  }, [items, searchTerm, appliedCategory, appliedSubCategory, appliedBrand, appliedNegativeStock]);
 
   // Active filter count for badge
   const activeFilterCount = useMemo(() => {
     let count = 0;
-    if (selectedBrand) count++;
-    if (selectedSubCategory) count++;
-    if (selectedStockStatus !== "all") count++;
+    if (appliedCategory !== "All") count++;
+    if (appliedSubCategory !== "All") count++;
+    if (appliedBrand !== "All") count++;
+    if (appliedNegativeStock !== "Select") count++;
     return count;
-  }, [selectedBrand, selectedSubCategory, selectedStockStatus]);
+  }, [appliedCategory, appliedSubCategory, appliedBrand, appliedNegativeStock]);
 
   // Totals calculations
   const totalPhysical = useMemo(() => {
@@ -419,17 +471,17 @@ export function ProductStockPage() {
           <h1 className="stock-header-title">Product Stock</h1>
 
           <div className="stock-header-actions">
-            {/* Filter Button */}
+            {/* Filter Toggle Button */}
             <button
               type="button"
-              className="stock-btn-filter"
-              onClick={() => setShowFilterModal(true)}
+              className={`stock-btn-filter ${showFilterPanel ? "active" : ""}`}
+              onClick={() => setShowFilterPanel((prev) => !prev)}
               title="Filter stock list"
+              aria-label="Filter"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              Filter
               {activeFilterCount > 0 && <span className="stock-filter-badge">{activeFilterCount}</span>}
             </button>
 
@@ -440,15 +492,99 @@ export function ProductStockPage() {
               onClick={handleExport}
               title="Export to Excel"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
               Export
             </button>
           </div>
         </div>
+
+        {/* Inline Filter Panel - off always until clicked */}
+        {showFilterPanel && (
+          <div className="stock-filter-panel" data-testid="stock-filter-panel">
+            <div className="stock-filter-grid">
+              <div className="stock-filter-field">
+                <label htmlFor="stock-filter-category">Category</label>
+                <select
+                  id="stock-filter-category"
+                  className="stock-filter-select"
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                >
+                  <option value="All">All</option>
+                  {categoryOptions.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="stock-filter-field">
+                <label htmlFor="stock-filter-subcategory">Sub Category</label>
+                <select
+                  id="stock-filter-subcategory"
+                  className="stock-filter-select"
+                  value={subCategoryFilter}
+                  onChange={(e) => setSubCategoryFilter(e.target.value)}
+                >
+                  <option value="All">All</option>
+                  {subCategoryOptions.map((sub) => (
+                    <option key={sub} value={sub}>
+                      {sub}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="stock-filter-field">
+                <label htmlFor="stock-filter-brand">Brand</label>
+                <select
+                  id="stock-filter-brand"
+                  className="stock-filter-select"
+                  value={brandFilter}
+                  onChange={(e) => setBrandFilter(e.target.value)}
+                >
+                  <option value="All">All</option>
+                  {brandOptions.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="stock-filter-field">
+                <label htmlFor="stock-filter-negative">Is Negative Stock</label>
+                <select
+                  id="stock-filter-negative"
+                  className="stock-filter-select"
+                  value={negativeStockFilter}
+                  onChange={(e) => setNegativeStockFilter(e.target.value)}
+                >
+                  <option value="Select">Select</option>
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="stock-filter-actions">
+              <button
+                type="button"
+                className="stock-btn-reset"
+                onClick={handleResetFilters}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                className="stock-btn-search"
+                onClick={handleApplyFilters}
+              >
+                Search
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Search Bar */}
         <div className="stock-search-card">
@@ -639,146 +775,7 @@ export function ProductStockPage() {
           </div>
         </div>
 
-        {/* Filter Modal */}
-        {showFilterModal && (
-          <div className="filter-modal-backdrop" onClick={() => setShowFilterModal(false)}>
-            <div className="filter-modal-box" onClick={(e) => e.stopPropagation()}>
-              <div className="filter-modal-header">
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1e293b" }}>
-                  Filter Product Stock
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setShowFilterModal(false)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    fontSize: "18px",
-                    cursor: "pointer",
-                    color: "#94a3b8",
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
 
-              <div className="filter-modal-body">
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Brand
-                  </label>
-                  <select
-                    value={selectedBrand}
-                    onChange={(e) => setSelectedBrand(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "8px 12px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "6px",
-                      fontSize: "13px",
-                      color: "#1e293b",
-                    }}
-                  >
-                    <option value="">All Brands</option>
-                    {brandOptions.map((brand) => (
-                      <option key={brand} value={brand}>
-                        {brand}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Sub Category
-                  </label>
-                  <select
-                    value={selectedSubCategory}
-                    onChange={(e) => setSelectedSubCategory(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "8px 12px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "6px",
-                      fontSize: "13px",
-                      color: "#1e293b",
-                    }}
-                  >
-                    <option value="">All Sub Categories</option>
-                    {subCategoryOptions.map((sub) => (
-                      <option key={sub} value={sub}>
-                        {sub}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Stock Availability
-                  </label>
-                  <select
-                    value={selectedStockStatus}
-                    onChange={(e) => setSelectedStockStatus(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "8px 12px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "6px",
-                      fontSize: "13px",
-                      color: "#1e293b",
-                    }}
-                  >
-                    <option value="all">All Products</option>
-                    <option value="in_stock">In Stock (Total Qty &gt; 0)</option>
-                    <option value="mumbai">Mumbai In Stock</option>
-                    <option value="ordered">Has Pending Orders</option>
-                    <option value="transit">In Transit</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="filter-modal-footer">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedBrand("");
-                    setSelectedSubCategory("");
-                    setSelectedStockStatus("all");
-                  }}
-                  style={{
-                    padding: "8px 14px",
-                    border: "1px solid #cbd5e1",
-                    background: "#ffffff",
-                    borderRadius: "6px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    color: "#475569",
-                    cursor: "pointer",
-                  }}
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowFilterModal(false)}
-                  style={{
-                    padding: "8px 16px",
-                    border: "none",
-                    background: "#2563eb",
-                    borderRadius: "6px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    color: "#ffffff",
-                    cursor: "pointer",
-                  }}
-                >
-                  Apply Filters
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Ordered Breakdown Popover Modal */}
         {activeOrderPopover && (
