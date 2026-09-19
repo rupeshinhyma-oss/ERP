@@ -1,10 +1,12 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
 import { InventoryApi } from "@/lib/api";
+import { ImpExpDropdown, BulkActionsDropdown } from "@/components/ImportWizard";
 import "@/styles/stockAdjustment.css";
 
 export interface StockAdjustmentLineItem {
@@ -619,22 +621,42 @@ export function StockAdjustmentPage({
   };
 
   return (
-    <AppShell activeKey="stock-adjustment">
-      <div className="page-stock-adjustment">
-        {/* Top Header */}
-        <div className="adjustment-header">
-          <h1 className="adjustment-header-title">Stock Adjustment</h1>
+    <AppShell activeKey="stock-adjustment" pageClassName="page-stock-adjustment">
+      <main className="page">
+        {/* Breadcrumb Trail */}
+        <Breadcrumb trail={["Inventory", "Stock Adjustment"]} />
 
-          <div className="adjustment-header-actions">
+        {/* Top Page Header */}
+        <div className="page-header">
+          <div>
+            <h1>Stock Adjustment</h1>
+            <div className="page-subtitle">
+              Manage inventory adjustments, physical count reconciliation, and discrepancies.
+            </div>
+          </div>
+
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
-              className={`adjustment-btn-filter ${showFilterPanel ? "active" : ""}`}
+              className="btn adjustment-btn-filter"
+              style={{
+                background: showFilterPanel ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
               onClick={() => setShowFilterPanel((prev) => !prev)}
               title="Filter stock adjustments"
               aria-label="Filter"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
               {activeFilterCount > 0 && <span className="adjustment-filter-badge">{activeFilterCount}</span>}
@@ -644,13 +666,27 @@ export function StockAdjustmentPage({
             <div style={{ position: "relative" }}>
               <button
                 type="button"
-                className="adjustment-btn-add"
+                className="btn btn-add-new adjustment-btn-add"
+                style={{
+                  background: "#0284c7",
+                  color: "#ffffff",
+                  padding: "8px 18px",
+                  borderRadius: "6px",
+                  fontWeight: 700,
+                  fontSize: "13.5px",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 2px 4px rgba(2, 132, 199, 0.25)",
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
                   setShowAddMenu((prev) => !prev);
                 }}
               >
-                Add New
+                + Add New
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
@@ -683,15 +719,93 @@ export function StockAdjustmentPage({
                 </div>
               )}
             </div>
+
+            {/* Imp / Exp Dropdown Button */}
+            <button
+              type="button"
+              className="btn btn-warning"
+              style={{
+                background: "#f59e0b",
+                color: "#ffffff",
+                padding: "8px 16px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13px",
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
+              }}
+              onClick={() => {
+                const csvHeader = "Adjustment No,Date,Warehouse,Type,Purpose,Total Amount,Created By\n";
+                const csvRows = items
+                  .map(
+                    (i) =>
+                      `"${i.adjustment_no || i.id}","${i.adjustment_date}","${i.warehouse}","${i.type}","${i.purpose}",${i.total_amount},"${i.created_by}"`
+                  )
+                  .join("\n");
+                const blob = new Blob([csvHeader + csvRows], { type: "text/csv;charset=utf-8;" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "stock_adjustments.csv";
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Imp / Exp ▾
+            </button>
+
+            {/* Bulk Actions Dropdown Button */}
+            <button
+              type="button"
+              className="btn btn-success"
+              style={{
+                background: "#10b981",
+                color: "#ffffff",
+                padding: "8px 16px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13px",
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 2px 4px rgba(16, 185, 129, 0.25)",
+              }}
+            >
+              Bulk Actions ▾
+            </button>
           </div>
         </div>
 
-        {/* Collapsible Filter Panel - off by default until clicked */}
+        {/* Collapsible Filter Panel */}
         {showFilterPanel && (
-          <div className="adjustment-filter-panel" data-testid="adjustment-filter-panel">
-            <div className="adjustment-filter-grid">
+          <div
+            className="filter-panel-card adjustment-filter-panel"
+            data-testid="adjustment-filter-panel"
+            style={{
+              background: "#ffffff",
+              padding: "20px 24px",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              marginBottom: "16px",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <div
+              className="adjustment-filter-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "18px 24px",
+              }}
+            >
               <div className="adjustment-filter-field">
-                <label htmlFor="filter-adjustment-date">Adjustment Date Range</label>
+                <label htmlFor="filter-adjustment-date" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Adjustment Date Range</label>
                 <DateRangePicker
                   id="filter-adjustment-date"
                   value={dateRangeFilter}
@@ -704,12 +818,13 @@ export function StockAdjustmentPage({
               </div>
 
               <div className="adjustment-filter-field">
-                <label htmlFor="filter-adjustment-type">Adjustment Type</label>
+                <label htmlFor="filter-adjustment-type" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Adjustment Type</label>
                 <select
                   id="filter-adjustment-type"
                   className="adjustment-filter-select"
                   value={typeFilter}
                   onChange={(e) => setTypeFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="All">All</option>
                   <option value="Stock IN">Stock IN</option>
@@ -718,12 +833,13 @@ export function StockAdjustmentPage({
               </div>
 
               <div className="adjustment-filter-field">
-                <label htmlFor="filter-adjustment-purpose">Purpose</label>
+                <label htmlFor="filter-adjustment-purpose" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Purpose</label>
                 <select
                   id="filter-adjustment-purpose"
                   className="adjustment-filter-select"
                   value={purposeFilter}
                   onChange={(e) => setPurposeFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="All">All</option>
                   <option value="Return From Client">Return From Client</option>
@@ -733,12 +849,13 @@ export function StockAdjustmentPage({
               </div>
 
               <div className="adjustment-filter-field">
-                <label htmlFor="filter-adjustment-warehouse">Warehouse</label>
+                <label htmlFor="filter-adjustment-warehouse" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Warehouse</label>
                 <select
                   id="filter-adjustment-warehouse"
                   className="adjustment-filter-select"
                   value={warehouseFilter}
                   onChange={(e) => setWarehouseFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="All">All</option>
                   <option value="Ahmedabad">Ahmedabad</option>
@@ -748,11 +865,21 @@ export function StockAdjustmentPage({
               </div>
             </div>
 
-            <div className="adjustment-filter-actions">
+            <div className="adjustment-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
               <button
                 type="button"
                 className="adjustment-btn-reset"
                 onClick={handleResetFilters}
+                style={{
+                  background: "#5c6f84",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "8px 24px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
               >
                 Reset
               </button>
@@ -760,6 +887,16 @@ export function StockAdjustmentPage({
                 type="button"
                 className="adjustment-btn-search"
                 onClick={handleApplyFilters}
+                style={{
+                  background: "#f59e0b",
+                  color: "#1e293b",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "8px 24px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
               >
                 Search
               </button>
@@ -767,58 +904,196 @@ export function StockAdjustmentPage({
           </div>
         )}
 
-        {/* Control Bar: Items Per Page + Live Search */}
-        <div className="adjustment-control-bar">
-          <div className="adjustment-per-page">
-            <select
-              className="adjustment-per-page-select"
-              value={perPage}
-              onChange={(e) => setPerPage(Number(e.target.value))}
-              aria-label="Items per page"
+        {/* Main Data Card */}
+        <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          {/* Status Tabs */}
+          <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: typeFilter === "All" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: typeFilter === "All" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setTypeFilter("All")}
             >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-            <span>Items/Page</span>
+              All ({items.length})
+            </button>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: typeFilter === "Stock IN" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: typeFilter === "Stock IN" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setTypeFilter("Stock IN")}
+            >
+              Stock IN
+            </button>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: typeFilter === "Stock OUT" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: typeFilter === "Stock OUT" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setTypeFilter("Stock OUT")}
+            >
+              Stock OUT
+            </button>
           </div>
 
-          <div className="adjustment-search-wrap">
-            <input
-              type="text"
-              className="adjustment-search-input"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
+          {/* Control Bar: Items Per Page + Live Search */}
+          <div
+            className="toolbar adjustment-control-bar"
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", gap: "10px", flexWrap: "wrap" }}
+          >
+            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+              <div className="adjustment-per-page" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <select
+                  className="adjustment-per-page-select"
+                  value={perPage}
+                  onChange={(e) => setPerPage(Number(e.target.value))}
+                  aria-label="Items per page"
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+              </div>
 
-        {/* Table Card */}
-        <div className="adjustment-table-card">
-          <div className="adjustment-table-wrap">
-            <table className="adjustment-table">
+              <button
+                type="button"
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "13px",
+                  background: "#ffffff",
+                  cursor: "pointer",
+                  color: "#0f172a",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                📌 Freeze Columns (2)
+              </button>
+            </div>
+
+            <div className="adjustment-search-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <input
+                type="text"
+                className="adjustment-search-input"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="table-scroll adjustment-table-card" style={{ maxHeight: "calc(100vh - 240px)", overflowY: "auto", overflowX: "auto" }}>
+            <table className="adjustment-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th className="sortable">
-                    Adjustment Date <span className="sort-icon">⇅</span>
+                  <th className="sortable" style={{ position: "sticky", left: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span>Adjustment Date</span>
+                        <span className="sort-icon">⇅</span>
+                      </div>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.8 }} title="Freeze column">📌</button>
+                    </div>
                   </th>
                   <th className="sortable">
-                    Client / Inv. No. <span className="sort-icon">⇅</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span>Client / Inv. No.</span>
+                        <span className="sort-icon">⇅</span>
+                      </div>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
                   </th>
                   <th className="sortable">
-                    Warehouse <span className="sort-icon">⇅</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span>Warehouse</span>
+                        <span className="sort-icon">⇅</span>
+                      </div>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
                   </th>
-                  <th>Type</th>
+                  <th>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <span>Type</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
                   <th className="sortable">
-                    Purpose <span className="sort-icon">⇅</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span>Purpose</span>
+                        <span className="sort-icon">⇅</span>
+                      </div>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
                   </th>
                   <th className="sortable" style={{ textAlign: "right" }}>
-                    Total <span className="sort-icon">⇅</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "4px" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span>Total</span>
+                        <span className="sort-icon">⇅</span>
+                      </div>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
                   </th>
-                  <th>Created By</th>
-                  <th style={{ textAlign: "center", width: "60px" }}>Action</th>
+                  <th>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <span>Created By</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th style={{ textAlign: "center", width: "60px", position: "sticky", right: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
+                    <span>Action</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1302,7 +1577,7 @@ export function StockAdjustmentPage({
             </div>
           </div>
         )}
-      </div>
+      </main>
     </AppShell>
   );
 }

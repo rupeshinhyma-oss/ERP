@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { InventoryApi } from "@/lib/api";
 import "@/styles/productStock.css";
@@ -586,22 +587,42 @@ export function ProductStockPage({
   }, [filteredItems]);
 
   return (
-    <AppShell activeKey="product-stock">
-      <div className="page-product-stock">
-        {/* Top Header */}
-        <div className="stock-header">
-          <h1 className="stock-header-title">Product Stock</h1>
+    <AppShell activeKey="product-stock" pageClassName="page-product-stock">
+      <main className="page">
+        {/* Breadcrumb Trail */}
+        <Breadcrumb trail={["Inventory", "Product Stock"]} />
 
-          <div className="stock-header-actions">
+        {/* Top Page Header */}
+        <div className="page-header">
+          <div>
+            <h1>Product Stock</h1>
+            <div className="page-subtitle">
+              Stock levels across Mumbai, Ahmedabad, and Indore warehouses.
+            </div>
+          </div>
+
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
-              className={`stock-btn-filter ${showFilterPanel ? "active" : ""}`}
+              className="btn stock-btn-filter"
+              style={{
+                background: showFilterPanel ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
               onClick={() => setShowFilterPanel((prev) => !prev)}
               title="Filter stock list"
               aria-label="Filter"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
               {activeFilterCount > 0 && <span className="stock-filter-badge">{activeFilterCount}</span>}
@@ -610,26 +631,78 @@ export function ProductStockPage({
             {/* Export Button */}
             <button
               type="button"
-              className="stock-btn-export"
+              className="btn stock-btn-export"
+              style={{
+                background: "#f59e0b",
+                color: "#ffffff",
+                padding: "8px 18px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
+              }}
               onClick={handleExport}
               title="Export to Excel"
             >
               Export
             </button>
+
+            {/* Bulk Actions Button */}
+            <button
+              type="button"
+              className="btn btn-success"
+              style={{
+                background: "#10b981",
+                color: "#ffffff",
+                padding: "8px 16px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 2px 4px rgba(16, 185, 129, 0.25)",
+              }}
+            >
+              Bulk Actions ▾
+            </button>
           </div>
         </div>
 
-        {/* Inline Filter Panel - off always until clicked */}
+        {/* Inline Filter Panel */}
         {showFilterPanel && (
-          <div className="stock-filter-panel" data-testid="stock-filter-panel">
-            <div className="stock-filter-grid">
+          <div
+            className="filter-panel-card stock-filter-panel"
+            data-testid="stock-filter-panel"
+            style={{
+              background: "#ffffff",
+              padding: "20px 24px",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              marginBottom: "16px",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <div
+              className="stock-filter-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "18px 24px",
+              }}
+            >
               <div className="stock-filter-field">
-                <label htmlFor="stock-filter-category">Category</label>
+                <label htmlFor="stock-filter-category" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Category</label>
                 <select
                   id="stock-filter-category"
                   className="stock-filter-select"
                   value={categoryFilter}
                   onChange={(e) => setCategoryFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="All">All</option>
                   {categoryOptions.map((cat) => (
@@ -641,12 +714,13 @@ export function ProductStockPage({
               </div>
 
               <div className="stock-filter-field">
-                <label htmlFor="stock-filter-subcategory">Sub Category</label>
+                <label htmlFor="stock-filter-subcategory" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Sub Category</label>
                 <select
                   id="stock-filter-subcategory"
                   className="stock-filter-select"
                   value={subCategoryFilter}
                   onChange={(e) => setSubCategoryFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="All">All</option>
                   {subCategoryOptions.map((sub) => (
@@ -658,12 +732,13 @@ export function ProductStockPage({
               </div>
 
               <div className="stock-filter-field">
-                <label htmlFor="stock-filter-brand">Brand</label>
+                <label htmlFor="stock-filter-brand" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Brand</label>
                 <select
                   id="stock-filter-brand"
                   className="stock-filter-select"
                   value={brandFilter}
                   onChange={(e) => setBrandFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="All">All</option>
                   {brandOptions.map((brand) => (
@@ -675,12 +750,13 @@ export function ProductStockPage({
               </div>
 
               <div className="stock-filter-field">
-                <label htmlFor="stock-filter-negative">Is Negative Stock</label>
+                <label htmlFor="stock-filter-negative" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>Is Negative Stock</label>
                 <select
                   id="stock-filter-negative"
                   className="stock-filter-select"
                   value={negativeStockFilter}
                   onChange={(e) => setNegativeStockFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="Select">Select</option>
                   <option value="Yes">Yes</option>
@@ -689,11 +765,21 @@ export function ProductStockPage({
               </div>
             </div>
 
-            <div className="stock-filter-actions">
+            <div className="stock-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
               <button
                 type="button"
                 className="stock-btn-reset"
                 onClick={handleResetFilters}
+                style={{
+                  background: "#5c6f84",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "8px 24px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
               >
                 Reset
               </button>
@@ -701,6 +787,16 @@ export function ProductStockPage({
                 type="button"
                 className="stock-btn-search"
                 onClick={handleApplyFilters}
+                style={{
+                  background: "#f59e0b",
+                  color: "#1e293b",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "8px 24px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
               >
                 Search
               </button>
@@ -708,45 +804,115 @@ export function ProductStockPage({
           </div>
         )}
 
-        {/* Search Bar */}
-        <div className="stock-search-card">
-          <div className="stock-search-input-wrap">
-            <svg
-              className="stock-search-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+        {/* Main Data Card */}
+        <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          {/* Status Tabs */}
+          <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: "2.5px solid #0061f2",
+                color: "#0061f2",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
             >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="text"
-              className="stock-search-input"
-              placeholder="Search products by name, code, brand, sub-category..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            {searchTerm && (
+              Active ({items.length})
+            </button>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: "2.5px solid transparent",
+                color: "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+            >
+              Inactive (0)
+            </button>
+          </div>
+
+          {/* Controls Toolbar: Items per page, Freeze Columns & Search Bar */}
+          <div
+            className="toolbar"
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", gap: "10px", flexWrap: "wrap" }}
+          >
+            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <select
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  defaultValue={50}
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+              </div>
+
               <button
                 type="button"
-                className="stock-search-clear"
-                onClick={() => setSearchTerm("")}
-                title="Clear search"
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "13px",
+                  background: "#ffffff",
+                  cursor: "pointer",
+                  color: "#0f172a",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
               >
-                ✕
+                📌 Freeze Columns (2)
               </button>
-            )}
-          </div>
-        </div>
+            </div>
 
-        {/* Table Card */}
-        <div className="stock-table-card">
-          <div className="stock-table-wrap">
-            <table className="stock-table">
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <input
+                type="text"
+                className="stock-search-input"
+                placeholder="Search products by name, code, brand, sub-category..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ width: "380px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  className="stock-search-clear"
+                  onClick={() => setSearchTerm("")}
+                  title="Clear search"
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="table-scroll stock-table-card" style={{ maxHeight: "calc(100vh - 240px)", overflowY: "auto", overflowX: "auto" }}>
+            <table className="stock-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
                   <th rowSpan={2} style={{ width: "65px", textAlign: "center", verticalAlign: "middle" }}>Sr. No.</th>
@@ -1044,7 +1210,7 @@ export function ProductStockPage({
             </div>
           )}
         </SideDrawer>
-      </div>
+      </main>
     </AppShell>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { InventoryApi } from "@/lib/api";
@@ -486,22 +487,42 @@ export function StockTransferPage({
   }, [items, activeTab, fromWhFilter, toWhFilter, appliedDateRange, searchTerm]);
 
   return (
-    <AppShell activeKey="stock-transfer">
-      <div className="page-stock-transfer">
-        {/* Top Header */}
-        <div className="transfer-header">
-          <h1 className="transfer-header-title">Stock Transfer</h1>
+    <AppShell activeKey="stock-transfer" pageClassName="page-stock-transfer">
+      <main className="page">
+        {/* Breadcrumb Trail */}
+        <Breadcrumb trail={["Inventory", "Stock Transfer"]} />
 
-          <div className="transfer-header-actions">
+        {/* Top Header */}
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginBottom: "8px" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1>Stock Transfer</h1>
+            <div className="page-subtitle">
+              Manage inter-warehouse stock movements, in-transit shipments, and receipts.
+            </div>
+          </div>
+
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
-              className={`transfer-btn-filter ${showFilterPanel ? "active" : ""}`}
+              className={`btn transfer-btn-filter ${showFilterPanel ? "active" : ""}`}
+              style={{
+                background: showFilterPanel ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
               onClick={() => setShowFilterPanel((prev) => !prev)}
               title="Filter stock transfers"
               aria-label="Filter"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
             </button>
@@ -509,81 +530,173 @@ export function StockTransferPage({
             {/* + ADD NEW Button */}
             <button
               type="button"
-              className="transfer-btn-add"
+              className="btn btn-add-new transfer-btn-add"
+              style={{
+                background: "#0284c7",
+                color: "#ffffff",
+                padding: "8px 18px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(2, 132, 199, 0.25)",
+              }}
               onClick={() => navigate("/transfer/addEdit")}
             >
               + ADD NEW
             </button>
+
+            {/* Imp / Exp Dropdown Button */}
+            <button
+              type="button"
+              className="btn btn-warning"
+              style={{
+                background: "#f59e0b",
+                color: "#ffffff",
+                padding: "8px 16px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13px",
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
+              }}
+              onClick={() => {
+                const csvHeader = "Transfer No,Date,From Warehouse,To Warehouse,Total Amount,Added By,Status\n";
+                const csvRows = items
+                  .map(
+                    (i) =>
+                      `"${i.transfer_no}","${i.transfer_date}","${i.from_warehouse}","${i.to_warehouse}",${i.total_amount},"${i.added_by}","${i.status}"`
+                  )
+                  .join("\n");
+                const blob = new Blob([csvHeader + csvRows], { type: "text/csv;charset=utf-8;" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "stock_transfers.csv";
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Imp / Exp ▾
+            </button>
+
+            {/* Bulk Actions Dropdown Button */}
+            <button
+              type="button"
+              className="btn btn-success"
+              style={{
+                background: "#10b981",
+                color: "#ffffff",
+                padding: "8px 16px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13px",
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 2px 4px rgba(16, 185, 129, 0.25)",
+              }}
+            >
+              Bulk Actions ▾
+            </button>
           </div>
         </div>
 
-        {/* Status Tabs Card (All, Pending, Confirmed, Received, Cancel) */}
-        <div className="transfer-tabs-card" data-testid="transfer-status-tabs">
-          <button
-            type="button"
-            data-testid="tab-All"
-            className={`transfer-tab-btn ${activeTab === "All" ? "active" : ""}`}
-            onClick={() => setActiveTab("All")}
-          >
-            All ({tabCounts.all})
-          </button>
-          <button
-            type="button"
-            data-testid="tab-Pending"
-            className={`transfer-tab-btn ${activeTab === "Pending" ? "active" : ""}`}
-            onClick={() => setActiveTab("Pending")}
-          >
-            Pending ({tabCounts.pending})
-          </button>
-          <button
-            type="button"
-            data-testid="tab-Confirmed"
-            className={`transfer-tab-btn ${activeTab === "Confirmed" ? "active" : ""}`}
-            onClick={() => setActiveTab("Confirmed")}
-          >
-            Confirmed ({tabCounts.confirmed})
-          </button>
-          <button
-            type="button"
-            data-testid="tab-Received"
-            className={`transfer-tab-btn ${activeTab === "Received" ? "active" : ""}`}
-            onClick={() => setActiveTab("Received")}
-          >
-            Received ({tabCounts.received})
-          </button>
-          <button
-            type="button"
-            data-testid="tab-Cancel"
-            className={`transfer-tab-btn ${activeTab === "Cancel" ? "active" : ""}`}
-            onClick={() => setActiveTab("Cancel")}
-          >
-            Cancel ({tabCounts.cancel})
-          </button>
-        </div>
-
-        {/* Collapsible Filter Panel (Exact Screenshot Replica) */}
+        {/* Collapsible Filter Panel */}
         {showFilterPanel && (
-          <div className="transfer-filter-panel" data-testid="transfer-filter-panel">
-            <div className="transfer-filter-field">
-              <label htmlFor="filter-transfer-date">Transfer Date</label>
-              <DateRangePicker
-                id="filter-transfer-date"
-                className="transfer-filter-input"
-                value={dateRangeFilter}
-                onChange={(val) => setDateRangeFilter(val)}
-                onApply={(val) => {
-                  setDateRangeFilter(val);
-                  setAppliedDateRange(val);
-                }}
-                placeholder=""
-              />
+          <div
+            className="filter-panel-card transfer-filter-panel"
+            data-testid="transfer-filter-panel"
+            style={{
+              background: "#ffffff",
+              padding: "20px 24px",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              marginBottom: "16px",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                gap: "18px 24px",
+              }}
+            >
+              <div className="transfer-filter-field">
+                <label htmlFor="filter-transfer-date" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                  Transfer Date
+                </label>
+                <DateRangePicker
+                  id="filter-transfer-date"
+                  className="transfer-filter-input"
+                  value={dateRangeFilter}
+                  onChange={(val) => setDateRangeFilter(val)}
+                  onApply={(val) => {
+                    setDateRangeFilter(val);
+                    setAppliedDateRange(val);
+                  }}
+                  placeholder=""
+                />
+              </div>
+
+              <div className="transfer-filter-field">
+                <label htmlFor="filter-from-warehouse" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                  From Warehouse
+                </label>
+                <select
+                  id="filter-from-warehouse"
+                  value={fromWhFilter}
+                  onChange={(e) => setFromWhFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+                >
+                  <option value="All">All</option>
+                  <option value="Ahmedabad">Ahmedabad</option>
+                  <option value="Mumbai">Mumbai</option>
+                  <option value="Indore">Indore</option>
+                </select>
+              </div>
+
+              <div className="transfer-filter-field">
+                <label htmlFor="filter-to-warehouse" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                  To Warehouse
+                </label>
+                <select
+                  id="filter-to-warehouse"
+                  value={toWhFilter}
+                  onChange={(e) => setToWhFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+                >
+                  <option value="All">All</option>
+                  <option value="Ahmedabad">Ahmedabad</option>
+                  <option value="Mumbai">Mumbai</option>
+                  <option value="Indore">Indore</option>
+                </select>
+              </div>
             </div>
 
-            <div className="transfer-filter-actions">
+            <div className="transfer-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
               <button
                 type="button"
                 className="transfer-btn-reset"
                 onClick={handleResetFilters}
+                style={{
+                  background: "#5c6f84",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "8px 24px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
               >
                 Reset
               </button>
@@ -591,6 +704,16 @@ export function StockTransferPage({
                 type="button"
                 className="transfer-btn-search"
                 onClick={handleSearchFilters}
+                style={{
+                  background: "#f59e0b",
+                  color: "#1e293b",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "8px 24px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
               >
                 Search
               </button>
@@ -598,54 +721,245 @@ export function StockTransferPage({
           </div>
         )}
 
-        {/* Control Bar: Items per page & Search Input */}
-        <div className="transfer-control-bar">
-          <div className="transfer-per-page">
-            <select
-              className="transfer-per-page-select"
-              value={perPage}
-              onChange={(e) => setPerPage(Number(e.target.value))}
-              aria-label="Items per page"
+        {/* Main Data Card */}
+        <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          {/* Status Tabs with blue underline indicator */}
+          <div
+            className="transfer-tabs-card"
+            data-testid="transfer-status-tabs"
+            style={{
+              display: "flex",
+              gap: "20px",
+              borderBottom: "1px solid #e2e8f0",
+              padding: "6px 16px 0",
+              background: "transparent",
+              borderTop: "none",
+              borderLeft: "none",
+              borderRight: "none",
+              borderRadius: 0,
+              boxShadow: "none",
+              marginBottom: 0,
+            }}
+          >
+            <button
+              type="button"
+              data-testid="tab-All"
+              className={`transfer-tab-btn ${activeTab === "All" ? "active" : ""}`}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "All" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: activeTab === "All" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setActiveTab("All")}
             >
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
-            <span>Items/Page</span>
+              All ({tabCounts.all})
+            </button>
+            <button
+              type="button"
+              data-testid="tab-Pending"
+              className={`transfer-tab-btn ${activeTab === "Pending" ? "active" : ""}`}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "Pending" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: activeTab === "Pending" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setActiveTab("Pending")}
+            >
+              Pending ({tabCounts.pending})
+            </button>
+            <button
+              type="button"
+              data-testid="tab-Confirmed"
+              className={`transfer-tab-btn ${activeTab === "Confirmed" ? "active" : ""}`}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "Confirmed" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: activeTab === "Confirmed" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setActiveTab("Confirmed")}
+            >
+              Confirmed ({tabCounts.confirmed})
+            </button>
+            <button
+              type="button"
+              data-testid="tab-Received"
+              className={`transfer-tab-btn ${activeTab === "Received" ? "active" : ""}`}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "Received" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: activeTab === "Received" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setActiveTab("Received")}
+            >
+              Received ({tabCounts.received})
+            </button>
+            <button
+              type="button"
+              data-testid="tab-Cancel"
+              className={`transfer-tab-btn ${activeTab === "Cancel" ? "active" : ""}`}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "Cancel" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: activeTab === "Cancel" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setActiveTab("Cancel")}
+            >
+              Cancel ({tabCounts.cancel})
+            </button>
           </div>
 
-          <div className="transfer-search-wrap">
-            <input
-              type="text"
-              className="transfer-search-input"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
+          {/* Control Bar: Items per page, Freeze Columns button, and Search */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #f1f5f9" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <select
+                  className="transfer-per-page-select"
+                  value={perPage}
+                  onChange={(e) => setPerPage(Number(e.target.value))}
+                  aria-label="Items per page"
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+              </div>
 
-        {/* Table Card */}
-        <div className="transfer-table-card">
-          <div className="transfer-table-wrap">
-            <table className="transfer-table">
+              <button
+                type="button"
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "13px",
+                  background: "#ffffff",
+                  cursor: "pointer",
+                  color: "#0f172a",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                📌 Freeze Columns (2)
+              </button>
+            </div>
+
+            <div className="transfer-search-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <input
+                type="text"
+                className="transfer-search-input"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="table-scroll transfer-table-wrap" style={{ overflowX: "auto" }}>
+            <table className="transfer-table" style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%" }}>
               <thead>
-                <tr>
-                  <th className="sortable">
-                    Sr. No. <span className="sort-icon">▼</span>
+                <tr style={{ background: "#f8fafc" }}>
+                  <th className="sortable" style={{ padding: "10px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>Sr. No.</span>
+                      <span style={{ display: "flex", gap: "2px" }}>
+                        <span className="sort-icon" style={{ fontSize: "10px", color: "#0284c7" }}>▼</span>
+                        <span style={{ fontSize: "11px", opacity: 0.5 }}>📌</span>
+                      </span>
+                    </div>
                   </th>
-                  <th>Transfer Date</th>
-                  <th className="sortable">
-                    From Warehouse <span className="sort-icon">⇅</span>
+                  <th style={{ padding: "10px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>Transfer Date</span>
+                      <span style={{ fontSize: "11px", opacity: 0.5 }}>📌</span>
+                    </div>
                   </th>
-                  <th>To Warehouse</th>
-                  <th style={{ textAlign: "right" }}>Total</th>
-                  <th className="sortable">
-                    Added By <span className="sort-icon">⇅</span>
+                  <th className="sortable" style={{ padding: "10px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>From Warehouse</span>
+                      <span style={{ display: "flex", gap: "2px" }}>
+                        <span className="sort-icon" style={{ fontSize: "10px", color: "#94a3b8" }}>⇅</span>
+                        <span style={{ fontSize: "11px", opacity: 0.5 }}>📌</span>
+                      </span>
+                    </div>
                   </th>
-                  <th>Status</th>
-                  <th style={{ textAlign: "center", width: "60px" }}>Action</th>
+                  <th style={{ padding: "10px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>To Warehouse</span>
+                      <span style={{ fontSize: "11px", opacity: 0.5 }}>📌</span>
+                    </div>
+                  </th>
+                  <th style={{ padding: "10px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", textAlign: "right" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "4px" }}>
+                      <span>Total</span>
+                      <span style={{ fontSize: "11px", opacity: 0.5 }}>📌</span>
+                    </div>
+                  </th>
+                  <th className="sortable" style={{ padding: "10px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>Added By</span>
+                      <span style={{ display: "flex", gap: "2px" }}>
+                        <span className="sort-icon" style={{ fontSize: "10px", color: "#94a3b8" }}>⇅</span>
+                        <span style={{ fontSize: "11px", opacity: 0.5 }}>📌</span>
+                      </span>
+                    </div>
+                  </th>
+                  <th style={{ padding: "10px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>Status</span>
+                      <span style={{ fontSize: "11px", opacity: 0.5 }}>📌</span>
+                    </div>
+                  </th>
+                  <th style={{ padding: "10px 14px", borderBottom: "1px solid #cbd5e1", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", textAlign: "center", width: "70px" }}>
+                    <span>Action</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -661,11 +975,15 @@ export function StockTransferPage({
                   filteredItems.slice(0, perPage).map((item) => (
                     <tr
                       key={item.id}
-                      style={{ cursor: "pointer" }}
+                      style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
                       onClick={() => setActiveItem(item)}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f0f7ff")}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                     >
-                      <td>{item.sr_no}</td>
-                      <td>
+                      <td style={{ padding: "11px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", color: "#334155" }}>
+                        {item.sr_no}
+                      </td>
+                      <td style={{ padding: "11px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1" }}>
                         <a
                           href="#view"
                           className="transfer-date-link"
@@ -674,22 +992,33 @@ export function StockTransferPage({
                             e.stopPropagation();
                             setActiveItem(item);
                           }}
+                          style={{ color: "#0061f2", fontWeight: 600, textDecoration: "none" }}
                         >
                           {item.transfer_date}
                         </a>
                       </td>
-                      <td>{item.from_warehouse}</td>
-                      <td>{item.to_warehouse}</td>
-                      <td style={{ textAlign: "right", fontWeight: 600, color: "#0f172a" }}>
+                      <td style={{ padding: "11px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", color: "#334155" }}>
+                        {item.from_warehouse}
+                      </td>
+                      <td style={{ padding: "11px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", color: "#334155" }}>
+                        {item.to_warehouse}
+                      </td>
+                      <td style={{ padding: "11px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", textAlign: "right", fontWeight: 600, color: "#0f172a" }}>
                         {formatIndianCurrency(item.total_amount)}
                       </td>
-                      <td>{item.added_by}</td>
-                      <td>
+                      <td style={{ padding: "11px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", color: "#334155" }}>
+                        {item.added_by}
+                      </td>
+                      <td style={{ padding: "11px 14px", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1" }}>
                         <span className={`badge-status ${item.status.toLowerCase()}`}>
                           {item.status}
                         </span>
                       </td>
-                      <td className="transfer-action-cell" onClick={(e) => e.stopPropagation()}>
+                      <td
+                        className="transfer-action-cell"
+                        style={{ padding: "11px 14px", borderBottom: "1px solid #cbd5e1", textAlign: "center" }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
                           type="button"
                           className={`transfer-action-btn ${openActionMenuId === item.id ? "active" : ""}`}
@@ -742,7 +1071,7 @@ export function StockTransferPage({
             </table>
           </div>
 
-          <div className="transfer-footer-bar">
+          <div className="transfer-footer-bar" style={{ padding: "12px 16px", borderTop: "1px solid #e2e8f0", fontSize: "13px", color: "#64748b" }}>
             <span>
               Showing <strong>{Math.min(filteredItems.length, perPage)}</strong> of{" "}
               <strong>{filteredItems.length}</strong> transfers
@@ -940,7 +1269,7 @@ export function StockTransferPage({
             </div>
           </div>
         )}
-      </div>
+      </main>
     </AppShell>
   );
 }

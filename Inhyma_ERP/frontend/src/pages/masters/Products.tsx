@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
 import {
   TextField,
@@ -886,30 +887,62 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
   }
 
   return (
-    <AppShell activeKey="masters-products">
-      <div className="page-product-master">
-        {/* 1. Header with Title and Action Buttons */}
-        <div className="pm-header">
-          <h1 className="pm-header-title">Product Master</h1>
+    <AppShell activeKey="masters-products" pageClassName="page-product-master">
+      <main className="page">
+        {/* Breadcrumb Trail */}
+        <Breadcrumb trail={["Inventory", "Product Master"]} />
 
-          <div className="pm-header-actions">
+        {/* 1. Header with Title and Action Buttons */}
+        <div className="page-header">
+          <div>
+            <h1>Product Master</h1>
+            <div className="page-subtitle">
+              Catalog of products, pricing, specifications, and packaging configurations.
+            </div>
+          </div>
+
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
-              className={`pm-btn-filter ${showFilterPanel ? "active" : ""}`}
+              className="btn pm-btn-filter"
+              style={{
+                background: showFilterPanel ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
               onClick={() => setShowFilterPanel((prev) => !prev)}
-              title="Toggle Filter Panel"
+              title="Toggle Filter Options"
               aria-label="Filter"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
             </button>
 
             {/* + ADD NEW Button */}
             <button
+              id="btn-add-product"
               type="button"
-              className="pm-btn-add"
+              className="btn btn-add-new pm-btn-add"
+              style={{
+                background: "#0284c7",
+                color: "#ffffff",
+                padding: "8px 18px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(2, 132, 199, 0.25)",
+              }}
               onClick={handleOpenCreate}
             >
               + ADD NEW
@@ -940,10 +973,30 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
 
         {/* 2. Collapsible Filter Panel Card */}
         {showFilterPanel && (
-          <div className="pm-filter-panel" data-testid="pm-filter-panel">
-            <div className="pm-filter-grid">
+          <div
+            className="filter-panel-card pm-filter-panel"
+            data-testid="pm-filter-panel"
+            style={{
+              background: "#ffffff",
+              padding: "20px 24px",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              marginBottom: "16px",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <div
+              className="pm-filter-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                gap: "18px 24px",
+              }}
+            >
               <div className="pm-filter-field">
-                <label htmlFor="filter-category">Category</label>
+                <label htmlFor="filter-category" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                  Category
+                </label>
                 <select
                   id="filter-category"
                   className="pm-filter-select"
@@ -951,6 +1004,16 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                   onChange={(e) => {
                     setCategoryDraft(e.target.value);
                     setSubCategoryDraft("");
+                  }}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    borderRadius: "5px",
+                    border: "1px solid #cbd5e1",
+                    padding: "0 10px",
+                    fontSize: "13.5px",
+                    color: "#334155",
+                    background: "#ffffff",
                   }}
                 >
                   <option value="">All</option>
@@ -963,12 +1026,24 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
               </div>
 
               <div className="pm-filter-field">
-                <label htmlFor="filter-subcategory">Sub Category</label>
+                <label htmlFor="filter-subcategory" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                  Sub Category
+                </label>
                 <select
                   id="filter-subcategory"
                   className="pm-filter-select"
                   value={subCategoryDraft}
                   onChange={(e) => setSubCategoryDraft(e.target.value)}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    borderRadius: "5px",
+                    border: "1px solid #cbd5e1",
+                    padding: "0 10px",
+                    fontSize: "13.5px",
+                    color: "#334155",
+                    background: "#ffffff",
+                  }}
                 >
                   <option value="">All</option>
                   {subCategories.items
@@ -982,12 +1057,24 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
               </div>
 
               <div className="pm-filter-field">
-                <label htmlFor="filter-brand">Brand</label>
+                <label htmlFor="filter-brand" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                  Brand
+                </label>
                 <select
                   id="filter-brand"
                   className="pm-filter-select"
                   value={brandDraft}
                   onChange={(e) => setBrandDraft(e.target.value)}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    borderRadius: "5px",
+                    border: "1px solid #cbd5e1",
+                    padding: "0 10px",
+                    fontSize: "13.5px",
+                    color: "#334155",
+                    background: "#ffffff",
+                  }}
                 >
                   <option value="">All</option>
                   {brands.items.map((b) => (
@@ -999,11 +1086,21 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
               </div>
             </div>
 
-            <div className="pm-filter-actions">
+            <div className="pm-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
               <button
                 type="button"
                 className="pm-btn-reset"
                 onClick={handleResetFilters}
+                style={{
+                  background: "#5c6f84",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "8px 24px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
               >
                 Reset
               </button>
@@ -1011,6 +1108,16 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                 type="button"
                 className="pm-btn-search"
                 onClick={handleApplyFilters}
+                style={{
+                  background: "#f59e0b",
+                  color: "#1e293b",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "8px 24px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
               >
                 Search
               </button>
@@ -1018,70 +1125,143 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
           </div>
         )}
 
-        {/* 3. Status Tabs Card (Active, Inactive) */}
-        <div className="pm-tabs-card" data-testid="pm-status-tabs">
-          <button
-            type="button"
-            className={`pm-tab-btn ${activeTab === "Active" ? "active" : ""}`}
-            onClick={() => {
-              setActiveTab("Active");
-              setCurrentPage(1);
-            }}
+        {/* 3. Main Data Card */}
+        <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          {/* Status Tabs (Active, Inactive) */}
+          <div
+            className="pm-tabs-card"
+            data-testid="pm-status-tabs"
+            style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}
           >
-            Active ({tabCounts.active})
-          </button>
-          <button
-            type="button"
-            className={`pm-tab-btn ${activeTab === "Inactive" ? "active" : ""}`}
-            onClick={() => {
-              setActiveTab("Inactive");
-              setCurrentPage(1);
-            }}
-          >
-            Inactive ({tabCounts.inactive})
-          </button>
-        </div>
-
-        {/* 4. Controls Bar: Items per page & Search Input */}
-        <div className="pm-control-bar">
-          <div className="pm-per-page">
-            <select
-              className="pm-per-page-select"
-              value={perPage}
-              onChange={(e) => {
-                setPerPage(Number(e.target.value));
+            <button
+              type="button"
+              className={`pm-tab-btn ${activeTab === "Active" ? "active" : ""}`}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "Active" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: activeTab === "Active" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                setActiveTab("Active");
                 setCurrentPage(1);
               }}
-              aria-label="Items per page"
             >
-              <option value="10">10 Items/Page</option>
-              <option value="25">25 Items/Page</option>
-              <option value="50">50 Items/Page</option>
-              <option value="100">100 Items/Page</option>
-            </select>
-          </div>
-
-          <div className="pm-search-wrap">
-            <input
-              type="text"
-              className="pm-search-input"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
+              Active ({tabCounts.active})
+            </button>
+            <button
+              type="button"
+              className={`pm-tab-btn ${activeTab === "Inactive" ? "active" : ""}`}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "Inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: activeTab === "Inactive" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "13.5px",
+                paddingBottom: "8px",
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                setActiveTab("Inactive");
                 setCurrentPage(1);
               }}
-            />
+            >
+              Inactive ({tabCounts.inactive})
+            </button>
           </div>
-        </div>
 
-        {/* 5. Products Table matching erp.inhymasolutions.com/product/list */}
-        <div className="pm-table-card">
-          <div className="pm-table-wrap">
-            <table className="pm-table">
+          {/* Controls Bar: Items per page & Search Input */}
+          <div
+            className="toolbar pm-control-bar"
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", gap: "10px", flexWrap: "wrap" }}
+          >
+            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+              <div className="pm-per-page" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <select
+                  className="pm-per-page-select"
+                  value={perPage}
+                  onChange={(e) => {
+                    setPerPage(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  aria-label="Items per page"
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                >
+                  <option value="10">10</option>
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+                <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+              </div>
+
+              {/* Freeze Columns Button */}
+              <button
+                type="button"
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "13px",
+                  background: "#ffffff",
+                  cursor: "pointer",
+                  color: "#0f172a",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                📌 Freeze Columns (2)
+              </button>
+            </div>
+
+            <div className="pm-search-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <input
+                type="text"
+                className="pm-search-input"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm("");
+                    setCurrentPage(1);
+                  }}
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 5. Products Table inside .table-scroll */}
+          <div className="table-scroll pm-table-card" style={{ maxHeight: "calc(100vh - 240px)", overflowY: "auto", overflowX: "auto" }}>
+            <table className="pm-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th style={{ width: "40px", textAlign: "center" }}>
+                  <th style={{ width: "40px", minWidth: "40px", textAlign: "center", position: "sticky", left: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
                     <input
                       type="checkbox"
                       checked={isAllSelected}
@@ -1094,19 +1274,73 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                     className="sortable"
                     onClick={() => setSortAsc((prev) => !prev)}
                     title="Click to sort by Product Name"
+                    style={{ position: "sticky", left: "40px", zIndex: 12, backgroundColor: "#f1f5f9" }}
                   >
-                    Product Name (As Per Tally) <span style={{ opacity: 0.5, fontSize: "11px" }}>⇅</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span>Product Name (As Per Tally)</span>
+                        <span style={{ opacity: 0.5, fontSize: "11px" }}>⇅</span>
+                      </div>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.8 }} title="Freeze column">📌</button>
+                    </div>
                   </th>
-                  <th>Product Code</th>
-                  <th>Brand</th>
-                  <th>Sub Cate.</th>
-                  <th>Min. Price Without GST</th>
-                  <th>HSN</th>
-                  <th>UOM</th>
-                  <th style={{ textAlign: "center" }}>Pack. Qty</th>
-                  <th style={{ textAlign: "center" }}>Pack. Gross Weight</th>
-                  <th style={{ textAlign: "center" }}>Pack. Unit CBM</th>
-                  <th style={{ textAlign: "center", width: "70px" }}>Action</th>
+                  <th>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <span>Product Code</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <span>Brand</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <span>Sub Cate.</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <span>Min. Price Without GST</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <span>HSN</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+                      <span>UOM</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th style={{ textAlign: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
+                      <span>Pack. Qty</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th style={{ textAlign: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
+                      <span>Pack. Gross Weight</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th style={{ textAlign: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
+                      <span>Pack. Unit CBM</span>
+                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    </div>
+                  </th>
+                  <th style={{ textAlign: "center", width: "70px", position: "sticky", right: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
+                    <span>Action</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1314,7 +1548,7 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
             onError={(msg) => alert(`Import error: ${msg}`)}
           />
         )}
-      </div>
+      </main>
     </AppShell>
   );
 }
