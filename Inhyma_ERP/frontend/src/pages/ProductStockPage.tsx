@@ -627,21 +627,29 @@ export function ProductStockPage() {
             <table className="stock-table">
               <thead>
                 <tr>
-                  <th style={{ width: "65px", textAlign: "center" }}>Sr. No.</th>
-                  <th style={{ minWidth: "260px" }}>Product Name (As Per Tally)</th>
-                  <th style={{ width: "110px", textAlign: "center" }}>Product Code</th>
-                  <th style={{ width: "100px", textAlign: "center" }}>Brand</th>
-                  <th style={{ minWidth: "170px" }}>Sub Category</th>
-                  <th className="th-pink" style={{ width: "80px" }}>Mumbai</th>
-                  <th className="th-sub" style={{ width: "95px" }}>Mumbai Transit</th>
-                  <th className="th-sub" style={{ width: "105px" }}>Mumbai Ordered</th>
-                  <th className="th-sub" style={{ width: "95px" }}>Ahmedabad</th>
-                  <th className="th-sub" style={{ width: "110px" }}>Ahmedabad Transit</th>
-                  <th className="th-sub" style={{ width: "120px" }}>Ahmedabad Ordered</th>
-                  <th className="th-pink" style={{ width: "80px" }}>Indore</th>
-                  <th className="th-sub" style={{ width: "95px" }}>Indore Transit</th>
-                  <th className="th-sub" style={{ width: "105px" }}>Indore Ordered</th>
-                  <th className="th-sub" style={{ width: "85px", fontWeight: 700 }}>Total Qty</th>
+                  <th rowSpan={2} style={{ width: "65px", textAlign: "center", verticalAlign: "middle" }}>Sr. No.</th>
+                  <th rowSpan={2} style={{ minWidth: "260px", verticalAlign: "middle" }}>Product Name (As Per Tally)</th>
+                  <th rowSpan={2} style={{ width: "110px", textAlign: "center", verticalAlign: "middle" }}>Product Code</th>
+                  <th rowSpan={2} style={{ width: "100px", textAlign: "center", verticalAlign: "middle" }}>Brand</th>
+                  <th rowSpan={2} style={{ minWidth: "170px", verticalAlign: "middle" }}>Sub Category</th>
+                  <th colSpan={3} className="th-group th-group-mumbai">Mumbai</th>
+                  <th colSpan={3} className="th-group th-group-ahmedabad">Ahmedabad</th>
+                  <th colSpan={3} className="th-group th-group-indore">Indore</th>
+                  <th rowSpan={2} className="th-sub" style={{ width: "85px", textAlign: "center", verticalAlign: "middle", fontWeight: 700 }}>Total Qty</th>
+                </tr>
+                <tr>
+                  {/* Mumbai Group */}
+                  <th className="th-sub th-pink" style={{ width: "75px" }} title="Mumbai Stock">Stock</th>
+                  <th className="th-sub" style={{ width: "85px" }} title="Mumbai Transit">Transit</th>
+                  <th className="th-sub th-group-end" style={{ width: "95px" }} title="Mumbai Ordered">Ordered</th>
+                  {/* Ahmedabad Group */}
+                  <th className="th-sub" style={{ width: "85px" }} title="Ahmedabad Stock">Stock</th>
+                  <th className="th-sub" style={{ width: "85px" }} title="Ahmedabad Transit">Transit</th>
+                  <th className="th-sub th-group-end" style={{ width: "95px" }} title="Ahmedabad Ordered">Ordered</th>
+                  {/* Indore Group */}
+                  <th className="th-sub th-pink" style={{ width: "75px" }} title="Indore Stock">Stock</th>
+                  <th className="th-sub" style={{ width: "85px" }} title="Indore Transit">Transit</th>
+                  <th className="th-sub th-group-end" style={{ width: "95px" }} title="Indore Ordered">Ordered</th>
                 </tr>
               </thead>
               <tbody>
@@ -671,9 +679,10 @@ export function ProductStockPage() {
                       <td className="td-center">{item.product_code}</td>
                       <td className="td-center">{item.brand}</td>
                       <td>{item.sub_category}</td>
+                      {/* Mumbai 3 */}
                       <td className="td-pink">{item.mumbai}</td>
                       <td className="td-center">{item.mumbai_transit}</td>
-                      <td className="td-center">
+                      <td className="td-center td-group-end">
                         <span className="ordered-badge">
                           <span>{item.mumbai_ordered}</span>
                           {item.mumbai_ordered > 0 && (
@@ -696,9 +705,10 @@ export function ProductStockPage() {
                           )}
                         </span>
                       </td>
+                      {/* Ahmedabad 3 */}
                       <td className="td-center">{item.ahmedabad}</td>
                       <td className="td-center">{item.ahmedabad_transit}</td>
-                      <td className="td-center">
+                      <td className="td-center td-group-end">
                         <span className="ordered-badge">
                           <span>{item.ahmedabad_ordered}</span>
                           {item.ahmedabad_ordered > 0 && (
@@ -721,9 +731,10 @@ export function ProductStockPage() {
                           )}
                         </span>
                       </td>
+                      {/* Indore 3 */}
                       <td className="td-pink">{item.indore}</td>
                       <td className="td-center">{item.indore_transit}</td>
-                      <td className="td-center">
+                      <td className="td-center td-group-end">
                         <span className="ordered-badge">
                           <span>{item.indore_ordered}</span>
                           {item.indore_ordered > 0 && (

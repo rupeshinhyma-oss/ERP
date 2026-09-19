@@ -302,6 +302,42 @@
   text-align: center;
 }
 
+/* Grouped Column Headers (3,3,3 in 1) */
+.stock-table th.th-group {
+  text-align: center;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #cbd5e1;
+  letter-spacing: 0.2px;
+}
+
+.stock-table th.th-group-mumbai {
+  background-color: #fde8e8;
+  color: #991b1b;
+  border-right: 2px solid #cbd5e1;
+}
+
+.stock-table th.th-group-ahmedabad {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  border-right: 2px solid #cbd5e1;
+}
+
+.stock-table th.th-group-indore {
+  background-color: #fde8e8;
+  color: #991b1b;
+  border-right: 2px solid #cbd5e1;
+}
+
+.stock-table th.th-group-end {
+  border-right: 2px solid #cbd5e1 !important;
+}
+
+.stock-table td.td-group-end {
+  border-right: 2px solid #e2e8f0 !important;
+}
+
 .stock-table td {
   padding: 11px 10px;
   border-bottom: 1px solid #f1f5f9;

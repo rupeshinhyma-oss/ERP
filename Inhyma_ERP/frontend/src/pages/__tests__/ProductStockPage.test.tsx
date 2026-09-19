@@ -55,7 +55,7 @@ describe("ProductStockPage", () => {
     ).toBeTruthy();
   });
 
-  it("renders exact table column headers words by words", () => {
+  it("renders 3,3,3 in 1 grouped table column headers", () => {
     render(
       <BrowserRouter>
         <ProductStockPage />
@@ -67,15 +67,14 @@ describe("ProductStockPage", () => {
     expect(screen.getByText("Product Code")).toBeTruthy();
     expect(screen.getByText("Brand")).toBeTruthy();
     expect(screen.getByText("Sub Category")).toBeTruthy();
+    // Group headers (3 in 1)
     expect(screen.getByText("Mumbai")).toBeTruthy();
-    expect(screen.getByText("Mumbai Transit")).toBeTruthy();
-    expect(screen.getByText("Mumbai Ordered")).toBeTruthy();
     expect(screen.getByText("Ahmedabad")).toBeTruthy();
-    expect(screen.getByText("Ahmedabad Transit")).toBeTruthy();
-    expect(screen.getByText("Ahmedabad Ordered")).toBeTruthy();
     expect(screen.getByText("Indore")).toBeTruthy();
-    expect(screen.getByText("Indore Transit")).toBeTruthy();
-    expect(screen.getByText("Indore Ordered")).toBeTruthy();
+    // Subheaders under each of the 3 groups
+    expect(screen.getAllByText("Stock").length).toBe(3);
+    expect(screen.getAllByText("Transit").length).toBe(3);
+    expect(screen.getAllByText("Ordered").length).toBe(3);
     expect(screen.getByText("Total Qty")).toBeTruthy();
   });
 
