@@ -13,7 +13,6 @@ from app.rbac.models import Permission, Role, UserPermission
 from app.users.models import User, UserStatus
 from app.auth.service import CurrentUser
 
-pytestmark = pytest.mark.asyncio
 
 
 def test_permission_model_hierarchy():
@@ -103,7 +102,7 @@ def test_user_permission_override_model():
     assert deny_override.is_granted is False
 
 
-async def test_effective_permissions_source_tracing():
+def test_effective_permissions_source_tracing():
     """Verify source resolution priority mapping (Role Permissions + User Overrides)."""
     user_grants = {"supplier.export"}
     user_denies = {"user.delete"}
