@@ -29,6 +29,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
+import { Pagination } from "@/components/Pagination";
 import {
   TextField,
   SelectField,
@@ -50,6 +51,7 @@ import { useModalHistorySync } from "@/lib/hooks";
 import type {
   Brand,
   ImportHeader,
+  PaginationMeta,
   Product,
   ProductCategory,
   ProductSubCategory,
@@ -481,6 +483,19 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
   }, [sortedProducts, currentPage, perPage]);
 
   const totalPages = Math.ceil(sortedProducts.length / perPage) || 1;
+
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: sortedProducts.length,
+    page_size: perPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, sortedProducts.length, perPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, activeTab, perPage]);
 
   // Tab counts
   const tabCounts = useMemo(() => {
@@ -1442,35 +1457,16 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
           </div>
 
           {/* Footer Bar */}
-          <div className="pm-footer-bar">
-            <span>
-              Showing <strong>{Math.min(filteredProducts.length, perPage)}</strong> of{" "}
-              <strong>{filteredProducts.length}</strong> products
-            </span>
-
-            {totalPages > 1 && (
-              <div className="pm-pagination-controls">
-                <button
-                  type="button"
-                  className="pm-page-btn"
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                >
-                  Previous
-                </button>
-                <span style={{ fontSize: "12.5px", padding: "0 6px" }}>
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="pm-page-btn"
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                >
-                  Next
-                </button>
-              </div>
-            )}
+          <div style={{ padding: "0 16px 14px", borderTop: "1px solid #e2e8f0", background: "#ffffff" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={perPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

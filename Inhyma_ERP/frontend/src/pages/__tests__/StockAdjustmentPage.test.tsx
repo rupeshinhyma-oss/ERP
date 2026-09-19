@@ -78,7 +78,7 @@ describe("StockAdjustmentPage", () => {
     expect(screen.getByText(/Warehouse/i)).toBeTruthy();
     expect(screen.getByText("Type")).toBeTruthy();
     expect(screen.getByText(/Purpose/i)).toBeTruthy();
-    expect(screen.getByText(/Total/i)).toBeTruthy();
+    expect(screen.getByText("Total")).toBeTruthy();
     expect(screen.getByText("Created By")).toBeTruthy();
     expect(screen.getByText("Action")).toBeTruthy();
   });

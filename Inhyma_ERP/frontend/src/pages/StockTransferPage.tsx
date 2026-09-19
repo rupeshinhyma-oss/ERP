@@ -4,6 +4,8 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { InventoryApi } from "@/lib/api";
 import "@/styles/stockTransfer.css";
 
@@ -255,6 +257,7 @@ export function StockTransferPage({
 
   const [searchTerm, setSearchTerm] = useState("");
   const [perPage, setPerPage] = useState<number>(50);
+  const [currentPage, setCurrentPage] = useState<number>(1);
   const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false);
 
   // Date range filter states (Exact Screenshot Replica)
@@ -485,6 +488,27 @@ export function StockTransferPage({
       return true;
     });
   }, [items, activeTab, fromWhFilter, toWhFilter, appliedDateRange, searchTerm]);
+
+  // Reset to page 1 on filter or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, activeTab, fromWhFilter, toWhFilter, appliedDateRange, perPage]);
+
+  // Pagination calculation
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * perPage;
+    return filteredItems.slice(start, start + perPage);
+  }, [filteredItems, currentPage, perPage]);
+
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: filteredItems.length,
+    page_size: perPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, filteredItems.length, perPage]);
 
   return (
     <AppShell activeKey="stock-transfer" pageClassName="page-stock-transfer">
@@ -972,7 +996,7 @@ export function StockTransferPage({
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.slice(0, perPage).map((item) => (
+                  paginatedItems.map((item) => (
                     <tr
                       key={item.id}
                       style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
@@ -1071,11 +1095,16 @@ export function StockTransferPage({
             </table>
           </div>
 
-          <div className="transfer-footer-bar" style={{ padding: "12px 16px", borderTop: "1px solid #e2e8f0", fontSize: "13px", color: "#64748b" }}>
-            <span>
-              Showing <strong>{Math.min(filteredItems.length, perPage)}</strong> of{" "}
-              <strong>{filteredItems.length}</strong> transfers
-            </span>
+          <div style={{ padding: "0 16px 14px", borderTop: "1px solid #e2e8f0", background: "#ffffff" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={perPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(s) => {
+                setPerPage(s);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

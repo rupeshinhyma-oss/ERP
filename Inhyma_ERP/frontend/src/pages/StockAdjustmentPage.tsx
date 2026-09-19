@@ -4,6 +4,8 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
 import { InventoryApi } from "@/lib/api";
 import "@/styles/stockAdjustment.css";
@@ -401,6 +403,7 @@ export function StockAdjustmentPage({
 
   // Per page items
   const [perPage, setPerPage] = useState<number>(50);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Add New Dropdown state
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -565,6 +568,21 @@ export function StockAdjustmentPage({
       return true;
     });
   }, [items, searchTerm, appliedDateRange, appliedType, appliedPurpose, appliedWarehouse]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * perPage;
+    return filteredItems.slice(start, start + perPage);
+  }, [filteredItems, currentPage, perPage]);
+
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: filteredItems.length,
+    page_size: perPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, filteredItems.length, perPage]);
 
   // Active filter badge count
   const activeFilterCount = useMemo(() => {
@@ -1053,7 +1071,7 @@ export function StockAdjustmentPage({
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.slice(0, perPage).map((item) => (
+                  paginatedItems.map((item) => (
                     <tr
                       key={item.id}
                       style={{ cursor: "pointer" }}
@@ -1141,11 +1159,16 @@ export function StockAdjustmentPage({
             </table>
           </div>
 
-          <div className="adjustment-footer-bar">
-            <span>
-              Showing <strong>{Math.min(filteredItems.length, perPage)}</strong> of{" "}
-              <strong>{filteredItems.length}</strong> adjustments
-            </span>
+          <div style={{ padding: "0 16px 14px", borderTop: "1px solid #e2e8f0", background: "#ffffff" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={perPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

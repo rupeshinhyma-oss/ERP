@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { InventoryApi } from "@/lib/api";
 import "@/styles/productStock.css";
 
@@ -421,6 +423,7 @@ export function ProductStockPage({
 
   const [searchTerm, setSearchTerm] = useState("");
   const [perPage, setPerPage] = useState(50);
+  const [currentPage, setCurrentPage] = useState(1);
   // Collapsible inline filter panel - off by default until clicked
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
@@ -556,6 +559,21 @@ export function ProductStockPage({
   const totalOrdered = useMemo(() => {
     return filteredItems.reduce((sum, item) => sum + item.mumbai_ordered + item.ahmedabad_ordered + item.indore_ordered, 0);
   }, [filteredItems]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * perPage;
+    return filteredItems.slice(start, start + perPage);
+  }, [filteredItems, currentPage, perPage]);
+
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: filteredItems.length,
+    page_size: perPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, filteredItems.length, perPage]);
 
   // Export to Excel
   const handleExport = useCallback(async () => {
@@ -918,7 +936,7 @@ export function ProductStockPage({
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.slice(0, perPage).map((item) => (
+                  paginatedItems.map((item) => (
                     <tr key={item.id}>
                       <td className="td-center col-freeze-1">{item.sr_no}</td>
                       <td className="col-freeze-2">
@@ -1025,22 +1043,30 @@ export function ProductStockPage({
             </table>
           </div>
 
-          {/* Table Footer with Summary Counts */}
-          <div className="stock-footer-bar">
-            <div>
-              Showing <strong>{Math.min(filteredItems.length, perPage)}</strong> of <strong>{filteredItems.length}</strong> products
+          {/* Table Footer with Summary Counts & Pagination */}
+          <div style={{ padding: "10px 16px 14px", borderTop: "1px solid #e2e8f0", background: "#ffffff" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "6px" }}>
+              <div className="stock-summary-chips">
+                <span className="stock-chip">
+                  Available Stock: <strong>{totalPhysical}</strong>
+                </span>
+                <span className="stock-chip">
+                  In Transit: <strong>{totalTransit}</strong>
+                </span>
+                <span className="stock-chip">
+                  Total Ordered: <strong>{totalOrdered}</strong>
+                </span>
+              </div>
             </div>
-            <div className="stock-summary-chips">
-              <span className="stock-chip">
-                Available Stock: <strong>{totalPhysical}</strong>
-              </span>
-              <span className="stock-chip">
-                In Transit: <strong>{totalTransit}</strong>
-              </span>
-              <span className="stock-chip">
-                Total Ordered: <strong>{totalOrdered}</strong>
-              </span>
-            </div>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={perPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 
