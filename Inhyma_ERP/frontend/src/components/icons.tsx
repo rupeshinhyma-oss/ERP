@@ -557,8 +557,40 @@ export function IconUserPlus(props: IconProps) {
   );
 }
 
+export function IconStock(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M3 3v18h18" />
+      <path d="M18 17V9" />
+      <path d="M13 17V5" />
+      <path d="M8 17v-3" />
+    </NavSvg>
+  );
+}
+
+export function IconFilter(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </NavSvg>
+  );
+}
+
+export function IconDownload(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </NavSvg>
+  );
+}
+
 /** Icon lookup by the string keys the nav config uses. */
 export const ICONS = {
+  stock: IconStock,
+  filter: IconFilter,
+  download: IconDownload,
   dashboard: IconDashboard,
   factory: IconFactory,
   shoppingBag: IconShoppingBag,

@@ -76,6 +76,7 @@ import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { ComingSoonPage } from "@/components/ComingSoon";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
+import { ProductStockPage } from "@/pages/ProductStockPage";
 
 export function App() {
   const navigate = useNavigate();
@@ -176,6 +177,34 @@ export function App() {
           <Route path="/masters/categories" element={<CategoriesPage />} />
           <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
           <Route path="/masters/products" element={<ProductsPage />} />
+          <Route path="/product-stock/list" element={<ProductStockPage />} />
+          <Route path="/product-stock" element={<Navigate to="/product-stock/list" replace />} />
+          <Route path="/product_stock/list" element={<Navigate to="/product-stock/list" replace />} />
+          <Route path="/product_stock" element={<Navigate to="/product-stock/list" replace />} />
+          <Route
+            path="/stock-adjustment"
+            element={
+              <ComingSoonPage
+                activeKey="stock-adjustment"
+                title="Stock Adjustment"
+                subtitle="Track physical stock counts, variances, and write-offs"
+                breadcrumbLabel="Stock Adjustment"
+                featureName="Stock Adjustment"
+              />
+            }
+          />
+          <Route
+            path="/stock-transfer"
+            element={
+              <ComingSoonPage
+                activeKey="stock-transfer"
+                title="Stock Transfer"
+                subtitle="Manage warehouse and branch inventory transfers"
+                breadcrumbLabel="Stock Transfer"
+                featureName="Stock Transfer"
+              />
+            }
+          />
           <Route path="/product-gallery" element={<ProductGalleryPage />} />
           <Route path="/product_gallery" element={<Navigate to="/product-gallery" replace />} />
 
