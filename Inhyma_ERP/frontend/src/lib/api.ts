@@ -715,3 +715,103 @@ export async function downloadExport(
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+// ============================================================================
+// Inventory & Stock Adjustment API Services
+// ============================================================================
+
+export interface ProductStockFilterParams {
+  warehouse?: string;
+  category?: string;
+  brand?: string;
+  status?: string;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+export interface StockAdjustmentFilterParams {
+  date_range?: string;
+  type?: string;
+  purpose?: string;
+  warehouse?: string;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+export const InventoryApi = {
+  /**
+   * Fetch product stock list with warehouse filtering and live search.
+   */
+  async listProductStock(params?: ProductStockFilterParams) {
+    const qs = new URLSearchParams();
+    if (params?.warehouse && params.warehouse !== "All") qs.set("warehouse", params.warehouse);
+    if (params?.category && params.category !== "All") qs.set("category", params.category);
+    if (params?.brand && params.brand !== "All") qs.set("brand", params.brand);
+    if (params?.status && params.status !== "All") qs.set("status", params.status);
+    if (params?.search) qs.set("search", params.search);
+    if (params?.skip !== undefined) qs.set("skip", String(params.skip));
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+
+    const endpoint = `/inventory/product-stock${qs.toString() ? `?${qs.toString()}` : ""}`;
+    return apiFetch<any>(endpoint);
+  },
+
+  /**
+   * Fetch details for a specific product stock item.
+   */
+  async getProductStock(stockId: string) {
+    return apiFetch<any>(`/inventory/product-stock/${stockId}`);
+  },
+
+  /**
+   * Fetch stock adjustments with date range, adjustment type, and warehouse filters.
+   */
+  async listStockAdjustments(params?: StockAdjustmentFilterParams) {
+    const qs = new URLSearchParams();
+    if (params?.date_range) qs.set("date_range", params.date_range);
+    if (params?.type && params.type !== "All") qs.set("type", params.type);
+    if (params?.purpose && params.purpose !== "All") qs.set("purpose", params.purpose);
+    if (params?.warehouse && params.warehouse !== "All") qs.set("warehouse", params.warehouse);
+    if (params?.search) qs.set("search", params.search);
+    if (params?.skip !== undefined) qs.set("skip", String(params.skip));
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+
+    const endpoint = `/inventory/stock-adjustment${qs.toString() ? `?${qs.toString()}` : ""}`;
+    return apiFetch<any>(endpoint);
+  },
+
+  /**
+   * Fetch specific stock adjustment details.
+   */
+  async getStockAdjustment(adjustmentId: string) {
+    return apiFetch<any>(`/inventory/stock-adjustment/${adjustmentId}`);
+  },
+
+  /**
+   * Create a new stock adjustment.
+   */
+  async createStockAdjustment(data: any) {
+    return apiFetch<any>("/inventory/stock-adjustment", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Delete an adjustment record.
+   */
+  async deleteStockAdjustment(adjustmentId: string) {
+    return apiFetch<any>(`/inventory/stock-adjustment/${adjustmentId}`, {
+      method: "DELETE",
+    });
+  },
+
+  /**
+   * Get direct PDF download URL for an adjustment record.
+   */
+  getAdjustmentPdfUrl(adjustmentId: string) {
+    return `${API_BASE}/adjustment/adjustment-order-pdf/${adjustmentId}`;
+  },
+};

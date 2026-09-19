@@ -42,6 +42,12 @@
 31. [USER MANAGEMENT: Organization Chart Module](#31-user-management-organization-chart-module)
 32. [WORK MANAGEMENT: Tasks, Kanban & Calendar Module](#32-work-management-tasks-kanban--calendar-module)
 33. [AI Subagent Autonomous Testing Prompt Template](#33-ai-subagent-autonomous-testing-prompt-template)
+34. [CONFIGURATIONS: Company Categories Master Module](#34-configurations-company-categories-master-module)
+35. [SETTINGS: Bank Master Module](#35-settings-bank-master-module)
+36. [CONTACT: Companies Module](#36-contact-companies-module)
+37. [INVENTORY: Product Stock Module](#37-inventory-product-stock-module)
+38. [INVENTORY: Stock Adjustment & Order PDF Module](#38-inventory-stock-adjustment--order-pdf-module)
+39. [TASK: Technical Tasks Module](#39-task-technical-tasks-module)
 
 ---
 
@@ -59,8 +65,12 @@
 | Sidebar Section | Navigation Label | Route Path | Active Key | Icon Key | Required Permission |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **DASHBOARD** | Dashboard | `/dashboard` | `dashboard` | `dashboard` | Public Authenticated |
+| **CONTACT** | Companies | `/companies` | `companies` | `building` | `company.view` |
 | **CONTACT** | Suppliers | `/suppliers` | `suppliers` | `factory` | `supplier.view` |
 | **CONTACT** | Buyers | `/buyers` | `buyers` | `shoppingBag` | `buyer.view` |
+| **INVENTORY** | Product Stock | `/product-stock/list` | `product-stock` | `stock` | `product.view` |
+| **INVENTORY** | Stock Adjustment | `/stock-adjustment` | `stock-adjustment` | `sliders` | `product.view` |
+| **INVENTORY** | Stock Transfer | `/stock-transfer` | `stock-transfer` | `truck` | `product.view` |
 | **INVENTORY** | Product Master | `/masters/products` | `masters-products` | `box` | `product.view` |
 | **INVENTORY** | Product Gallery | `/product-gallery` | `product-gallery` | `image` | `productgallery.view` |
 | **INVENTORY** | Categories | `/masters/categories` | `masters-categories` | `layers` | `category.view` |
@@ -69,7 +79,9 @@
 | **INVENTORY** | Supplier Types | `/masters/supplier-types` | `masters-supplier-types` | `network` | `suppliertype.view` |
 | **INVENTORY** | Buyer Types | `/masters/buyer-types` | `masters-buyer-types` | `idCard` | `buyertype.view` |
 | **SALE** | Inquiries | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
-| **WORK MANAGEMENT** | Tasks | `/tasks` | `tasks` | `checkSquare` | `task.view` |
+| **TASK** | Tasks | `/tasks` | `tasks` | `checkSquare` | `task.view` |
+| **TASK** | Technical Tasks | `/technical-task/list` | `technical-tasks` | `wrench` | `technicaltask.view` |
+| **TASK** | Marketing Tasks | `/marketing-task/list` | `marketing-tasks` | `messageSquare` | `task.view` |
 | **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
 | **USER MANAGEMENT** | Positions | `/positions` | `positions` | `briefcase` | `position.view` |
 | **USER MANAGEMENT** | Organization Chart | `/org-chart` | `org-chart` | `orgChart` | `reporting.view` |
@@ -1386,7 +1398,7 @@ Checklist to execute:
 
 ---
 
-## 27. SETTINGS: Bank Master Module
+## 35. SETTINGS: Bank Master Module
 
 - **Route:** `/masters/banks`
 - **Legacy Redirects:** `/bank/list`, `/masters-bank.html`, `/masters-banks.html`, `/masters/bank`
@@ -1428,4 +1440,282 @@ Checklist to execute:
 - [ ] Verify export downloads CSV/XLSX with all bank fields.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 15, 2026 (Bank Master Module Addition & Seeding).*
+
+## 36. CONTACT: Companies Module
+
+- **Route:** `/companies`
+- **Add Company Route:** `/companies/add`
+- **Legacy Redirects:** `/user/addEdit`, `/user/addedit`
+- **Required Permission:** `company.view` (Mutations: `company.create`, `company.update`, `company.delete`, `company.import`, `company.export`)
+- **Purpose:** Comprehensive B2B corporate customer and supplier directory tracking legal identities, commercial credit lines, multi-tier potential ratings, multi-contact directories, and dispatch addresses.
+
+### Visual Elements & Layout
+1. **Breadcrumbs:** `Contact` > `Companies`
+2. **Page Title:** `Companies`
+3. **Subtitle:** `Manage corporate business accounts, credit terms, multi-contact directories, and client potential ratings.`
+4. **Action Buttons:**
+   - `+ ADD NEW` (Primary blue button) — Opens company creation drawer or navigates to `/companies/add`.
+   - `Import` / `Export` — Universal Excel/CSV import wizard and export utilities.
+   - `Bulk Actions` — Bulk status activation, deactivation, and soft-deletion for selected companies.
+5. **Filter Toolbar:**
+   - Real-time search bar querying legal name, trade name, GSTIN, PAN, and contact persons.
+   - Grade filter dropdown (`All`, `Grade A`, `Grade B`, `Grade C`, `Grade D`).
+   - Potential filter dropdown (`All`, `High`, `Medium`, `Low`).
+   - Status toggle (`All`, `Active`, `Inactive`).
+6. **Master Companies Table:**
+   - `Checkbox` — Multi-row selection for mass actions.
+   - `Sr. No.` — Sequence index counter.
+   - `Company Name` — Displays legal business name with trade name subtitle.
+   - `Primary Contact` — Primary contact person name, designation, and phone.
+   - `Email & Phone` — Clickable mailto and tel links with country dialing codes.
+   - `City & State` — Geographical billing location.
+   - `Grade` — Interactive inline grade selector badge with instant PATCH mutation.
+   - `Potential` — Interactive inline potential selector badge with instant PATCH mutation.
+   - `Status` — Active / Inactive status toggle pill.
+   - `Action` — Quick Edit (pencil icon), Contacts Drawer (users icon), and Soft-Delete (trash can icon).
+7. **Multi-Tab Company Drawer / Add Page:**
+   - `Overview Tab`: Legal name, trade name, business classification, company category, company sector, GSTIN, PAN, TAN, and IEC.
+   - `Contacts Tab`: Multi-contact person roster with name, department, designation, direct phone, WhatsApp number, email, and primary contact toggle.
+   - `Addresses Tab`: Multi-address matrix supporting Billing Head Office, Factory/Plant, and Dispatch Warehouses with PIN/ZIP validation.
+   - `Financials & Credit Tab`: Credit limit (currency), credit period in days, payment terms selector, and bank account associations.
+   - `Activity Timeline Tab`: Chronological audit trail of corporate mutations, status transitions, and RFQ consignments.
+
+### Test Cases
+- [ ] Verify navigating to `/user/addEdit` or `/user/addedit` seamlessly redirects to `/companies/add`.
+- [ ] Verify company list loads with correct pagination, search filters, and grade/potential badges.
+- [ ] Verify changing Grade or Potential directly from the table dropdown updates immediately via PATCH without page reload.
+- [ ] Verify creating a company requires legal name and validates GSTIN/PAN formatting.
+- [ ] Verify adding multiple contacts to a company persists all contacts in the database with primary flag enforcement.
+- [ ] Verify soft-deleting a company moves the record and linked contacts to Trash (`/trash`) with full restoration capability.
+- [ ] Verify spreadsheet import parses corporate fields and handles duplicate GSTIN/PAN conflicts gracefully.
+- [ ] Verify real-time WebSocket events (`company.created`, `company.updated`) refresh connected user sessions live.
+
+---
+
+## 37. INVENTORY: Product Stock Module
+
+- **Route:** `/product-stock/list`
+- **Legacy Redirects:** `/product-stock`, `/product_stock/list`, `/product_stock`
+- **Required Permission:** `product.view`
+- **Purpose:** Centralized warehouse inventory ledger providing real-time visibility into physical on-hand stock, reserved order allocations, net available quantities, and monetary inventory valuation across all storage facilities.
+
+### Visual Elements & Layout
+1. **Breadcrumbs:** `Inventory` > `Product Stock`
+2. **Page Title:** `Product Stock`
+3. **Subtitle:** `Real-time physical stock counts, warehouse allocation, and inventory valuation across storage depots.`
+4. **Top Action Controls:**
+   - `Export CSV`: Downloads inventory balance dataset in CSV format.
+   - `Export Excel`: Downloads formatted `.xlsx` workbook with formulas.
+   - `Import Stock`: Launches the universal bulk import wizard for opening balance reconciliation.
+   - `Refresh`: Clears local caches and refetches real-time stock balances from backend.
+5. **Multi-Warehouse Dropdown Selector:**
+   - Prominently positioned in the filter bar.
+   - Options dynamically loaded from Warehouses Master: `All Warehouses` (default) plus each configured warehouse (e.g. *Main Depot - Bhiwandi*, *Ahmedabad Hub*, *Mumbai Transit Depot*).
+   - Selecting a warehouse filters table rows and recalculates the 3,3,3 stat cards instantly.
+6. **Grouped 3,3,3 in 1 Summary Metric Cards (with Crimson Status Badges):**
+   - Distinctive 3-group layout styled with elegant dark cards and deep red/crimson accent badges matching the system design specification:
+     - **Card 1 (Catalog & Line Items):**
+       - Metric A: `Total Registered Products` count.
+       - Metric B: `Active Stock Lines` count (products with positive inventory).
+       - Metric C: `Inactive / Discontinued SKUs` count.
+     - **Card 2 (Physical Quantities):**
+       - Metric A: `Total On Hand Quantity` (cumulative physical units in warehouse).
+       - Metric B: `Total Reserved Quantity` (units committed to pending sales consignments).
+       - Metric C: `Net Available Quantity` (free units ready for immediate sale or dispatch).
+     - **Card 3 (Financial Valuation & Health Alerts):**
+       - Metric A: `Total Inventory Valuation` (calculated as $\sum (\text{On Hand} \times \text{Unit Price})$ with dynamic currency formatting).
+       - Metric B: `Low Stock Alert Lines` count (inventory below reorder threshold).
+       - Metric C: `Out of Stock Alerts` count (inventory exhausted or zero).
+7. **Live Debounced Search Bar:**
+   - Text input with instant debounced filtering across Product Name, Product SKU/Code, Category, and Warehouse Name.
+8. **Master Product Stock Table:**
+   - Columns:
+     - `Sr No.`: 1-indexed sequential counter.
+     - `Product Name & Code`: Displays product name in bold with internal SKU code below in secondary badge.
+     - `Category`: Product categorization name.
+     - `Warehouse`: Warehouse facility name holding the stock.
+     - `On Hand Qty`: Total physical count in warehouse.
+     - `Reserved Qty`: Units reserved for active inquiries or orders.
+     - `Available Qty`: Net available units ($\text{On Hand} - \text{Reserved}$).
+     - `Unit Price`: Unit cost rate formatted in currency.
+     - `Total Valuation`: Product line monetary value ($\text{On Hand} \times \text{Unit Price}$).
+     - `Status`: High-contrast pill badge:
+       - `In Stock` (Emerald green badge `#10b981`).
+       - `Low Stock` (Amber warning badge `#f59e0b`).
+       - `Out of Stock` (Crimson red badge `#ef4444`).
+
+### Test Cases
+- [ ] Verify navigating to `/product-stock`, `/product_stock`, or `/product_stock/list` redirects automatically to `/product-stock/list`.
+- [ ] Verify the 3,3,3 in 1 summary cards render in 3 balanced columns with deep red/crimson accents.
+- [ ] Verify selecting a specific warehouse in the warehouse dropdown filters both the table and the summary stat card totals.
+- [ ] Verify typing in the search bar dynamically filters matching product names, codes, or categories without full page reload.
+- [ ] Verify table column sorting works as expected on Product Name, On Hand Qty, Available Qty, and Total Valuation.
+- [ ] Verify `Available Qty` mathematically equals `On Hand Qty - Reserved Qty`.
+- [ ] Verify `Total Valuation` mathematically equals `On Hand Qty * Unit Price`.
+- [ ] Verify Status pill renders `In Stock` (green) when available > reorder level, `Low Stock` (amber) when available <= reorder level, and `Out of Stock` (red) when available <= 0.
+- [ ] Verify Export CSV and Export Excel generate valid spreadsheets matching the active filtered dataset.
+
+---
+
+## 38. INVENTORY: Stock Adjustment & Order PDF Module
+
+- **Route:** `/stock-adjustment`
+- **Legacy Redirects:** `/adjustment/list`, `/adjustment`
+- **Order PDF Route:** `/adjustment/adjustment-order-pdf/:id`
+- **Required Permission:** `product.view` (Mutations: `product.create`, `product.delete`)
+- **Purpose:** Formal inventory adjustments, reconciliation of count variances, split order consignments, client return processing, and damage write-offs with automatic warehouse inventory synchronization, left-sliding audit drawer, and official A4 Order PDF generation.
+
+### Visual Elements & Layout
+1. **Breadcrumbs:** `Inventory` > `Stock Adjustment`
+2. **Page Title:** `Stock Adjustment`
+3. **Subtitle:** `Record physical inventory count adjustments, reconciliations, split orders, and damage deductions.`
+4. **Header Action Controls:**
+   - `+ New Adjustment` (Primary blue button) — Opens adjustment creation modal.
+   - `Refresh` — Refetches adjustment records and resets filter caches.
+5. **Search & Comprehensive Filter Toolbar:**
+   - Live text search bar querying Invoice Number, Client Name, Warehouse, or Remarks.
+   - Adjustment Type dropdown filter: `All Types`, `Stock IN` (green), `Stock OUT` (red).
+   - Adjustment Purpose dropdown filter: `All Purposes`, `Return From Client`, `Split`, `Damage`, `Inventory Count Variance`, `Internal Transfer Correction`.
+   - **Interactive Dual-Calendar Date Range Picker Popover:**
+     - Calendar trigger button displaying active range (e.g. `12-09-2026 - 19-09-2026`).
+     - 7 Quick Presets: `Today`, `Yesterday`, `This Week`, `Last Week`, `This Month`, `Last Month`, `Custom Range`.
+     - Dual Side-by-Side Monthly Navigation: Renders current and next consecutive month with synchronized navigation chevrons.
+     - Visual range selection highlighting start date, end date, and continuous hover range.
+     - "Clear" button resets to all-time; "Apply" button commits the date filter and executes query.
+6. **Master Stock Adjustments Table:**
+   - Columns:
+     - `Sr No.`: Sequential row index counter.
+     - `Invoice No.`: Official transaction voucher number (e.g., `ADJ-2026-001`).
+     - `Adjustment Type`: Pill badge displaying `Stock IN` (emerald green) or `Stock OUT` (crimson red).
+     - `Client Name`: Name of customer, supplier, or party involved in transaction.
+     - `Warehouse`: Warehouse facility where adjustment took effect.
+     - `Purpose`: Categorization reason badge (`Return From Client`, `Split`, `Damage`, etc.).
+     - `Date`: Formatted transaction date (`DD-MM-YYYY`).
+     - `Total Amount`: Formatted total currency sum (e.g., `₹ 2,45,000.00`).
+     - `Action`: 3-dots `⋮` action menu button.
+7. **3-Dots Action Popup (`ActionMenu`):**
+   - Triggered by clicking the row-level `⋮` action menu button on any row.
+   - Includes backdrop-click dismissal, `Escape` key handler, and collision-aware viewport positioning.
+   - Actions:
+     - `Download PDF`: Client-side high-fidelity PDF generation or server endpoint redirect to `/adjustment/adjustment-order-pdf/{id}`.
+     - `Delete`: Prompts confirmation modal, verifies permissions, soft-deletes the voucher, and shows toast notification.
+8. **Slide-In SideDrawer (Left-Side Modal Animation):**
+   - Opens smoothly from the left viewport edge (`side-drawer--left`) whenever clicking any row in the adjustments table.
+   - **Header:**
+     - Title: Invoice/Reference code (e.g., `ADJ-2026-001`).
+     - Status Badge: `Stock IN` green or `Stock OUT` red pill badge.
+     - Close button: `✕` icon button in top-right corner.
+   - **Comprehensive Metadata Fields Grid:**
+     - `Client Name`: Customer or vendor entity name.
+     - `Warehouse`: Storage depot name.
+     - `Invoice No.`: Official invoice reference.
+     - `Adjustment Type`: IN / OUT badge.
+     - `Date`: Transaction date (`DD-MM-YYYY`).
+     - `Purpose`: Selected adjustment purpose.
+     - `Created By`: Author employee name or user email.
+     - `Created At`: Audit creation timestamp (`DD-MM-YYYY HH:mm`).
+     - `Total Amount`: Formatted grand total sum (`₹ 2,45,000.00`).
+   - **Line Items Detail Table (Full 8-Column Schema):**
+     - Columns:
+       - `Sr No.`: Item sequence index.
+       - `Item(S)`: Product SKU and item description.
+       - `Category`: Product category.
+       - `HSN`: Customs HSN/SAC code.
+       - `GST`: Applicable GST percentage rate.
+       - `Quantity`: Number of units adjusted.
+       - `Unit Price`: Unit rate in currency.
+       - `Total Price`: Calculated item total ($\text{Quantity} \times \text{Unit Price}$).
+     - **Grand Total Footer Row:** Light slate background (`#e2e8f0`) spanning the table width, with high-contrast label and bold emerald green amount (`#15803d`).
+   - **Remarks Section:**
+     - Bordered callout card displaying administrative remarks, reason notes, or inspection comments.
+9. **A4 Order PDF Generation Engine (`stockAdjustmentPdf.ts`):**
+   - Engineered using `jsPDF` and `jspdf-autotable`.
+   - Generates production-quality A4 PDF documents matching official corporate invoice formats:
+     - Header branding: Inhyma Solutions logo, corporate identity, GSTIN, PAN, and office address.
+     - Document Title Banner: `STOCK ADJUSTMENT ORDER` header with voucher ID.
+     - Two-Column Voucher Details: Voucher No, Date, Type, Purpose, Warehouse, Client/Party.
+     - 8-Column AutoTable Line Items Matrix: Sr No, Item(S), Category, HSN, GST, Quantity, Unit Price, Total Price.
+     - Highlighted Grand Total block with currency formatting.
+     - Remarks callout card.
+     - Dual Signatory section: "Prepared By" and "Authorized Signatory" blocks.
+
+### Test Cases
+- [ ] Verify navigating to `/adjustment/list` or `/adjustment` automatically redirects to `/stock-adjustment`.
+- [ ] Verify clicking on the Date Range button opens the dual-calendar popover with 7 preset buttons.
+- [ ] Verify clicking any preset (e.g. `This Month`, `Last Week`) selects the corresponding dates and highlights the range visually.
+- [ ] Verify navigating months forward/backward in the dual-calendar updates month/year synchronously.
+- [ ] Verify clicking `Apply` in the date picker filters the table records to within that date range.
+- [ ] Verify filtering by Adjustment Type (`Stock IN` / `Stock OUT`) and Purpose updates the table live.
+- [ ] Verify clicking on any row in the adjustments table opens the SlideDrawer smoothly from the **left side**.
+- [ ] Verify the SideDrawer displays all 9 required metadata fields: `Client Name`, `Warehouse`, `Invoice No.`, `Adjustment Type`, `Date`, `Purpose`, `Created By`, `Created At`, and `Total Amount`.
+- [ ] Verify the SideDrawer line items table includes all 8 columns: `Sr No.`, `Item(S)`, `Category`, `HSN`, `GST`, `Quantity`, `Unit Price`, `Total Price`.
+- [ ] Verify the `Grand Total` footer row renders with light slate background (`#e2e8f0`) and bold green currency (`#15803d`).
+- [ ] Verify the Remarks box renders underneath the table with full notes text.
+- [ ] Verify clicking the 3-dots `⋮` action menu displays `Download PDF` and `Delete`.
+- [ ] Verify clicking `Download PDF` triggers `generateStockAdjustmentPdf()` and downloads the formatted A4 PDF.
+- [ ] Verify visiting `/adjustment/adjustment-order-pdf/:id` renders or downloads the adjustment order document.
+- [ ] Verify clicking `Delete` opens a confirmation modal and soft-deletes the record upon confirmation.
+
+---
+
+## 39. TASK: Technical Tasks Module
+
+- **Route:** `/technical-task/list`
+- **Legacy Redirects:** `/technical-tasks`
+- **Required Permission:** `technicaltask.view` (Mutations: `technicaltask.create`, `technicaltask.update`, `technicaltask.delete`)
+- **Purpose:** Field service ticket management, preventive maintenance scheduling, machine breakdown triage, and service technician engineering dispatch.
+
+### Visual Elements & Layout
+1. **Breadcrumbs:** `Task` > `Technical Tasks`
+2. **Page Title:** `Technical Tasks`
+3. **Subtitle:** `Manage field service calls, machine maintenance tickets, technician allocation, and customer support requests.`
+4. **Action Buttons:**
+   - `+ ADD NEW` (Primary blue button) — Opens the technical service ticket creation drawer.
+   - `DELETE` — Bulk delete selected technical tasks.
+   - `Refresh` — Refetches tickets and updates status tab counters.
+5. **Status Workflow Tabs (with Live Counter Badges):**
+   - `All` — Total technical service tasks.
+   - `Pending` — Unassigned or newly lodged customer service tickets.
+   - `Allotted` — Assigned to a field service technician with scheduled visit date.
+   - `Under Process` — Work in progress, machine inspection, or part replacement underway.
+   - `Completed` — Service signed off and resolved by client.
+   - `Cancelled` — Ticket cancelled or customer rescheduled.
+6. **Filter Toolbar:**
+   - Real-time search bar querying Ticket Number, Customer Name, Machine Model, Serial No, or City.
+   - City / Region filter dropdown.
+   - Call Type filter dropdown (`Installation`, `Preventive Maintenance`, `Breakdown Service`, `Warranty Inspection`).
+   - Service Mode filter dropdown (`On-Site`, `Remote Support`, `Workshop Repair`).
+   - Priority filter dropdown (`Low`, `Medium`, `High`, `Critical`).
+   - Technician filter dropdown (populated from Technicians master / employee directory).
+7. **Master Technical Tasks Table:**
+   - `Checkbox` — Multi-row selection for bulk operations.
+   - `Sr. No.` — Sequence index counter.
+   - `Ticket No.` — Unique service call identifier (e.g. `TECH-2026-042`).
+   - `Customer / Company` — Client entity name with contact phone.
+   - `Machine & Model` — Equipment description and machine serial number.
+   - `Call Type` — Service classification pill.
+   - `Technician` — Assigned service engineer name with avatar pill.
+   - `Scheduled Date` — Target service visit date and time slot.
+   - `Priority` — Color-coded priority pill (`Critical` red, `High` orange, `Medium` blue, `Low` gray).
+   - `Status` — Current workflow status pill.
+   - `Action` — Quick Edit (pencil icon), Status Transition dropdown, and Soft-Delete (trash can icon).
+8. **Technical Service Creation / Edit Modal:**
+   - Customer / Company autocomplete selector.
+   - Machine Model, Serial Number, and Warranty Status (`Under Warranty`, `Out of Warranty`, `AMC Contract`).
+   - Call Type selector and Service Mode selector.
+   - Assigned Technician autocomplete selector.
+   - Scheduled Visit Date and Time.
+   - Problem Description and Customer Complaint text notes.
+
+### Test Cases
+- [ ] Verify navigating to `/technical-tasks` automatically redirects to `/technical-task/list`.
+- [ ] Verify status tabs render with dynamic badge counts matching database records.
+- [ ] Verify switching between status tabs (`Pending`, `Allotted`, `Under Process`, `Completed`, `Cancelled`) filters tickets accurately.
+- [ ] Verify clicking `+ ADD NEW` opens the creation drawer with all customer, machine, and technician fields.
+- [ ] Verify technician dropdown populates with active technicians from the Technicians master.
+- [ ] Verify status transitions update ticket state and log the action in the audit trail.
+- [ ] Verify soft-deleting a technical task moves it to Trash (`/trash`) with restore capability.
+- [ ] Verify multi-select checkboxes allow bulk deletion of technical service tasks.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 19, 2026 (Inventory: Product Stock, Stock Adjustment with PDF Engine, Companies, and Technical Tasks Comprehensive Upgrades).*

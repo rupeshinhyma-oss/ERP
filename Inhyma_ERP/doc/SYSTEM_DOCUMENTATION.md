@@ -33,6 +33,10 @@
    - 8.13. [Organization & System Profile](#813-organization--system-profile)
    - 8.14. [Employee Directory & Organization Structure](#814-employee-directory--organization-structure-identity--access-management-upgrade)
    - 8.15. [Standalone Work Management & Task Module](#815-standalone-work-management--task-module)
+   - 8.16. [Inventory: Product Stock Management](#816-inventory-product-stock-management)
+   - 8.17. [Inventory: Stock Adjustment & Order PDF Generation](#817-inventory-stock-adjustment--order-pdf-generation)
+   - 8.18. [Contact: Companies & Multi-Contact Directory](#818-contact-companies--multi-contact-directory)
+   - 8.19. [Task: Technical Tasks & Field Service Dispatch](#819-task-technical-tasks--field-service-dispatch)
 
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
@@ -562,6 +566,129 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     - Task entity integrated into `/api/v1/search?q=` across task titles, descriptions, linked label names, and comment message bodies.
     - Surfaces directly in ERP topbar global search with `[ISSUE_TYPE]` badge and direct deep-link.
 
+### 8.16. Inventory: Product Stock Management
+- **Files:**
+  - Backend: `backend/app/inventory/routes.py`, `backend/app/inventory/schemas.py`, `backend/app/inventory/__init__.py`.
+  - Frontend: `frontend/src/pages/ProductStockPage.tsx`, `frontend/src/styles/productStock.css`, `frontend/src/lib/api.ts` (`InventoryApi`).
+- **Endpoints:**
+  - `GET /api/v1/inventory/product-stock`: List stock items with pagination, warehouse filtering (`warehouse_id`), status filtering, and live debounced text search (`q`).
+  - `GET /api/v1/inventory/product-stock/{id}`: Detailed product stock ledger breakdown.
+  - Legacy Aliases: `GET /api/v1/product-stock`, `GET /api/v1/product-stock/list`.
+- **Core Architecture & Inventory Calculations:**
+  - Real-time aggregation of physical inventory positions across all organizational warehouses and storage depots.
+  - Calculated Metrics:
+    $$\text{Available Quantity} = \text{On Hand Quantity} - \text{Reserved Quantity}$$
+    $$\text{Total Valuation} = \text{On Hand Quantity} \times \text{Unit Price}$$
+  - Supported Stock Statuses:
+    - `IN_STOCK`: $\text{Available Quantity} > \text{Reorder Level}$.
+    - `LOW_STOCK`: $0 < \text{Available Quantity} \le \text{Reorder Level}$.
+    - `OUT_OF_STOCK`: $\text{Available Quantity} \le 0$.
+- **Frontend User Experience & Layout:**
+  - **Multi-Warehouse Dropdown Selector:** Positioned in the page header filter bar. Allows filtering the inventory ledger by any designated warehouse (e.g., *Main Warehouse*, *Ahmedabad Depot*, *Mumbai Hub*) or displaying cumulative balances across *All Warehouses*.
+  - **Grouped 3,3,3 in 1 Summary Stat Cards:** Distinctive three-group dashboard widget accented with deep red/crimson gradient status badges matching the enterprise design system:
+    - **Group 1 (Catalog & SKUs):** Total Registered Products count, Active Stock Lines count, and Inactive/Discontinued SKUs.
+    - **Group 2 (Physical Volumes):** Cumulative On Hand Quantity, Reserved Stock (allocated to pending sales consignments), and Net Available Units ready for dispatch.
+    - **Group 3 (Financial Valuation & Critical Alerts):** Total Inventory Valuation (currency-formatted with dynamic conversion), Low Stock alert count, and Out of Stock SKU alerts.
+  - **Live Debounced Search:** Real-time search bar scanning product name, internal SKU code, category, HSN code, and warehouse location.
+  - **Master Product Stock Table:**
+    - Columns: `Sr No.`, `Product Name & Code`, `Category`, `Warehouse`, `On Hand Qty`, `Reserved Qty`, `Available Qty`, `Unit Price`, `Total Valuation`, `Status Badge`.
+    - Status Pills: Styled with rounded borders and high-contrast color badges (`#10b981` emerald green for in stock, `#f59e0b` amber for low stock, `#ef4444` red for out of stock).
+  - **Universal Spreadsheet Import & Export:** Built-in integration with the universal import wizard (`ImportWizard.tsx`) supporting `.csv` and `.xlsx` inventory spreadsheets with column auto-mapping and reconciliation.
+
+### 8.17. Inventory: Stock Adjustment & Order PDF Generation
+- **Files:**
+  - Backend: `backend/app/inventory/routes.py`, `backend/app/inventory/schemas.py`, `backend/app/inventory/__init__.py`.
+  - Frontend: `frontend/src/pages/StockAdjustmentPage.tsx`, `frontend/src/pages/AdjustmentOrderPdfPage.tsx`, `frontend/src/utils/stockAdjustmentPdf.ts`, `frontend/src/lib/api.ts` (`InventoryApi`).
+- **Endpoints:**
+  - `GET /api/v1/inventory/stock-adjustment`: Paginated list of stock adjustment vouchers with search query, adjustment type filter (`IN` / `OUT`), purpose filter, and date range boundaries (`start_date`, `end_date`).
+  - `GET /api/v1/inventory/stock-adjustment/{id}`: Detailed adjustment voucher including complete multi-product line items breakdown.
+  - `POST /api/v1/inventory/stock-adjustment`: Create new adjustment voucher with line items and atomically update warehouse inventory balances.
+  - `DELETE /api/v1/inventory/stock-adjustment/{id}`: Soft-delete stock adjustment voucher and reverse the inventory adjustments in audit history.
+  - `GET /api/v1/adjustment/adjustment-order-pdf/{id}`: Direct PDF stream download / print view.
+  - Legacy Aliases: `GET /api/v1/adjustment/list`, `POST /api/v1/adjustment`, `DELETE /api/v1/adjustment/{id}`.
+- **Voucher Lifecycles & Reconciliation Purposes:**
+  - **Adjustment Types:**
+    - `Stock IN` (Green badge): Positive inventory adjustments reflecting incoming returns, found stock, assembly completion, or positive count variances.
+    - `Stock OUT` (Red badge): Negative inventory deductions reflecting client dispatch, split consignments, damage/scrap write-offs, or negative count variances.
+  - **Standardized Purposes:** `Return From Client`, `Split`, `Damage`, `Inventory Count Variance`, `Internal Transfer Correction`.
+- **Interactive Dual-Calendar Date Range Picker Popover:**
+  - Trigger: Calendar button displaying current active range label (e.g., `12-09-2026 - 19-09-2026`).
+  - Seven Quick-Select Presets: `Today`, `Yesterday`, `This Week`, `Last Week`, `This Month`, `Last Month`, `Custom Range`.
+  - Dual Side-by-Side Monthly Navigation: Renders current and next consecutive months side-by-side with synchronized previous/next month chevrons and year selector.
+  - Continuous Range Highlighting: Visual selection highlighting start date, end date, and continuous hover range gradient between selected bounds.
+  - Dedicated "Clear" button resets filters to all-time; "Apply" button commits selection and dispatches API query.
+- **3-Dots Action Popup (`ActionMenu`):**
+  - Triggered by clicking the row-level `⋮` action menu button on any adjustment table row.
+  - Features backdrop-click listener, keyboard `Escape` dismissal, and collision-aware viewport positioning.
+  - Menu Items:
+    - `Download PDF`: Instantly generates and downloads the official branded A4 Adjustment Order PDF using client-side `jsPDF` or redirects to `/adjustment/adjustment-order-pdf/:id`.
+    - `Delete`: Prompts confirmation modal, verifies permissions, soft-deletes the record, and triggers table refetch with toast alert.
+- **Slide-In SideDrawer (Left-Side Modal Animation):**
+  - Smoothly animates into view from the left viewport edge (`side-drawer--left`) when clicking any table row.
+  - **Header:** Displays Invoice/Reference number (e.g., `ADJ-2026-001`), adjustment type pill badge (`Stock IN` green / `Stock OUT` red), and close `✕` button.
+  - **Metadata Fields Grid:**
+    - `Client Name`: Customer or vendor entity name associated with the transaction.
+    - `Warehouse`: Target storage warehouse depot.
+    - `Invoice No.`: Official invoice or adjustment reference code.
+    - `Adjustment Type`: IN / OUT badge.
+    - `Date`: Formatted adjustment date (`DD-MM-YYYY`).
+    - `Purpose`: Purpose categorization tag.
+    - `Created By`: Author employee name or user email.
+    - `Created At`: Audit creation timestamp (`DD-MM-YYYY HH:mm`).
+    - `Total Amount`: Formatted total transaction sum (e.g., `₹ 2,45,000.00`).
+  - **Line Items Detail Table (Full 8-Column Schema):**
+    - Columns: `Sr No.`, `Item(S)`, `Category`, `HSN`, `GST`, `Quantity`, `Unit Price`, `Total Price`.
+    - `Grand Total` Footer Row: Formatted with light slate background (`#e2e8f0`), bold high-contrast label, and prominent emerald green currency amount (`#15803d`).
+  - **Remarks Section:** Bordered callout card displaying administrative remarks, inspection notes, or approval reasons.
+- **A4 Order PDF Generation Engine (`stockAdjustmentPdf.ts`):**
+  - Engineered with `jsPDF` and `jspdf-autotable`.
+  - Strict compliance with corporate invoice and inventory documentation standards:
+    - Corporate Header: Inhyma Solutions logo, legal company name, GSTIN, PAN, and registered office address.
+    - Document Title Banner: High-contrast `STOCK ADJUSTMENT ORDER` header with barcode / voucher ID.
+    - Two-Column Voucher Details: Voucher No, Date, Type, Purpose, Warehouse, Client/Party Name.
+    - AutoTable Line Items Matrix: Formatted 8-column table with alternating row striping, exact cell padding, and numeric right-alignment for quantities and currency amounts.
+    - Financial Summary Block: Subtotal, GST breakup, and bold highlighted Grand Total box.
+    - Remarks Callout & Dual Signatory Block: "Prepared By" and "Authorized Signatory" signature lines with official stamp boxes.
+
+### 8.18. Contact: Companies & Multi-Contact Directory
+- **Files:** `backend/app/companies/routes.py`, `backend/app/companies/service.py`, `backend/app/companies/repository.py`, `backend/app/companies/schemas.py`, `backend/app/companies/models.py`, `frontend/src/pages/CompaniesPage.tsx`.
+- **Endpoints:**
+  - `GET /api/v1/companies`: Paginated list of enterprise companies with grade, potential, and search filters.
+  - `POST /api/v1/companies`: Create company account with primary contact and tax identifiers.
+  - `GET /api/v1/companies/{id}`: Retrieve detailed company profile, addresses, and contacts.
+  - `PATCH /api/v1/companies/{id}`: Update company information, credit terms, and status.
+  - `DELETE /api/v1/companies/{id}`: Soft-delete company record and associated contacts.
+  - `POST /api/v1/companies/{id}/contacts`: Add sub-contact person to company contact roster.
+  - `PATCH /api/v1/companies/{id}/grade`: Quick-update corporate grade (A, B, C, D).
+  - `PATCH /api/v1/companies/{id}/potential`: Quick-update client revenue potential rating.
+  - `POST /api/v1/companies/import`: Bulk spreadsheet import for company directories.
+  - `GET /api/v1/companies/export`: Export company database to Excel / CSV.
+  - Legacy Aliases: `/user/addEdit`, `/user/addedit`.
+- **Features:**
+  - B2B corporate directory tracking Legal Name, Trade Name, GSTIN, PAN, TAN, and IEC codes.
+  - Multi-tier company classifications, payment credit limits, and credit terms (Net 30, Net 60, Advance).
+  - Multi-address matrix supporting Billing Head Office, Factory/Plant, and Warehouse Delivery locations.
+  - Real-time WebSocket event dispatching (`company.created`, `company.updated`, `company.deleted`) on `module:companies`.
+
+### 8.19. Task: Technical Tasks & Field Service Dispatch
+- **Files:** `backend/app/technical_tasks/routes.py`, `backend/app/technical_tasks/service.py`, `backend/app/technical_tasks/repository.py`, `backend/app/technical_tasks/schemas.py`, `backend/app/technical_tasks/models.py`, `frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx`.
+- **Endpoints:**
+  - `GET /api/v1/technical-tasks`: Paginated list of service tasks with tab status, call type, technician, city, and priority filters.
+  - `GET /api/v1/technical-tasks/counts`: Summary status counts across tabs (`All`, `Pending`, `Allotted`, `Under Process`, `Completed`, `Cancelled`).
+  - `POST /api/v1/technical-tasks`: Create new field service ticket or maintenance request.
+  - `GET /api/v1/technical-tasks/{id}`: Retrieve full technical service task details.
+  - `PATCH /api/v1/technical-tasks/{id}`: Update service ticket fields and customer complaints.
+  - `PATCH /api/v1/technical-tasks/{id}/status`: Transition service ticket status with resolution remarks.
+  - `DELETE /api/v1/technical-tasks/{id}`: Soft-delete technical task ticket.
+  - `POST /api/v1/technical-tasks/bulk-delete`: Bulk soft-delete selected service tasks.
+  - Legacy Aliases: `/technical-task/list`, `/technical-tasks`.
+- **Features:**
+  - Field service engineering dispatch tracking machine serial numbers, models, installation dates, and warranty status.
+  - Status Tab Workflow: `All` $\rightarrow$ `Pending` $\rightarrow$ `Allotted` $\rightarrow$ `Under Process` $\rightarrow$ `Completed` (or `Cancelled`).
+  - Call Type Classifications: `Installation`, `Preventive Maintenance`, `Breakdown Service`, `Warranty Inspection`, `Post-Warranty Overhaul`.
+  - Service Modes: `On-Site Client Visit`, `Remote Diagnostic Support`, `Workshop Repair`.
+  - Technician Allotment: Searchable technician assignment linked to employee directory with scheduled service visit dates.
+
 ---
 
 ## 9. Real-Time WebSocket & Event Synchronization
@@ -771,6 +898,51 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Notifications** | `GET` | `/api/v1/notifications/unread-count` | Get unread notification badge count | Authenticated |
 | **Notifications** | `POST` | `/api/v1/notifications/{id}/read` | Mark single notification as read | Authenticated |
 | **Notifications** | `POST` | `/api/v1/notifications/read-all` | Mark all notifications as read | Authenticated |
+| **Inventory: Stock** | `GET` | `/api/v1/inventory/product-stock` | List product stock levels with warehouse filter, pagination & search | `product.view` |
+| **Inventory: Stock** | `GET` | `/api/v1/inventory/product-stock/{id}` | Retrieve individual product stock valuation & availability ledger | `product.view` |
+| **Inventory: Stock** | `GET` | `/api/v1/product-stock` | Legacy alias for `/inventory/product-stock` | `product.view` |
+| **Inventory: Stock** | `GET` | `/api/v1/product-stock/list` | Legacy alias for `/inventory/product-stock` | `product.view` |
+| **Inventory: Adjustment** | `GET` | `/api/v1/inventory/stock-adjustment` | List stock adjustment vouchers with date range, purpose & type filters | `product.view` |
+| **Inventory: Adjustment** | `GET` | `/api/v1/inventory/stock-adjustment/{id}` | Retrieve stock adjustment voucher with multi-line item breakdown | `product.view` |
+| **Inventory: Adjustment** | `POST` | `/api/v1/inventory/stock-adjustment` | Create stock adjustment voucher & atomically update warehouse quantities | `product.create` |
+| **Inventory: Adjustment** | `DELETE`| `/api/v1/inventory/stock-adjustment/{id}` | Soft-delete stock adjustment voucher & revert stock mutations | `product.delete` |
+| **Inventory: Adjustment** | `GET` | `/api/v1/adjustment/list` | Legacy alias for `/inventory/stock-adjustment` | `product.view` |
+| **Inventory: Adjustment** | `GET` | `/api/v1/adjustment/{id}` | Legacy alias for `/inventory/stock-adjustment/{id}` | `product.view` |
+| **Inventory: Adjustment** | `POST` | `/api/v1/adjustment` | Legacy alias for creating adjustment | `product.create` |
+| **Inventory: Adjustment** | `DELETE`| `/api/v1/adjustment/{id}` | Legacy alias for deleting adjustment | `product.delete` |
+| **Inventory: Adjustment** | `GET` | `/api/v1/adjustment/adjustment-order-pdf/{id}` | Generate/stream official A4 adjustment order PDF | `product.view` |
+| **Companies** | `GET` | `/api/v1/companies` | List enterprise companies with grade, potential & search filters | `company.view` |
+| **Companies** | `POST` | `/api/v1/companies` | Create new enterprise company profile | `company.create` |
+| **Companies** | `GET` | `/api/v1/companies/{id}` | Get company profile, multi-contact directory & address matrix | `company.view` |
+| **Companies** | `PATCH` | `/api/v1/companies/{id}` | Update company details, credit terms, and status | `company.update` |
+| **Companies** | `DELETE`| `/api/v1/companies/{id}` | Soft-delete company record | `company.delete` |
+| **Companies** | `POST` | `/api/v1/companies/{id}/contacts` | Add contact person to company roster | `company.update` |
+| **Companies** | `PATCH` | `/api/v1/companies/{id}/grade` | Quick-update company tier/grade (A, B, C, D) | `company.update` |
+| **Companies** | `PATCH` | `/api/v1/companies/{id}/potential` | Quick-update revenue potential rating | `company.update` |
+| **Companies** | `POST` | `/api/v1/companies/import` | Bulk import companies from spreadsheet | `company.import` |
+| **Companies** | `GET` | `/api/v1/companies/export` | Export company database to Excel / CSV | `company.export` |
+| **Technical Tasks** | `GET` | `/api/v1/technical-tasks` | List technical service tasks with tab status, call type & filters | `technicaltask.view` |
+| **Technical Tasks** | `GET` | `/api/v1/technical-tasks/counts` | Get status counts across tabs (All, Pending, Allotted, Under Process, etc.) | `technicaltask.view` |
+| **Technical Tasks** | `POST` | `/api/v1/technical-tasks` | Create field service ticket or machine maintenance task | `technicaltask.create` |
+| **Technical Tasks** | `GET` | `/api/v1/technical-tasks/{id}` | Retrieve technical service task details | `technicaltask.view` |
+| **Technical Tasks** | `PATCH` | `/api/v1/technical-tasks/{id}` | Update technical service task fields & notes | `technicaltask.update` |
+| **Technical Tasks** | `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition task status (pending -> allotted -> under process -> done) | `technicaltask.update` |
+| **Technical Tasks** | `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical task | `technicaltask.delete` |
+| **Technical Tasks** | `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete selected technical tasks | `technicaltask.delete` |
+| **Masters** | `GET/POST`| `/api/v1/masters/districts` | Manage administrative district records | `district.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/company-sectors` | Manage industry sectors (Agriculture, Pharma, FMCG, Metals, etc.) | `companysector.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/warehouses` | Manage inventory hubs, transit depots & billing company links | `warehouse.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/billing-companies` | Manage billing legal entities & tax credentials | `billingcompany.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/technicians` | Manage field service engineers & service technicians | `technician.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/banks` | Manage corporate banking registry (IFSC, Account No, Branch) | `bank.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/transports` | Manage logistics providers, transport carriers & tracking links | `transport.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/payment-terms` | Manage commercial payment terms & credit days | `paymentterms.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/lead-sources` | Manage lead generation sources & marketing channels | `leadsource.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/adjustment-purposes` | Manage stock adjustment reasons (Damage, Split, Return, Count Variance) | `adjustmentpurpose.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/call-types` | Manage field service call types (Installation, Breakdown, Maintenance) | `calltype.*` |
+| **Federation** | `POST` | `/api/v1/federation/sso-handover` | Generate cross-ERP single sign-on handover ticket | Authenticated |
+| **Federation** | `POST` | `/api/v1/federation/token` | Exchange SSO ticket for local JWT session pair | Public (Ticket Validated) |
+| **Organizations** | `GET` | `/api/v1/organizations/public` | Fetch public organization name and logo for login page | Public |
 
 ---
 
