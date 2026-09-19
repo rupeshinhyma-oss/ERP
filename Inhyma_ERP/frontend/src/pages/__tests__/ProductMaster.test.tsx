@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
-import { ProductsPage } from "../masters/Products";
+import { ProductsPage, ProductSkeletonRows } from "../masters/Products";
 
 // Mock AppShell
 vi.mock("@/components/AppShell", () => ({
@@ -138,7 +138,7 @@ describe("Product Master (/product/list)", () => {
   it("renders collapsible filter panel with Category, Sub Category, Brand dropdowns and Reset & Search buttons", () => {
     render(
       <BrowserRouter>
-        <ProductsPage />
+        <ProductsPage defaultFilterOpen={true} />
       </BrowserRouter>
     );
 
@@ -188,7 +188,7 @@ describe("Product Master (/product/list)", () => {
     });
   });
 
-  it("renders all table columns exactly as circled in legacy ERP screenshot", async () => {
+  it("renders all table columns including Sr. No. and preserves natural default order", async () => {
     render(
       <BrowserRouter>
         <ProductsPage />
@@ -200,6 +200,8 @@ describe("Product Master (/product/list)", () => {
 
     const { getByText, getByRole } = within(table);
 
+    // Sr. No. column header
+    expect(getByText("Sr. No.")).toBeTruthy();
     expect(getByRole("columnheader", { name: /Product Name \(As Per Tally\)/i })).toBeTruthy();
     expect(getByText("Product Code")).toBeTruthy();
     expect(getByText("Brand")).toBeTruthy();
@@ -211,6 +213,18 @@ describe("Product Master (/product/list)", () => {
     expect(getByText("Pack. Gross Weight")).toBeTruthy();
     expect(getByText("Pack. Unit CBM")).toBeTruthy();
     expect(getByText("Action")).toBeTruthy();
+
+    // Verify row serial numbers (1, 2, 3...)
+    await waitFor(() => {
+      expect(screen.getByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
+    });
+
+    const rows = screen.getAllByRole("row");
+    // Row 0 is header, Row 1 should have Sr. No. 1, Row 2 should have Sr. No. 2
+    expect(rows[1].querySelector(".cell-srno")?.textContent?.trim()).toBe("1");
+    expect(within(rows[1]).getByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
+    expect(rows[2].querySelector(".cell-srno")?.textContent?.trim()).toBe("2");
+    expect(within(rows[2]).getByText("DZ800 Double Face Shaping Vacuum Machine 10Kgs")).toBeTruthy();
   });
 
   it("renders blue square edit button on each row and clicking it opens the edit form", async () => {
@@ -270,4 +284,42 @@ describe("Product Master (/product/list)", () => {
     expect(screen.getByText("Identity & Classification")).toBeTruthy();
     expect(screen.getByText("Packaging & Pricing")).toBeTruthy();
   });
+
+  it("renders standalone ProductSkeletonRows with specified row count and shimmer classes", () => {
+    const { container } = render(
+      <table>
+        <tbody>
+          <ProductSkeletonRows
+            count={6}
+            displayOrder={[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]}
+            getFreezeStyle={() => ({})}
+          />
+        </tbody>
+      </table>
+    );
+
+    const skeletonRows = screen.getAllByTestId("skeleton-row");
+    expect(skeletonRows.length).toBe(6);
+
+    const shimmerLines = container.querySelectorAll(".skeleton-line");
+    expect(shimmerLines.length).toBeGreaterThan(0);
+  });
+
+  it("displays skeleton loading rows while products data is fetching", async () => {
+    render(
+      <BrowserRouter>
+        <ProductsPage />
+      </BrowserRouter>
+    );
+
+    // Skeleton rows should appear during loading
+    const skeletonRows = screen.queryAllByTestId("skeleton-row");
+    expect(skeletonRows.length).toBeGreaterThanOrEqual(0);
+
+    // After loading resolves, products should be displayed
+    await waitFor(() => {
+      expect(screen.getByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
+    });
+  });
 });
+

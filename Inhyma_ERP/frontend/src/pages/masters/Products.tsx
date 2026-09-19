@@ -24,30 +24,19 @@
  *  - SideDrawer for comprehensive product details.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
 import {
-  TextField,
-  SelectField,
-  TextAreaField,
-  nullIfBlank,
-  numOrNull,
-} from "@/components/fields";
-import {
   ImpExpDropdown,
   BulkActionsDropdown,
-  WizardModal,
-  downloadSampleCsv,
-  type SheetRow,
 } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useLiveModule } from "@/lib/live/useLive";
-import { useModalHistorySync } from "@/lib/hooks";
 import type {
   Brand,
   ImportHeader,
@@ -282,19 +271,189 @@ const IMPORT_HEADERS: ImportHeader[] = [
   { key: "Status", label: "Status" },
 ];
 
-/** L x W x H in cm -> cubic metres, to 6dp. Blank unless all three are set. */
-function computeCbm(length: string, width: string, height: string): string {
-  const l = parseFloat(length) || 0;
-  const w = parseFloat(width) || 0;
-  const h = parseFloat(height) || 0;
-  if (l > 0 && w > 0 && h > 0) {
-    return ((l * w * h) / 1000000).toFixed(6);
-  }
-  return "";
+
+const PRODUCT_COLUMN_LABELS = [
+  "", // 0: Checkbox
+  "Sr. No.", // 1
+  "Product Name (As Per Tally)", // 2
+  "Product Code", // 3
+  "Brand", // 4
+  "Sub Cate.", // 5
+  "Min. Price Without GST", // 6
+  "HSN", // 7
+  "UOM", // 8
+  "Pack. Qty", // 9
+  "Pack. Gross Weight", // 10
+  "Pack. Unit CBM", // 11
+  "Action", // 12
+];
+
+/** Skeleton Shimmer Loading Rows for Product Master */
+export function ProductSkeletonRows({
+  count = 8,
+  displayOrder,
+  getFreezeStyle,
+}: {
+  count?: number;
+  displayOrder: number[];
+  getFreezeStyle: (colIdx: number, isHeader?: boolean) => React.CSSProperties;
+}) {
+  const rowIndexes = Array.from({ length: count }, (_, i) => i);
+  const nameWidths = ["75%", "88%", "65%", "82%", "90%", "70%", "78%", "85%"];
+
+  return (
+    <>
+      {rowIndexes.map((rowIndex) => (
+        <tr
+          key={`prod-skeleton-row-${rowIndex}`}
+          className="skeleton-row"
+          data-testid="skeleton-row"
+          style={{ borderBottom: "1px solid #f1f5f9" }}
+        >
+          {displayOrder.map((colIdx) => {
+            let content: React.ReactNode = null;
+            switch (colIdx) {
+              case 0: // Checkbox
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 1: // Sr. No.
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 2: // Product Name
+                content = (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <div
+                      className="skeleton-line"
+                      style={{
+                        width: nameWidths[rowIndex % nameWidths.length],
+                        height: "15px",
+                        borderRadius: "4px",
+                      }}
+                    />
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "70px", height: "11px", borderRadius: "3px", opacity: 0.7 }}
+                    />
+                  </div>
+                );
+                break;
+              case 3: // Product Code
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "80px", height: "13px", borderRadius: "3px" }}
+                  />
+                );
+                break;
+              case 4: // Brand
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "65px", height: "13px", borderRadius: "3px" }}
+                  />
+                );
+                break;
+              case 5: // Sub Cate.
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "100px", height: "13px", borderRadius: "3px" }}
+                  />
+                );
+                break;
+              case 6: // Min Price Without GST
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "85px", height: "14px", borderRadius: "3px", marginLeft: "auto" }}
+                  />
+                );
+                break;
+              case 7: // HSN
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "70px", height: "13px", borderRadius: "3px" }}
+                  />
+                );
+                break;
+              case 8: // UOM
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "35px", height: "13px", borderRadius: "3px" }}
+                  />
+                );
+                break;
+              case 9: // Pack Qty
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "28px", height: "13px", borderRadius: "3px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 10: // Pack Gross Weight
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "32px", height: "13px", borderRadius: "3px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 11: // Pack Unit CBM
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "40px", height: "13px", borderRadius: "3px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 12: // Action
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "28px", height: "28px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              default:
+                content = <div className="skeleton-line" style={{ height: "14px", borderRadius: "4px" }} />;
+            }
+
+            return (
+              <td
+                key={`sk-cell-${colIdx}`}
+                className={colIdx === 1 ? "cell-srno" : colIdx === 12 ? "actions" : undefined}
+                style={{
+                  ...(colIdx === 0 ? { width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center" } : {}),
+                  ...(colIdx === 1 ? { width: "92px", minWidth: "92px", maxWidth: "100px", textAlign: "center" } : {}),
+                  ...(colIdx === 6 ? { textAlign: "right", paddingRight: "14px" } : {}),
+                  ...(colIdx === 9 || colIdx === 10 || colIdx === 11 || colIdx === 12 ? { textAlign: "center" } : {}),
+                  ...getFreezeStyle(colIdx, false),
+                }}
+              >
+                {content}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </>
+  );
 }
 
-export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = {}) {
-  const navigate = useNavigate();
+export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: { defaultAdd?: boolean; defaultFilterOpen?: boolean } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Lookups
@@ -305,7 +464,7 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
 
   // Products Data
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCT_MASTER_ITEMS);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [liveReloadToken, setLiveReloadToken] = useState(0);
 
   // Live Module sync
@@ -314,7 +473,7 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
   });
 
   // Filter Card States
-  const [showFilterPanel, setShowFilterPanel] = useState(true);
+  const [showFilterPanel, setShowFilterPanel] = useState(defaultFilterOpen);
   const [categoryDraft, setCategoryDraft] = useState("");
   const [subCategoryDraft, setSubCategoryDraft] = useState("");
   const [brandDraft, setBrandDraft] = useState("");
@@ -330,8 +489,80 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
   const [perPage, setPerPage] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [searchTerm, setSearchTerm] = useState("");
-  const [sortField, setSortField] = useState<string>("product_name_tally");
-  const [sortAsc, setSortAsc] = useState<boolean>(true);
+
+  // Sorting - normal by default (no forced sort, preserves natural order)
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = (colIdx: number) => {
+    if (colIdx === 0 || colIdx === 12) return; // Don't sort checkbox or action
+    if (sortColIndex === colIdx) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else {
+        setSortColIndex(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColIndex(colIdx);
+      setSortDirection("asc");
+    }
+  };
+
+  // Dynamic Column Freezing (matches Company Profiles: Checkbox, Sr. No., Product Name)
+  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
+    const saved = localStorage.getItem("product_master_pinned_cols_v3");
+    if (saved !== null) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return { 0: "left", 1: "left", 2: "left" };
+  });
+
+  useEffect(() => {
+    localStorage.setItem("product_master_pinned_cols_v3", JSON.stringify(pinnedCols));
+  }, [pinnedCols]);
+
+  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
+  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
+  const [pinMenuOpen, setPinMenuOpen] = useState(false);
+  const pinMenuRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+
+  useEffect(() => {
+    if (!pinMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
+        setPinMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [pinMenuOpen]);
+
+  const togglePin = useCallback((colIdx: number) => {
+    setPinnedCols((prev) => {
+      const next = { ...prev };
+      if (next[colIdx]) {
+        delete next[colIdx];
+      } else {
+        if (colIdx >= 12) {
+          next[colIdx] = "right";
+        } else {
+          next[colIdx] = "left";
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const displayOrder = useMemo(() => {
+    const allIndices = Array.from({ length: 13 }, (_, i) => i);
+    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
+    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
+    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
+    return [...lefts, ...unpinned, ...rights];
+  }, [pinnedCols]);
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -346,13 +577,6 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [errorMessageBanner, setErrorMessageBanner] = useState<string | null>(null);
-
-  // Wizard / Import state
-  const [wizardPending, setWizardPending] = useState<{
-    file: File;
-    rows: SheetRow[];
-    sheetColumns: string[];
-  } | null>(null);
 
   // Load products from API
   const loadProducts = useCallback(async () => {
@@ -466,21 +690,175 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
   // Sorted items
   const sortedProducts = useMemo(() => {
     const list = [...filteredProducts];
+    if (sortColIndex === null) return list;
+
     list.sort((a, b) => {
-      const valA = (a.product_name_tally || a.product_name || "").toLowerCase();
-      const valB = (b.product_name_tally || b.product_name || "").toLowerCase();
-      if (valA < valB) return sortAsc ? -1 : 1;
-      if (valA > valB) return sortAsc ? 1 : -1;
+      let valA: string | number = "";
+      let valB: string | number = "";
+
+      switch (sortColIndex) {
+        case 1: { // SR. NO.
+          const idxA = filteredProducts.indexOf(a);
+          const idxB = filteredProducts.indexOf(b);
+          valA = idxA;
+          valB = idxB;
+          break;
+        }
+        case 2: // Product Name
+          valA = (a.product_name_tally || a.product_name || "").toLowerCase();
+          valB = (b.product_name_tally || b.product_name || "").toLowerCase();
+          break;
+        case 3: // Product Code
+          valA = (a.product_code || "").toLowerCase();
+          valB = (b.product_code || "").toLowerCase();
+          break;
+        case 4: // Brand
+          valA = (brands.items.find((x) => x.id === a.brand_id)?.name || "").toLowerCase();
+          valB = (brands.items.find((x) => x.id === b.brand_id)?.name || "").toLowerCase();
+          break;
+        case 5: // Sub Cate.
+          valA = (subCategories.items.find((x) => x.id === a.sub_category_id)?.name || "").toLowerCase();
+          valB = (subCategories.items.find((x) => x.id === b.sub_category_id)?.name || "").toLowerCase();
+          break;
+        case 6: // Standard Price
+          valA = a.standard_price || 0;
+          valB = b.standard_price || 0;
+          break;
+        case 7: // HSN
+          valA = PRODUCT_HSN_MAP[a.product_name_tally || a.product_name || ""] || "";
+          valB = PRODUCT_HSN_MAP[b.product_name_tally || b.product_name || ""] || "";
+          break;
+        case 8: // UOM
+          valA = (uoms.items.find((x) => x.id === a.uom_id)?.name || "").toLowerCase();
+          valB = (uoms.items.find((x) => x.id === b.uom_id)?.name || "").toLowerCase();
+          break;
+        case 9: // Pack Qty
+          valA = a.packaging_quantity ?? 0;
+          valB = b.packaging_quantity ?? 0;
+          break;
+        case 10: // Gross Weight
+          valA = a.packaging_gross_weight ?? 0;
+          valB = b.packaging_gross_weight ?? 0;
+          break;
+        case 11: // Unit CBM
+          valA = a.packaging_unit_cbm ?? 0;
+          valB = b.packaging_unit_cbm ?? 0;
+          break;
+        default:
+          return 0;
+      }
+
+      if (valA < valB) return sortDirection === "asc" ? -1 : 1;
+      if (valA > valB) return sortDirection === "asc" ? 1 : -1;
       return 0;
     });
     return list;
-  }, [filteredProducts, sortAsc]);
+  }, [filteredProducts, sortColIndex, sortDirection, brands.items, subCategories.items, uoms.items]);
 
   // Pagination slice
   const paginatedProducts = useMemo(() => {
     const start = (currentPage - 1) * perPage;
     return sortedProducts.slice(start, start + perPage);
   }, [sortedProducts, currentPage, perPage]);
+
+  // Column Offset calculation using ResizeObserver
+  useLayoutEffect(() => {
+    if (!tableRef.current) return;
+    const tableEl = tableRef.current;
+
+    const updateOffsets = () => {
+      const ths = tableEl.querySelectorAll("thead th");
+      if (!ths.length) return;
+
+      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+      let accumLeft = 0;
+      const nextLefts: Record<number, number> = {};
+      for (const idx of lefts) {
+        const thPos = displayOrder.indexOf(idx);
+        if (ths[thPos]) {
+          nextLefts[idx] = accumLeft;
+          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
+        }
+      }
+
+      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
+      let accumRight = 0;
+      const nextRights: Record<number, number> = {};
+      for (const idx of rights) {
+        const thPos = displayOrder.indexOf(idx);
+        if (ths[thPos]) {
+          nextRights[idx] = accumRight;
+          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
+        }
+      }
+
+      setColLeftOffsets((prev) => {
+        const isSame =
+          Object.keys(nextLefts).length === Object.keys(prev).length &&
+          Object.keys(nextLefts).every((k) => prev[Number(k)] === nextLefts[Number(k)]);
+        return isSame ? prev : nextLefts;
+      });
+      setColRightOffsets((prev) => {
+        const isSame =
+          Object.keys(nextRights).length === Object.keys(prev).length &&
+          Object.keys(nextRights).every((k) => prev[Number(k)] === nextRights[Number(k)]);
+        return isSame ? prev : nextRights;
+      });
+    };
+
+    updateOffsets();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => updateOffsets());
+      ro.observe(tableEl);
+      return () => ro.disconnect();
+    }
+  }, [pinnedCols, products, loading, displayOrder]);
+
+  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
+    const dir = pinnedCols[colIdx];
+    const headerTopStyle: React.CSSProperties = isHeader
+      ? {
+        position: "sticky",
+        top: 0,
+        zIndex: dir ? 30 : 15,
+        backgroundColor: "#f1f5f9",
+        boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
+      }
+      : {};
+
+    if (!dir) return headerTopStyle;
+
+    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
+
+    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
+    const isFirstRight = dir === "right" && colIdx === rights[0];
+
+    if (dir === "left") {
+      const left = colLeftOffsets[colIdx] ?? 0;
+      return {
+        ...headerTopStyle,
+        position: "sticky",
+        left: `${left}px`,
+        zIndex: isHeader ? 35 : 10,
+        backgroundColor: isHeader ? "#f1f5f9" : "#ffffff",
+        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
+        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
+      };
+    }
+
+    const right = colRightOffsets[colIdx] ?? 0;
+    return {
+      ...headerTopStyle,
+      position: "sticky",
+      right: `${right}px`,
+      zIndex: isHeader ? 35 : 10,
+      backgroundColor: isHeader ? "#f1f5f9" : "#ffffff",
+      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
+      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
+    };
+  }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
 
   const totalPages = Math.ceil(sortedProducts.length / perPage) || 1;
 
@@ -920,7 +1298,7 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
             {/* Filter Toggle Button */}
             <button
               type="button"
-              className="btn pm-btn-filter"
+              className="btn"
               style={{
                 background: showFilterPanel ? "#0061f2" : "#475569",
                 color: "#ffffff",
@@ -946,18 +1324,7 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
             <button
               id="btn-add-product"
               type="button"
-              className="btn btn-add-new pm-btn-add"
-              style={{
-                background: "#0284c7",
-                color: "#ffffff",
-                padding: "8px 18px",
-                borderRadius: "6px",
-                fontWeight: 700,
-                fontSize: "13.5px",
-                border: "none",
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(2, 132, 199, 0.25)",
-              }}
+              className="btn btn-add-new"
               onClick={handleOpenCreate}
             >
               + ADD NEW
@@ -965,15 +1332,17 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
 
             {/* Imp / Exp Dropdown */}
             <ImpExpDropdown
+              apiBase="/masters/products"
               entityName="product"
               importHeaders={IMPORT_HEADERS}
-              onDownloadTemplate={() => downloadSampleCsv("product", IMPORT_HEADERS)}
-              onImportClick={(file, rows, sheetColumns) => {
-                setWizardPending({ file, rows, sheetColumns });
+              onSummary={() => {}}
+              onError={(msg) => setErrorMessageBanner(msg)}
+              onComplete={() => loadProducts()}
+              onExportCsv={() => {
+                downloadExport("/masters/products", "csv", "products");
               }}
-              onExportClick={() => {
-                downloadExport("/masters/products/export", "products.csv");
-              }}
+              showImport={true}
+              showExport={true}
             />
 
             {/* Bulk Actions Dropdown */}
@@ -986,10 +1355,10 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
           </div>
         </div>
 
-        {/* 2. Collapsible Filter Panel Card */}
+        {/* 2. Collapsible Filter Panel Card (Matches Company Profiles Layout) */}
         {showFilterPanel && (
           <div
-            className="filter-panel-card pm-filter-panel"
+            className="filter-panel-card"
             data-testid="pm-filter-panel"
             style={{
               background: "#ffffff",
@@ -1001,20 +1370,18 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
             }}
           >
             <div
-              className="pm-filter-grid"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                gridTemplateColumns: "repeat(3, 1fr)",
                 gap: "18px 24px",
               }}
             >
-              <div className="pm-filter-field">
+              <div>
                 <label htmlFor="filter-category" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
                   Category
                 </label>
                 <select
                   id="filter-category"
-                  className="pm-filter-select"
                   value={categoryDraft}
                   onChange={(e) => {
                     setCategoryDraft(e.target.value);
@@ -1025,10 +1392,17 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                     height: "38px",
                     borderRadius: "5px",
                     border: "1px solid #cbd5e1",
-                    padding: "0 10px",
+                    padding: "0 28px 0 10px",
                     fontSize: "13.5px",
-                    color: "#334155",
-                    background: "#ffffff",
+                    color: categoryDraft ? "#334155" : "#64748b",
+                    fontStyle: categoryDraft ? "normal" : "italic",
+                    background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
+                    appearance: "none",
+                    WebkitAppearance: "none",
+                    MozAppearance: "none",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    cursor: "pointer",
                   }}
                 >
                   <option value="">All</option>
@@ -1040,13 +1414,12 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                 </select>
               </div>
 
-              <div className="pm-filter-field">
+              <div>
                 <label htmlFor="filter-subcategory" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
                   Sub Category
                 </label>
                 <select
                   id="filter-subcategory"
-                  className="pm-filter-select"
                   value={subCategoryDraft}
                   onChange={(e) => setSubCategoryDraft(e.target.value)}
                   style={{
@@ -1054,10 +1427,17 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                     height: "38px",
                     borderRadius: "5px",
                     border: "1px solid #cbd5e1",
-                    padding: "0 10px",
+                    padding: "0 28px 0 10px",
                     fontSize: "13.5px",
-                    color: "#334155",
-                    background: "#ffffff",
+                    color: subCategoryDraft ? "#334155" : "#64748b",
+                    fontStyle: subCategoryDraft ? "normal" : "italic",
+                    background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
+                    appearance: "none",
+                    WebkitAppearance: "none",
+                    MozAppearance: "none",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    cursor: "pointer",
                   }}
                 >
                   <option value="">All</option>
@@ -1071,13 +1451,12 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                 </select>
               </div>
 
-              <div className="pm-filter-field">
+              <div>
                 <label htmlFor="filter-brand" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
                   Brand
                 </label>
                 <select
                   id="filter-brand"
-                  className="pm-filter-select"
                   value={brandDraft}
                   onChange={(e) => setBrandDraft(e.target.value)}
                   style={{
@@ -1085,10 +1464,17 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                     height: "38px",
                     borderRadius: "5px",
                     border: "1px solid #cbd5e1",
-                    padding: "0 10px",
+                    padding: "0 28px 0 10px",
                     fontSize: "13.5px",
-                    color: "#334155",
-                    background: "#ffffff",
+                    color: brandDraft ? "#334155" : "#64748b",
+                    fontStyle: brandDraft ? "normal" : "italic",
+                    background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
+                    appearance: "none",
+                    WebkitAppearance: "none",
+                    MozAppearance: "none",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    cursor: "pointer",
                   }}
                 >
                   <option value="">All</option>
@@ -1101,10 +1487,9 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
               </div>
             </div>
 
-            <div className="pm-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
               <button
                 type="button"
-                className="pm-btn-reset"
                 onClick={handleResetFilters}
                 style={{
                   background: "#5c6f84",
@@ -1115,13 +1500,16 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                   fontWeight: 600,
                   fontSize: "13.5px",
                   cursor: "pointer",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                  transition: "opacity 0.2s",
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
               >
                 Reset
               </button>
               <button
                 type="button"
-                className="pm-btn-search"
                 onClick={handleApplyFilters}
                 style={{
                   background: "#f59e0b",
@@ -1132,7 +1520,11 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                   fontWeight: 600,
                   fontSize: "13.5px",
                   cursor: "pointer",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                  transition: "opacity 0.2s",
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
               >
                 Search
               </button>
@@ -1140,14 +1532,10 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
           </div>
         )}
 
-        {/* 3. Main Data Card */}
-        <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-          {/* Status Tabs (Active, Inactive) */}
-          <div
-            className="pm-tabs-card"
-            data-testid="pm-status-tabs"
-            style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}
-          >
+        {/* 3. Main Data Card (Clean Company Profiles Layout) */}
+        <div className="card">
+          {/* Active / Inactive Top Tabs */}
+          <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}>
             <button
               type="button"
               className={`pm-tab-btn ${activeTab === "Active" ? "active" : ""}`}
@@ -1190,63 +1578,158 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
             </button>
           </div>
 
-          {/* Controls Bar: Items per page & Search Input */}
+          {/* Controls Bar: Items per page & Freeze Columns & Search */}
           <div
-            className="toolbar pm-control-bar"
-            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", gap: "10px", flexWrap: "wrap" }}
+            className="toolbar"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "8px 14px",
+              gap: "10px",
+              flexWrap: "wrap",
+            }}
           >
             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-              <div className="pm-per-page" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <select
-                  className="pm-per-page-select"
                   value={perPage}
                   onChange={(e) => {
                     setPerPage(Number(e.target.value));
                     setCurrentPage(1);
                   }}
                   aria-label="Items per page"
-                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                  }}
                 >
-                  <option value="10">10</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                  <option value="100">100</option>
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
                 </select>
                 <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
               </div>
 
-              {/* Freeze Columns Button */}
-              <button
-                type="button"
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "13px",
-                  background: "#ffffff",
-                  cursor: "pointer",
-                  color: "#0f172a",
-                  fontWeight: 600,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                📌 Freeze Columns (2)
-              </button>
+              {/* Dynamic Freeze Columns Dropdown Menu */}
+              <div ref={pinMenuRef} style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  onClick={() => setPinMenuOpen((v) => !v)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
+                    cursor: "pointer",
+                    color: "#0f172a",
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  📌 Freeze Columns ({Object.keys(pinnedCols).length})
+                </button>
+                {pinMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: "38px",
+                      zIndex: 100,
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "12px",
+                      minWidth: "240px",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        color: "#475569",
+                        marginBottom: "8px",
+                        borderBottom: "1px solid #f1f5f9",
+                        paddingBottom: "6px",
+                      }}
+                    >
+                      Toggle Frozen Columns
+                    </div>
+                    <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
+                      {PRODUCT_COLUMN_LABELS.map((label, idx) => {
+                        if (!label) return null;
+                        const isPinned = Boolean(pinnedCols[idx]);
+                        return (
+                          <label
+                            key={label}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              fontSize: "13px",
+                              cursor: "pointer",
+                              padding: "4px 0",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isPinned}
+                              onChange={() => togglePin(idx)}
+                            />{" "}
+                            {label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPinnedCols({})}
+                        style={{
+                          width: "100%",
+                          padding: "6px 8px",
+                          fontSize: "12px",
+                          borderRadius: "4px",
+                          border: "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                          cursor: "pointer",
+                          color: "#dc2626",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Clear All Freezes
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="pm-search-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+            {/* Search Input with Clear Button */}
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
               <input
                 type="text"
-                className="pm-search-input"
                 placeholder="Search..."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setCurrentPage(1);
                 }}
-                style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                style={{
+                  width: "320px",
+                  padding: "8px 36px 8px 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                }}
               />
               {searchTerm && (
                 <button
@@ -1255,6 +1738,7 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                     setSearchTerm("");
                     setCurrentPage(1);
                   }}
+                  title="Clear search"
                   style={{
                     position: "absolute",
                     right: "8px",
@@ -1263,6 +1747,10 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                     cursor: "pointer",
                     color: "#94a3b8",
                     fontSize: "16px",
+                    lineHeight: 1,
+                    padding: "0 2px",
+                    display: "flex",
+                    alignItems: "center",
                   }}
                 >
                   ×
@@ -1271,102 +1759,155 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
             </div>
           </div>
 
-          {/* 5. Products Table inside .table-scroll */}
-          <div className="table-scroll pm-table-card" style={{ maxHeight: "calc(100vh - 240px)", overflowY: "auto", overflowX: "auto" }}>
-            <table className="pm-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+          {/* 5. Products Table matching Company Profiles Grid */}
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
+            <table ref={tableRef} style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th style={{ width: "40px", minWidth: "40px", textAlign: "center", position: "sticky", left: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
-                    <input
-                      type="checkbox"
-                      checked={isAllSelected}
-                      onChange={(e) => handleToggleSelectAll(e.target.checked)}
-                      style={{ cursor: "pointer", width: "15px", height: "15px" }}
-                      aria-label="Select All"
-                    />
-                  </th>
-                  <th
-                    className="sortable"
-                    onClick={() => setSortAsc((prev) => !prev)}
-                    title="Click to sort by Product Name"
-                    style={{ position: "sticky", left: "40px", zIndex: 12, backgroundColor: "#f1f5f9" }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Product Name (As Per Tally)</span>
-                        <span style={{ opacity: 0.5, fontSize: "11px" }}>⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.8 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>Product Code</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>Brand</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>Sub Cate.</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>Min. Price Without GST</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>HSN</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>UOM</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th style={{ textAlign: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
-                      <span>Pack. Qty</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th style={{ textAlign: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
-                      <span>Pack. Gross Weight</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th style={{ textAlign: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
-                      <span>Pack. Unit CBM</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th style={{ textAlign: "center", width: "70px", position: "sticky", right: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
-                    <span>Action</span>
-                  </th>
+                  {displayOrder.map((idx) => {
+                    if (idx === 0) {
+                      return (
+                        <th
+                          key="col-0"
+                          style={{
+                            width: "40px",
+                            minWidth: "40px",
+                            maxWidth: "45px",
+                            textAlign: "center",
+                            ...getFreezeStyle(0, true),
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isAllSelected}
+                            onChange={(e) => handleToggleSelectAll(e.target.checked)}
+                            style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                            aria-label="Select All"
+                          />
+                        </th>
+                      );
+                    }
+
+                    const label = PRODUCT_COLUMN_LABELS[idx];
+                    const isPinned = Boolean(pinnedCols[idx]);
+                    const isSrNo = idx === 1;
+                    const isAction = idx === 12;
+                    const isSorted = sortColIndex === idx;
+
+                    return (
+                      <th
+                        key={`col-${idx}-${label}`}
+                        style={{
+                          ...(isSrNo ? { width: "92px", minWidth: "92px", maxWidth: "100px", textAlign: "center" } : isAction ? { width: "70px", minWidth: "70px", textAlign: "center" } : {}),
+                          ...getFreezeStyle(idx, true),
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: isAction || isSrNo ? "center" : "space-between",
+                            gap: "4px",
+                          }}
+                        >
+                          {isAction ? (
+                            <span>{label}</span>
+                          ) : (
+                            <div
+                              onClick={() => handleHeaderSort(idx)}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: isSrNo ? "center" : "flex-start",
+                                gap: "5px",
+                                cursor: "pointer",
+                                userSelect: "none",
+                                flex: isSrNo ? undefined : 1,
+                                minWidth: 0,
+                                padding: "2px 0",
+                              }}
+                              title={
+                                isSorted
+                                  ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                                  : `Click to sort by ${label} (Ascending)`
+                              }
+                            >
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {label}
+                              </span>
+                              {isSorted ? (
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    color: "#0061f2",
+                                    fontSize: "10px",
+                                    fontWeight: 800,
+                                    background: "#e0f2fe",
+                                    padding: "1px 4px",
+                                    borderRadius: "3px",
+                                    border: "1px solid #bae6fd",
+                                    lineHeight: 1,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {sortDirection === "asc" ? "▲" : "▼"}
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    color: "#94a3b8",
+                                    opacity: 0.45,
+                                    lineHeight: 1,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  ↕
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              togglePin(idx);
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: "11px",
+                              opacity: isPinned ? 1 : 0.3,
+                              padding: "0 2px",
+                              flexShrink: 0,
+                            }}
+                            title={isPinned ? "Unfreeze column" : "Freeze column"}
+                          >
+                            📌
+                          </button>
+                        </div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
-                {paginatedProducts.length === 0 ? (
+                {loading ? (
+                  <ProductSkeletonRows
+                    count={perPage > 10 ? 8 : perPage}
+                    displayOrder={displayOrder}
+                    getFreezeStyle={getFreezeStyle}
+                  />
+                ) : paginatedProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={12} style={{ textAlign: "center", padding: "36px", color: "#64748b" }}>
+                    <td colSpan={displayOrder.length} style={{ textAlign: "center", padding: "36px", color: "#64748b" }}>
                       No products found.
                     </td>
                   </tr>
                 ) : (
-                  paginatedProducts.map((p) => {
+                  paginatedProducts.map((p, rowIdx) => {
                     const name = p.product_name_tally || p.product_name || "—";
                     const brandObj = brands.items.find((b) => b.id === p.brand_id);
                     const brandName = brandObj?.name || (p.brand_id === "brand-yinglima" ? "Yinglima" : "—");
@@ -1388,66 +1929,152 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
                     const hsn = PRODUCT_HSN_MAP[name] || "8422.30.00";
                     const uomObj = uoms.items.find((u) => u.id === p.uom_id);
                     const uomName = uomObj?.code || uomObj?.name || "Nos";
-
                     const isChecked = selectedIds.includes(p.id);
+                    const srNo = (currentPage - 1) * perPage + rowIdx + 1;
 
                     return (
                       <tr key={p.id}>
-                        <td style={{ textAlign: "center" }}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => handleToggleRow(p.id, e.target.checked)}
-                            style={{ cursor: "pointer", width: "15px", height: "15px" }}
-                          />
-                        </td>
-                        <td>
-                          <a
-                            href="#detail"
-                            className="pm-link-product"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              setDrawerProduct(p);
-                            }}
-                          >
-                            {name}
-                          </a>
-                        </td>
-                        <td>{p.product_code && p.product_code !== "-" ? p.product_code : ""}</td>
-                        <td>{brandName}</td>
-                        <td>{subCatName}</td>
-                        <td style={{ textAlign: "right", paddingRight: "18px" }}>
-                          {p.standard_price ? formatIndianCurrency(p.standard_price) : ""}
-                        </td>
-                        <td>{hsn}</td>
-                        <td>{uomName}</td>
-                        <td style={{ textAlign: "center" }}>{p.packaging_quantity ?? 1}</td>
-                        <td style={{ textAlign: "center" }}>{p.packaging_gross_weight ?? 0}</td>
-                        <td style={{ textAlign: "center" }}>{p.packaging_unit_cbm ?? 0}</td>
-                        <td style={{ textAlign: "center" }}>
-                          {/* Blue square edit button [ 🖉 ] */}
-                          <button
-                            type="button"
-                            className="pm-btn-edit"
-                            title="Edit Product"
-                            aria-label={`Edit ${name}`}
-                            onClick={() => handleOpenEdit(p)}
-                          >
-                            <svg
-                              width="15"
-                              height="15"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                        </td>
+                        {displayOrder.map((colIdx) => {
+                          switch (colIdx) {
+                            case 0:
+                              return (
+                                <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, false) }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => handleToggleRow(p.id, e.target.checked)}
+                                    style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                                  />
+                                </td>
+                              );
+                            case 1:
+                              return (
+                                <td
+                                  key="cell-1"
+                                  className="cell-srno"
+                                  style={{
+                                    width: "92px",
+                                    minWidth: "92px",
+                                    maxWidth: "100px",
+                                    textAlign: "center",
+                                    color: "#64748b",
+                                    fontWeight: 500,
+                                    ...getFreezeStyle(1, false),
+                                  }}
+                                >
+                                  {srNo}
+                                </td>
+                              );
+                            case 2:
+                              return (
+                                <td key="cell-2" style={{ minWidth: "220px", ...getFreezeStyle(2, false) }}>
+                                  <a
+                                    href="#detail"
+                                    className="pm-link-product"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      setDrawerProduct(p);
+                                    }}
+                                  >
+                                    {name}
+                                  </a>
+                                </td>
+                              );
+                            case 3:
+                              return (
+                                <td key="cell-3" style={{ minWidth: "120px", ...getFreezeStyle(3, false) }}>
+                                  {p.product_code && p.product_code !== "-" ? p.product_code : "—"}
+                                </td>
+                              );
+                            case 4:
+                              return (
+                                <td key="cell-4" style={{ minWidth: "120px", ...getFreezeStyle(4, false) }}>
+                                  {brandName}
+                                </td>
+                              );
+                            case 5:
+                              return (
+                                <td key="cell-5" style={{ minWidth: "160px", ...getFreezeStyle(5, false) }}>
+                                  {subCatName}
+                                </td>
+                              );
+                            case 6:
+                              return (
+                                <td key="cell-6" style={{ minWidth: "150px", textAlign: "right", paddingRight: "14px", ...getFreezeStyle(6, false) }}>
+                                  {p.standard_price ? formatIndianCurrency(p.standard_price) : "—"}
+                                </td>
+                              );
+                            case 7:
+                              return (
+                                <td key="cell-7" style={{ minWidth: "100px", ...getFreezeStyle(7, false) }}>
+                                  {hsn}
+                                </td>
+                              );
+                            case 8:
+                              return (
+                                <td key="cell-8" style={{ minWidth: "80px", ...getFreezeStyle(8, false) }}>
+                                  {uomName}
+                                </td>
+                              );
+                            case 9:
+                              return (
+                                <td key="cell-9" style={{ minWidth: "90px", textAlign: "center", ...getFreezeStyle(9, false) }}>
+                                  {p.packaging_quantity ?? 1}
+                                </td>
+                              );
+                            case 10:
+                              return (
+                                <td key="cell-10" style={{ minWidth: "130px", textAlign: "center", ...getFreezeStyle(10, false) }}>
+                                  {p.packaging_gross_weight ?? 0}
+                                </td>
+                              );
+                            case 11:
+                              return (
+                                <td key="cell-11" style={{ minWidth: "110px", textAlign: "center", ...getFreezeStyle(11, false) }}>
+                                  {p.packaging_unit_cbm ?? 0}
+                                </td>
+                              );
+                            case 12:
+                              return (
+                                <td key="cell-12" className="actions" style={{ width: "70px", minWidth: "70px", textAlign: "center", ...getFreezeStyle(12, false) }}>
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    style={{
+                                      background: "#0061f2",
+                                      color: "#ffffff",
+                                      padding: "6px 9px",
+                                      borderRadius: "4px",
+                                      border: "none",
+                                      cursor: "pointer",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                    }}
+                                    onClick={() => handleOpenEdit(p)}
+                                    title="Edit Product"
+                                    aria-label={`Edit ${name}`}
+                                  >
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    >
+                                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                    </svg>
+                                  </button>
+                                </td>
+                              );
+                            default:
+                              return null;
+                          }
+                        })}
                       </tr>
                     );
                   })
@@ -1456,8 +2083,8 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
             </table>
           </div>
 
-          {/* Footer Bar */}
-          <div style={{ padding: "0 16px 14px", borderTop: "1px solid #e2e8f0", background: "#ffffff" }}>
+          {/* Pagination Matching Company Profiles */}
+          <div className="pagination">
             <Pagination
               pagination={paginationMeta}
               pageSize={perPage}
@@ -1527,23 +2154,6 @@ export function ProductsPage({ defaultAdd = false }: { defaultAdd?: boolean } = 
           )}
         </SideDrawer>
 
-        {/* 7. Wizard Modal for Imports */}
-        {wizardPending && (
-          <WizardModal
-            file={wizardPending.file}
-            rows={wizardPending.rows}
-            sheetColumns={wizardPending.sheetColumns}
-            apiBase="/masters/products"
-            entityName="product"
-            importHeaders={IMPORT_HEADERS}
-            onClose={() => setWizardPending(null)}
-            onComplete={() => {
-              setWizardPending(null);
-              loadProducts();
-            }}
-            onError={(msg) => alert(`Import error: ${msg}`)}
-          />
-        )}
       </main>
     </AppShell>
   );
