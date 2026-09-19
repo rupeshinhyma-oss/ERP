@@ -621,7 +621,7 @@ export function StockAdjustmentPage({
   };
 
   return (
-    <AppShell activeKey="stock-adjustment" pageClassName="page-stock-adjustment">
+    <AppShell activeKey="stock-adjustment">
       <main className="page">
         {/* Breadcrumb Trail */}
         <Breadcrumb trail={["Inventory", "Stock Adjustment"]} />
@@ -906,62 +906,10 @@ export function StockAdjustmentPage({
 
         {/* Main Data Card */}
         <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-          {/* Status Tabs */}
-          <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}>
-            <button
-              type="button"
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: typeFilter === "All" ? "2.5px solid #0061f2" : "2.5px solid transparent",
-                color: typeFilter === "All" ? "#0061f2" : "#64748b",
-                fontWeight: 700,
-                fontSize: "13.5px",
-                paddingBottom: "8px",
-                cursor: "pointer",
-              }}
-              onClick={() => setTypeFilter("All")}
-            >
-              All ({items.length})
-            </button>
-            <button
-              type="button"
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: typeFilter === "Stock IN" ? "2.5px solid #0061f2" : "2.5px solid transparent",
-                color: typeFilter === "Stock IN" ? "#0061f2" : "#64748b",
-                fontWeight: 700,
-                fontSize: "13.5px",
-                paddingBottom: "8px",
-                cursor: "pointer",
-              }}
-              onClick={() => setTypeFilter("Stock IN")}
-            >
-              Stock IN
-            </button>
-            <button
-              type="button"
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: typeFilter === "Stock OUT" ? "2.5px solid #0061f2" : "2.5px solid transparent",
-                color: typeFilter === "Stock OUT" ? "#0061f2" : "#64748b",
-                fontWeight: 700,
-                fontSize: "13.5px",
-                paddingBottom: "8px",
-                cursor: "pointer",
-              }}
-              onClick={() => setTypeFilter("Stock OUT")}
-            >
-              Stock OUT
-            </button>
-          </div>
-
           {/* Control Bar: Items Per Page + Live Search */}
           <div
             className="toolbar adjustment-control-bar"
-            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", gap: "10px", flexWrap: "wrap" }}
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", gap: "10px", flexWrap: "wrap", borderBottom: "1px solid #e2e8f0" }}
           >
             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
               <div className="adjustment-per-page" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -1030,7 +978,7 @@ export function StockAdjustmentPage({
           </div>
 
           {/* Table Container */}
-          <div className="table-scroll adjustment-table-card" style={{ maxHeight: "calc(100vh - 240px)", overflowY: "auto", overflowX: "auto" }}>
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto", border: "none", borderRadius: 0, boxShadow: "none" }}>
             <table className="adjustment-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
