@@ -717,3 +717,18 @@
 .date-range-btn-apply:hover {
   background-color: #0369a1;
 }
+
+/* ==========================================================================
+   Wide Detail SideDrawer for Stock Adjustment
+   ========================================================================== */
+.stock-adjustment-drawer.side-drawer-card {
+  width: 100% !important;
+  max-width: min(1050px, 96vw) !important;
+}
+
+@media (max-width: 1100px) {
+  .stock-adjustment-drawer.side-drawer-card {
+    max-width: 95vw !important;
+  }
+}
+

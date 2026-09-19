@@ -826,6 +826,8 @@ export function StockAdjustmentPage() {
           onClose={() => setActiveItem(null)}
           title="Stock Adjustment Details"
           subtitle={activeItem ? `${activeItem.warehouse} • ${activeItem.type} • ${activeItem.adjustment_date}` : ""}
+          maxWidth="min(1050px, 96vw)"
+          className="stock-adjustment-drawer"
         >
           {activeItem && (
             <div>
@@ -843,24 +845,6 @@ export function StockAdjustmentPage() {
                 ]}
               />
 
-              {activeItem.remarks && (
-                <div
-                  style={{
-                    marginTop: "16px",
-                    padding: "10px 14px",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "6px",
-                    backgroundColor: "#f8fafc",
-                    fontSize: "12.5px",
-                    color: "#334155",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  <strong style={{ color: "#1e293b" }}>Remarks: </strong>
-                  {activeItem.remarks}
-                </div>
-              )}
-
               {/* Items Breakdown with Category, HSN, and GST */}
               <h4 style={{ margin: "22px 0 10px", fontSize: "14px", fontWeight: 700, color: "#1e293b" }}>
                 Adjusted Items Breakdown
@@ -869,46 +853,63 @@ export function StockAdjustmentPage() {
                 style={{
                   border: "1px solid #e2e8f0",
                   borderRadius: "8px",
-                  overflow: "hidden",
-                  marginBottom: "20px",
+                  overflowX: "auto",
+                  marginBottom: "16px",
+                  boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+                  backgroundColor: "#ffffff",
                 }}
               >
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px", minWidth: "850px" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                      <th style={{ padding: "8px 10px", textAlign: "center", width: "50px" }}>Sr No.</th>
-                      <th style={{ padding: "8px 10px", textAlign: "left" }}>Item(S)</th>
-                      <th style={{ padding: "8px 10px", textAlign: "center" }}>Category</th>
-                      <th style={{ padding: "8px 10px", textAlign: "center" }}>HSN</th>
-                      <th style={{ padding: "8px 10px", textAlign: "center" }}>GST</th>
-                      <th style={{ padding: "8px 10px", textAlign: "center" }}>Quantity</th>
-                      <th style={{ padding: "8px 10px", textAlign: "right" }}>Unit Price</th>
-                      <th style={{ padding: "8px 10px", textAlign: "right" }}>Total Price</th>
+                      <th style={{ padding: "10px 12px", textAlign: "center", width: "55px", color: "#475569", fontWeight: 700 }}>Sr No.</th>
+                      <th style={{ padding: "10px 12px", textAlign: "left", color: "#475569", fontWeight: 700 }}>Item(S)</th>
+                      <th style={{ padding: "10px 12px", textAlign: "center", width: "100px", color: "#475569", fontWeight: 700 }}>Category</th>
+                      <th style={{ padding: "10px 12px", textAlign: "center", width: "90px", color: "#475569", fontWeight: 700 }}>HSN</th>
+                      <th style={{ padding: "10px 12px", textAlign: "center", width: "75px", color: "#475569", fontWeight: 700 }}>GST</th>
+                      <th style={{ padding: "10px 12px", textAlign: "center", width: "95px", color: "#475569", fontWeight: 700 }}>Quantity</th>
+                      <th style={{ padding: "10px 12px", textAlign: "right", width: "130px", color: "#475569", fontWeight: 700 }}>Unit Price</th>
+                      <th style={{ padding: "10px 12px", textAlign: "right", width: "140px", color: "#475569", fontWeight: 700 }}>Total Price</th>
                     </tr>
                   </thead>
                   <tbody>
                     {activeItem.items && activeItem.items.length > 0 ? (
                       activeItem.items.map((line, idx) => (
                         <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "8px 10px", textAlign: "center", color: "#64748b" }}>{idx + 1}</td>
-                          <td style={{ padding: "8px 10px", fontWeight: 600 }}>{line.product_name}</td>
-                          <td style={{ padding: "8px 10px", textAlign: "center" }}>{line.category || "Machines"}</td>
-                          <td style={{ padding: "8px 10px", textAlign: "center" }}>{line.hsn_code || "84224000"}</td>
-                          <td style={{ padding: "8px 10px", textAlign: "center" }}>{line.gst_rate || "18%"}</td>
-                          <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 600 }}>
+                          <td style={{ padding: "10px 12px", textAlign: "center", color: "#64748b" }}>{idx + 1}</td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <div style={{ fontWeight: 600, color: "#1e293b" }}>{line.product_name}</div>
+                            {line.product_code && (
+                              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                                SKU: {line.product_code}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                            <span style={{ display: "inline-block", padding: "2px 8px", background: "#f1f5f9", borderRadius: "12px", fontSize: "11.5px", color: "#475569", fontWeight: 500 }}>
+                              {line.category || "Machines"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "center", fontFamily: "monospace", fontSize: "12px", color: "#475569" }}>
+                            {line.hsn_code || "84224000"}
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "center", fontWeight: 600, color: "#2563eb" }}>
+                            {line.gst_rate || "18%"}
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "center", fontWeight: 600, color: "#0f172a" }}>
                             {line.qty} {line.uom}
                           </td>
-                          <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                          <td style={{ padding: "10px 12px", textAlign: "right", color: "#334155" }}>
                             {formatIndianCurrency(line.rate)}
                           </td>
-                          <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
+                          <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
                             {formatIndianCurrency(line.amount)}
                           </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={8} style={{ padding: "14px", textAlign: "center", color: "#94a3b8" }}>
+                        <td colSpan={8} style={{ padding: "18px", textAlign: "center", color: "#94a3b8" }}>
                           No line items recorded.
                         </td>
                       </tr>
@@ -917,10 +918,10 @@ export function StockAdjustmentPage() {
                   {activeItem.items && activeItem.items.length > 0 && (
                     <tfoot>
                       <tr style={{ background: "#e2e8f0", borderTop: "2px solid #cbd5e1" }}>
-                        <td colSpan={7} style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontSize: "12.5px", color: "#1e293b" }}>
+                        <td colSpan={7} style={{ padding: "11px 16px", textAlign: "right", fontWeight: 700, fontSize: "13px", color: "#1e293b" }}>
                           Grand Total
                         </td>
-                        <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontSize: "13px", color: "#15803d" }}>
+                        <td style={{ padding: "11px 16px", textAlign: "right", fontWeight: 700, fontSize: "14px", color: "#15803d", whiteSpace: "nowrap" }}>
                           {formatIndianCurrency(activeItem.total_amount)}
                         </td>
                       </tr>
@@ -928,6 +929,24 @@ export function StockAdjustmentPage() {
                   )}
                 </table>
               </div>
+
+              {/* Remarks Box positioned below table matching Screenshot 1 */}
+              {activeItem.remarks && (
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "8px",
+                    backgroundColor: "#f8fafc",
+                    fontSize: "13px",
+                    color: "#334155",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <strong style={{ color: "#1e293b" }}>Remarks: </strong>
+                  {activeItem.remarks}
+                </div>
+              )}
             </div>
           )}
         </SideDrawer>
