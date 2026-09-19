@@ -6,7 +6,6 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
 import { InventoryApi } from "@/lib/api";
-import { ImpExpDropdown, BulkActionsDropdown } from "@/components/ImportWizard";
 import "@/styles/stockAdjustment.css";
 
 export interface StockAdjustmentLineItem {
