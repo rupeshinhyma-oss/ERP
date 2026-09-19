@@ -116,6 +116,10 @@ describe("ProductStockPage", () => {
 
     await waitFor(() => {
       expect(screen.getAllByText("Sensor (Banding)").length).toBeGreaterThan(1);
+      expect(screen.getByText("Category")).toBeTruthy();
+      expect(screen.getByText("HSN")).toBeTruthy();
+      expect(screen.getByText("GST")).toBeTruthy();
+      expect(screen.getByText("84229090")).toBeTruthy();
       expect(screen.getByText("Location Stock Breakdown")).toBeTruthy();
     });
   });
