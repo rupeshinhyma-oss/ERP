@@ -347,4 +347,15 @@ describe("StockAdjustmentPage", () => {
     expect(screen.getByText("Stock IN Adjustment")).toBeTruthy();
     expect(screen.getByText("Stock OUT Adjustment")).toBeTruthy();
   });
+
+  it("renders shimmer skeleton rows when loading is true", () => {
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage initialLoading={true} />
+      </BrowserRouter>
+    );
+
+    const skeletonRows = screen.getAllByTestId("skeleton-row");
+    expect(skeletonRows.length).toBe(8);
+  });
 });

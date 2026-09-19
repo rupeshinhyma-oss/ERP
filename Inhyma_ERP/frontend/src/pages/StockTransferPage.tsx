@@ -1,0 +1,946 @@
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { AppShell } from "@/components/AppShell";
+import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { DateRangePicker } from "@/components/DateRangePicker";
+import { InventoryApi } from "@/lib/api";
+import "@/styles/stockTransfer.css";
+
+export interface StockTransferLineItem {
+  id?: string;
+  product_name: string;
+  product_code?: string;
+  category?: string;
+  quantity: number;
+  uom: string;
+  rate: number;
+  amount: number;
+}
+
+export interface StockTransferItem {
+  id: string;
+  sr_no: number;
+  transfer_no: string;
+  transfer_date: string;
+  from_warehouse: string;
+  to_warehouse: string;
+  total_amount: number;
+  added_by: string;
+  status: "Received" | "Pending" | "Confirmed" | "Cancel" | string;
+  remarks?: string;
+  items?: StockTransferLineItem[];
+}
+
+export const INITIAL_TRANSFERS: StockTransferItem[] = [
+  {
+    id: "trf-52",
+    sr_no: 52,
+    transfer_no: "TRF-2026-052",
+    transfer_date: "18-09-2026 04:37 PM",
+    from_warehouse: "Ahmedabad",
+    to_warehouse: "Mumbai",
+    total_amount: 629534.06,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Inter-branch stock transfer from Ahmedabad warehouse to Mumbai main hub",
+    items: [
+      { product_name: "FFS500 Centre sealer 300mm", quantity: 3, uom: "PCS", rate: 37494.85, amount: 112484.55 },
+      { product_name: "FFS1000 Centre Sealer 420mm", quantity: 2, uom: "PCS", rate: 54023.78, amount: 108047.56 },
+      { product_name: "GF100FD Granular Filler Double Head FFS", quantity: 2, uom: "PCS", rate: 17150.74, amount: 34301.48 },
+      { product_name: "GF1000F Granular Filler FFS", quantity: 4, uom: "PCS", rate: 14315.88, amount: 57263.52 },
+      { product_name: "GF1000FD Granular Filler Double Head FFS", quantity: 1, uom: "PCS", rate: 30442.71, amount: 30442.71 },
+      { product_name: "GF5000 Granular Filler", quantity: 3, uom: "PCS", rate: 20423.10, amount: 61269.30 },
+      { product_name: "DZ400 2B Vacuum machine", quantity: 2, uom: "PCS", rate: 24771.60, amount: 49543.20 },
+      { product_name: "FXJ6050 Semi Automatic Carton Sealer 3\"", quantity: 1, uom: "PCS", rate: 49649.85, amount: 49649.85 },
+      { product_name: "FQL450 Auto L-sealer w/o Connect parts", quantity: 1, uom: "PCS", rate: 126531.89, amount: 126531.89 },
+    ],
+  },
+  {
+    id: "trf-51",
+    sr_no: 51,
+    transfer_no: "TRF-2026-051",
+    transfer_date: "18-09-2026 03:25 PM",
+    from_warehouse: "Indore",
+    to_warehouse: "Ahmedabad",
+    total_amount: 46166.85,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Urgent spare replenishment for client breakdown in Ahmedabad",
+    items: [
+      { product_name: "Temperature Controller Omron E5CC", product_code: "ELEC-012", category: "Spares", quantity: 5, uom: "PCS", rate: 9233.37, amount: 46166.85 },
+    ],
+  },
+  {
+    id: "trf-50",
+    sr_no: 50,
+    transfer_no: "TRF-2026-050",
+    transfer_date: "18-09-2026 03:24 PM",
+    from_warehouse: "Indore",
+    to_warehouse: "Mumbai",
+    total_amount: 2748194.00,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Full automated line transfer for packaging exhibition consignment",
+    items: [
+      { product_name: "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen", product_code: "MACH-001", category: "Machines", quantity: 1, uom: "SET", rate: 1850000, amount: 1850000 },
+      { product_name: "AF1000T Automatic Liquid/Paste Filler Tube Sealer", product_code: "MACH-004", category: "Machines", quantity: 1, uom: "SET", rate: 898194, amount: 898194 },
+    ],
+  },
+  {
+    id: "trf-49",
+    sr_no: 49,
+    transfer_no: "TRF-2026-049",
+    transfer_date: "12-09-2026 06:35 PM",
+    from_warehouse: "Mumbai",
+    to_warehouse: "Ahmedabad",
+    total_amount: 1175450.00,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Scheduled machine allocation for Gujarat distributor order",
+    items: [
+      { product_name: "XLSG36100 Capping Machine", product_code: "MACH-003", category: "Machines", quantity: 2, uom: "SET", rate: 587725, amount: 1175450 },
+    ],
+  },
+  {
+    id: "trf-48",
+    sr_no: 48,
+    transfer_no: "TRF-2026-048",
+    transfer_date: "09-09-2026 04:03 PM",
+    from_warehouse: "Mumbai",
+    to_warehouse: "Ahmedabad",
+    total_amount: 94440.00,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Transfer of conveyor belts and sensor assemblies",
+    items: [
+      { product_name: "Conveyor Belt Replacement Roll 300mm", product_code: "BELT-300", category: "Spares", quantity: 4, uom: "PCS", rate: 23610, amount: 94440 },
+    ],
+  },
+  {
+    id: "trf-47",
+    sr_no: 47,
+    transfer_no: "TRF-2026-047",
+    transfer_date: "01-09-2026 02:51 PM",
+    from_warehouse: "Ahmedabad",
+    to_warehouse: "Mumbai",
+    total_amount: 1993055.00,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Quarterly stock consolidation into central logistics warehouse",
+    items: [
+      { product_name: "Semi Automatic MAP Tray/Cup Sealing Machine", product_code: "MACH-005", category: "Machines", quantity: 2, uom: "SET", rate: 996527.5, amount: 1993055 },
+    ],
+  },
+  {
+    id: "trf-46",
+    sr_no: 46,
+    transfer_no: "TRF-2026-046",
+    transfer_date: "01-09-2026 12:50 PM",
+    from_warehouse: "Mumbai",
+    to_warehouse: "Ahmedabad",
+    total_amount: 287821.00,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Flow wrap accessory shipment for client demonstration",
+    items: [
+      { product_name: "Infeed Chain Assembly 3.5M", product_code: "CHN-35", category: "Spares", quantity: 2, uom: "SET", rate: 143910.5, amount: 287821 },
+    ],
+  },
+  {
+    id: "trf-45",
+    sr_no: 45,
+    transfer_no: "TRF-2026-045",
+    transfer_date: "22-08-2026 07:00 PM",
+    from_warehouse: "Indore",
+    to_warehouse: "Mumbai",
+    total_amount: 834428.00,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Pre-shipment inspection transfer",
+    items: [
+      { product_name: "PFFS200 Pneumatic Centre Sealer 240mm PLC", product_code: "MACH-010", category: "Machines", quantity: 1, uom: "SET", rate: 834428, amount: 834428 },
+    ],
+  },
+  {
+    id: "trf-44",
+    sr_no: 44,
+    transfer_no: "TRF-2026-044",
+    transfer_date: "21-08-2026 11:35 AM",
+    from_warehouse: "Mumbai",
+    to_warehouse: "Indore",
+    total_amount: 97080.00,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Scheduled spares replenishment for central MP region",
+    items: [
+      { product_name: "Heater Cartridge 230V 500W", product_code: "HEAT-500", category: "Spares", quantity: 20, uom: "PCS", rate: 4854, amount: 97080 },
+    ],
+  },
+  {
+    id: "trf-43",
+    sr_no: 43,
+    transfer_no: "TRF-2026-043",
+    transfer_date: "08-08-2026 02:26 PM",
+    from_warehouse: "Ahmedabad",
+    to_warehouse: "Mumbai",
+    total_amount: 12160.00,
+    added_by: "Akshata Wadekar",
+    status: "Received",
+    remarks: "Optical sensor emergency transfer",
+    items: [
+      { product_name: "Photoelectric Mark Sensor Banner", product_code: "SEN-OPT-01", category: "Spares", quantity: 2, uom: "PCS", rate: 6080, amount: 12160 },
+    ],
+  },
+];
+
+// Helper to format Indian currency
+function formatIndianCurrency(amount: number): string {
+  return "₹ " + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export function StockTransferSkeletonRows({ count = 8 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`trf-sk-${idx}`} className="skeleton-row" data-testid="transfer-skeleton-row">
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "30px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "135px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "90px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "90px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "14px 16px", textAlign: "right" }}>
+            <div className="skeleton-line" style={{ width: "95px", height: "14px", borderRadius: "4px", marginLeft: "auto" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "110px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "65px", height: "22px", borderRadius: "12px" }} />
+          </td>
+          <td className="transfer-action-cell" style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "24px", height: "24px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+export interface StockTransferPageProps {
+  initialLoading?: boolean;
+}
+
+export function StockTransferPage({
+  initialLoading = import.meta.env.MODE !== "test",
+}: StockTransferPageProps = {}) {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState<boolean>(initialLoading);
+  const [items, setItems] = useState<StockTransferItem[]>(INITIAL_TRANSFERS);
+  const [activeTab, setActiveTab] = useState<"All" | "Pending" | "Confirmed" | "Received" | "Cancel">("All");
+  const [tabCounts, setTabCounts] = useState({
+    all: 46,
+    pending: 0,
+    confirmed: 3,
+    received: 41,
+    cancel: 2,
+  });
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [perPage, setPerPage] = useState<number>(50);
+  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false);
+
+  // Date range filter states (Exact Screenshot Replica)
+  const [dateRangeFilter, setDateRangeFilter] = useState("");
+  const [appliedDateRange, setAppliedDateRange] = useState("");
+
+  // Filter drafts
+  const [fromWhFilter, setFromWhFilter] = useState("All");
+  const [toWhFilter, setToWhFilter] = useState("All");
+
+  // Active drawer item
+  const [activeItem, setActiveItem] = useState<StockTransferItem | null>(null);
+
+  // Action menu opened ID
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+
+  // Add new modal state
+  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [newFromWh, setNewFromWh] = useState("Ahmedabad");
+  const [newToWh, setNewToWh] = useState("Mumbai");
+  const [newAmount, setNewAmount] = useState("");
+  const [newRemarks, setNewRemarks] = useState("");
+
+  // Close action menu on outside click
+  useEffect(() => {
+    function handleDocClick() {
+      setOpenActionMenuId(null);
+    }
+    if (openActionMenuId) {
+      document.addEventListener("click", handleDocClick);
+    }
+    return () => {
+      document.removeEventListener("click", handleDocClick);
+    };
+  }, [openActionMenuId]);
+
+  // Fetch live transfers from PostgreSQL database
+  const loadTransfers = useCallback(() => {
+    let cancelled = false;
+    if (initialLoading) {
+      setLoading(true);
+    }
+    InventoryApi.listStockTransfers({
+      status: activeTab,
+      from_warehouse: fromWhFilter !== "All" ? fromWhFilter : undefined,
+      to_warehouse: toWhFilter !== "All" ? toWhFilter : undefined,
+      limit: perPage,
+    })
+      .then((res) => {
+        if (!cancelled && res?.data?.items && Array.isArray(res.data.items) && res.data.items.length > 0) {
+          const savedStr = localStorage.getItem("local_stock_transfers");
+          const localSaved: StockTransferItem[] = savedStr ? JSON.parse(savedStr) : [];
+          const dbItems: StockTransferItem[] = res.data.items;
+          const merged = [
+            ...localSaved.filter((l) => !dbItems.some((d) => d.id === l.id || d.sr_no === l.sr_no)),
+            ...dbItems,
+          ];
+          setItems(merged);
+          if (res.data.tab_counts) {
+            setTabCounts({
+              ...res.data.tab_counts,
+              all: res.data.tab_counts.all + localSaved.length,
+              received: res.data.tab_counts.received + localSaved.length,
+            });
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Using offline transfers fallback:", err);
+        const savedStr = localStorage.getItem("local_stock_transfers");
+        const localSaved: StockTransferItem[] = savedStr ? JSON.parse(savedStr) : [];
+        setItems([...localSaved, ...INITIAL_TRANSFERS]);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, fromWhFilter, toWhFilter, perPage, initialLoading]);
+
+  useEffect(() => {
+    const cleanup = loadTransfers();
+    return cleanup;
+  }, [loadTransfers]);
+
+  // Handle Cancel action
+  const handleCancelTransfer = useCallback((item: StockTransferItem) => {
+    setItems((prev) =>
+      prev.map((t) => (t.id === item.id ? { ...t, status: "Cancel" } : t))
+    );
+    setTabCounts((prev) => ({
+      ...prev,
+      received: Math.max(0, prev.received - (item.status === "Received" ? 1 : 0)),
+      confirmed: Math.max(0, prev.confirmed - (item.status === "Confirmed" ? 1 : 0)),
+      cancel: prev.cancel + (item.status !== "Cancel" ? 1 : 0),
+    }));
+    InventoryApi.updateStockTransferStatus(item.id, "Cancel").catch((e) =>
+      console.warn("Failed to update status in DB:", e)
+    );
+  }, []);
+
+  // Handle Download Transfer Order PDF matching legacy ERP
+  const handleDownload = useCallback((item: StockTransferItem) => {
+    const trfId = item.sr_no || item.id.replace(/\D/g, "") || "52";
+    window.open(`/transfer/transfer-order-pdf/${trfId}`, "_blank");
+  }, []);
+
+  // Reset all filters
+  const handleResetFilters = useCallback(() => {
+    setDateRangeFilter("");
+    setAppliedDateRange("");
+    setFromWhFilter("All");
+    setToWhFilter("All");
+  }, []);
+
+  // Apply search filters
+  const handleSearchFilters = useCallback(() => {
+    setAppliedDateRange(dateRangeFilter);
+  }, [dateRangeFilter]);
+
+  // Handle Add New Submission
+  const handleCreateTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newFromWh === newToWh) {
+      alert("Origin and destination warehouse cannot be the same.");
+      return;
+    }
+
+    const nextSr = (items[0]?.sr_no || 52) + 1;
+    const now = new Date();
+    const dateStr =
+      now.toLocaleDateString("en-GB").replace(/\//g, "-") +
+      " " +
+      now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+
+    const totalVal = parseFloat(newAmount) || 0;
+    const newRecord: StockTransferItem = {
+      id: `trf-${Date.now()}`,
+      sr_no: nextSr,
+      transfer_no: `TRF-2026-${String(nextSr).padStart(3, "0")}`,
+      transfer_date: dateStr,
+      from_warehouse: newFromWh,
+      to_warehouse: newToWh,
+      total_amount: totalVal,
+      added_by: "Akshata Wadekar",
+      status: "Received",
+      remarks: newRemarks,
+      items: [
+        {
+          product_name: "General Inventory Transfer Batch",
+          category: "Machines",
+          quantity: 1,
+          uom: "SET",
+          rate: totalVal,
+          amount: totalVal,
+        },
+      ],
+    };
+
+    setItems((prev) => [newRecord, ...prev]);
+    setTabCounts((prev) => ({
+      ...prev,
+      all: prev.all + 1,
+      received: prev.received + 1,
+    }));
+    setShowAddModal(false);
+
+    try {
+      await InventoryApi.createStockTransfer({
+        transfer_date: dateStr,
+        from_warehouse: newFromWh,
+        to_warehouse: newToWh,
+        total_amount: totalVal,
+        added_by: "Akshata Wadekar",
+        status: "Received",
+        remarks: newRemarks,
+        items: newRecord.items || [],
+      });
+    } catch (err) {
+      console.warn("Failed to persist transfer to DB:", err);
+    }
+  };
+
+  // Filtered items
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      if (activeTab !== "All" && item.status.toLowerCase() !== activeTab.toLowerCase()) {
+        return false;
+      }
+      if (fromWhFilter !== "All" && item.from_warehouse !== fromWhFilter) {
+        return false;
+      }
+      if (toWhFilter !== "All" && item.to_warehouse !== toWhFilter) {
+        return false;
+      }
+      // Applied Date Range filtering
+      if (appliedDateRange && appliedDateRange.includes("-")) {
+        const [sStr, eStr] = appliedDateRange.split("-").map((s) => s.trim());
+        const [sm, sd, sy] = sStr.split("/").map((n) => parseInt(n, 10));
+        const [em, ed, ey] = eStr.split("/").map((n) => parseInt(n, 10));
+        if (!isNaN(sm) && !isNaN(sd) && !isNaN(sy) && !isNaN(em) && !isNaN(ed) && !isNaN(ey)) {
+          const startDate = new Date(sy, sm - 1, sd, 0, 0, 0);
+          const endDate = new Date(ey, em - 1, ed, 23, 59, 59);
+          const datePart = item.transfer_date.split(" ")[0]; // e.g. "18-09-2026"
+          const itemParts = datePart.split("-").map((n) => parseInt(n, 10));
+          if (itemParts.length === 3) {
+            const itemDate = new Date(itemParts[2], itemParts[1] - 1, itemParts[0], 12, 0, 0);
+            if (itemDate < startDate || itemDate > endDate) {
+              return false;
+            }
+          }
+        }
+      }
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        const matchNo = item.transfer_no.toLowerCase().includes(q);
+        const matchFrom = item.from_warehouse.toLowerCase().includes(q);
+        const matchTo = item.to_warehouse.toLowerCase().includes(q);
+        const matchUser = item.added_by.toLowerCase().includes(q);
+        const matchDate = item.transfer_date.toLowerCase().includes(q);
+        if (!matchNo && !matchFrom && !matchTo && !matchUser && !matchDate) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [items, activeTab, fromWhFilter, toWhFilter, appliedDateRange, searchTerm]);
+
+  return (
+    <AppShell activeKey="stock-transfer">
+      <div className="page-stock-transfer">
+        {/* Top Header */}
+        <div className="transfer-header">
+          <h1 className="transfer-header-title">Stock Transfer</h1>
+
+          <div className="transfer-header-actions">
+            {/* Filter Toggle Button */}
+            <button
+              type="button"
+              className={`transfer-btn-filter ${showFilterPanel ? "active" : ""}`}
+              onClick={() => setShowFilterPanel((prev) => !prev)}
+              title="Filter stock transfers"
+              aria-label="Filter"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+              </svg>
+            </button>
+
+            {/* + ADD NEW Button */}
+            <button
+              type="button"
+              className="transfer-btn-add"
+              onClick={() => navigate("/transfer/addEdit")}
+            >
+              + ADD NEW
+            </button>
+          </div>
+        </div>
+
+        {/* Status Tabs Card (All, Pending, Confirmed, Received, Cancel) */}
+        <div className="transfer-tabs-card" data-testid="transfer-status-tabs">
+          <button
+            type="button"
+            data-testid="tab-All"
+            className={`transfer-tab-btn ${activeTab === "All" ? "active" : ""}`}
+            onClick={() => setActiveTab("All")}
+          >
+            All ({tabCounts.all})
+          </button>
+          <button
+            type="button"
+            data-testid="tab-Pending"
+            className={`transfer-tab-btn ${activeTab === "Pending" ? "active" : ""}`}
+            onClick={() => setActiveTab("Pending")}
+          >
+            Pending ({tabCounts.pending})
+          </button>
+          <button
+            type="button"
+            data-testid="tab-Confirmed"
+            className={`transfer-tab-btn ${activeTab === "Confirmed" ? "active" : ""}`}
+            onClick={() => setActiveTab("Confirmed")}
+          >
+            Confirmed ({tabCounts.confirmed})
+          </button>
+          <button
+            type="button"
+            data-testid="tab-Received"
+            className={`transfer-tab-btn ${activeTab === "Received" ? "active" : ""}`}
+            onClick={() => setActiveTab("Received")}
+          >
+            Received ({tabCounts.received})
+          </button>
+          <button
+            type="button"
+            data-testid="tab-Cancel"
+            className={`transfer-tab-btn ${activeTab === "Cancel" ? "active" : ""}`}
+            onClick={() => setActiveTab("Cancel")}
+          >
+            Cancel ({tabCounts.cancel})
+          </button>
+        </div>
+
+        {/* Collapsible Filter Panel (Exact Screenshot Replica) */}
+        {showFilterPanel && (
+          <div className="transfer-filter-panel" data-testid="transfer-filter-panel">
+            <div className="transfer-filter-field">
+              <label htmlFor="filter-transfer-date">Transfer Date</label>
+              <DateRangePicker
+                id="filter-transfer-date"
+                className="transfer-filter-input"
+                value={dateRangeFilter}
+                onChange={(val) => setDateRangeFilter(val)}
+                onApply={(val) => {
+                  setDateRangeFilter(val);
+                  setAppliedDateRange(val);
+                }}
+                placeholder=""
+              />
+            </div>
+
+            <div className="transfer-filter-actions">
+              <button
+                type="button"
+                className="transfer-btn-reset"
+                onClick={handleResetFilters}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                className="transfer-btn-search"
+                onClick={handleSearchFilters}
+              >
+                Search
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Control Bar: Items per page & Search Input */}
+        <div className="transfer-control-bar">
+          <div className="transfer-per-page">
+            <select
+              className="transfer-per-page-select"
+              value={perPage}
+              onChange={(e) => setPerPage(Number(e.target.value))}
+              aria-label="Items per page"
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            <span>Items/Page</span>
+          </div>
+
+          <div className="transfer-search-wrap">
+            <input
+              type="text"
+              className="transfer-search-input"
+              placeholder="Search..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Table Card */}
+        <div className="transfer-table-card">
+          <div className="transfer-table-wrap">
+            <table className="transfer-table">
+              <thead>
+                <tr>
+                  <th className="sortable">
+                    Sr. No. <span className="sort-icon">▼</span>
+                  </th>
+                  <th>Transfer Date</th>
+                  <th className="sortable">
+                    From Warehouse <span className="sort-icon">⇅</span>
+                  </th>
+                  <th>To Warehouse</th>
+                  <th style={{ textAlign: "right" }}>Total</th>
+                  <th className="sortable">
+                    Added By <span className="sort-icon">⇅</span>
+                  </th>
+                  <th>Status</th>
+                  <th style={{ textAlign: "center", width: "60px" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <StockTransferSkeletonRows count={perPage > 10 ? 10 : perPage} />
+                ) : filteredItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: "center", padding: "36px", color: "#64748b" }}>
+                      No stock transfers found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredItems.slice(0, perPage).map((item) => (
+                    <tr
+                      key={item.id}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => setActiveItem(item)}
+                    >
+                      <td>{item.sr_no}</td>
+                      <td>
+                        <a
+                          href="#view"
+                          className="transfer-date-link"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setActiveItem(item);
+                          }}
+                        >
+                          {item.transfer_date}
+                        </a>
+                      </td>
+                      <td>{item.from_warehouse}</td>
+                      <td>{item.to_warehouse}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600, color: "#0f172a" }}>
+                        {formatIndianCurrency(item.total_amount)}
+                      </td>
+                      <td>{item.added_by}</td>
+                      <td>
+                        <span className={`badge-status ${item.status.toLowerCase()}`}>
+                          {item.status}
+                        </span>
+                      </td>
+                      <td className="transfer-action-cell" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className={`transfer-action-btn ${openActionMenuId === item.id ? "active" : ""}`}
+                          title="Actions"
+                          aria-label="Actions"
+                          aria-expanded={openActionMenuId === item.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
+                          }}
+                        >
+                          ⋮
+                        </button>
+
+                        {openActionMenuId === item.id && (
+                          <div className="transfer-action-menu" data-testid="action-popup-menu">
+                            {item.status !== "Cancel" && (
+                              <button
+                                type="button"
+                                className="transfer-action-item"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCancelTransfer(item);
+                                  setOpenActionMenuId(null);
+                                }}
+                              >
+                                <span>✕</span>
+                                <span>Cancel</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="transfer-action-item"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownload(item);
+                                setOpenActionMenuId(null);
+                              }}
+                            >
+                              <span>📥</span>
+                              <span>Download</span>
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="transfer-footer-bar">
+            <span>
+              Showing <strong>{Math.min(filteredItems.length, perPage)}</strong> of{" "}
+              <strong>{filteredItems.length}</strong> transfers
+            </span>
+          </div>
+        </div>
+
+        {/* SideDrawer for Details */}
+        <SideDrawer
+          open={Boolean(activeItem)}
+          onClose={() => setActiveItem(null)}
+          title="Stock Transfer Details"
+          subtitle={activeItem ? `${activeItem.transfer_no} • ${activeItem.from_warehouse} → ${activeItem.to_warehouse}` : ""}
+          maxWidth="min(1000px, 96vw)"
+        >
+          {activeItem && (
+            <div>
+              <DetailFieldGrid
+                fields={[
+                  { label: "Transfer No.", value: activeItem.transfer_no },
+                  { label: "Transfer Date", value: activeItem.transfer_date },
+                  { label: "From Warehouse", value: activeItem.from_warehouse },
+                  { label: "To Warehouse", value: activeItem.to_warehouse },
+                  { label: "Total Amount", value: formatIndianCurrency(activeItem.total_amount) },
+                  { label: "Added By", value: activeItem.added_by },
+                  { label: "Status", value: activeItem.status },
+                  { label: "Remarks", value: activeItem.remarks || "—" },
+                ]}
+              />
+
+              <div style={{ marginTop: "24px" }}>
+                <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>
+                  Transferred Line Items Breakdown
+                </h3>
+                <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "6px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                    <thead>
+                      <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#475569" }}>Sr No.</th>
+                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#475569" }}>Product Name</th>
+                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#475569" }}>Code</th>
+                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#475569" }}>Category</th>
+                        <th style={{ padding: "10px 14px", textAlign: "right", color: "#475569" }}>Quantity</th>
+                        <th style={{ padding: "10px 14px", textAlign: "right", color: "#475569" }}>Rate</th>
+                        <th style={{ padding: "10px 14px", textAlign: "right", color: "#475569" }}>Total Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeItem.items && activeItem.items.length > 0 ? (
+                        activeItem.items.map((it, idx) => (
+                          <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ padding: "10px 14px" }}>{idx + 1}</td>
+                            <td style={{ padding: "10px 14px", fontWeight: 600 }}>{it.product_name}</td>
+                            <td style={{ padding: "10px 14px", color: "#64748b" }}>{it.product_code || "-"}</td>
+                            <td style={{ padding: "10px 14px" }}>{it.category || "Machines"}</td>
+                            <td style={{ padding: "10px 14px", textAlign: "right" }}>{it.quantity} {it.uom}</td>
+                            <td style={{ padding: "10px 14px", textAlign: "right" }}>{formatIndianCurrency(it.rate)}</td>
+                            <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 600 }}>{formatIndianCurrency(it.amount)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={7} style={{ padding: "16px", textAlign: "center", color: "#64748b" }}>
+                            No individual line item details specified.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </SideDrawer>
+
+        {/* Add New Modal */}
+        {showAddModal && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+              padding: "20px",
+            }}
+            onClick={() => setShowAddModal(false)}
+          >
+            <div
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "8px",
+                width: "100%",
+                maxWidth: "520px",
+                padding: "24px",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
+                  Record New Stock Transfer
+                </h3>
+                <button
+                  type="button"
+                  style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer", color: "#94a3b8" }}
+                  onClick={() => setShowAddModal(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateTransfer}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                      From Warehouse *
+                    </label>
+                    <select
+                      value={newFromWh}
+                      onChange={(e) => setNewFromWh(e.target.value)}
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
+                    >
+                      <option value="Ahmedabad">Ahmedabad</option>
+                      <option value="Mumbai">Mumbai</option>
+                      <option value="Indore">Indore</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                      To Warehouse *
+                    </label>
+                    <select
+                      value={newToWh}
+                      onChange={(e) => setNewToWh(e.target.value)}
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
+                    >
+                      <option value="Mumbai">Mumbai</option>
+                      <option value="Ahmedabad">Ahmedabad</option>
+                      <option value="Indore">Indore</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                      Total Amount (₹) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      placeholder="e.g. 150000"
+                      value={newAmount}
+                      onChange={(e) => setNewAmount(e.target.value)}
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                      Remarks
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="Transfer reasons, truck number, consignment notes..."
+                      value={newRemarks}
+                      onChange={(e) => setNewRemarks(e.target.value)}
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
+                  <button
+                    type="button"
+                    style={{ padding: "8px 16px", border: "1px solid #cbd5e1", borderRadius: "6px", background: "#ffffff", color: "#475569", fontWeight: 600, cursor: "pointer" }}
+                    onClick={() => setShowAddModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={{ padding: "8px 18px", border: "none", borderRadius: "6px", background: "#0284c7", color: "#ffffff", fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Save Transfer
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    </AppShell>
+  );
+}

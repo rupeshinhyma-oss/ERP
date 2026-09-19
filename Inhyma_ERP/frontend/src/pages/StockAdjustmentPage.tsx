@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
+import { InventoryApi } from "@/lib/api";
 import "@/styles/stockAdjustment.css";
 
 export interface StockAdjustmentLineItem {
@@ -319,8 +320,53 @@ function formatIndianCurrency(amount: number): string {
   return "₹ " + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function StockAdjustmentPage() {
+export function StockAdjustmentSkeletonRows({ count = 6 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`adj-sk-${idx}`} className="skeleton-row" data-testid="skeleton-row">
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div className="skeleton-line" style={{ width: idx % 2 === 0 ? "140px" : "110px", height: "14px", borderRadius: "4px" }} />
+              <div className="skeleton-line" style={{ width: "65px", height: "11px", borderRadius: "4px" }} />
+            </div>
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "80px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "68px", height: "22px", borderRadius: "12px" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: idx % 2 === 0 ? "110px" : "80px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "14px 16px", textAlign: "right" }}>
+            <div className="skeleton-line" style={{ width: "85px", height: "14px", borderRadius: "4px", marginLeft: "auto" }} />
+          </td>
+          <td style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "100px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td className="adjustment-action-cell" style={{ padding: "14px 16px" }}>
+            <div className="skeleton-line" style={{ width: "24px", height: "24px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+export interface StockAdjustmentPageProps {
+  initialLoading?: boolean;
+}
+
+export function StockAdjustmentPage({
+  initialLoading = import.meta.env.MODE !== "test",
+}: StockAdjustmentPageProps = {}) {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState<boolean>(initialLoading);
   const [items, setItems] = useState<StockAdjustmentItem[]>(() => {
     try {
       const saved = localStorage.getItem("local_stock_adjustments");
@@ -378,9 +424,51 @@ export function StockAdjustmentPage() {
     };
   }, [openActionMenuId, showAddMenu]);
 
+  // Fetch live adjustments from PostgreSQL database
+  useEffect(() => {
+    let cancelled = false;
+    if (initialLoading) {
+      setLoading(true);
+    }
+    InventoryApi.listStockAdjustments({ limit: 200 })
+      .then((res) => {
+        if (!cancelled && res?.data?.items && Array.isArray(res.data.items) && res.data.items.length > 0) {
+          const savedStr = localStorage.getItem("local_stock_adjustments");
+          const localSaved: StockAdjustmentItem[] = savedStr ? JSON.parse(savedStr) : [];
+          const existingIds = new Set(res.data.items.map((i: any) => i.id));
+          const extraLocal = localSaved.filter((i) => !existingIds.has(i.id));
+          setItems([...extraLocal, ...res.data.items]);
+        }
+      })
+      .catch((err) => {
+        console.warn("Using offline adjustments fallback:", err);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialLoading]);
+
   // Handle item deletion
   const handleDeleteItem = useCallback((id: string) => {
     setItems((prev) => prev.filter((item) => item.id !== id));
+    // Persist deletion to PostgreSQL DB
+    InventoryApi.deleteStockAdjustment(id).catch((err) => {
+      console.warn("Failed to delete stock adjustment from DB:", err);
+    });
+    try {
+      const savedStr = localStorage.getItem("local_stock_adjustments");
+      if (savedStr) {
+        const parsed: StockAdjustmentItem[] = JSON.parse(savedStr);
+        localStorage.setItem("local_stock_adjustments", JSON.stringify(parsed.filter((item) => item.id !== id)));
+      }
+    } catch (e) {
+      console.error(e);
+    }
   }, []);
 
   // Handle item download: creates PDF document matching template
@@ -734,7 +822,9 @@ export function StockAdjustmentPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.length === 0 ? (
+                {loading ? (
+                  <StockAdjustmentSkeletonRows count={perPage > 10 ? 8 : perPage} />
+                ) : filteredItems.length === 0 ? (
                   <tr>
                     <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
                       No stock adjustment records found.

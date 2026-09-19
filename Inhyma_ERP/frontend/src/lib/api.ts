@@ -740,6 +740,15 @@ export interface StockAdjustmentFilterParams {
   limit?: number;
 }
 
+export interface StockTransferFilterParams {
+  status?: string;
+  from_warehouse?: string;
+  to_warehouse?: string;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
 export const InventoryApi = {
   /**
    * Fetch product stock list with warehouse filtering and live search.
@@ -755,14 +764,14 @@ export const InventoryApi = {
     if (params?.limit !== undefined) qs.set("limit", String(params.limit));
 
     const endpoint = `/inventory/product-stock${qs.toString() ? `?${qs.toString()}` : ""}`;
-    return apiFetch<any>(endpoint);
+    return apiGet<any>(endpoint);
   },
 
   /**
    * Fetch details for a specific product stock item.
    */
   async getProductStock(stockId: string) {
-    return apiFetch<any>(`/inventory/product-stock/${stockId}`);
+    return apiGet<any>(`/inventory/product-stock/${stockId}`);
   },
 
   /**
@@ -779,33 +788,28 @@ export const InventoryApi = {
     if (params?.limit !== undefined) qs.set("limit", String(params.limit));
 
     const endpoint = `/inventory/stock-adjustment${qs.toString() ? `?${qs.toString()}` : ""}`;
-    return apiFetch<any>(endpoint);
+    return apiGet<any>(endpoint);
   },
 
   /**
    * Fetch specific stock adjustment details.
    */
   async getStockAdjustment(adjustmentId: string) {
-    return apiFetch<any>(`/inventory/stock-adjustment/${adjustmentId}`);
+    return apiGet<any>(`/inventory/stock-adjustment/${adjustmentId}`);
   },
 
   /**
    * Create a new stock adjustment.
    */
   async createStockAdjustment(data: any) {
-    return apiFetch<any>("/inventory/stock-adjustment", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    return apiPost<any>("/inventory/stock-adjustment", data);
   },
 
   /**
    * Delete an adjustment record.
    */
   async deleteStockAdjustment(adjustmentId: string) {
-    return apiFetch<any>(`/inventory/stock-adjustment/${adjustmentId}`, {
-      method: "DELETE",
-    });
+    return apiDelete<any>(`/inventory/stock-adjustment/${adjustmentId}`);
   },
 
   /**
@@ -813,5 +817,42 @@ export const InventoryApi = {
    */
   getAdjustmentPdfUrl(adjustmentId: string) {
     return `${API_BASE}/adjustment/adjustment-order-pdf/${adjustmentId}`;
+  },
+
+  /**
+   * Fetch stock transfers with tab status filtering, warehouse filters, and search.
+   */
+  async listStockTransfers(params?: StockTransferFilterParams) {
+    const qs = new URLSearchParams();
+    if (params?.status && params.status !== "All") qs.set("status", params.status);
+    if (params?.from_warehouse && params.from_warehouse !== "All") qs.set("from_warehouse", params.from_warehouse);
+    if (params?.to_warehouse && params.to_warehouse !== "All") qs.set("to_warehouse", params.to_warehouse);
+    if (params?.search) qs.set("search", params.search);
+    if (params?.skip !== undefined) qs.set("skip", String(params.skip));
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+
+    const endpoint = `/inventory/stock-transfer${qs.toString() ? `?${qs.toString()}` : ""}`;
+    return apiGet<any>(endpoint);
+  },
+
+  /**
+   * Fetch specific stock transfer details.
+   */
+  async getStockTransfer(transferId: string) {
+    return apiGet<any>(`/inventory/stock-transfer/${transferId}`);
+  },
+
+  /**
+   * Create a new stock transfer.
+   */
+  async createStockTransfer(data: any) {
+    return apiPost<any>("/inventory/stock-transfer", data);
+  },
+
+  /**
+   * Update transfer status (e.g. Cancel).
+   */
+  async updateStockTransferStatus(transferId: string, status: string) {
+    return apiPatch<any>(`/inventory/stock-transfer/${transferId}/status`, { status });
   },
 };

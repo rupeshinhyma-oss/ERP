@@ -71,6 +71,7 @@ import app.suppliers.models  # noqa: F401,E402 - Phase 8
 import app.buyers.models  # noqa: F401,E402
 import app.inquiries.models  # noqa: F401,E402
 import app.planning.models  # noqa: F401,E402
+import app.inventory.models  # noqa: F401,E402
 
 # This is the Alembic Config object, providing access to the values within
 # the .ini file in use.

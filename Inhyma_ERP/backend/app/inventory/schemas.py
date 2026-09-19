@@ -6,8 +6,8 @@ Pydantic Schemas for Inventory Modules:
 
 from __future__ import annotations
 
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, List, Optional
+from pydantic import BaseModel, Field, model_validator
 
 
 # ==============================================================================
@@ -61,6 +61,29 @@ class StockAdjustmentLineItemSchema(BaseModel):
     rate: float = Field(..., ge=0, description="Rate / unit price in INR")
     amount: float = Field(..., ge=0, description="Total amount (qty * rate)")
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "product_name" not in data and "item_name" in data:
+                data["product_name"] = data["item_name"]
+            if "qty" not in data and "quantity" in data:
+                data["qty"] = data["quantity"]
+            if "rate" not in data and "unit_price" in data:
+                data["rate"] = data["unit_price"]
+            if "amount" not in data:
+                if "total_price" in data:
+                    data["amount"] = data["total_price"]
+                elif "qty" in data and "rate" in data:
+                    data["amount"] = float(data["qty"]) * float(data["rate"])
+            if "hsn_code" not in data and "hsn" in data:
+                data["hsn_code"] = data["hsn"]
+            if "gst_rate" not in data and "gst" in data:
+                data["gst_rate"] = data["gst"]
+            if "uom" not in data:
+                data["uom"] = "SET"
+        return data
+
 
 class StockAdjustmentCreate(BaseModel):
     """Payload to record a new stock adjustment."""
@@ -73,6 +96,20 @@ class StockAdjustmentCreate(BaseModel):
     purpose: str = Field(..., description="Purpose: 'Return From Client', 'Split', 'Damage'")
     remarks: Optional[str] = Field(None, description="Detailed reasons or inspection remarks")
     items: List[StockAdjustmentLineItemSchema] = Field(..., min_length=1, description="Line items adjusted")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_adjustment_type(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "type" not in data and "adjustment_type" in data:
+                raw_type = str(data["adjustment_type"]).upper()
+                if "IN" in raw_type:
+                    data["type"] = "Stock IN"
+                elif "OUT" in raw_type:
+                    data["type"] = "Stock OUT"
+                else:
+                    data["type"] = data["adjustment_type"]
+        return data
 
 
 class StockAdjustmentRead(BaseModel):
@@ -103,3 +140,62 @@ class StockAdjustmentFilterParams(BaseModel):
     search: Optional[str] = Field(None, description="Search term for client, invoice, product, warehouse")
     skip: int = Field(0, ge=0)
     limit: int = Field(50, ge=1, le=500)
+
+
+# ==============================================================================
+# Stock Transfer Schemas
+# ==============================================================================
+
+class StockTransferLineItemSchema(BaseModel):
+    """Line item belonging to a stock transfer."""
+    id: Optional[str] = None
+    product_name: str
+    product_code: Optional[str] = "-"
+    category: Optional[str] = "Machines"
+    quantity: float = Field(1.0, gt=0)
+    uom: str = "SET"
+    rate: float = Field(0.0, ge=0)
+    amount: float = Field(0.0, ge=0)
+
+
+class StockTransferCreate(BaseModel):
+    """Payload to record a new stock transfer."""
+    transfer_date: str = Field(..., description="Date and time string (e.g. '18-09-2026 04:37 PM')")
+    from_warehouse: str = Field(..., description="Origin warehouse")
+    to_warehouse: str = Field(..., description="Destination warehouse")
+    total_amount: Optional[float] = Field(None, description="Grand total amount")
+    added_by: str = Field("Akshata Wadekar", description="User who recorded the transfer")
+    status: str = Field("Received", description="'Received' | 'Pending' | 'Confirmed' | 'Cancel'")
+    remarks: Optional[str] = None
+    items: List[StockTransferLineItemSchema] = Field(default_factory=list)
+
+
+class StockTransferRead(BaseModel):
+    """Full stock transfer record schema."""
+    id: str
+    sr_no: int
+    transfer_no: str
+    transfer_date: str
+    from_warehouse: str
+    to_warehouse: str
+    total_amount: float
+    added_by: str
+    status: str
+    remarks: Optional[str] = None
+    items: List[StockTransferLineItemSchema] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class StockTransferTabCounts(BaseModel):
+    """Count of stock transfers across status tabs."""
+    all: int = 0
+    pending: int = 0
+    confirmed: int = 0
+    received: int = 0
+    cancel: int = 0
+
+
+class StockTransferUpdateStatus(BaseModel):
+    """Payload to update stock transfer status."""
+    status: str = Field(..., description="'Received' | 'Pending' | 'Confirmed' | 'Cancel'")

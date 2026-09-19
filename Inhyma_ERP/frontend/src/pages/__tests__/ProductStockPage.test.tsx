@@ -197,5 +197,16 @@ describe("ProductStockPage", () => {
     expect(screen.getByText("Sensor (Banding)")).toBeTruthy();
     expect(screen.getByText("XLSG36100 Capping Machine")).toBeTruthy();
   });
+
+  it("renders shimmer skeleton rows when loading is true", () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage initialLoading={true} />
+      </BrowserRouter>
+    );
+
+    const skeletonRows = screen.getAllByTestId("stock-skeleton-row");
+    expect(skeletonRows.length).toBe(8);
+  });
 });
 

@@ -80,6 +80,9 @@ import { ProductStockPage } from "@/pages/ProductStockPage";
 import { StockAdjustmentPage } from "@/pages/StockAdjustmentPage";
 import { AdjustmentOrderPdfPage } from "@/pages/AdjustmentOrderPdfPage";
 import { AddAdjustmentOrderPage } from "@/pages/AddAdjustmentOrderPage";
+import { StockTransferPage } from "@/pages/StockTransferPage";
+import { TransferOrderPdfPage } from "@/pages/TransferOrderPdfPage";
+import { AddTransferOrderPage } from "@/pages/AddTransferOrderPage";
 
 export function App() {
   const navigate = useNavigate();
@@ -180,6 +183,12 @@ export function App() {
           <Route path="/masters/categories" element={<CategoriesPage />} />
           <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
           <Route path="/masters/products" element={<ProductsPage />} />
+          <Route path="/product/list" element={<ProductsPage />} />
+          <Route path="/product" element={<Navigate to="/product/list" replace />} />
+          <Route path="/product/addEdit" element={<ProductsPage defaultAdd={true} />} />
+          <Route path="/product/addedit" element={<ProductsPage defaultAdd={true} />} />
+          <Route path="/product/add" element={<ProductsPage defaultAdd={true} />} />
+          <Route path="/product/create" element={<ProductsPage defaultAdd={true} />} />
           <Route path="/product-stock/list" element={<ProductStockPage />} />
           <Route path="/product-stock" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock/list" element={<Navigate to="/product-stock/list" replace />} />
@@ -192,19 +201,23 @@ export function App() {
           <Route path="/adjustment/add" element={<AddAdjustmentOrderPage />} />
           <Route path="/adjustment" element={<Navigate to="/adjustment/list" replace />} />
           <Route path="/adjustment/adjustment-order-pdf/:id" element={<AdjustmentOrderPdfPage />} />
-          <Route path="/adjustment/adjustment-order-pdf" element={<AdjustmentOrderPdfPage />} />
-          <Route
-            path="/stock-transfer"
-            element={
-              <ComingSoonPage
-                activeKey="stock-transfer"
-                title="Stock Transfer"
-                subtitle="Manage warehouse and branch inventory transfers"
-                breadcrumbLabel="Stock Transfer"
-                featureName="Stock Transfer"
-              />
-            }
-          />
+          <Route path="/stock-transfer" element={<StockTransferPage />} />
+          <Route path="/stock-transfer/list" element={<StockTransferPage />} />
+          <Route path="/transfer/list" element={<StockTransferPage />} />
+          <Route path="/transfer/addEdit" element={<AddTransferOrderPage />} />
+          <Route path="/transfer/addedit" element={<AddTransferOrderPage />} />
+          <Route path="/transfer/add" element={<AddTransferOrderPage />} />
+          <Route path="/stock-transfer/add" element={<AddTransferOrderPage />} />
+          <Route path="/stock-transfer/addEdit" element={<AddTransferOrderPage />} />
+          <Route path="/transfer/transfer-order-pdf/:id" element={<TransferOrderPdfPage />} />
+          <Route path="/transfer/transfer-order-pdf" element={<TransferOrderPdfPage />} />
+          <Route path="/transfer/transfer_order_pdf/:id" element={<TransferOrderPdfPage />} />
+          <Route path="/transfer/transfer_order_pdf" element={<TransferOrderPdfPage />} />
+          <Route path="/transfer/transfer-order_pdf/:id" element={<TransferOrderPdfPage />} />
+          <Route path="/transfer/transfer-order_pdf" element={<TransferOrderPdfPage />} />
+          <Route path="/stock-transfer/transfer-order-pdf/:id" element={<TransferOrderPdfPage />} />
+          <Route path="/stock-transfer/transfer-order-pdf" element={<TransferOrderPdfPage />} />
+          <Route path="/transfer" element={<Navigate to="/transfer/list" replace />} />
           <Route path="/product-gallery" element={<ProductGalleryPage />} />
           <Route path="/product_gallery" element={<Navigate to="/product-gallery" replace />} />
 

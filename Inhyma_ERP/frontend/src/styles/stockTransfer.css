@@ -1,0 +1,1126 @@
+/* ==========================================================================
+   Stock Transfer Page Styles (Matches erp.inhymasolutions.com/transfer/list)
+   ========================================================================== */
+
+.page-stock-transfer {
+  padding: 20px 24px 40px;
+  background-color: #f8fafc;
+  min-height: calc(100vh - 64px);
+}
+
+/* Header */
+.transfer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.transfer-header-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+.transfer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.transfer-btn-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background-color: #5b6b82;
+  color: #ffffff;
+  border: 1px solid #5b6b82;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  height: 38px;
+  min-width: 38px;
+}
+
+.transfer-btn-filter:hover {
+  background-color: #475569;
+  border-color: #475569;
+}
+
+.transfer-btn-filter.active {
+  background-color: #334155;
+}
+
+.transfer-btn-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background-color: #0284c7;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  height: 38px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.transfer-btn-add:hover {
+  background-color: #0369a1;
+}
+
+/* Status Tabs Card */
+.transfer-tabs-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0 16px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  overflow-x: auto;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.transfer-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 4px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.transfer-tab-btn:hover {
+  color: #0f172a;
+}
+
+.transfer-tab-btn.active {
+  color: #0284c7;
+  border-bottom-color: #0284c7;
+}
+
+/* Control Bar */
+.transfer-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.transfer-per-page {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.transfer-per-page-select {
+  padding: 6px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1e293b;
+  background-color: #ffffff;
+  outline: none;
+  cursor: pointer;
+}
+
+.transfer-search-wrap {
+  position: relative;
+  width: 260px;
+}
+
+.transfer-search-input {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1e293b;
+  background-color: #ffffff;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.transfer-search-input:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1);
+}
+
+/* Table Card */
+.transfer-table-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.transfer-table-wrap {
+  overflow-x: auto;
+  width: 100%;
+}
+
+.transfer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+
+.transfer-table thead th {
+  background-color: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.transfer-table thead th.sortable {
+  cursor: pointer;
+}
+
+.transfer-table thead th.sortable:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+.transfer-table tbody td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.transfer-table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.transfer-table tbody tr:hover {
+  background-color: #f8fafc;
+}
+
+.transfer-date-link {
+  color: #0284c7;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.transfer-date-link:hover {
+  color: #0369a1;
+  text-decoration: underline;
+}
+
+/* Status Badges */
+.badge-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.badge-status.received {
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.badge-status.pending {
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
+.badge-status.confirmed {
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+}
+
+.badge-status.cancel {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+/* Action Dropdown */
+.transfer-action-cell {
+  position: relative;
+  text-align: center;
+}
+
+.transfer-action-btn {
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.transfer-action-btn:hover,
+.transfer-action-btn.active {
+  background-color: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.transfer-action-menu {
+  position: absolute;
+  right: 16px;
+  top: 40px;
+  z-index: 50;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  min-width: 125px;
+  padding: 4px 0;
+  animation: menuDrop 0.12s ease-out;
+}
+
+@keyframes menuDrop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.transfer-action-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 14px;
+  background: transparent;
+  border: none;
+  color: #334155;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.transfer-action-item:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+/* Skeleton Loading */
+.skeleton-row td {
+  background-color: #ffffff;
+}
+
+.skeleton-row:hover td {
+  background-color: #f8fafc !important;
+}
+
+.skeleton-line {
+  display: inline-block;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+  background-size: 400% 100%;
+  animation: transferShimmer 1.3s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes transferShimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
+/* Footer Pagination */
+.transfer-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background-color: #ffffff;
+  border-top: 1px solid #e2e8f0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* Filter Panel (Exact Screenshot Replica) */
+.transfer-filter-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  position: relative;
+}
+
+.transfer-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 280px;
+}
+
+.transfer-filter-field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.transfer-filter-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1e293b;
+  outline: none;
+  background-color: #ffffff;
+  transition: border-color 0.15s ease;
+  height: 38px;
+  box-sizing: border-box;
+}
+
+.transfer-filter-input:focus {
+  border-color: #0284c7;
+}
+
+.transfer-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.transfer-btn-reset {
+  background-color: #64748b;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  height: 38px;
+}
+
+.transfer-btn-reset:hover {
+  background-color: #475569;
+}
+
+.transfer-btn-search {
+  background-color: #ffb822;
+  color: #1e293b;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  height: 38px;
+}
+
+.transfer-btn-search:hover {
+  background-color: #f59e0b;
+}
+
+/* ==========================================================================
+   DateRangePicker Popover Styles (Exact Screenshot Replica)
+   ========================================================================== */
+.date-range-container {
+  position: relative;
+  width: 100%;
+}
+
+.date-range-popover {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  z-index: 100;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.15), 0 10px 15px -5px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  animation: filterSlideDown 0.15s ease-out;
+}
+
+.date-range-body {
+  display: flex;
+}
+
+/* Left Sidebar Presets */
+.date-range-sidebar {
+  width: 135px;
+  padding: 12px 8px;
+  border-right: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background-color: #ffffff;
+  border-top-left-radius: 8px;
+}
+
+.date-range-preset-btn {
+  padding: 6px 12px;
+  font-size: 12.5px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: #334155;
+  transition: all 0.12s ease;
+  font-weight: 500;
+}
+
+.date-range-preset-btn:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+.date-range-preset-btn.active {
+  background-color: #0284c7;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* Dual Calendars */
+.date-range-calendars {
+  display: flex;
+  gap: 16px;
+  padding: 14px 16px;
+  background-color: #ffffff;
+  border-top-right-radius: 8px;
+}
+
+.date-range-calendar {
+  width: 220px;
+}
+
+.date-range-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.date-range-nav-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.date-range-nav-btn:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.date-range-cal-select {
+  height: 26px;
+  font-size: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 0 4px;
+  background: #ffffff;
+  color: #1e293b;
+  outline: none;
+  cursor: pointer;
+}
+
+.date-range-cal-select:focus {
+  border-color: #2563eb;
+}
+
+.date-range-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.date-range-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.date-range-day {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 0;
+  color: #1e293b;
+  user-select: none;
+  transition: background-color 0.1s ease;
+}
+
+.date-range-day.out-of-month {
+  color: #94a3b8;
+}
+
+.date-range-day.in-range {
+  background-color: #e0f2fe;
+  color: #0369a1;
+}
+
+.date-range-day.range-start {
+  background-color: #0284c7 !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.date-range-day.range-end {
+  background-color: #0284c7 !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.date-range-day:hover:not(.range-start):not(.range-end) {
+  background-color: #bae6fd;
+}
+
+/* Footer Action Bar */
+.date-range-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.date-range-footer-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  letter-spacing: 0.2px;
+}
+
+.date-range-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-range-btn-clear {
+  background: none;
+  border: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.12s;
+}
+
+.date-range-btn-clear:hover {
+  color: #1e293b;
+  background-color: #e2e8f0;
+}
+
+.date-range-btn-apply {
+  background-color: #0284c7;
+  color: #ffffff;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.date-range-btn-apply:hover {
+  background-color: #0369a1;
+}
+
+/* ==========================================================================
+   Add Transfer Order Page Styles (Matches erp.inhymasolutions.com/transfer/addEdit)
+   ========================================================================== */
+
+.page-add-transfer {
+  padding: 20px 24px 40px;
+  background-color: #f8fafc;
+  min-height: calc(100vh - 64px);
+}
+
+.add-transfer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.add-transfer-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+.add-transfer-btn-back {
+  background-color: #ffffff;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: all 0.15s ease;
+}
+
+.add-transfer-btn-back:hover {
+  background-color: #f1f5f9;
+  color: #1e293b;
+  border-color: #94a3b8;
+}
+
+.add-transfer-error-banner {
+  padding: 12px 16px;
+  background-color: #fee2e2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+.add-transfer-form-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.add-transfer-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .add-transfer-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.add-transfer-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.add-transfer-field-full {
+  width: 100%;
+}
+
+.add-transfer-field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.add-transfer-field .req {
+  color: #ef4444;
+  margin-left: 2px;
+}
+
+.add-transfer-select,
+.add-transfer-textarea,
+.add-transfer-input {
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #1e293b;
+  background-color: #ffffff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.add-transfer-select:focus,
+.add-transfer-textarea:focus,
+.add-transfer-input:focus {
+  border-color: #3b82f6;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.add-transfer-textarea {
+  resize: vertical;
+  min-height: 75px;
+  font-family: inherit;
+}
+
+/* PRODUCT SEARCH Fieldset */
+.add-transfer-search-fieldset {
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 12px 16px 16px;
+  margin: 4px 0;
+  position: relative;
+}
+
+.add-transfer-search-legend {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 6px;
+}
+
+.add-transfer-search-group {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  height: 38px;
+}
+
+.add-transfer-barcode-btn {
+  background-color: #1877f2;
+  border: none;
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+  color: #ffffff;
+  width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.add-transfer-barcode-btn:hover {
+  background-color: #166fe5;
+}
+
+.add-transfer-search-input {
+  flex: 1;
+  border: 1px solid #cbd5e1;
+  border-left: none;
+  border-right: none;
+  padding: 0 12px;
+  font-size: 13px;
+  color: #1e293b;
+  outline: none;
+  background-color: #ffffff;
+}
+
+.add-transfer-search-input:focus {
+  border-color: #3b82f6;
+}
+
+.add-transfer-search-input:disabled {
+  background-color: #f8fafc;
+  cursor: not-allowed;
+}
+
+.add-transfer-add-btn {
+  background-color: #dc2626;
+  border: none;
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+  color: #ffffff;
+  width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.add-transfer-add-btn:hover {
+  background-color: #b91c1c;
+}
+
+.add-transfer-notice-helper {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+/* Autocomplete Dropdown */
+.add-transfer-autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.add-transfer-autocomplete-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.add-transfer-autocomplete-item:hover {
+  background-color: #f8fafc;
+}
+
+.autocomplete-item-name {
+  font-size: 13px;
+  color: #1e293b;
+  display: block;
+}
+
+.autocomplete-item-sub {
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.autocomplete-item-avail {
+  font-size: 12px;
+  font-weight: 600;
+  display: block;
+}
+
+.autocomplete-item-avail.avail-positive {
+  color: #15803d;
+}
+
+.autocomplete-item-avail.avail-zero {
+  color: #ef4444;
+}
+
+.autocomplete-item-price {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.autocomplete-empty-state {
+  padding: 14px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+/* Notice text */
+.add-transfer-notice-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+/* Items Table */
+.add-transfer-table-wrap {
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.add-transfer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.add-transfer-table th {
+  background-color: #ffffff;
+  color: #1e293b;
+  font-weight: 600;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+}
+
+.add-transfer-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.table-product-title {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.table-product-meta {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.table-qty-input {
+  width: 70px;
+  height: 32px;
+  padding: 4px 6px;
+  text-align: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.table-price-input {
+  width: 115px;
+  height: 32px;
+  padding: 4px 8px;
+  text-align: right;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.table-action-delete-btn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.table-action-delete-btn:hover {
+  background-color: #fee2e2;
+}
+
+/* Grand Total Row */
+.transfer-grand-total-row {
+  background-color: #dbeafe !important;
+}
+
+.transfer-grand-total-label {
+  text-align: right;
+  font-weight: 700;
+  color: #1e293b;
+  padding-right: 24px !important;
+  font-size: 13px;
+}
+
+.add-transfer-table td.transfer-grand-total-value,
+.transfer-grand-total-value {
+  text-align: right;
+  font-weight: 700;
+  color: #16a34a !important;
+  font-size: 14px;
+}
+
+/* Bottom Actions */
+.add-transfer-actions {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.add-transfer-btn-submit {
+  background-color: #1a73e8;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 24px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: background-color 0.15s ease;
+}
+
+.add-transfer-btn-submit:hover:not(:disabled) {
+  background-color: #1557b0;
+}
+
+.add-transfer-btn-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+

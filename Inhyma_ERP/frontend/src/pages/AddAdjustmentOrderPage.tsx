@@ -211,8 +211,8 @@ export function AddAdjustmentOrderPage() {
     setSubmitting(true);
     try {
       const payload = {
-        adjustment_date: new Date().toISOString().split("T")[0],
-        adjustment_type: adjustmentType === "Stock IN" ? "IN" : "OUT",
+        adjustment_date: new Date().toLocaleDateString("en-GB").replace(/\//g, "-"),
+        type: adjustmentType,
         client_name: clientName || undefined,
         invoice_no: invoiceNo || undefined,
         warehouse,
@@ -220,14 +220,15 @@ export function AddAdjustmentOrderPage() {
         remarks: remark || undefined,
         total_amount: grandTotal,
         items: selectedProducts.map((p) => ({
-          product_id: p.id,
-          item_name: p.product_name,
-          category: p.category,
-          hsn: p.hsn_code,
-          gst: p.gst_rate,
-          quantity: p.qty,
-          unit_price: p.unit_price,
-          total_price: p.total_price,
+          product_name: p.product_name,
+          product_code: p.product_code || undefined,
+          category: p.category || "Machines",
+          hsn_code: p.hsn_code || "84224000",
+          gst_rate: p.gst_rate || "18%",
+          qty: p.qty,
+          uom: p.uom || "SET",
+          rate: p.unit_price,
+          amount: p.total_price,
         })),
       };
 

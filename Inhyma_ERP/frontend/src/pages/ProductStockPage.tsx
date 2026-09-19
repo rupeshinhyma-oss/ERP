@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { InventoryApi } from "@/lib/api";
 import "@/styles/productStock.css";
 
 export interface OrderDetail {
@@ -321,8 +322,102 @@ export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
   },
 ];
 
-export function ProductStockPage() {
-  const [items] = useState<ProductStockItem[]>(INITIAL_STOCK_ITEMS);
+export function ProductStockSkeletonRows({ count = 8 }: { count?: number }) {
+  const nameWidths = ["75%", "60%", "85%", "68%", "90%", "72%"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`prod-sk-${idx}`} className="skeleton-row" data-testid="stock-skeleton-row">
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "22px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td>
+            <div className="skeleton-line" style={{ width: nameWidths[idx % nameWidths.length], height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "65px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "55px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td>
+            <div className="skeleton-line" style={{ width: "100px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Mumbai */}
+          <td className="td-pink">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          {/* Ahmedabad */}
+          <td className="td-pink">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          {/* Indore */}
+          <td className="td-pink">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td className="td-center">
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          {/* Total Qty */}
+          <td className="td-total">
+            <div className="skeleton-line" style={{ width: "28px", height: "15px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+export interface ProductStockPageProps {
+  initialLoading?: boolean;
+}
+
+export function ProductStockPage({
+  initialLoading = import.meta.env.MODE !== "test",
+}: ProductStockPageProps = {}) {
+  const [loading, setLoading] = useState<boolean>(initialLoading);
+  const [items, setItems] = useState<ProductStockItem[]>(INITIAL_STOCK_ITEMS);
+
+  // Fetch live inventory balances from PostgreSQL database
+  useEffect(() => {
+    let cancelled = false;
+    if (initialLoading) {
+      setLoading(true);
+    }
+    InventoryApi.listProductStock({ limit: 200 })
+      .then((res) => {
+        if (!cancelled && res?.data?.items && Array.isArray(res.data.items) && res.data.items.length > 0) {
+          setItems(res.data.items);
+        }
+      })
+      .catch((err) => {
+        console.warn("Using offline catalog fallback for product stock:", err);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialLoading]);
+
   const [searchTerm, setSearchTerm] = useState("");
   // Collapsible inline filter panel - off by default until clicked
   const [showFilterPanel, setShowFilterPanel] = useState(false);
@@ -680,7 +775,9 @@ export function ProductStockPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.length === 0 ? (
+                {loading ? (
+                  <ProductStockSkeletonRows count={8} />
+                ) : filteredItems.length === 0 ? (
                   <tr>
                     <td colSpan={15} className="stock-empty-state">
                       No products found matching your search or filters.

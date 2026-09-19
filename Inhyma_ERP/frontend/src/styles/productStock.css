@@ -416,6 +416,15 @@
   color: #64748b;
 }
 
+/* Skeleton Shimmer Loading States */
+.skeleton-row td {
+  background-color: #ffffff;
+}
+
+.skeleton-row:hover td {
+  background-color: #f8fafc !important;
+}
+
 .stock-footer-bar {
   display: flex;
   align-items: center;
