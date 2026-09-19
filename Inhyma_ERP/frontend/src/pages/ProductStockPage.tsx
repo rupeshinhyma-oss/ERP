@@ -329,10 +329,10 @@ export function ProductStockSkeletonRows({ count = 8 }: { count?: number }) {
     <>
       {Array.from({ length: count }).map((_, idx) => (
         <tr key={`prod-sk-${idx}`} className="skeleton-row" data-testid="stock-skeleton-row">
-          <td className="td-center">
+          <td className="td-center col-freeze-1">
             <div className="skeleton-line" style={{ width: "22px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
           </td>
-          <td>
+          <td className="col-freeze-2">
             <div className="skeleton-line" style={{ width: nameWidths[idx % nameWidths.length], height: "14px", borderRadius: "4px" }} />
           </td>
           <td className="td-center">
@@ -420,6 +420,7 @@ export function ProductStockPage({
   }, [initialLoading]);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [perPage, setPerPage] = useState(50);
   // Collapsible inline filter panel - off by default until clicked
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
@@ -587,7 +588,7 @@ export function ProductStockPage({
   }, [filteredItems]);
 
   return (
-    <AppShell activeKey="product-stock" pageClassName="page-product-stock">
+    <AppShell activeKey="product-stock">
       <main className="page">
         {/* Breadcrumb Trail */}
         <Breadcrumb trail={["Inventory", "Product Stock"]} />
@@ -806,50 +807,17 @@ export function ProductStockPage({
 
         {/* Main Data Card */}
         <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-          {/* Status Tabs */}
-          <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}>
-            <button
-              type="button"
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: "2.5px solid #0061f2",
-                color: "#0061f2",
-                fontWeight: 700,
-                fontSize: "13.5px",
-                paddingBottom: "8px",
-                cursor: "pointer",
-              }}
-            >
-              Active ({items.length})
-            </button>
-            <button
-              type="button"
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: "2.5px solid transparent",
-                color: "#64748b",
-                fontWeight: 700,
-                fontSize: "13.5px",
-                paddingBottom: "8px",
-                cursor: "pointer",
-              }}
-            >
-              Inactive (0)
-            </button>
-          </div>
-
           {/* Controls Toolbar: Items per page, Freeze Columns & Search Bar */}
           <div
             className="toolbar"
-            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", gap: "10px", flexWrap: "wrap" }}
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", gap: "10px", flexWrap: "wrap", borderBottom: "1px solid #e2e8f0" }}
           >
             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <select
                   style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-                  defaultValue={50}
+                  value={perPage}
+                  onChange={(e) => setPerPage(Number(e.target.value))}
                 >
                   <option value={10}>10</option>
                   <option value={25}>25</option>
@@ -911,12 +879,12 @@ export function ProductStockPage({
           </div>
 
           {/* Table Container */}
-          <div className="table-scroll stock-table-card" style={{ maxHeight: "calc(100vh - 240px)", overflowY: "auto", overflowX: "auto" }}>
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto", border: "none", borderRadius: 0, boxShadow: "none" }}>
             <table className="stock-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th rowSpan={2} style={{ width: "65px", textAlign: "center", verticalAlign: "middle" }}>Sr. No.</th>
-                  <th rowSpan={2} style={{ minWidth: "260px", verticalAlign: "middle" }}>Product Name (As Per Tally)</th>
+                  <th rowSpan={2} className="col-freeze-1" style={{ width: "65px", minWidth: "65px", maxWidth: "65px", textAlign: "center", verticalAlign: "middle" }}>Sr. No.</th>
+                  <th rowSpan={2} className="col-freeze-2" style={{ minWidth: "260px", verticalAlign: "middle" }}>Product Name (As Per Tally)</th>
                   <th rowSpan={2} style={{ width: "110px", textAlign: "center", verticalAlign: "middle" }}>Product Code</th>
                   <th rowSpan={2} style={{ width: "100px", textAlign: "center", verticalAlign: "middle" }}>Brand</th>
                   <th rowSpan={2} style={{ minWidth: "170px", verticalAlign: "middle" }}>Sub Category</th>
@@ -950,10 +918,10 @@ export function ProductStockPage({
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.map((item) => (
+                  filteredItems.slice(0, perPage).map((item) => (
                     <tr key={item.id}>
-                      <td className="td-center">{item.sr_no}</td>
-                      <td>
+                      <td className="td-center col-freeze-1">{item.sr_no}</td>
+                      <td className="col-freeze-2">
                         <a
                           href="#view-product"
                           className="product-link"
@@ -1060,7 +1028,7 @@ export function ProductStockPage({
           {/* Table Footer with Summary Counts */}
           <div className="stock-footer-bar">
             <div>
-              Showing <strong>{filteredItems.length}</strong> of <strong>{items.length}</strong> products
+              Showing <strong>{Math.min(filteredItems.length, perPage)}</strong> of <strong>{filteredItems.length}</strong> products
             </div>
             <div className="stock-summary-chips">
               <span className="stock-chip">

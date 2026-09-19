@@ -3,9 +3,7 @@
    ========================================================================== */
 
 .page-stock-transfer {
-  padding: 20px 24px 40px;
-  background-color: #f8fafc;
-  min-height: calc(100vh - 64px);
+  width: 100%;
 }
 
 /* Header */

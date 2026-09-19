@@ -3,9 +3,7 @@
    ========================================================================== */
 
 .page-product-stock {
-  padding: 20px 24px 40px;
-  background-color: #f8fafc;
-  min-height: calc(100vh - 64px);
+  width: 100%;
 }
 
 .stock-header {
@@ -273,20 +271,23 @@
 
 .stock-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13px;
   text-align: left;
   min-width: 1250px;
 }
 
 .stock-table th {
-  padding: 10px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #475569;
-  background-color: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  border-right: 1px solid #f1f5f9;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #1e293b;
+  background-color: #f1f5f9;
+  border-bottom: 1px solid #cbd5e1;
+  border-right: 1px solid #cbd5e1;
   white-space: nowrap;
 }
 
@@ -297,19 +298,21 @@
 }
 
 .stock-table th.th-sub {
-  background-color: #f1f5f9;
+  background-color: #f8fafc;
   color: #475569;
   text-align: center;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 /* Grouped Column Headers (3,3,3 in 1) */
 .stock-table th.th-group {
   text-align: center;
   font-weight: 700;
-  font-size: 13px;
-  padding: 8px 10px;
+  font-size: 12px;
+  padding: 7px 10px;
   border-bottom: 1px solid #cbd5e1;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.04em;
 }
 
 .stock-table th.th-group-mumbai {
@@ -335,16 +338,18 @@
 }
 
 .stock-table td.td-group-end {
-  border-right: 2px solid #e2e8f0 !important;
+  border-right: 2px solid #cbd5e1 !important;
 }
 
 .stock-table td {
-  padding: 11px 10px;
-  border-bottom: 1px solid #f1f5f9;
-  border-right: 1px solid #f8fafc;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
   vertical-align: middle;
   color: #334155;
   font-size: 13px;
+  height: 38px;
+  background-color: #ffffff;
 }
 
 .stock-table tr:hover td {
@@ -366,16 +371,50 @@
   text-align: center;
 }
 
+/* Frozen columns */
+.col-freeze-1 {
+  position: sticky !important;
+  left: 0;
+  z-index: 2;
+  background-color: #ffffff;
+}
+
+.col-freeze-2 {
+  position: sticky !important;
+  left: 65px;
+  z-index: 2;
+  background-color: #ffffff;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+  border-right: 2px solid #cbd5e1 !important;
+}
+
+.stock-table th.col-freeze-1 {
+  z-index: 10;
+  background-color: #f1f5f9;
+}
+
+.stock-table th.col-freeze-2 {
+  z-index: 10;
+  background-color: #f1f5f9;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+  border-right: 2px solid #cbd5e1 !important;
+}
+
+.stock-table tr:hover td.col-freeze-1,
+.stock-table tr:hover td.col-freeze-2 {
+  background-color: #f8fafc;
+}
+
 .product-link {
-  color: #2563eb;
-  font-weight: 500;
+  color: #0284c7;
+  font-weight: 600;
   text-decoration: none;
   cursor: pointer;
   transition: color 0.15s ease;
 }
 
 .product-link:hover {
-  color: #1d4ed8;
+  color: #0369a1;
   text-decoration: underline;
 }
 
