@@ -643,7 +643,7 @@ export function ProductStockPage() {
                   <th className="th-sub" style={{ width: "85px" }} title="Mumbai Transit">Transit</th>
                   <th className="th-sub th-group-end" style={{ width: "95px" }} title="Mumbai Ordered">Ordered</th>
                   {/* Ahmedabad Group */}
-                  <th className="th-sub" style={{ width: "85px" }} title="Ahmedabad Stock">Stock</th>
+                  <th className="th-sub th-pink" style={{ width: "85px" }} title="Ahmedabad Stock">Stock</th>
                   <th className="th-sub" style={{ width: "85px" }} title="Ahmedabad Transit">Transit</th>
                   <th className="th-sub th-group-end" style={{ width: "95px" }} title="Ahmedabad Ordered">Ordered</th>
                   {/* Indore Group */}
@@ -706,7 +706,7 @@ export function ProductStockPage() {
                         </span>
                       </td>
                       {/* Ahmedabad 3 */}
-                      <td className="td-center">{item.ahmedabad}</td>
+                      <td className="td-pink">{item.ahmedabad}</td>
                       <td className="td-center">{item.ahmedabad_transit}</td>
                       <td className="td-center td-group-end">
                         <span className="ordered-badge">
