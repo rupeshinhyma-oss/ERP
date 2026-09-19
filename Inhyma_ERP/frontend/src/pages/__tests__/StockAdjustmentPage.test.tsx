@@ -12,6 +12,11 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
+const mockGeneratePdf = vi.fn();
+vi.mock("@/lib/stockAdjustmentPdf", () => ({
+  generateStockAdjustmentPdf: (...args: any[]) => mockGeneratePdf(...args),
+}));
+
 describe("StockAdjustmentPage", () => {
   afterEach(() => {
     cleanup();
@@ -139,7 +144,7 @@ describe("StockAdjustmentPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Adjusted Items Breakdown")).toBeTruthy();
-      expect(screen.getByText("ISL250 Rotary PFS 8 Head With Zipper & Nitrogen")).toBeTruthy();
+      expect(screen.getByText("ISL450XDAN Flow Wrap machine w/o end seal chain")).toBeTruthy();
       expect(screen.getByText("Category")).toBeTruthy();
       expect(screen.getByText("HSN")).toBeTruthy();
       expect(screen.getByText("GST")).toBeTruthy();
@@ -270,5 +275,31 @@ describe("StockAdjustmentPage", () => {
 
     // GARUDA ENGINEERS should now be removed
     expect(screen.queryByText("GARUDA ENGINEERS")).toBeNull();
+  });
+
+  it("triggers PDF generation when clicking Download in action dropdown", () => {
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+
+    const actionButtons = screen.getAllByRole("button", { name: "Actions" });
+    fireEvent.click(actionButtons[0]);
+
+    const downloadBtn = screen.getByRole("button", { name: /Download/i });
+    fireEvent.click(downloadBtn);
+
+    expect(mockGeneratePdf).toHaveBeenCalledTimes(1);
+    expect(mockGeneratePdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "adj-1",
+        client_name: "GARUDA ENGINEERS",
+      }),
+      expect.objectContaining({
+        saveFile: true,
+        openInNewTab: true,
+      })
+    );
   });
 });

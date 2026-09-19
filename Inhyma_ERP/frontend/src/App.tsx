@@ -78,6 +78,7 @@ import { ComingSoonPage } from "@/components/ComingSoon";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ProductStockPage } from "@/pages/ProductStockPage";
 import { StockAdjustmentPage } from "@/pages/StockAdjustmentPage";
+import { AdjustmentOrderPdfPage } from "@/pages/AdjustmentOrderPdfPage";
 
 export function App() {
   const navigate = useNavigate();
@@ -185,6 +186,8 @@ export function App() {
           <Route path="/stock-adjustment" element={<StockAdjustmentPage />} />
           <Route path="/adjustment/list" element={<StockAdjustmentPage />} />
           <Route path="/adjustment" element={<Navigate to="/adjustment/list" replace />} />
+          <Route path="/adjustment/adjustment-order-pdf/:id" element={<AdjustmentOrderPdfPage />} />
+          <Route path="/adjustment/adjustment-order-pdf" element={<AdjustmentOrderPdfPage />} />
           <Route
             path="/stock-transfer"
             element={

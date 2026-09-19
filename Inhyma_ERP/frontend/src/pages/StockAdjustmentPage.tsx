@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
+import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
 import "@/styles/stockAdjustment.css";
 
 export interface StockAdjustmentLineItem {
@@ -18,12 +19,13 @@ export interface StockAdjustmentLineItem {
 
 export interface StockAdjustmentItem {
   id: string;
+  adjustment_no?: string;
   adjustment_date: string;
   client_name?: string;
   invoice_no?: string;
   warehouse: string;
   type: "Stock IN" | "Stock OUT";
-  purpose: "Return From Client" | "Split" | "Damage";
+  purpose: "Return From Client" | "Split" | "Damage" | "Return from client";
   total_amount: number;
   created_by: string;
   remarks?: string;
@@ -33,6 +35,7 @@ export interface StockAdjustmentItem {
 export const INITIAL_ADJUSTMENTS: StockAdjustmentItem[] = [
   {
     id: "adj-1",
+    adjustment_no: "492",
     adjustment_date: "19-09-2026",
     client_name: "GARUDA ENGINEERS",
     invoice_no: "660/26-27",
@@ -41,10 +44,10 @@ export const INITIAL_ADJUSTMENTS: StockAdjustmentItem[] = [
     purpose: "Return From Client",
     total_amount: 275000,
     created_by: "Akshata Wadekar",
-    remarks: "Client return due to model upgrade specification",
+    remarks: "Party required another machine, but salesperson give the other machine",
     items: [
       {
-        product_name: "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen",
+        product_name: "ISL450XDAN Flow Wrap machine w/o end seal chain",
         product_code: "MACH-002",
         category: "Machines",
         hsn_code: "84224000",
@@ -362,15 +365,9 @@ export function StockAdjustmentPage() {
     setItems((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
-  // Handle item download
+  // Handle item download: creates PDF document matching template
   const handleDownloadItem = useCallback((item: StockAdjustmentItem) => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(item, null, 2));
-    const downloadAnchor = document.createElement("a");
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `StockAdjustment_${item.id}_${item.adjustment_date}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+    generateStockAdjustmentPdf(item, { saveFile: true, openInNewTab: true });
   }, []);
 
   // Add New Adjustment modal state
