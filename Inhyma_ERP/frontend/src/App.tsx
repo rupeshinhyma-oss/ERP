@@ -79,6 +79,7 @@ import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ProductStockPage } from "@/pages/ProductStockPage";
 import { StockAdjustmentPage } from "@/pages/StockAdjustmentPage";
 import { AdjustmentOrderPdfPage } from "@/pages/AdjustmentOrderPdfPage";
+import { AddAdjustmentOrderPage } from "@/pages/AddAdjustmentOrderPage";
 
 export function App() {
   const navigate = useNavigate();
@@ -184,7 +185,11 @@ export function App() {
           <Route path="/product_stock/list" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/stock-adjustment" element={<StockAdjustmentPage />} />
+          <Route path="/stock-adjustment/add" element={<AddAdjustmentOrderPage />} />
           <Route path="/adjustment/list" element={<StockAdjustmentPage />} />
+          <Route path="/adjustment/addEdit" element={<AddAdjustmentOrderPage />} />
+          <Route path="/adjustment/addedit" element={<AddAdjustmentOrderPage />} />
+          <Route path="/adjustment/add" element={<AddAdjustmentOrderPage />} />
           <Route path="/adjustment" element={<Navigate to="/adjustment/list" replace />} />
           <Route path="/adjustment/adjustment-order-pdf/:id" element={<AdjustmentOrderPdfPage />} />
           <Route path="/adjustment/adjustment-order-pdf" element={<AdjustmentOrderPdfPage />} />

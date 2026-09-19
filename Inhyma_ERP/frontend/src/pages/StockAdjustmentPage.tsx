@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -319,7 +320,21 @@ function formatIndianCurrency(amount: number): string {
 }
 
 export function StockAdjustmentPage() {
-  const [items, setItems] = useState<StockAdjustmentItem[]>(INITIAL_ADJUSTMENTS);
+  const navigate = useNavigate();
+  const [items, setItems] = useState<StockAdjustmentItem[]>(() => {
+    try {
+      const saved = localStorage.getItem("local_stock_adjustments");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return [...parsed, ...INITIAL_ADJUSTMENTS];
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load local_stock_adjustments:", e);
+    }
+    return INITIAL_ADJUSTMENTS;
+  });
   const [searchTerm, setSearchTerm] = useState("");
 
   // Collapsible inline filter panel (off by default until clicked)
@@ -353,14 +368,15 @@ export function StockAdjustmentPage() {
   useEffect(() => {
     function handleDocClick() {
       setOpenActionMenuId(null);
+      setShowAddMenu(false);
     }
-    if (openActionMenuId) {
+    if (openActionMenuId || showAddMenu) {
       document.addEventListener("click", handleDocClick);
     }
     return () => {
       document.removeEventListener("click", handleDocClick);
     };
-  }, [openActionMenuId]);
+  }, [openActionMenuId, showAddMenu]);
 
   // Handle item deletion
   const handleDeleteItem = useCallback((id: string) => {
@@ -541,7 +557,10 @@ export function StockAdjustmentPage() {
               <button
                 type="button"
                 className="adjustment-btn-add"
-                onClick={() => setShowAddMenu((prev) => !prev)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAddMenu((prev) => !prev);
+                }}
               >
                 Add New
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -550,14 +569,13 @@ export function StockAdjustmentPage() {
               </button>
 
               {showAddMenu && (
-                <div className="add-menu-dropdown">
+                <div className="add-menu-dropdown" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
                     className="add-menu-item"
                     onClick={() => {
-                      setNewType("Stock IN");
                       setShowAddMenu(false);
-                      setShowAddModal(true);
+                      navigate("/adjustment/addEdit?type=Addition");
                     }}
                   >
                     <span className="badge-stock-in" style={{ padding: "1px 6px", fontSize: "10px" }}>IN</span>
@@ -567,9 +585,8 @@ export function StockAdjustmentPage() {
                     type="button"
                     className="add-menu-item"
                     onClick={() => {
-                      setNewType("Stock OUT");
                       setShowAddMenu(false);
-                      setShowAddModal(true);
+                      navigate("/adjustment/addEdit?type=Deduction");
                     }}
                   >
                     <span className="badge-stock-out" style={{ padding: "1px 6px", fontSize: "10px" }}>OUT</span>

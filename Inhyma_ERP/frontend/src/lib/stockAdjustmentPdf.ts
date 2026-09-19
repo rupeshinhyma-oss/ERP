@@ -7,10 +7,13 @@ import type { StockAdjustmentItem } from "@/pages/StockAdjustmentPage";
  * - Centered "Stock Adjustment" title bordered by top & bottom horizontal rules
  * - Client Name, Invoice No, Adjustment Type, Purpose, Date, Created by, Created at
  * - Warehouse
- * - Item breakdown table (Sr., Item(s), Quantity, Unit Price, Total Price)
  * - Grand Total row
  * - Bordered Remarks box
  */
+export function formatIndianCurrency(amount: number): string {
+  return "₹ " + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export function generateStockAdjustmentPdf(
   item: StockAdjustmentItem,
   options?: { openInNewTab?: boolean; saveFile?: boolean }

@@ -328,4 +328,23 @@ describe("StockAdjustmentPage", () => {
       })
     );
   });
+
+  it("opens Add New dropdown when clicked showing Stock IN Adjustment option", () => {
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+
+    // Initial state: dropdown is closed
+    expect(screen.queryByText("Stock IN Adjustment")).toBeNull();
+
+    // Click Add New button
+    const addBtn = screen.getByRole("button", { name: /Add New/i });
+    fireEvent.click(addBtn);
+
+    // Dropdown items should be visible
+    expect(screen.getByText("Stock IN Adjustment")).toBeTruthy();
+    expect(screen.getByText("Stock OUT Adjustment")).toBeTruthy();
+  });
 });
