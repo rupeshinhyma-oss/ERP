@@ -37,6 +37,10 @@ export function SaleProcessFormPage() {
   const [buyerName, setBuyerName] = useState("");
   const [buyerBranchId, setBuyerBranchId] = useState("");
   const [buyerBranchName, setBuyerBranchName] = useState("");
+  // Searchable buyer combobox
+  const [buyerSearch, setBuyerSearch] = useState("");
+  const [buyerOpen, setBuyerOpen] = useState(false);
+  const buyerDropdownRef = useRef<HTMLDivElement>(null);
 
   // Shipment Planning Consignment Integration
   const [consignments, setConsignments] = useState<PlanningConsignmentColumn[]>([]);
@@ -102,6 +106,17 @@ export function SaleProcessFormPage() {
     const handleClickOutside = (e: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
         setShowSearchResults(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Close buyer dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (buyerDropdownRef.current && !buyerDropdownRef.current.contains(e.target as Node)) {
+        setBuyerOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -288,21 +303,28 @@ export function SaleProcessFormPage() {
     const timer = setTimeout(async () => {
       setSearchLoading(true);
       try {
-        const res = await apiGet<{
-          items: Array<{
+        const res = await apiGet<
+          Array<{
             id: string;
             product_name: string;
+            product_name_invoice?: string;
+            product_name_tally?: string;
             product_code?: string;
             hsn_code?: string;
             standard_cost?: number;
             refund_vat_percent?: number;
-          }>;
-        }>(`/masters/products?search=${encodeURIComponent(productSearch)}&page_size=15`);
+          }>
+        >(`/masters/products?search=${encodeURIComponent(productSearch)}&page_size=15`);
 
-        if (res.data?.items) {
-          setProductSearchResults(res.data.items);
-          setShowSearchResults(true);
-        }
+        // API returns array directly in res.data
+        const results = Array.isArray(res.data) ? res.data : [];
+        // Normalise display name: prefer product_name_invoice, then product_name_tally, then product_name
+        const normalised = results.map((p) => ({
+          ...p,
+          product_name: p.product_name_invoice || p.product_name_tally || p.product_name,
+        }));
+        setProductSearchResults(normalised);
+        setShowSearchResults(normalised.length > 0);
       } catch {
         // quiet
       } finally {
@@ -426,6 +448,9 @@ export function SaleProcessFormPage() {
     };
   }, [items]);
 
+  // Track which rows have invalid unit_rate (for inline highlighting)
+  const [invalidRateIds, setInvalidRateIds] = useState<Set<number>>(new Set());
+
   // Submit Handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -439,12 +464,37 @@ export function SaleProcessFormPage() {
       return;
     }
 
+    // Validate quantity
     for (let i = 0; i < items.length; i++) {
       if (!items[i].quantity || items[i].quantity <= 0) {
         toast(`Item #${i + 1} (${items[i].product_name}) must have quantity > 0.`, "error");
         return;
       }
     }
+
+    // Validate unit_rate — collect ALL offending items and show ONE summary toast
+    const badRateIndices = items
+      .map((it, idx) => ({ it, idx }))
+      .filter(({ it }) => !it.unit_rate || it.unit_rate <= 0)
+      .map(({ idx }) => idx);
+
+    if (badRateIndices.length > 0) {
+      // Mark rows for highlighting
+      setInvalidRateIds(new Set(badRateIndices));
+      // Scroll to first offending row
+      const firstBadRow = document.querySelector(`[data-row-index="${badRateIndices[0]}"]`);
+      if (firstBadRow) firstBadRow.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Single consolidated message
+      const noun = badRateIndices.length === 1 ? "item has" : "items have";
+      toast(
+        `${badRateIndices.length} ${noun} unit rate ≤ 0. Please fill the highlighted rows before saving.`,
+        "error"
+      );
+      return;
+    }
+
+    // Clear any previous highlights
+    setInvalidRateIds(new Set());
 
     setSubmitting(true);
     try {
@@ -650,30 +700,149 @@ export function SaleProcessFormPage() {
                 gap: "16px",
               }}
             >
-              {/* Buyer Company */}
-              <div>
+              {/* Buyer Company — Searchable Combobox */}
+              <div ref={buyerDropdownRef} style={{ position: "relative" }}>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
                   Buyer Company <span style={{ color: "#ef4444" }}>*</span>
                 </label>
-                <select
-                  value={buyerId}
-                  onChange={(e) => handleBuyerSelect(e.target.value)}
+
+                {/* Trigger button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBuyerOpen((o) => !o);
+                    setBuyerSearch("");
+                  }}
                   style={{
                     width: "100%",
                     padding: "8px 10px",
                     borderRadius: "6px",
                     border: "1px solid #cbd5e1",
                     fontSize: "13px",
+                    background: "#fff",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    color: buyerId ? "#0f172a" : "#94a3b8",
                   }}
-                  required
                 >
-                  <option value="">-- Select Buyer Company --</option>
-                  {buyerLookup.items?.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.company_name || b.name}
-                    </option>
-                  ))}
-                </select>
+                  <span>{buyerName || "-- Select Buyer Company --"}</span>
+                  <span style={{ fontSize: "10px", color: "#64748b" }}>{buyerOpen ? "▲" : "▼"}</span>
+                </button>
+
+                {/* Dropdown panel */}
+                {buyerOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 4px)",
+                      left: 0,
+                      right: 0,
+                      background: "#fff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                      zIndex: 999,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {/* Search input */}
+                    <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9" }}>
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="🔍 Search buyer..."
+                        value={buyerSearch}
+                        onChange={(e) => setBuyerSearch(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "6px 10px",
+                          borderRadius: "5px",
+                          border: "1px solid #e2e8f0",
+                          fontSize: "12px",
+                          outline: "none",
+                          boxSizing: "border-box",
+                          background: "#f8fafc",
+                        }}
+                      />
+                    </div>
+
+                    {/* Options list */}
+                    <div style={{ maxHeight: "220px", overflowY: "auto" }}>
+                      {/* Clear option */}
+                      <div
+                        onClick={() => {
+                          handleBuyerSelect("");
+                          setBuyerName("");
+                          setBuyerOpen(false);
+                          setBuyerSearch("");
+                        }}
+                        style={{
+                          padding: "8px 12px",
+                          fontSize: "12px",
+                          color: "#94a3b8",
+                          cursor: "pointer",
+                          fontStyle: "italic",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        -- Select Buyer Company --
+                      </div>
+
+                      {buyerLookup.items
+                        ?.filter((b) => {
+                          const label = (b.company_name || b.name || "").toLowerCase();
+                          return label.includes(buyerSearch.toLowerCase());
+                        })
+                        .map((b) => {
+                          const label = b.company_name || b.name;
+                          const isSelected = b.id === buyerId;
+                          return (
+                            <div
+                              key={b.id}
+                              onClick={() => {
+                                handleBuyerSelect(b.id);
+                                setBuyerOpen(false);
+                                setBuyerSearch("");
+                              }}
+                              style={{
+                                padding: "8px 12px",
+                                fontSize: "13px",
+                                cursor: "pointer",
+                                fontWeight: isSelected ? 700 : 400,
+                                color: isSelected ? "#2563eb" : "#1e293b",
+                                background: isSelected ? "#eff6ff" : "transparent",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!isSelected) e.currentTarget.style.background = "#f8fafc";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = isSelected ? "#eff6ff" : "transparent";
+                              }}
+                            >
+                              {isSelected && <span style={{ fontSize: "10px" }}>✔</span>}
+                              {label}
+                            </div>
+                          );
+                        })}
+
+                      {buyerLookup.items?.filter((b) => {
+                        const label = (b.company_name || b.name || "").toLowerCase();
+                        return label.includes(buyerSearch.toLowerCase());
+                      }).length === 0 && (
+                        <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "12px" }}>
+                          No buyers match "{buyerSearch}"
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Consignment Selection from Shipment Planning */}
@@ -1082,57 +1251,69 @@ export function SaleProcessFormPage() {
                 <div ref={searchRef} style={{ position: "relative" }}>
                   <input
                     type="text"
-                    placeholder="+ Add custom product..."
+                    placeholder="🔍 Search & add product from master..."
                     value={productSearch}
                     onChange={(e) => setProductSearch(e.target.value)}
                     style={{
-                      width: "220px",
-                      padding: "6px 10px",
+                      width: "260px",
+                      padding: "6px 12px",
                       borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
+                      border: "1.5px solid #0284c7",
                       fontSize: "12px",
+                      outline: "none",
+                      color: "#0f172a",
                     }}
                   />
 
-                  {showSearchResults && (
+                  {(showSearchResults || searchLoading) && (
                     <div
                       style={{
                         position: "absolute",
                         right: 0,
-                        top: "100%",
-                        marginTop: "4px",
-                        width: "320px",
-                        maxHeight: "240px",
+                        top: "calc(100% + 4px)",
+                        width: "360px",
+                        maxHeight: "280px",
                         overflowY: "auto",
                         background: "#ffffff",
                         border: "1px solid #cbd5e1",
-                        borderRadius: "6px",
-                        boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
-                        zIndex: 100,
+                        borderRadius: "8px",
+                        boxShadow: "0 12px 28px rgba(0,0,0,0.13)",
+                        zIndex: 999,
                       }}
                     >
+                      {/* Header */}
+                      <div style={{ padding: "6px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "11px", color: "#64748b", fontWeight: 600 }}>
+                        {searchLoading ? "Searching product master..." : `${productSearchResults.length} product(s) found — click to add`}
+                      </div>
+
                       {searchLoading ? (
-                        <div style={{ padding: "10px", fontSize: "12px", color: "#64748b" }}>Searching...</div>
+                        <div style={{ padding: "14px", fontSize: "12px", color: "#64748b", textAlign: "center" }}>⏳ Searching...</div>
                       ) : productSearchResults.length === 0 ? (
-                        <div style={{ padding: "10px", fontSize: "12px", color: "#94a3b8" }}>No products found</div>
+                        <div style={{ padding: "14px", fontSize: "12px", color: "#94a3b8", textAlign: "center" }}>No products match "{productSearch}"</div>
                       ) : (
                         productSearchResults.map((p) => (
                           <div
                             key={p.id}
                             onClick={() => handleAddProduct(p)}
                             style={{
-                              padding: "8px 12px",
+                              padding: "9px 12px",
                               fontSize: "12px",
                               cursor: "pointer",
                               borderBottom: "1px solid #f1f5f9",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
                             }}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "#eff6ff")}
                             onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
                           >
-                            <div style={{ fontWeight: 600, color: "#0f172a" }}>{p.product_name}</div>
-                            <div style={{ fontSize: "11px", color: "#64748b" }}>
-                              {p.product_code || "No Code"} | Cost: {currencySymbol}{Number(p.standard_cost || 0).toFixed(2)}
+                            <div>
+                              <div style={{ fontWeight: 600, color: "#0f172a" }}>{p.product_name}</div>
+                              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                                Code: {p.product_code || "—"} &nbsp;|&nbsp; HSN: {p.hsn_code || "—"}
+                              </div>
                             </div>
+                            <span style={{ fontSize: "11px", background: "#0284c7", color: "#fff", padding: "2px 8px", borderRadius: "99px", flexShrink: 0 }}>+ Add</span>
                           </div>
                         ))
                       )}
@@ -1196,9 +1377,15 @@ export function SaleProcessFormPage() {
                     items.map((item, idx) => (
                       <tr
                         key={item.id || idx}
+                        data-row-index={idx}
                         style={{
                           borderBottom: "1px solid #f1f5f9",
-                          backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fcfdfe",
+                          backgroundColor: invalidRateIds.has(idx)
+                            ? "#fff1f2"
+                            : idx % 2 === 0
+                            ? "#ffffff"
+                            : "#fcfdfe",
+                          transition: "background-color 0.3s",
                         }}
                       >
                         <td style={{ padding: "6px 10px", color: "#94a3b8" }}>{idx + 1}</td>
@@ -1255,6 +1442,7 @@ export function SaleProcessFormPage() {
                             step="any"
                             min="0.01"
                             value={item.quantity}
+                            onFocus={(e) => e.target.select()}
                             onChange={(e) => updateItem(idx, "quantity", parseFloat(e.target.value) || 0)}
                             style={{
                               width: "100%",
@@ -1275,12 +1463,26 @@ export function SaleProcessFormPage() {
                             step="any"
                             min="0"
                             value={item.unit_rate}
-                            onChange={(e) => updateItem(idx, "unit_rate", parseFloat(e.target.value) || 0)}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              updateItem(idx, "unit_rate", val);
+                              // Auto-clear row highlight once user fixes the rate
+                              if (val > 0 && invalidRateIds.has(idx)) {
+                                setInvalidRateIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(idx);
+                                  return next;
+                                });
+                              }
+                            }}
                             style={{
                               width: "100%",
                               padding: "4px 6px",
                               borderRadius: "4px",
-                              border: "1px solid #cbd5e1",
+                              border: invalidRateIds.has(idx)
+                                ? "1.5px solid #ef4444"
+                                : "1px solid #cbd5e1",
                               fontSize: "12px",
                               textAlign: "right",
                               boxSizing: "border-box",
@@ -1293,6 +1495,7 @@ export function SaleProcessFormPage() {
                             step="any"
                             min="0"
                             value={item.tax_percent}
+                            onFocus={(e) => e.target.select()}
                             onChange={(e) => updateItem(idx, "tax_percent", parseFloat(e.target.value) || 0)}
                             style={{
                               width: "100%",
