@@ -117,6 +117,10 @@ api_router.include_router(planning_router)
 from app.purchases.local.routes import router as local_purchases_router
 api_router.include_router(local_purchases_router)
 
+# Sales: Sale Process & Commercial Orders
+from app.sales.routes import router as sales_router
+api_router.include_router(sales_router)
+
 # Phase 1 (Live Events): generic real-time WebSocket infrastructure --
 # see app/events/ and doc/EVENTS_ARCHITECTURE.md. Not module-specific;
 # any future module's routes/services publish through this without

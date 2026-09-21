@@ -57,6 +57,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "SALE",
     items: [
+      { key: "sale-process", label: "Sale Process", path: "/sale/process", icon: "shoppingBag" },
       { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText", permission: "inquiry.view" },
     ],
   },
@@ -144,6 +145,9 @@ export const PAGE_TITLES: Record<string, string> = {
   "masters-products": "Product Master",
   "product-prices": "Product Prices",
   "local-purchases": "Local Purchase",
+  "sale-process": "Sale Process",
+  "/sale/process": "Sale Process",
+  "/sale/process/new": "New Sale Process Order",
   suppliers: "Suppliers",
   audit: "Audit Log",
   rbac: "Departments & Permissions",

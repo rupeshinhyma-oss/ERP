@@ -56,6 +56,8 @@ import { LiveConnectionLifecycle } from "@/lib/live/liveConnectionLifecycle";
 import { ProductGalleryPage } from "@/pages/ProductGallery";
 import { LocalPurchasesPage } from "@/pages/purchases/LocalPurchases";
 import { LocalPurchaseFormPage } from "@/pages/purchases/LocalPurchaseForm";
+import { SaleProcessListPage } from "@/pages/sales/SaleProcessList";
+import { SaleProcessFormPage } from "@/pages/sales/SaleProcessForm";
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { TrashPage } from "@/pages/Trash";
 import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
@@ -133,6 +135,11 @@ export function App() {
           <Route path="/purchase/local/new" element={<LocalPurchaseFormPage />} />
           <Route path="/purchase/local/:id/edit" element={<LocalPurchaseFormPage />} />
           <Route path="/local-purchase" element={<Navigate to="/purchase/local" replace />} />
+
+          {/* Sales */}
+          <Route path="/sale/process" element={<SaleProcessListPage />} />
+          <Route path="/sale/process/new" element={<SaleProcessFormPage />} />
+          <Route path="/sale/process/:id/edit" element={<SaleProcessFormPage />} />
 
           <Route path="/masters/company-list" element={<CompanyListPage />} />
           <Route path="/masters/countries" element={<CountriesPage />} />

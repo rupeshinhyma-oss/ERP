@@ -39,7 +39,13 @@ export function LocalPurchaseFormPage() {
   const [invoiceNo, setInvoiceNo] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [currency, setCurrency] = useState("RMB");
+  const currencySymbol = currency === "RMB" ? "¥" : currency === "INR" ? "₹" : "$";
   const [invoiceTotalValue, setInvoiceTotalValue] = useState<number | "">("");
+
+  // Quick Fill & Bulk Rates Tool
+  const [showQuickFillModal, setShowQuickFillModal] = useState(false);
+  const [quickFillRate, setQuickFillRate] = useState<string>("");
+  const [quickFillOnlyEmpty, setQuickFillOnlyEmpty] = useState(true);
 
   // Expenses
   const [packingForwarding, setPackingForwarding] = useState<number | "">("");
@@ -596,6 +602,76 @@ export function LocalPurchaseFormPage() {
     }
   };
 
+  // Missing rates metrics & Auto-Suggested Rate for Quick Fill
+  const missingRateCount = useMemo(() => {
+    return items.filter((it) => !it.unit_rate || Number(it.unit_rate) <= 0).length;
+  }, [items]);
+
+  const missingQtyTotal = useMemo(() => {
+    return items
+      .filter((it) => !it.unit_rate || Number(it.unit_rate) <= 0)
+      .reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+  }, [items]);
+
+  const autoSuggestedRate = useMemo(() => {
+    if (!invoiceTotalValue || Number(invoiceTotalValue) <= 0) return null;
+    const qty = quickFillOnlyEmpty ? missingQtyTotal : (calculations.totalQuantity || items.length);
+    if (qty <= 0) return null;
+    return (Number(invoiceTotalValue) / qty).toFixed(2);
+  }, [invoiceTotalValue, quickFillOnlyEmpty, missingQtyTotal, calculations.totalQuantity, items.length]);
+
+  // Scroll & Highlight first invalid item row
+  const scrollToFirstInvalidItem = () => {
+    const firstInvalidIdx = items.findIndex((it) => !it.unit_rate || Number(it.unit_rate) <= 0);
+    if (firstInvalidIdx !== -1) {
+      const el = document.getElementById(`unit-rate-input-${firstInvalidIdx}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus();
+        el.style.transition = "box-shadow 0.3s ease, border-color 0.3s ease";
+        el.style.boxShadow = "0 0 0 4px rgba(239, 68, 68, 0.4)";
+        el.style.borderColor = "#ef4444";
+        setTimeout(() => {
+          el.style.boxShadow = "";
+          el.style.borderColor = "";
+        }, 1800);
+      }
+    }
+  };
+
+  // Quick fill missing / all unit rates
+  const handleApplyQuickFill = (overrideRate?: number) => {
+    const rateNum = overrideRate !== undefined ? overrideRate : Number(quickFillRate);
+    if (isNaN(rateNum) || rateNum <= 0) {
+      toast("Please enter a valid Unit Rate greater than 0", "warning");
+      return;
+    }
+
+    let updatedCount = 0;
+    setItems((prev) =>
+      prev.map((it) => {
+        if (quickFillOnlyEmpty && it.unit_rate && Number(it.unit_rate) > 0) {
+          return it;
+        }
+        updatedCount++;
+        return {
+          ...it,
+          unit_rate: Number(rateNum.toFixed(2)),
+        };
+      })
+    );
+
+    setErrors((errs) => {
+      const next = { ...errs };
+      delete next.unit_rates;
+      delete next.discrepancy;
+      return next;
+    });
+
+    setShowQuickFillModal(false);
+    toast(`Successfully updated unit rate for ${updatedCount} item(s) to ${currencySymbol} ${rateNum.toFixed(2)}`, "success");
+  };
+
   // Comprehensive Form Validation (Product Master Visual Style)
   const validateForm = (): Record<string, string> => {
     const errs: Record<string, string> = {};
@@ -624,9 +700,16 @@ export function LocalPurchaseFormPage() {
         .map((it, idx) => ({ ...it, rowNum: idx + 1 }))
         .filter((it) => !it.unit_rate || Number(it.unit_rate) <= 0);
       if (invalidItems.length > 0) {
-        errs.unit_rates = `Unit Rate must be greater than 0 for all items. Please check row(s): ${invalidItems
-          .map((inv) => `#${inv.rowNum} (${inv.product_name || "Custom Product"})`)
-          .join(", ")}.`;
+        if (invalidItems.length === 1) {
+          errs.unit_rates = `Unit Rate must be greater than 0. Missing on Row #${invalidItems[0].rowNum} (${invalidItems[0].product_name || "Custom Product"}).`;
+        } else if (invalidItems.length <= 3) {
+          errs.unit_rates = `Unit Rate must be greater than 0. Missing on: ${invalidItems
+            .map((inv) => `#${inv.rowNum} (${inv.product_name || "Custom Product"})`)
+            .join(", ")}.`;
+        } else {
+          const sample = invalidItems.slice(0, 3).map((inv) => `#${inv.rowNum}`).join(", ");
+          errs.unit_rates = `Unit Rate must be greater than 0 for all items. Missing on ${invalidItems.length} items (e.g., Rows ${sample}, and ${invalidItems.length - 3} more).`;
+        }
       }
     }
 
@@ -657,8 +740,14 @@ export function LocalPurchaseFormPage() {
 
     if (Object.keys(validationErrors).length > 0) {
       window.scrollTo({ top: 0, behavior: "smooth" });
-      const firstError = Object.values(validationErrors)[0];
-      toast(firstError, "warning");
+      let toastMsg = Object.values(validationErrors)[0];
+      if (validationErrors.unit_rates) {
+        const invalidCount = items.filter((it) => !it.unit_rate || Number(it.unit_rate) <= 0).length;
+        toastMsg = `Unit Rate (> 0) is required for ${invalidCount} item${invalidCount > 1 ? "s" : ""}. Please check highlighted rows below.`;
+      } else if (toastMsg.length > 120) {
+        toastMsg = toastMsg.substring(0, 117) + "...";
+      }
+      toast(toastMsg, "warning");
       return;
     }
 
@@ -708,8 +797,6 @@ export function LocalPurchaseFormPage() {
       setSubmitting(false);
     }
   };
-
-  const currencySymbol = currency === "RMB" ? "¥" : currency === "INR" ? "₹" : "$";
 
   if (initialLoading) {
     return (
@@ -768,8 +855,62 @@ export function LocalPurchaseFormPage() {
                 boxShadow: "0 2px 6px rgba(239, 68, 68, 0.12)",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "14px", marginBottom: "6px" }}>
-                <span>⚠️</span> Please fix the required field errors before saving:
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "14px" }}>
+                  <span>⚠️</span> Please fix the required field errors before saving:
+                </div>
+                {errors.unit_rates && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={scrollToFirstInvalidItem}
+                      style={{
+                        background: "#ffffff",
+                        border: "1px solid #f87171",
+                        color: "#b91c1c",
+                        padding: "4px 10px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <span>🎯</span> Jump to Row
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickFillModal(true)}
+                      style={{
+                        background: "#dc2626",
+                        border: "none",
+                        color: "#ffffff",
+                        padding: "4px 12px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                      }}
+                    >
+                      <span>⚡</span> Quick Fill Rates
+                    </button>
+                  </div>
+                )}
               </div>
               <ul style={{ margin: "4px 0 0 20px", padding: 0, fontSize: "12.5px", lineHeight: "1.6" }}>
                 {Object.entries(errors).map(([key, msg]) => (
@@ -1479,6 +1620,28 @@ export function LocalPurchaseFormPage() {
                   </span>
                 </div>
               )}
+              {items.length > 0 && items.some((it) => !it.unit_rate || Number(it.unit_rate) <= 0) && (
+                <button
+                  type="button"
+                  onClick={() => setShowQuickFillModal(true)}
+                  style={{
+                    padding: "4px 12px",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    color: "#92400e",
+                    background: "#fef3c7",
+                    border: "1px solid #fde68a",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                  }}
+                  title="Quickly fill missing unit rates"
+                >
+                  ⚡ Quick Fill Rates ({items.filter((it) => !it.unit_rate || Number(it.unit_rate) <= 0).length} missing)
+                </button>
+              )}
             </div>
 
             {/* Error alerts if items are empty or have 0 rate */}
@@ -1488,8 +1651,64 @@ export function LocalPurchaseFormPage() {
               </div>
             )}
             {errors.unit_rates && (
-              <div style={{ padding: "10px 18px", background: "#fef2f2", borderBottom: "1px solid #fecaca", color: "#dc2626", fontSize: "12.5px", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" }}>
-                <span>▲</span> {errors.unit_rates}
+              <div
+                style={{
+                  padding: "10px 18px",
+                  background: "#fef2f2",
+                  borderBottom: "1px solid #fecaca",
+                  color: "#dc2626",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>▲</span> {errors.unit_rates}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={scrollToFirstInvalidItem}
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #f87171",
+                      color: "#b91c1c",
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      fontSize: "11.5px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    🎯 Jump to First Missing
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickFillModal(true)}
+                    style={{
+                      background: "#dc2626",
+                      border: "none",
+                      color: "#ffffff",
+                      padding: "4px 12px",
+                      borderRadius: "6px",
+                      fontSize: "11.5px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    ⚡ Quick Fill Rates
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1533,7 +1752,7 @@ export function LocalPurchaseFormPage() {
                     </tr>
                   ) : (
                     calculations.calculatedItems.map((item, idx) => (
-                      <tr key={idx}>
+                      <tr key={idx} id={`item-row-${idx}`}>
                         {/* Index */}
                         <td style={{ textAlign: "center", color: "#94a3b8", fontWeight: 600 }}>
                           {idx + 1}
@@ -1646,6 +1865,7 @@ export function LocalPurchaseFormPage() {
                         {/* Unit Rate */}
                         <td>
                           <input
+                            id={`unit-rate-input-${idx}`}
                             type="number"
                             step="0.01"
                             min="0.01"
@@ -1829,6 +2049,29 @@ export function LocalPurchaseFormPage() {
                   {invoiceDiff !== 0 && Math.abs(invoiceDiff || 0) > 0.05 && (
                     <div style={{ fontSize: "12px", color: "#991b1b", marginTop: "2px" }}>
                       Difference: <strong>{currencySymbol} {Math.abs(invoiceDiff || 0).toFixed(2)}</strong> ({invoiceDiff! > 0 ? "entered invoice total is higher" : "calculated items total is higher"}. Submission is blocked until line items match the invoice total).
+                      {items.some((it) => !it.unit_rate || Number(it.unit_rate) <= 0) && (
+                        <div style={{ marginTop: "6px" }}>
+                          <button
+                            type="button"
+                            onClick={() => setShowQuickFillModal(true)}
+                            style={{
+                              background: "#fee2e2",
+                              border: "1px solid #fca5a5",
+                              color: "#991b1b",
+                              padding: "3px 10px",
+                              borderRadius: "5px",
+                              fontSize: "11.5px",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            ⚡ Auto-Distribute or Set Rates to Reconcile
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1919,6 +2162,253 @@ export function LocalPurchaseFormPage() {
             )}
           </div>
         </form>
+
+        {/* QUICK FILL UNIT RATES MODAL */}
+        {showQuickFillModal && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 100020,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px",
+              boxSizing: "border-box",
+            }}
+          >
+            {/* Backdrop */}
+            <div
+              onClick={() => setShowQuickFillModal(false)}
+              style={{
+                position: "absolute",
+                inset: 0,
+                background: "rgba(15, 23, 42, 0.55)",
+                backdropFilter: "blur(3px)",
+              }}
+            />
+
+            {/* Dialog Card */}
+            <div
+              style={{
+                position: "relative",
+                width: "540px",
+                maxWidth: "95vw",
+                background: "#ffffff",
+                borderRadius: "12px",
+                boxShadow: "0 20px 40px -15px rgba(0,0,0,0.3)",
+                border: "1px solid #cbd5e1",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {/* Modal Header */}
+              <div
+                style={{
+                  padding: "16px 20px",
+                  borderBottom: "1px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  background: "#f8fafc",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span>⚡</span> Quick Fill Unit Rates
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                    Quickly populate unit rates for multiple items in bulk.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowQuickFillModal(false)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    fontSize: "18px",
+                    color: "#64748b",
+                    cursor: "pointer",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+                {/* Context Status */}
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12.5px",
+                    color: "#334155",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>Items missing unit rate:</span>
+                  <strong style={{ color: "#dc2626", fontSize: "13px" }}>
+                    {missingRateCount} of {items.length} items
+                  </strong>
+                </div>
+
+                {/* Option A: Auto-Distribution from Invoice Total if available */}
+                {invoiceTotalValue !== "" && Number(invoiceTotalValue) > 0 && autoSuggestedRate && (
+                  <div
+                    style={{
+                      background: "#f0fdf4",
+                      border: "1.5px solid #86efac",
+                      borderRadius: "8px",
+                      padding: "14px",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, color: "#166534", fontSize: "13.5px", marginBottom: "4px" }}>
+                      🎯 Auto-Distribute from Invoice Total
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#15803d", marginBottom: "10px", lineHeight: "1.5" }}>
+                      Distribute entered Invoice Total (<strong>{currencySymbol} {Number(invoiceTotalValue).toFixed(2)}</strong>) across {quickFillOnlyEmpty ? missingQtyTotal : calculations.totalQuantity} total units:
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleApplyQuickFill(Number(autoSuggestedRate))}
+                      style={{
+                        width: "100%",
+                        padding: "9px 16px",
+                        borderRadius: "6px",
+                        border: "none",
+                        background: "#16a34a",
+                        color: "#ffffff",
+                        fontSize: "13px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "6px",
+                        boxShadow: "0 2px 4px rgba(22, 163, 74, 0.2)",
+                      }}
+                    >
+                      ⚡ Auto-Apply Balanced Rate ({currencySymbol} {autoSuggestedRate} / unit)
+                    </button>
+                  </div>
+                )}
+
+                {/* Option B: Set Custom Fixed Rate */}
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                    padding: "14px",
+                  }}
+                >
+                  <label style={{ fontWeight: 700, color: "#1e293b", fontSize: "13px", display: "block", marginBottom: "8px" }}>
+                    Set Custom Unit Rate
+                  </label>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <div style={{ position: "relative", flex: 1 }}>
+                      <span
+                        style={{
+                          position: "absolute",
+                          left: "10px",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          fontWeight: 700,
+                          color: "#64748b",
+                          fontSize: "13px",
+                        }}
+                      >
+                        {currencySymbol}
+                      </span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={quickFillRate}
+                        onChange={(e) => setQuickFillRate(e.target.value)}
+                        placeholder="e.g. 50.00"
+                        style={{
+                          width: "100%",
+                          padding: "8px 12px 8px 28px",
+                          borderRadius: "6px",
+                          border: "1px solid #cbd5e1",
+                          fontSize: "13px",
+                          fontWeight: 600,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleApplyQuickFill()}
+                      disabled={!quickFillRate || Number(quickFillRate) <= 0}
+                      style={{
+                        padding: "8px 16px",
+                        borderRadius: "6px",
+                        border: "none",
+                        background: !quickFillRate || Number(quickFillRate) <= 0 ? "#cbd5e1" : "#0061f2",
+                        color: "#ffffff",
+                        fontSize: "13px",
+                        fontWeight: 700,
+                        cursor: !quickFillRate || Number(quickFillRate) <= 0 ? "not-allowed" : "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Apply Rate
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scope Toggle */}
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12.5px", color: "#475569", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={quickFillOnlyEmpty}
+                    onChange={(e) => setQuickFillOnlyEmpty(e.target.checked)}
+                  />
+                  <span>Only fill items that currently have <strong>0 or missing rate</strong></span>
+                </label>
+              </div>
+
+              {/* Modal Footer */}
+              <div
+                style={{
+                  padding: "12px 20px",
+                  borderTop: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setShowQuickFillModal(false)}
+                  style={{
+                    padding: "6px 16px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#475569",
+                    fontSize: "12.5px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </AppShell>
   );
