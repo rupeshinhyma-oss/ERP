@@ -16,13 +16,15 @@ export function formatIndianCurrency(amount: number): string {
 
 export function generateStockAdjustmentPdf(
   item: StockAdjustmentItem,
-  options?: { openInNewTab?: boolean; saveFile?: boolean }
+  options?: { openInNewTab?: boolean; saveFile?: boolean; doc?: jsPDF }
 ): jsPDF {
-  const doc = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
-  });
+  const doc =
+    options?.doc ||
+    new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
 
   const pageWidth = 210;
   const margin = 15;

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { INITIAL_ADJUSTMENTS, StockAdjustmentItem } from "@/pages/StockAdjustmentPage";
+import { INITIAL_ADJUSTMENTS } from "@/pages/StockAdjustmentPage";
 import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
 
 export function AdjustmentOrderPdfPage() {
