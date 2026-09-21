@@ -183,10 +183,10 @@ export function OrganizationPage() {
   return (
     <AppShell activeKey="organization">
       <main className="page">
-        <Breadcrumb trail={["Settings", "ERP Settings"]} />
+        <Breadcrumb trail={["Settings", "Organization"]} />
         <div className="page-header">
           <div>
-            <h1>ERP Settings</h1>
+            <h1>Organization Settings</h1>
             <div className="page-subtitle">
               Your company's profile, used throughout the ERP and shown as the sidebar's brand
               name.

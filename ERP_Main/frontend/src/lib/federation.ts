@@ -20,27 +20,6 @@ export interface StoredFederationState {
 }
 
 /**
- * Fallback host URL resolver if base_url is unset in database.
- */
-export function getErpHostUrl(erp: Partial<ErpInstance> & { key?: string }): string {
-  const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
-  if (erp.base_url) {
-    try {
-      const url = new URL(erp.base_url);
-      if (url.hostname === "localhost" && host !== "localhost") {
-        url.hostname = host;
-        return url.toString();
-      }
-    } catch {}
-    return erp.base_url;
-  }
-  const key = (erp.erp_key || erp.key || "").toLowerCase();
-  if (key === "inhyma") return `http://${host}:5174/dashboard`;
-  if (key === "yinglima") return `http://${host}:5173/dashboard`;
-  return "";
-}
-
-/**
  * Generate a cryptographically secure random URL-safe string.
  */
 export function generateRandomString(byteLength: number = 32): string {
@@ -190,11 +169,7 @@ export async function authorizeErpLaunch(
   }
 
   // 1. Resolve redirect URI (defaulting to /auth/callback on the target ERP)
-  let origin = erp.base_url.replace(/\/$/, "");
-  try {
-    origin = new URL(erp.base_url).origin;
-  } catch {}
-  const defaultRedirect = `${origin}/auth/callback`;
+  const defaultRedirect = `${erp.base_url.replace(/\/$/, "")}/auth/callback`;
   const targetRedirectUri = customRedirectUri || defaultRedirect;
 
   // 2. Validate redirect URI against ERP's base URL origin

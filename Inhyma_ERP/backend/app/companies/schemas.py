@@ -136,17 +136,8 @@ class CompanyCreate(BaseModel):
     tax_id_number: str | None = Field(default=None, max_length=100)
     address: str | None = None
     town: str | None = Field(default=None, max_length=150)
-    pincode: str | None = Field(default=None, max_length=20)
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
-    company_category: str | None = Field(default=None, max_length=150)
-    product_manufacture_or_supply: str | None = None
-    machines_buying_from: str | None = None
-    spares_buying_from: str | None = None
-    products_interested: str | None = None
-    gst_registration_date: str | None = Field(default=None, max_length=50)
-    age_of_company: str | None = Field(default=None, max_length=50)
-    social_media: list[dict[str, Any]] | None = None
     sub_category_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Key Strength Product Sub Category (multiple)."
     )
@@ -176,7 +167,7 @@ class CompanyCreate(BaseModel):
                 if grade_letter in ("A", "B", "C"):
                     return grade_letter
             lower_v = cleaned.lower()
-            if lower_v in ("new", "existing", "active", "inactive", "lead", "prospect", "client", "yes", "no", "high", "medium", "low"):
+            if lower_v in ("new", "existing", "yes", "no"):
                 return lower_v
             if cleaned.upper() in ("A", "B", "C"):
                 return cleaned.upper()
@@ -213,17 +204,8 @@ class CompanyUpdate(BaseModel):
     tax_id_number: str | None = Field(default=None, max_length=100)
     address: str | None = None
     town: str | None = Field(default=None, max_length=150)
-    pincode: str | None = Field(default=None, max_length=20)
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
-    company_category: str | None = Field(default=None, max_length=150)
-    product_manufacture_or_supply: str | None = None
-    machines_buying_from: str | None = None
-    spares_buying_from: str | None = None
-    products_interested: str | None = None
-    gst_registration_date: str | None = Field(default=None, max_length=50)
-    age_of_company: str | None = Field(default=None, max_length=50)
-    social_media: list[dict[str, Any]] | None = None
     sub_category_ids: list[uuid.UUID] | None = None
     product_ids: list[uuid.UUID] | None = None
     company_grade: CompanyGrade | None = None
@@ -249,7 +231,7 @@ class CompanyUpdate(BaseModel):
                 if grade_letter in ("A", "B", "C"):
                     return grade_letter
             lower_v = cleaned.lower()
-            if lower_v in ("new", "existing", "active", "inactive", "lead", "prospect", "client", "yes", "no", "high", "medium", "low"):
+            if lower_v in ("new", "existing", "yes", "no"):
                 return lower_v
             if cleaned.upper() in ("A", "B", "C"):
                 return cleaned.upper()
@@ -304,17 +286,8 @@ class CompanyRead(BaseModel):
     tax_id_number: str | None
     address: str | None
     town: str | None
-    pincode: str | None = None
     primary_website: str | None
     secondary_website: str | None
-    company_category: str | None = None
-    product_manufacture_or_supply: str | None = None
-    machines_buying_from: str | None = None
-    spares_buying_from: str | None = None
-    products_interested: str | None = None
-    gst_registration_date: str | None = None
-    age_of_company: str | None = None
-    social_media: list[dict[str, Any]] | None = None
     company_grade: CompanyGrade | None
     current_status: CompanyCurrentStatus | None
     potential: CompanyPotential | None

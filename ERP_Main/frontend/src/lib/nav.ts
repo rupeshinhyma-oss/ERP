@@ -116,8 +116,7 @@ for (const section of NAV_SECTIONS) {
   }
 }
 
-// Support legacy keys in NAV_ITEMS_BY_KEY for backwards compatibility
-NAV_ITEMS_BY_KEY["erps"] = NAV_ITEMS_BY_KEY["erp-switcher"];
+NAV_ITEMS_BY_KEY["erps"] = NAV_ITEMS_BY_KEY["erp-switcher"] || NAV_ITEMS_BY_KEY["erp-registry"];
 NAV_ITEMS_BY_KEY["my-erps"] = NAV_ITEMS_BY_KEY["erp-switcher"];
 NAV_ITEMS_BY_KEY["integration"] = NAV_ITEMS_BY_KEY["integrations"];
 NAV_ITEMS_BY_KEY["health"] = NAV_ITEMS_BY_KEY["system-health"];

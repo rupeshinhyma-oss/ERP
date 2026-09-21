@@ -75,35 +75,3 @@ class InternalMembershipLookupResponse(BaseModel):
     global_user_id: uuid.UUID
     local_user_id: str
     status: ErpMembershipStatus
-
-
-class InternalUserRegistrationRequest(BaseModel):
-    """
-    Payload for the service-credential-gated internal user auto-registration
-    endpoint (`POST /internal/federation/register-user`).
-
-    Sent by an ERP's own backend, fire-and-forget, right after IT creates a
-    new local login-having user -- never by a browser, and never containing
-    a password or any credential. `erp_instance_id` is deliberately absent
-    here too, for the same reason it's absent from `ErpMembershipCreate`:
-    the caller's identity comes only from its verified service credential
-    (`credential.erp_instance_id`), never from a body field a compromised
-    or misconfigured caller could set to impersonate a different ERP.
-    """
-
-    email: str = Field(..., min_length=3, max_length=255)
-    display_name: str = Field(..., min_length=1, max_length=200)
-    local_user_id: str = Field(..., min_length=1, max_length=255)
-
-
-class InternalUserRegistrationResponse(BaseModel):
-    """Response confirming the resulting GlobalUser + ErpMembership state (idempotent on repeat calls)."""
-
-    global_user_id: uuid.UUID
-    erp_instance_id: uuid.UUID
-    local_user_id: str
-    membership_status: ErpMembershipStatus
-    global_user_created: bool = Field(
-        description="True only if this call created a brand-new GlobalUser; False if one already existed "
-        "for this email (e.g. the person already has a membership in another ERP)."
-    )

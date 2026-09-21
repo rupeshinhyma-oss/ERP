@@ -386,11 +386,11 @@ export function Memberships() {
       >
         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", flex: 1 }}>
           {/* Search */}
-          <div style={{ position: "relative", minWidth: "260px", maxWidth: "340px", width: "100%" }}>
+          <div style={{ position: "relative", minWidth: "260px" }}>
             <input
               type="text"
               className="form-input"
-              style={{ paddingLeft: "34px", height: "36px", fontSize: "13px", width: "100%" }}
+              style={{ paddingLeft: "34px", height: "36px", fontSize: "13px" }}
               placeholder="Search user, local ID, ERP..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}

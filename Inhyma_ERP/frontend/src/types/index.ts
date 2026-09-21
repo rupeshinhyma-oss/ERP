@@ -762,11 +762,6 @@ export interface Company {
   is_active?: boolean;
   dealing_officer_id?: string | null;
   contacts?: CompanyContact[];
-  created_at?: string;
-  updated_at?: string;
-  sales_person_name?: string | null;
-  machine_buying_from?: string | null;
-  pi_to_buy_from_us?: string | null;
 }
 
 /** Backend list endpoints that wrap rows in an object rather than an array. */

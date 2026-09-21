@@ -398,16 +398,3 @@ export interface SessionState {
   sessionExpired: boolean;
   isSuperAdmin: boolean;
 }
-
-/**
- * What `login()` resolves with, so the caller (the Login page) can decide
- * where to navigate WITHOUT racing React's own state updates -- reading
- * `memberships` from context right after `await login(...)` isn't safe
- * (state set inside `login` may not have re-rendered yet), so `login`
- * hands back exactly what the caller needs directly.
- */
-export interface LoginResult {
-  userType: PrincipalType;
-  /** Only ever populated for a Global User login; empty for a Platform Admin. */
-  activeMemberships: ErpMembership[];
-}
