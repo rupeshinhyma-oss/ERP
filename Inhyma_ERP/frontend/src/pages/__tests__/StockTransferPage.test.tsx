@@ -322,4 +322,87 @@ describe("StockTransferPage", () => {
       expect(screen.getByText("Cancel")).toBeTruthy();
     });
   });
+
+  it("handles multi-select checkbox selection and updates Bulk Actions count", async () => {
+    render(
+      <BrowserRouter>
+        <StockTransferPage initialLoading={false} />
+      </BrowserRouter>
+    );
+
+    // Wait for live transfers to resolve
+    await waitFor(() => {
+      expect(screen.getByText("18-09-2026 04:37 PM")).toBeTruthy();
+    });
+
+    const selectAllCheckbox = screen.getByLabelText("Select All") as HTMLInputElement;
+    expect(selectAllCheckbox.checked).toBe(false);
+
+    // Click select all
+    fireEvent.click(selectAllCheckbox);
+    await waitFor(() => {
+      expect(selectAllCheckbox.checked).toBe(true);
+      expect(screen.getByText(/Bulk Actions \(1\) ▾/i)).toBeTruthy();
+    });
+
+    // Uncheck select all
+    fireEvent.click(selectAllCheckbox);
+    await waitFor(() => {
+      expect(selectAllCheckbox.checked).toBe(false);
+      expect(screen.getByText(/^Bulk Actions ▾$/i)).toBeTruthy();
+    });
+  });
+
+  it("opens freeze columns dropdown menu and allows clearing all freezes", async () => {
+    render(
+      <BrowserRouter>
+        <StockTransferPage initialLoading={false} />
+      </BrowserRouter>
+    );
+
+    const freezeBtn = screen.getByText(/📌 Freeze Columns/i);
+    fireEvent.click(freezeBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Toggle Frozen Columns")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Clear All Freezes" })).toBeTruthy();
+    });
+
+    const clearBtn = screen.getByRole("button", { name: "Clear All Freezes" });
+    fireEvent.click(clearBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("📌 Freeze Columns (0)")).toBeTruthy();
+    });
+  });
+
+  it("cycles column sort direction on column header click", async () => {
+    render(
+      <BrowserRouter>
+        <StockTransferPage initialLoading={false} />
+      </BrowserRouter>
+    );
+
+    const fromWhHeader = screen.getByText("From Warehouse");
+    
+    // First click: asc sort
+    fireEvent.click(fromWhHeader);
+    await waitFor(() => {
+      expect(screen.getByText("▲")).toBeTruthy();
+    });
+
+    // Second click: desc sort
+    fireEvent.click(fromWhHeader);
+    await waitFor(() => {
+      expect(screen.getByText("▼")).toBeTruthy();
+    });
+
+    // Third click: resets to natural order
+    fireEvent.click(fromWhHeader);
+    await waitFor(() => {
+      expect(screen.queryByText("▲")).toBeNull();
+      expect(screen.queryByText("▼")).toBeNull();
+    });
+  });
 });
+
