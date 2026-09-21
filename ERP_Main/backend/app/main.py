@@ -18,7 +18,6 @@ sits in the request path of any existing ERP's business APIs.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -31,8 +30,6 @@ from app.core.exception_handlers import register_exception_handlers
 from app.core.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
 from app.database.base import Base
 from app.database.engine import dispose_engine, get_engine
-
-logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -49,9 +46,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
           this service has no Alembic migration history to run yet in a
           fresh container -- the real Alembic migrations in
           `alembic/versions/` are what provision a Postgres deployment.
-        - Guarantee the bootstrap Platform Admin + Global User accounts
-          exist, so a fresh/reset database is never stuck with no way to
-          log in at all (see the try/except block below).
     Shutdown: dispose of the database engine's connection pool.
     """
     settings.validate_production_secrets()
@@ -60,68 +54,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.DATABASE_URL.startswith("sqlite"):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-
-    # Reliability fallback: guarantee the bootstrap Platform Admin account
-    # exists every time this backend starts, with zero manual steps.
-    # Previously `scripts/seed.py` had to be run by hand, and nothing here
-    # ever reminded anyone to do it -- a freshly created or reset database
-    # had no admin account at all, so every login attempt failed with a
-    # plain "Invalid username/email/phone number or password.",
-    # indistinguishable from a real typo.
-    #
-    # Calls `seed_bootstrap_accounts_with_session()`, NOT
-    # `scripts.seed.seed_bootstrap_accounts()` -- the latter disposes the
-    # shared database engine when it finishes (correct for a one-shot CLI
-    # script, wrong here). Gated on an existence check first purely as an
-    # optimization; `seed_bootstrap_accounts_with_session()` is itself
-    # fully idempotent and -- as of this fix -- never resets an existing
-    # account's password either way.
-    #
-    # Scope note: this only guarantees the Platform Admin + Global User
-    # accounts (and, if the ERP registry/role catalog already exist, their
-    # memberships and role assignment). It does NOT run the full
-    # `scripts.seed.main()` chain (ERP registry + platform permission
-    # catalog seeding) automatically -- those are one-time ecosystem setup
-    # steps, not something to silently redo on every restart. On a
-    # completely fresh ERP_Main database (nothing ever seeded at all), run
-    # `python -m scripts.seed` once by hand; after that, this fallback
-    # keeps the admin account itself from ever going missing again.
-    try:
-        from sqlalchemy import select
-        from app.database.engine import get_sessionmaker
-        from app.platform_auth.models import PlatformAdmin
-
-        async with get_sessionmaker()() as _bootstrap_session:
-            _existing_admin = await _bootstrap_session.scalar(
-                select(PlatformAdmin).where(PlatformAdmin.email == settings.BOOTSTRAP_ADMIN_EMAIL)
-            )
-
-            if _existing_admin is None:
-                logger.warning(
-                    "No bootstrap Platform Admin found -- running the bootstrap-accounts seed "
-                    "automatically so login is not blocked. This never runs again once the account exists."
-                )
-                from scripts.seed import seed_bootstrap_accounts_with_session as _run_bootstrap_seed
-
-                await _run_bootstrap_seed(_bootstrap_session)
-                await _bootstrap_session.commit()
-
-            # Ensure federation clients and service credentials exist for seamless ERP switching
-            try:
-                from scripts.seed_federation import seed_federation_with_session as _run_fed_seed
-
-                await _run_fed_seed(_bootstrap_session)
-                await _bootstrap_session.commit()
-            except Exception:
-                logger.warning("Federation client check failed; continuing startup.", exc_info=True)
-    except Exception:
-        # Fail-open on purpose: if this check itself can't run for any
-        # reason (e.g. a migration hasn't created the platform_admins
-        # table yet on a brand-new database), that is a separate, louder
-        # problem that will surface clearly on the very next request
-        # anyway -- this safety net must never be the thing that prevents
-        # the server from starting.
-        logger.warning("Bootstrap admin existence check failed; continuing startup regardless.", exc_info=True)
 
     yield
 

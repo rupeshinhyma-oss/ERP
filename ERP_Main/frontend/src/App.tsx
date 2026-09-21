@@ -31,6 +31,7 @@ import { Dashboard } from "./pages/Dashboard";
 
 // ERPs Section
 import { ErpDetail } from "./pages/ErpDetail";
+import { ErpLauncher } from "./pages/ErpLauncher";
 import { ErpRegistry } from "./pages/ErpRegistry";
 import { ErpInstances } from "./pages/ErpInstances";
 import { ErpModules } from "./pages/ErpModules";
@@ -94,12 +95,12 @@ export function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
 
-          {/* Section 2: ERPs (Redirected to Dashboard Switcher) */}
-          <Route path="/erps" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/erps/switcher" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/erps/launcher" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/my-erps" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/launcher" element={<Navigate to="/dashboard" replace />} />
+          {/* Section 2: ERPs */}
+          <Route path="/erps" element={<Navigate to="/erps/switcher" replace />} />
+          <Route path="/erps/switcher" element={<ErpLauncher />} />
+          <Route path="/erps/launcher" element={<Navigate to="/erps/switcher" replace />} />
+          <Route path="/my-erps" element={<Navigate to="/erps/switcher" replace />} />
+          <Route path="/launcher" element={<Navigate to="/erps/switcher" replace />} />
           <Route path="/erps/registry" element={<ErpRegistry />} />
           <Route path="/erps/instances" element={<ErpInstances />} />
           <Route path="/erps/modules" element={<ErpModules />} />

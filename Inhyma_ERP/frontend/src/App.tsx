@@ -20,7 +20,6 @@ import { setUnauthorizedHandler } from "@/lib/api";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
 
 import { LoginPage } from "@/pages/Login";
-import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { DashboardPage } from "@/pages/Dashboard";
 import { ForbiddenPage } from "@/pages/Forbidden";
 import { OrganizationPage } from "@/pages/Organization";
@@ -127,7 +126,6 @@ export function App() {
       <ErrorBoundary key={location.pathname} title="This page ran into a problem.">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/quote/:token" element={<PublicSupplierQuotePage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -143,9 +141,6 @@ export function App() {
           <Route path="/employees" element={<UsersPage />} />
           <Route path="/positions" element={<PositionsPage />} />
           <Route path="/companies" element={<CompaniesPage />} />
-          <Route path="/companies/add" element={<CompaniesPage defaultAdd={true} />} />
-          <Route path="/user/addEdit" element={<CompaniesPage defaultAdd={true} />} />
-          <Route path="/user/addedit" element={<CompaniesPage defaultAdd={true} />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/buyers" element={<BuyersPage />} />
           <Route path="/inquiries" element={<InquiriesPage />} />

@@ -123,10 +123,6 @@ class CompanyService:
         """Return every contact person for a company."""
         return await self.contact_repository.list_for_company(company_id)
 
-    async def get_filter_options(self) -> dict[str, list]:
-        """Return distinct filter options based on existing company records."""
-        return await self.repository.get_distinct_filter_options()
-
     # ------------------------------------------------------------------
     # Validation helpers
     # ------------------------------------------------------------------

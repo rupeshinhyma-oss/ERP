@@ -37,8 +37,6 @@ class CityLookupRead(BaseModel):
 
     id: uuid.UUID
     name: str
-    state_id: uuid.UUID | None = None
-    district_id: uuid.UUID | None = None
 
 
 class CityRead(BaseModel):

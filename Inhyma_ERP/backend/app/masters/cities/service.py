@@ -69,14 +69,6 @@ class CityService:
         await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, cities)
         return cities
 
-    async def list_by_district(self, district_id: uuid.UUID) -> list[City]:
-        """Return all active cities belonging to a district."""
-        return await self.repository.list_by_district(district_id)
-
-    async def list_by_state(self, state_id: uuid.UUID) -> list[City]:
-        """Return all active cities belonging to a state."""
-        return await self.repository.list_by_state(state_id)
-
     async def _invalidate_cache(self) -> None:
         """Invalidate the cities dropdown cache after any mutation."""
         await self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)

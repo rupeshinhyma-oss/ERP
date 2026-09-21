@@ -30,7 +30,6 @@ import { ICONS } from "./icons";
 interface AppShellProps {
   activeKey: string;
   pageTitle?: string;
-  subtitle?: ReactNode;
   breadcrumbs?: string[];
   actions?: ReactNode;
   children: ReactNode;
@@ -39,7 +38,6 @@ interface AppShellProps {
 export function AppShell({
   activeKey,
   pageTitle,
-  subtitle,
   breadcrumbs,
   actions,
   children,
@@ -117,57 +115,30 @@ export function AppShell({
     navigate("/login");
   }, [navigate]);
 
-  // Whether an automatic-login mechanism might still resolve before we
-  // should give up and bounce to /login. This covers two cases:
-  //  1. A legacy `sso_handover` token is present in the URL right now.
-  //  2. `processIncomingSsoHandover()` hasn't reported its result yet
-  //     for THIS mount -- e.g. it found a still-valid ecosystem cookie
-  //     and is in the middle of exchanging it. Gating on "has it
-  //     settled" rather than only "is the query param present right
-  //     now" is what closes the original race: previously, a mount
-  //     with no `sso_handover` param in the URL (or one already
-  //     stripped by an earlier effect) fell straight through to the
-  //     /login redirect even while an auto-login was genuinely still
-  //     in flight, logging out users -- including Platform Super
-  //     Admins -- who had a perfectly valid session about to be
-  //     established.
-  const [ssoCheckPending, setSsoCheckPending] = useState(
-    () => !isLoggedIn && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover")
-  );
-
   useEffect(() => {
-    if (isLoggedIn) {
-      setSsoCheckPending(false);
-      return;
+    if (!isLoggedIn) {
+      processIncomingSsoHandover().then((result) => {
+        // Only a genuine fresh auto-login (a real state change) warrants a
+        // reload. "already-logged-in" means Auth was already logged in by
+        // the time this ran (e.g. this component remounting right after a
+        // previous reload) -- reloading again here would just repeat the
+        // same effect on the next mount, forever.
+        if (result === "logged-in") {
+          window.location.reload();
+        }
+      });
     }
-    let cancelled = false;
-    setSsoCheckPending(true);
-    processIncomingSsoHandover().then((result) => {
-      if (cancelled) return;
-      // Only a genuine fresh auto-login (a real state change) warrants a
-      // reload. "already-logged-in" means Auth was already logged in by
-      // the time this ran (e.g. this component remounting right after a
-      // previous reload) -- reloading again here would just repeat the
-      // same effect on the next mount, forever.
-      if (result === "logged-in") {
-        window.location.reload();
-        return; // leave ssoCheckPending true through the reload -- no flash to /login in the interim
-      }
-      setSsoCheckPending(false);
-    });
-    return () => {
-      cancelled = true;
-    };
   }, [isLoggedIn]);
 
+  const hasSsoHandover = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover");
   // Redirect to login if unauthenticated
   if (!isLoggedIn) {
-    if (ssoCheckPending) {
+    if (hasSsoHandover) {
       return (
         <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc" }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ width: 36, height: 36, margin: "0 auto 16px", border: "3px solid #e2e8f0", borderTopColor: "#0061f2", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Checking your session…</div>
+            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Authorizing Platform Super Admin Single Sign-On...</div>
           </div>
         </div>
       );
@@ -176,7 +147,7 @@ export function AppShell({
   }
 
   return (
-    <div className="app-shell" style={{ display: "flex", minHeight: "100vh", background: "var(--color-bg)", width: "100%", maxWidth: "100vw", overflowX: "hidden" }}>
+    <div className="app-shell" style={{ display: "flex", minHeight: "100vh", background: "var(--color-bg)" }}>
       {/* Mobile overlay backdrop */}
       {mobileNavOpen && (
         <div
@@ -300,12 +271,7 @@ export function AppShell({
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                   {visibleItems.map((item) => {
-                    const isAccessKey = ["users", "memberships", "roles", "permissions", "access-policies", "access"].includes(activeKey);
-                    const isOrgKey = ["organizations", "companies", "departments", "business-units"].includes(activeKey);
-                    const isActive =
-                      activeKey === item.key ||
-                      (item.key === "users" && isAccessKey) ||
-                      (item.key === "organizations" && isOrgKey);
+                    const isActive = activeKey === item.key;
                     const IconComponent = ICONS[item.icon] || ICONS.dashboard;
 
                     return (
@@ -370,7 +336,6 @@ export function AppShell({
 
       {/* Main Content Area */}
       <div
-        className="main-column"
         style={{
           flex: 1,
           marginLeft: "var(--sidebar-width, 248px)",
@@ -378,9 +343,6 @@ export function AppShell({
           flexDirection: "column",
           minWidth: 0,
           minHeight: "100vh",
-          width: "calc(100% - var(--sidebar-width, 248px))",
-          maxWidth: "calc(100vw - var(--sidebar-width, 248px))",
-          overflowX: "hidden",
         }}
       >
         {/* Topbar Header */}
@@ -569,8 +531,6 @@ export function AppShell({
             maxWidth: "1440px",
             width: "100%",
             boxSizing: "border-box",
-            minWidth: 0,
-            overflowX: "hidden",
           }}
         >
           {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumb trail={breadcrumbs} />}
@@ -598,20 +558,6 @@ export function AppShell({
               >
                 {currentTitle}
               </h1>
-              {subtitle && (
-                <p
-                  className="page-subtitle"
-                  style={{
-                    margin: "6px 0 0",
-                    fontSize: "14px",
-                    color: "var(--color-muted, #64748b)",
-                    maxWidth: "720px",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {subtitle}
-                </p>
-              )}
             </div>
             {actions && <div className="page-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>{actions}</div>}
           </div>

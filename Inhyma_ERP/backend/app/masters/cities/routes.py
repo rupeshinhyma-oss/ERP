@@ -135,23 +135,16 @@ async def list_citys(
 )
 async def lookup_cities(
     request: Request,
-    district_id: uuid.UUID | None = None,
-    state_id: uuid.UUID | None = None,
     service: CityService = Depends(get_city_service),
     _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
-    Return active cities as bare ``{id, name, state_id, district_id}`` pairs.
+    Return every active city as bare ``{id, name}`` pairs.
 
     Gated on "is logged in" only, NOT ``city.view`` -- same rationale as
     ``app.masters.countries.routes.lookup_countries``.
     """
-    if district_id is not None:
-        cities = await service.list_by_district(district_id)
-    elif state_id is not None:
-        cities = await service.list_by_state(state_id)
-    else:
-        cities = await service.list_all_cached()
+    cities = await service.list_all_cached()
     data = [CityLookupRead.model_validate(c).model_dump(mode="json") for c in cities]
     return build_success_response(data=data, request_id=request.state.request_id)
 

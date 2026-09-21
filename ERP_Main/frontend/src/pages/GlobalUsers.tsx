@@ -409,8 +409,8 @@ export function GlobalUsers() {
           gap: "16px",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", flex: 1, minWidth: "280px" }}>
-          <div style={{ position: "relative", width: "100%", maxWidth: "360px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: "1 1 300px" }}>
+          <div style={{ position: "relative", width: "100%", maxWidth: "380px" }}>
             <span
               style={{
                 position: "absolute",
@@ -418,9 +418,6 @@ export function GlobalUsers() {
                 top: "50%",
                 transform: "translateY(-50%)",
                 color: "var(--color-muted)",
-                pointerEvents: "none",
-                display: "flex",
-                alignItems: "center",
               }}
             >
               <ICONS.search width={16} height={16} />
@@ -431,31 +428,24 @@ export function GlobalUsers() {
               placeholder="Search by name, email or external ID..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="form-input"
-              style={{
-                width: "100%",
-                paddingLeft: "36px",
-                height: "38px",
-                fontSize: "13px",
-              }}
+              className="form-control"
+              style={{ paddingLeft: "36px", height: "38px" }}
             />
           </div>
 
-          <div style={{ minWidth: "160px" }}>
-            <select
-              id="select-status-filter"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="form-select"
-              style={{ width: "160px", height: "38px", fontSize: "13px" }}
-            >
-              {STATUS_FILTERS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <select
+            id="select-status-filter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="form-control"
+            style={{ width: "160px", height: "38px" }}
+          >
+            {STATUS_FILTERS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
