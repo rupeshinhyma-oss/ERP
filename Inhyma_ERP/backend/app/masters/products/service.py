@@ -29,9 +29,10 @@ from app.masters.import_export import (
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
 from app.masters.products.constants import DROPDOWN_CACHE_NAME, EXPORT_HEADERS
-from app.masters.products.models import Product
+from app.masters.products.models import Product, ProductDimensionRow
 from app.masters.products.repository import ProductRepository
 from app.masters.products.validators import validate_product_row
+from app.masters.taxes.repository import TaxRepository
 from app.masters.uom.repository import UomRepository
 from app.planning.ws_manager import notify_source_record_changed, refresh_planning_cells_for_record
 
@@ -49,6 +50,7 @@ class ProductService:
         brand_repository: BrandRepository,
         uom_repository: UomRepository,
         cache_manager: CacheManager,
+        tax_repository: TaxRepository | None = None,
     ) -> None:
         """Bind this service to its own repository, every referenced master's repository, and the cache manager."""
         self.repository = repository
@@ -57,6 +59,7 @@ class ProductService:
         self.brand_repository = brand_repository
         self.uom_repository = uom_repository
         self.cache_manager = cache_manager
+        self.tax_repository = tax_repository
 
     async def get_by_id_or_raise(self, product_id: uuid.UUID) -> Product:
         """Fetch a product by ID or raise :class:`NotFoundException`."""
@@ -112,8 +115,51 @@ class ProductService:
             if uom_id is not None and secondary_uom_id == uom_id:
                 raise BadRequestException("The secondary unit of measurement must differ from the primary unit.")
 
+        hsn_id = field_values.get("hsn_id")
+        if hsn_id is not None and self.tax_repository is not None:
+            if await self.tax_repository.get_by_id(hsn_id) is None:
+                raise BadRequestException("The specified HSN Code does not exist in the Taxes master.")
+
+    async def _replace_dimension_rows(self, product: Product, rows: list[dict] | None) -> None:
+        """Replace every ``ProductDimensionRow`` on ``product`` with ``rows`` (full replace-on-save, matching the form's own add/remove-row UI -- there's no partial-row-update case to support).
+
+        ``product.dimension_rows`` is declared ``lazy="selectin"`` for query
+        loads, but that strategy doesn't apply to touching the attribute on
+        an already-in-session instance -- accessing it here would trigger an
+        implicit synchronous lazy-load, which raises ``MissingGreenlet``
+        under the async engine. ``session.refresh(..., ["dimension_rows"])``
+        is the async-safe way to make sure the collection is loaded before
+        we mutate it (a cheap no-op extra query on create, since a
+        brand-new product has none yet).
+        """
+        if rows is None:
+            return
+        await self.repository.session.refresh(product, attribute_names=["dimension_rows"])
+        product.dimension_rows.clear()
+        for index, row in enumerate(rows):
+            l = row.get("length")
+            w = row.get("width")
+            h = row.get("height")
+            cbm = row.get("cbm")
+            if (cbm is None or float(cbm) <= 0) and l is not None and w is not None and h is not None and float(l) > 0 and float(w) > 0 and float(h) > 0:
+                cbm = round((float(l) * float(w) * float(h)) / 1_000_000.0, 6)
+            product.dimension_rows.append(
+                ProductDimensionRow(
+                    title=row.get("title"),
+                    length=l,
+                    width=w,
+                    height=h,
+                    cbm=cbm,
+                    sort_order=index,
+                )
+            )
+
     async def create(self, **field_values: Any) -> Product:
         """Create a new product, validating code uniqueness if provided, and foreign-key references."""
+        # Not a column on Product -- persisted separately as child rows via
+        # _replace_dimension_rows, after the product itself exists.
+        dimension_rows_payload = field_values.pop("dimensions_rows", None)
+
         product_code = field_values.get("product_code")
         if product_code and str(product_code).strip():
             clean_code = str(product_code).strip()
@@ -164,11 +210,19 @@ class ProductService:
             field_values["organization_ids"] = [str(x) for x in field_values["organization_ids"]]
 
         product = await self.repository.create(**field_values)
+        if dimension_rows_payload is not None:
+            await self._replace_dimension_rows(product, dimension_rows_payload)
+            await self.repository.session.flush()
         await self._invalidate_cache()
         return product
 
     async def update(self, product_id: uuid.UUID, **field_values: Any) -> Product:
         """Update an existing product, validating code uniqueness and every foreign-key reference."""
+        # Not a column on Product -- persisted separately as child rows via
+        # _replace_dimension_rows, so it never reaches the repository's
+        # raw column-assignment / OCC update() path below.
+        dimension_rows_payload = field_values.pop("dimensions_rows", None)
+
         product = await self.get_by_id_or_raise(product_id)
         product_code = field_values.get("product_code")
         if product_code:
@@ -185,6 +239,7 @@ class ProductService:
             "brand_id": field_values.get("brand_id", product.brand_id),
             "uom_id": field_values.get("uom_id", product.uom_id),
             "secondary_uom_id": field_values.get("secondary_uom_id", product.secondary_uom_id),
+            "hsn_id": field_values.get("hsn_id", product.hsn_id),
         }
         await self._validate_references(merged)
 
@@ -200,6 +255,20 @@ class ProductService:
 
         if field_values:
             await self.repository.update(product, **field_values)
+            if "hsn_id" in field_values:
+                # Product.hsn is lazy="joined", loaded once when the
+                # instance first entered this session -- reassigning
+                # hsn_id above does NOT refresh the already-loaded `hsn`
+                # relationship object, so ProductRead would keep
+                # serializing the OLD Tax (stale hsn_number/gst_percent/
+                # import_duty_percent) until the object is evicted and
+                # re-queried. Refresh it explicitly so the response (and
+                # this same in-memory `product`, which callers reuse
+                # directly) reflects the new HSN immediately.
+                await self.repository.session.refresh(product, attribute_names=["hsn"])
+        if dimension_rows_payload is not None:
+            await self._replace_dimension_rows(product, dimension_rows_payload)
+            await self.repository.session.flush()
         await self._invalidate_cache()
         # Best-effort, never raises: tells any already-open Shipment
         # Planning tab whose ITEM column (or any other LINKED_LOOKUP/

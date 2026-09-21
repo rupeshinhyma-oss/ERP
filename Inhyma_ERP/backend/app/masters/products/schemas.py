@@ -10,6 +10,41 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validat
 from app.core.constants import RecordStatus
 
 
+class TaxRefRead(BaseModel):
+    """Minimal read-only view of the linked Taxes-master row (HSN Number / GST % / Import Duty %)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    hsn_number: str
+    gst_percent: float
+    import_duty_percent: float
+
+
+class ProductDimensionRowIn(BaseModel):
+    """One row of the "Dimensions" table, as submitted by the Add/Edit form."""
+
+    id: str | None = None  # Client-generated row id; ignored on write, just echoed back
+    title: str | None = Field(default=None, max_length=255)
+    length: float | None = Field(default=None, ge=0)
+    width: float | None = Field(default=None, ge=0)
+    height: float | None = Field(default=None, ge=0)
+    cbm: float | None = Field(default=None, ge=0)
+
+
+class ProductDimensionRowRead(BaseModel):
+    """One row of the "Dimensions" table, as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str | None = None
+    length: float | None = None
+    width: float | None = None
+    height: float | None = None
+    cbm: float | None = None
+
+
 class ProductCreate(BaseModel):
     """Payload to create a new product."""
 
@@ -24,9 +59,16 @@ class ProductCreate(BaseModel):
     brand_id: uuid.UUID | None = None
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None = None
+    # HSN Code * on the form -- FK into the Taxes master. GST % / Import
+    # Duty % are NOT accepted here: they belong to the Tax record itself
+    # and are always read off the joined Tax row (see ProductRead), so a
+    # stale/edited value on one product can never drift from the master.
+    hsn_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
     branch_ids: list[str] | None = None
+
+    dimensions_rows: list[ProductDimensionRowIn] | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -93,9 +135,12 @@ class ProductUpdate(BaseModel):
     brand_id: uuid.UUID | None = None
     uom_id: uuid.UUID | None = None
     secondary_uom_id: uuid.UUID | None = None
+    hsn_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
     branch_ids: list[str] | None = None
+
+    dimensions_rows: list[ProductDimensionRowIn] | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -147,10 +192,31 @@ class ProductRead(BaseModel):
     brand_id: uuid.UUID | None
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None
+    hsn_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
     branch_ids: list[str] | None = None
 
+    dimensions_rows: list[ProductDimensionRowRead] = Field(default_factory=list, validation_alias="dimension_rows")
+
+    @computed_field
+    @property
+    def hsn_number(self) -> str | None:
+        return self.hsn.hsn_number if self.hsn else None
+
+    @computed_field
+    @property
+    def gst_percent(self) -> float | None:
+        return float(self.hsn.gst_percent) if self.hsn else None
+
+    @computed_field
+    @property
+    def import_duty_percent(self) -> float | None:
+        return float(self.hsn.import_duty_percent) if self.hsn else None
+
+    # Not exposed directly (excluded below) -- backs the three computed
+    # properties above by reading the eager-loaded Product.hsn relationship.
+    hsn: "TaxRefRead | None" = Field(default=None, exclude=True)
 
     refund_vat_percent: float = 0.0
     license_certificate_required: str | None = None
@@ -193,6 +259,9 @@ class ProductRead(BaseModel):
     status: RecordStatus
     created_at: datetime
     updated_at: datetime
+
+
+ProductRead.model_rebuild()
 
 
 class ImportSummaryRead(BaseModel):

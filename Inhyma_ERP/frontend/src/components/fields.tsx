@@ -1438,6 +1438,10 @@ export function SearchableSelectField({
         <input
           id={id}
           type="text"
+          title=""
+          translate="no"
+          className="notranslate"
+          autoComplete="off"
           value={displayString}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -1473,6 +1477,9 @@ export function SearchableSelectField({
 
       {open && (
         <div
+          title=""
+          translate="no"
+          className="notranslate"
           style={{
             position: "absolute",
             top: "calc(100% + 2px)",
@@ -1496,6 +1503,9 @@ export function SearchableSelectField({
               return (
                 <div
                   key={idx}
+                  title=""
+                  translate="no"
+                  className="notranslate"
                   onClick={() => {
                     onChange(opt.value);
                     setOpen(false);

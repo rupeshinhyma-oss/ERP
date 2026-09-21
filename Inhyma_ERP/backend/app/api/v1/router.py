@@ -69,6 +69,7 @@ from app.technical_tasks.routes import router as technical_tasks_router
 from app.trash.routes import router as trash_router
 from app.users.routes import router as users_router
 from app.inventory.routes import router as inventory_router
+from app.sales.routes import router as sales_router
 
 api_router = APIRouter()
 
@@ -174,6 +175,7 @@ api_router.include_router(federation_router)
 api_router.include_router(internal_users_router)
 api_router.include_router(integration_router)
 api_router.include_router(inventory_router)
+api_router.include_router(sales_router)
 
 from app.durable_events.routes import router as durable_events_router  # noqa: E402
 

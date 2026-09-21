@@ -34,6 +34,7 @@ import { CompaniesPage } from "@/pages/Companies";
 import { SuppliersPage } from "@/pages/Suppliers";
 import { BuyersPage } from "@/pages/Buyers";
 import { InquiriesPage } from "@/pages/Inquiries";
+import { ProformaInvoicesPage } from "@/pages/ProformaInvoicesPage";
 import { PlanningPage } from "@/pages/Planning";
 import { TasksPage } from "@/pages/tasks/TasksPage";
 import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
@@ -149,6 +150,8 @@ export function App() {
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/buyers" element={<BuyersPage />} />
           <Route path="/inquiries" element={<InquiriesPage />} />
+          <Route path="/proforma-invoice/list" element={<ProformaInvoicesPage />} />
+          <Route path="/proforma-invoice/add" element={<ProformaInvoicesPage defaultAdd={true} />} />
           <Route path="/planning" element={<PlanningPage />} />
           <Route path="/tasks/my" element={<Navigate to="/tasks?tab=my" replace />} />
           <Route path="/tasks" element={<TasksPage />} />

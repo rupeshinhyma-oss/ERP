@@ -20,11 +20,12 @@ import uuid
 
 from sqlalchemy import JSON, Boolean, ForeignKey, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import RecordStatus
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 import app.masters.company_list.models  # noqa: F401
+import app.masters.taxes.models  # noqa: F401
 import app.suppliers.models  # noqa: F401
 
 
@@ -55,6 +56,15 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     )
     secondary_uom_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("units_of_measurement.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    # HSN Code * on the Add/Edit Product form: FK into the Taxes master
+    # (see app.masters.taxes.models.Tax), which is the live source of
+    # truth for HSN Number / GST % / Import Duty % -- the now-removed
+    # `hsn_codes` table (see migration o5f6a7b8c9d0_remove_hsn_codes_module)
+    # was replaced by Taxes, so GST %/Import Duty are read off the joined
+    # Tax row rather than duplicated as separate columns on Product.
+    hsn_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("taxes.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("master_companies.id", ondelete="SET NULL"), nullable=True, index=True
@@ -107,6 +117,47 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
         index=True,
     )
 
+    # Eager-loaded in repository reads (see ProductRepository.get_by_id /
+    # list) so ProductRead can surface hsn_number/gst_percent/import_duty_percent
+    # without an extra round trip per row.
+    hsn = relationship("Tax", lazy="joined", viewonly=True)
+
+    dimension_rows: Mapped[list["ProductDimensionRow"]] = relationship(
+        "ProductDimensionRow",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductDimensionRow.sort_order",
+        lazy="selectin",
+    )
+
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
         return f"<Product code={self.product_code!r} name={self.product_name!r}>"
+
+
+class ProductDimensionRow(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """One row of the "Dimensions" table on the Add/Edit Product form.
+
+    A product can have several packing configurations (Master Carton, Unit
+    Box, etc.), each with its own L/W/H and CBM -- distinct from the single
+    "Dimensions For CBM" (length_cm/width_cm/height_cm/packaging_unit_cbm)
+    fields above, which describe the primary packaging unit only.
+    """
+
+    __tablename__ = "product_dimension_rows"
+
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    length: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    width: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    height: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    cbm: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)  # Auto computed: L*W*H/1,000,000
+    sort_order: Mapped[int] = mapped_column(default=0, nullable=False)
+
+    product: Mapped["Product"] = relationship("Product", back_populates="dimension_rows")
+
+    def __repr__(self) -> str:
+        """Return a debug-friendly representation."""
+        return f"<ProductDimensionRow product_id={self.product_id!r} title={self.title!r}>"

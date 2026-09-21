@@ -321,5 +321,99 @@ describe("Product Master (/product/list)", () => {
       expect(screen.getByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
     });
   });
+
+  it("renders all legacy ERP fields in the Add Product form matching the screenshot", () => {
+    render(
+      <BrowserRouter>
+        <ProductsPage defaultAdd={true} />
+      </BrowserRouter>
+    );
+
+    // Header & Navigation
+    expect(screen.getByRole("heading", { name: "Add Product" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "← BACK" })).toBeTruthy();
+
+    // Row 1
+    expect(screen.getByText(/Product Name \(As Per Tally\)/i)).toBeTruthy();
+    expect(screen.getByText(/Product Name \(As Per Invoice\)/i)).toBeTruthy();
+    expect(screen.getByText(/^Product Code$/i)).toBeTruthy();
+
+    // Row 2
+    expect(screen.getByText(/^Brand$/i)).toBeTruthy();
+    expect(screen.getByText(/^Category/i)).toBeTruthy();
+    expect(screen.getByText(/^Sub Category/i)).toBeTruthy();
+
+    // Row 3
+    expect(screen.getByText(/HSN Code/i)).toBeTruthy();
+    expect(screen.getByText(/^GST %$/i)).toBeTruthy();
+    expect(screen.getByText(/^Import Duty$/i)).toBeTruthy();
+
+    // Row 4
+    expect(screen.getByText(/^UOM/i)).toBeTruthy();
+    expect(screen.getByText(/Packaging Quantity/i)).toBeTruthy();
+    expect(screen.getByText(/Packaging Net Weight/i)).toBeTruthy();
+
+    // Row 5
+    expect(screen.getByText(/Packaging Gross Weight/i)).toBeTruthy();
+    expect(screen.getByText(/Minimum Price/i)).toBeTruthy();
+    expect(screen.getByText(/Without GST/i)).toBeTruthy();
+
+    // Dimensions For CBM
+    expect(screen.getByText(/^Dimensions For CBM$/i)).toBeTruthy();
+    expect(screen.getByText(/Length \(CM\)/i)).toBeTruthy();
+    expect(screen.getByText(/Width \(CM\)/i)).toBeTruthy();
+    expect(screen.getByText(/Height \(CM\)/i)).toBeTruthy();
+    expect(screen.getByText(/^Packaging Unit CBM$/i)).toBeTruthy();
+
+    // Image Of Product
+    expect(screen.getByText(/Image Of Product/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Select Image" })).toBeTruthy();
+
+    // Specification
+    expect(screen.getByText(/^Specification$/i)).toBeTruthy();
+    expect(screen.getByTitle("Bold")).toBeTruthy();
+    expect(screen.getByTitle("Italic")).toBeTruthy();
+    expect(screen.getByTitle("Underline")).toBeTruthy();
+
+    // Dimensions Dynamic Table
+    expect(screen.getByRole("heading", { name: /^Dimensions$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Add Row" })).toBeTruthy();
+
+    // Submit button
+    expect(screen.getByRole("button", { name: /Submit|Save Product/i })).toBeTruthy();
+    expect(screen.getByText("Submit")).toBeTruthy();
+  });
+
+  it("dynamically adds dimension rows and auto-calculates CBM", async () => {
+    render(
+      <BrowserRouter>
+        <ProductsPage defaultAdd={true} />
+      </BrowserRouter>
+    );
+
+    const addRowBtn = screen.getByRole("button", { name: "+ Add Row" });
+    fireEvent.click(addRowBtn);
+
+    // Dimension row inputs should appear
+    expect(screen.getByPlaceholderText("e.g. Master Carton, Unit Box...")).toBeTruthy();
+    const lInput = screen.getByPlaceholderText("L") as HTMLInputElement;
+    const wInput = screen.getByPlaceholderText("W") as HTMLInputElement;
+    const hInput = screen.getByPlaceholderText("H") as HTMLInputElement;
+    const cbmInput = screen.getByPlaceholderText("0.000000") as HTMLInputElement;
+
+    // Type dimensions: 100 x 50 x 20 = 100,000 / 1,000,000 = 0.100000
+    fireEvent.change(lInput, { target: { value: "100" } });
+    fireEvent.change(wInput, { target: { value: "50" } });
+    fireEvent.change(hInput, { target: { value: "20" } });
+
+    await waitFor(() => {
+      expect(cbmInput.value).toBe("0.100000");
+    });
+
+    // Delete row
+    const deleteBtn = screen.getByTitle("Delete Row");
+    fireEvent.click(deleteBtn);
+    expect(screen.queryByPlaceholderText("e.g. Master Carton, Unit Box...")).toBeNull();
+  });
 });
 

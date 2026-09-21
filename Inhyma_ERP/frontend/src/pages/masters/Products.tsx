@@ -25,11 +25,12 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
+import { SearchableSelectField } from "@/components/fields";
 import {
   ImpExpDropdown,
   BulkActionsDropdown,
@@ -44,12 +45,47 @@ import type {
   Product,
   ProductCategory,
   ProductSubCategory,
+  Tax,
   Uom,
 } from "@/types";
 import "@/styles/productMaster.css";
 
 function formatIndianCurrency(amount: number): string {
   return "₹ " + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export const HSN_OPTIONS = [
+  { code: "8422.30.00", gst: "18", importDuty: "7.5", desc: "Machinery for filling, closing, sealing" },
+  { code: "8422.40.00", gst: "18", importDuty: "7.5", desc: "Other packing or wrapping machinery" },
+  { code: "8422.90.90", gst: "18", importDuty: "7.5", desc: "Parts of packing machinery" },
+  { code: "8423.30.00", gst: "18", importDuty: "7.5", desc: "Constant weight scales & hopper scales" },
+  { code: "8419.89.90", gst: "18", importDuty: "7.5", desc: "Industrial machinery for heat treatment" },
+  { code: "8428.39.00", gst: "18", importDuty: "7.5", desc: "Other continuous-action elevators or conveyors" },
+  { code: "8431.20.90", gst: "18", importDuty: "7.5", desc: "Parts of lifting, handling, loading machinery" },
+  { code: "8479.89.99", gst: "18", importDuty: "7.5", desc: "Other machines and mechanical appliances" },
+  { code: "3923.10.90", gst: "18", importDuty: "10.0", desc: "Boxes, cases, crates of plastics" },
+  { code: "996511", gst: "18", importDuty: "0", desc: "Road transport services of goods" },
+];
+
+export const STANDARD_UOMS = [
+  { id: "uom-nos", code: "NOS", name: "Numbers" },
+  { id: "uom-set", code: "SET", name: "Set" },
+  { id: "uom-kgs", code: "KGS", name: "Kilograms" },
+  { id: "uom-pcs", code: "PCS", name: "Pieces" },
+  { id: "uom-mtr", code: "MTR", name: "Meters" },
+  { id: "uom-ltr", code: "LTR", name: "Liters" },
+  { id: "uom-box", code: "BOX", name: "Box" },
+  { id: "uom-roll", code: "ROLL", name: "Roll" },
+];
+
+export function computeCbm(lStr?: string | number, wStr?: string | number, hStr?: string | number): string {
+  const l = typeof lStr === "number" ? lStr : parseFloat(String(lStr || "").trim());
+  const w = typeof wStr === "number" ? wStr : parseFloat(String(wStr || "").trim());
+  const h = typeof hStr === "number" ? hStr : parseFloat(String(hStr || "").trim());
+  if (!isNaN(l) && !isNaN(w) && !isNaN(h) && l > 0 && w > 0 && h > 0) {
+    return ((l * w * h) / 1000000).toFixed(6);
+  }
+  return "";
 }
 
 // Known HSN mappings for legacy ERP catalog products
@@ -455,12 +491,97 @@ export function ProductSkeletonRows({
 
 export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: { defaultAdd?: boolean; defaultFilterOpen?: boolean } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   // Lookups
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250, true);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500, true);
   const brands = useLookup<Brand>("/masters/brands", 250, true);
   const uoms = useLookup<Uom>("/masters/uom", 250, true);
+  const taxes = useLookup<Tax>("/masters/taxes", 250, true);
+
+  const allBrands = useMemo(() => {
+    const list = [...brands.items];
+    const fallback = [
+      { id: "brand-yinglima", name: "Yinglima" },
+      { id: "brand-inhyma", name: "Inhyma" },
+      { id: "brand-garuda", name: "Garuda" },
+      { id: "brand-delta", name: "Delta" },
+    ];
+    for (const fb of fallback) {
+      if (!list.some((b) => b.id === fb.id || b.name?.toLowerCase() === fb.name.toLowerCase())) {
+        list.push(fb as Brand);
+      }
+    }
+    return list;
+  }, [brands.items]);
+
+  const allCategories = useMemo(() => {
+    const list = [...categories.items];
+    const fallback = [
+      { id: "cat-machines", name: "Machines" },
+      { id: "cat-spares", name: "Spares" },
+      { id: "cat-consumables", name: "Consumables" },
+      { id: "cat-packaging", name: "Packaging Material" },
+    ];
+    for (const fb of fallback) {
+      if (!list.some((c) => c.id === fb.id || c.name?.toLowerCase() === fb.name.toLowerCase())) {
+        list.push(fb as ProductCategory);
+      }
+    }
+    return list;
+  }, [categories.items]);
+
+  const allSubCategories = useMemo(() => {
+    const list = [...subCategories.items];
+    const fallback = [
+      { id: "sub-misc", name: "Miscellaneous", category_id: "cat-machines" },
+      { id: "sub-vacuum", name: "Vacuum Sealer Machine", category_id: "cat-machines" },
+      { id: "sub-capping", name: "Capping Machine", category_id: "cat-machines" },
+      { id: "sub-tube-sealer", name: "Tube Sealer Machine", category_id: "cat-machines" },
+      { id: "sub-banding-spares", name: "Spares For Banding Machine", category_id: "cat-spares" },
+    ];
+    for (const fb of fallback) {
+      if (!list.some((sc) => sc.id === fb.id || sc.name?.toLowerCase() === fb.name.toLowerCase())) {
+        list.push(fb as ProductSubCategory);
+      }
+    }
+    return list;
+  }, [subCategories.items]);
+
+  const allUoms = useMemo(() => {
+    const list = [...uoms.items];
+    for (const su of STANDARD_UOMS) {
+      if (!list.some((u) => u.id === su.id || u.code?.toUpperCase() === su.code)) {
+        list.push(su as unknown as Uom);
+      }
+    }
+    return list;
+  }, [uoms.items]);
+
+  // HSN Code * dropdown source: the live Taxes master (HSN Number / GST % /
+  // Import Duty %). HSN_OPTIONS below is kept only as a fallback so the
+  // dropdown still has choices before the /masters/taxes request settles
+  // or if it fails -- once taxes.items loads, those take priority.
+  const allTaxes = useMemo(() => {
+    const list = [...taxes.items];
+    for (const h of HSN_OPTIONS) {
+      if (!list.some((t) => t.hsn_number === h.code)) {
+        list.push({
+          id: `hsn-fallback-${h.code}`,
+          hsn_number: h.code,
+          gst_percent: parseFloat(h.gst),
+          import_duty_percent: parseFloat(h.importDuty),
+        } as Tax);
+      }
+    }
+    return list;
+  }, [taxes.items]);
+
+  const findTaxById = (id?: string | null) => allTaxes.find((t) => t.id === id);
+  const findTaxByHsnNumber = (hsnNumber?: string | null) =>
+    hsnNumber ? allTaxes.find((t) => t.hsn_number === hsnNumber) : undefined;
 
   // Products Data
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCT_MASTER_ITEMS);
@@ -514,7 +635,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     if (saved !== null) {
       try {
         return JSON.parse(saved);
-      } catch {}
+      } catch { }
     }
     return { 0: "left", 1: "left", 2: "left" };
   });
@@ -571,12 +692,22 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const [drawerProduct, setDrawerProduct] = useState<Product | null>(null);
 
   // Add / Edit Form State
-  const [isFormOpen, setIsFormOpen] = useState(defaultAdd);
+  const [isFormOpen, setIsFormOpen] = useState(defaultAdd || (typeof window !== "undefined" && window.location.pathname.toLowerCase().includes("add")));
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [formState, setFormState] = useState<Record<string, string>>({});
+  const [formState, setFormState] = useState<Record<string, any>>({});
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [errorMessageBanner, setErrorMessageBanner] = useState<string | null>(null);
+  const [dimensionRows, setDimensionRows] = useState<
+    Array<{ id: string; title: string; length: string; width: string; height: string; cbm: string }>
+  >([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const filteredSubCategories = useMemo(() => {
+    if (!formState.category_id) return allSubCategories;
+    const matched = allSubCategories.filter((sc) => sc.category_id === formState.category_id);
+    return matched.length > 0 ? matched : allSubCategories;
+  }, [allSubCategories, formState.category_id]);
 
   // Load products from API
   const loadProducts = useCallback(async () => {
@@ -661,7 +792,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         const q = searchTerm.toLowerCase();
         const brandName = brands.items.find((b) => b.id === p.brand_id)?.name || "";
         const subCatName = subCategories.items.find((sc) => sc.id === p.sub_category_id)?.name || "";
-        const hsn = PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "";
+        const hsn = p.hsn_number || PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "";
 
         const match =
           (p.product_name_tally && p.product_name_tally.toLowerCase().includes(q)) ||
@@ -725,8 +856,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
           valB = b.standard_price || 0;
           break;
         case 7: // HSN
-          valA = PRODUCT_HSN_MAP[a.product_name_tally || a.product_name || ""] || "";
-          valB = PRODUCT_HSN_MAP[b.product_name_tally || b.product_name || ""] || "";
+          valA = a.hsn_number || PRODUCT_HSN_MAP[a.product_name_tally || a.product_name || ""] || "";
+          valB = b.hsn_number || PRODUCT_HSN_MAP[b.product_name_tally || b.product_name || ""] || "";
           break;
         case 8: // UOM
           valA = (uoms.items.find((x) => x.id === a.uom_id)?.name || "").toLowerCase();
@@ -911,26 +1042,31 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   // Open Create Form
   const handleOpenCreate = () => {
     setEditingProduct(null);
+    const defaultTax = findTaxByHsnNumber("8422.30.00") || allTaxes[0];
     setFormState({
       product_name_tally: "",
       product_name_invoice: "",
       product_code: "",
-      barcode: "",
+      brand_id: brands.items[0]?.id || "",
       category_id: categories.items[0]?.id || "",
       sub_category_id: subCategories.items[0]?.id || "",
-      brand_id: brands.items[0]?.id || "",
-      uom_id: uoms.items[0]?.id || "",
+      hsn_id: defaultTax?.id || "",
+      gst_percent: defaultTax ? String(defaultTax.gst_percent) : "18",
+      import_duty: defaultTax ? String(defaultTax.import_duty_percent) : "7.5",
+      uom_id: uoms.items[0]?.id || "uom-nos",
       packaging_quantity: "1",
+      packaging_net_weight: "",
       packaging_gross_weight: "0",
+      standard_price: "",
       length_cm: "",
       width_cm: "",
       height_cm: "",
       packaging_unit_cbm: "0",
-      standard_price: "",
+      image_url: "",
       specification: "",
-      description: "",
       status: "active",
     });
+    setDimensionRows([]);
     setFormErrors({});
     setIsFormOpen(true);
   };
@@ -938,28 +1074,98 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   // Open Edit Form
   const handleOpenEdit = (p: Product) => {
     setEditingProduct(p);
+    // Prefer the real FK from the backend; fall back to matching the
+    // legacy PRODUCT_HSN_MAP-derived code (pre-migration local seed rows
+    // that were never saved against a real Tax record) by HSN number.
+    const fallbackHsnNumber = PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "8422.30.00";
+    const resolvedTax = findTaxById(p.hsn_id) || findTaxByHsnNumber(p.hsn_number) || findTaxByHsnNumber(fallbackHsnNumber);
     setFormState({
       product_name_tally: p.product_name_tally || p.product_name || "",
       product_name_invoice: p.product_name_invoice || "",
       product_code: p.product_code && p.product_code !== "-" ? p.product_code : "",
-      barcode: p.barcode || "",
+      brand_id: p.brand_id || "",
       category_id: p.category_id || categories.items[0]?.id || "",
       sub_category_id: p.sub_category_id || "",
-      brand_id: p.brand_id || "",
+      hsn_id: resolvedTax?.id || "",
+      gst_percent: resolvedTax ? String(resolvedTax.gst_percent) : (p.gst_percent != null ? String(p.gst_percent) : "18"),
+      import_duty: resolvedTax ? String(resolvedTax.import_duty_percent) : (p.import_duty_percent != null ? String(p.import_duty_percent) : "7.5"),
       uom_id: p.uom_id || uoms.items[0]?.id || "",
       packaging_quantity: String(p.packaging_quantity ?? 1),
+      packaging_net_weight: p.packaging_net_weight != null ? String(p.packaging_net_weight) : "",
       packaging_gross_weight: String(p.packaging_gross_weight ?? 0),
-      length_cm: String(p.length_cm ?? ""),
-      width_cm: String(p.width_cm ?? ""),
-      height_cm: String(p.height_cm ?? ""),
-      packaging_unit_cbm: String(p.packaging_unit_cbm ?? 0),
       standard_price: p.standard_price ? String(p.standard_price) : "",
+      length_cm: String(p.length_cm ?? p.length ?? ""),
+      width_cm: String(p.width_cm ?? p.width ?? ""),
+      height_cm: String(p.height_cm ?? p.height ?? ""),
+      packaging_unit_cbm: String(p.packaging_unit_cbm ?? 0),
+      image_url: p.image_url || (p.images && p.images[0]) || "",
       specification: p.specification || "",
-      description: p.description || "",
       status: p.status || "active",
     });
+    if (p.dimensions_rows && Array.isArray(p.dimensions_rows)) {
+      setDimensionRows(
+        p.dimensions_rows.map((d, i) => ({
+          id: d.id || String(i + 1),
+          title: d.title || "",
+          length: String(d.length ?? ""),
+          width: String(d.width ?? ""),
+          height: String(d.height ?? ""),
+          cbm: String(d.cbm ?? ""),
+        }))
+      );
+    } else {
+      setDimensionRows([]);
+    }
     setFormErrors({});
     setIsFormOpen(true);
+  };
+
+  const handleBack = () => {
+    setIsFormOpen(false);
+    setEditingProduct(null);
+    if (location.pathname.toLowerCase().includes("add")) {
+      navigate("/product/list");
+    }
+  };
+
+  const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (uploadEvt) => {
+        const url = uploadEvt.target?.result as string;
+        setFormState((prev) => ({ ...prev, image_url: url }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAddDimensionRow = () => {
+    setDimensionRows((prev) => [
+      ...prev,
+      { id: Date.now().toString(), title: "", length: "", width: "", height: "", cbm: "" },
+    ]);
+  };
+
+  const handleUpdateDimensionRow = (id: string, field: string, value: string) => {
+    setDimensionRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== id) return row;
+        const updated = { ...row, [field]: value };
+        if (field === "length" || field === "width" || field === "height") {
+          const l = field === "length" ? value : row.length;
+          const w = field === "width" ? value : row.width;
+          const h = field === "height" ? value : row.height;
+          const cbm = computeCbm(l, w, h);
+          if (cbm) updated.cbm = cbm;
+        }
+        return updated;
+      })
+    );
+  };
+
+  const handleDeleteDimensionRow = (id: string) => {
+    setDimensionRows((prev) => prev.filter((r) => r.id !== id));
   };
 
   // Handle Form Submit
@@ -969,10 +1175,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
     const errs: Record<string, string> = {};
     if (!formState.product_name_tally?.trim()) {
-      errs.product_name_tally = "Product Name (As per Tally) is required.";
+      errs.product_name_tally = "Product Name (As Per Tally) is required.";
     }
     if (!formState.category_id) {
       errs.category_id = "Please select a Category.";
+    }
+    if (!formState.hsn_id) {
+      errs.hsn_id = "Please select an HSN Code.";
     }
     if (!formState.uom_id) {
       errs.uom_id = "Please select a UOM.";
@@ -985,22 +1194,35 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
     setFormSubmitting(true);
     try {
-      const payload = {
+      const payload: Partial<Product> = {
         product_name_tally: formState.product_name_tally.trim(),
         product_name: formState.product_name_tally.trim(),
-        product_name_invoice: formState.product_name_invoice || undefined,
-        product_code: formState.product_code || "-",
-        barcode: formState.barcode || undefined,
+        product_name_invoice: formState.product_name_invoice?.trim() || undefined,
+        product_code: formState.product_code?.trim() || "-",
+        brand_id: formState.brand_id || undefined,
         category_id: formState.category_id,
         sub_category_id: formState.sub_category_id || undefined,
-        brand_id: formState.brand_id || undefined,
+        hsn_id: formState.hsn_id || undefined,
         uom_id: formState.uom_id,
         packaging_quantity: parseFloat(formState.packaging_quantity) || 1,
+        packaging_net_weight: formState.packaging_net_weight ? parseFloat(formState.packaging_net_weight) : undefined,
         packaging_gross_weight: parseFloat(formState.packaging_gross_weight) || 0,
+        length_cm: formState.length_cm ? parseFloat(formState.length_cm) : undefined,
+        width_cm: formState.width_cm ? parseFloat(formState.width_cm) : undefined,
+        height_cm: formState.height_cm ? parseFloat(formState.height_cm) : undefined,
         packaging_unit_cbm: parseFloat(formState.packaging_unit_cbm) || 0,
         standard_price: parseFloat(formState.standard_price) || 0,
         specification: formState.specification || undefined,
-        description: formState.description || undefined,
+        image_url: formState.image_url || undefined,
+        images: formState.image_url ? [formState.image_url] : undefined,
+        dimensions_rows: dimensionRows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          length: parseFloat(r.length) || 0,
+          width: parseFloat(r.width) || 0,
+          height: parseFloat(r.height) || 0,
+          cbm: parseFloat(r.cbm) || 0,
+        })),
         status: formState.status || "active",
       };
 
@@ -1020,10 +1242,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         } catch (err) {
           console.warn("API create fallback:", err);
         }
-        setProducts((prev) => [{ id: newId, ...payload }, ...prev]);
+        setProducts((prev) => [{ id: newId, ...payload } as Product, ...prev]);
       }
 
       setIsFormOpen(false);
+      if (location.pathname.toLowerCase().includes("add")) {
+        navigate("/product/list");
+      }
     } catch (err: any) {
       setErrorMessageBanner(err.message || "Failed to save product.");
     } finally {
@@ -1035,7 +1260,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const handleBulkActivate = async () => {
     if (selectedIds.length === 0) return;
     for (const id of selectedIds) {
-      apiPatch(`/masters/products/${id}/activate`, {}).catch(() => {});
+      apiPatch(`/masters/products/${id}/activate`, {}).catch(() => { });
     }
     setProducts((prev) =>
       prev.map((p) => (selectedIds.includes(p.id) ? { ...p, status: "active" } : p))
@@ -1046,7 +1271,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const handleBulkDeactivate = async () => {
     if (selectedIds.length === 0) return;
     for (const id of selectedIds) {
-      apiPatch(`/masters/products/${id}/deactivate`, {}).catch(() => {});
+      apiPatch(`/masters/products/${id}/deactivate`, {}).catch(() => { });
     }
     setProducts((prev) =>
       prev.map((p) => (selectedIds.includes(p.id) ? { ...p, status: "inactive" } : p))
@@ -1058,7 +1283,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     if (selectedIds.length === 0) return;
     if (!confirm(`Are you sure you want to delete ${selectedIds.length} selected product(s)?`)) return;
     for (const id of selectedIds) {
-      apiDelete(`/masters/products/${id}`).catch(() => {});
+      apiDelete(`/masters/products/${id}`).catch(() => { });
     }
     setProducts((prev) => prev.filter((p) => !selectedIds.includes(p.id)));
     setSelectedIds([]);
@@ -1068,17 +1293,18 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   if (isFormOpen) {
     return (
       <AppShell activeKey="masters-products">
-        <div className="page-product-master">
-          <div className="pm-header">
-            <h1 className="pm-header-title">
+        <div className="pm-form-page">
+          <div className="pm-form-topbar">
+            <h1 className="pm-form-title">
               {editingProduct ? "Edit Product" : "Add Product"}
             </h1>
             <button
               type="button"
-              className="pm-btn-reset"
-              onClick={() => setIsFormOpen(false)}
+              className="pm-btn-back"
+              aria-label="← BACK"
+              onClick={handleBack}
             >
-              ← BACK
+              &lt; BACK
             </button>
           </div>
 
@@ -1098,176 +1324,538 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
             </div>
           )}
 
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "8px",
-              border: "1px solid #e2e8f0",
-              padding: "24px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-            }}
-          >
+          <div className="pm-form-card">
             <form onSubmit={handleSaveProduct}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "18px", marginBottom: "18px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Product Name (As per Tally) <span style={{ color: "#ef4444" }}>*</span>
+              {/* Row 1: Product Name (As Per Tally) *, Product Name (As Per Invoice), Product Code */}
+              <div className="pm-grid-3">
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Product Name (As Per Tally) <span className="req">*</span>
                   </label>
                   <input
                     type="text"
+                    className="pm-form-input"
                     required
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px" }}
-                    placeholder="Name as in Tally"
-                    value={formState.product_name_tally}
+                    value={formState.product_name_tally || ""}
                     onChange={(e) => setFormState({ ...formState, product_name_tally: e.target.value })}
                   />
                   {formErrors.product_name_tally && (
-                    <span style={{ color: "#ef4444", fontSize: "12px", marginTop: "4px", display: "block" }}>{formErrors.product_name_tally}</span>
+                    <span style={{ color: "#ef4444", fontSize: "12px" }}>
+                      {formErrors.product_name_tally}
+                    </span>
                   )}
                 </div>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Product Name (As Per Invoice)
+                  </label>
+                  <input
+                    type="text"
+                    className="pm-form-input"
+                    value={formState.product_name_invoice || ""}
+                    onChange={(e) => setFormState({ ...formState, product_name_invoice: e.target.value })}
+                  />
+                </div>
+
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
                     Product Code
                   </label>
                   <input
                     type="text"
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px" }}
-                    placeholder="e.g. PRD-001"
-                    value={formState.product_code}
+                    className="pm-form-input"
+                    value={formState.product_code || ""}
                     onChange={(e) => setFormState({ ...formState, product_code: e.target.value })}
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Category <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <select
-                    required
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px", background: "#fff" }}
-                    value={formState.category_id}
-                    onChange={(e) => setFormState({ ...formState, category_id: e.target.value })}
-                  >
-                    <option value="">Select Category</option>
-                    {categories.items.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
+              {/* Row 2: Brand, Category *, Sub Category * */}
+              <div className="pm-grid-3">
+                <SearchableSelectField
+                  id="product-brand"
+                  label="Brand"
+                  value={formState.brand_id || ""}
+                  onChange={(v) => setFormState({ ...formState, brand_id: v })}
+                >
+                  <option value="">Select</option>
+                  {allBrands.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </SearchableSelectField>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Sub Category
-                  </label>
-                  <select
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px", background: "#fff" }}
-                    value={formState.sub_category_id}
-                    onChange={(e) => setFormState({ ...formState, sub_category_id: e.target.value })}
-                  >
-                    <option value="">Select Sub Category</option>
-                    {subCategories.items.map((sc) => (
-                      <option key={sc.id} value={sc.id}>{sc.name}</option>
-                    ))}
-                  </select>
-                </div>
+                <SearchableSelectField
+                  id="product-category"
+                  label="Category *"
+                  required
+                  value={formState.category_id || ""}
+                  onChange={(v) => setFormState({ ...formState, category_id: v })}
+                  errorMessage={formErrors.category_id}
+                >
+                  <option value="">Select</option>
+                  {allCategories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </SearchableSelectField>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Brand
-                  </label>
-                  <select
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px", background: "#fff" }}
-                    value={formState.brand_id}
-                    onChange={(e) => setFormState({ ...formState, brand_id: e.target.value })}
-                  >
-                    <option value="">Select Brand</option>
-                    {brands.items.map((b) => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
-                </div>
+                <SearchableSelectField
+                  id="product-sub-category"
+                  label="Sub Category *"
+                  required
+                  value={formState.sub_category_id || ""}
+                  onChange={(v) => setFormState({ ...formState, sub_category_id: v })}
+                  errorMessage={formErrors.sub_category_id}
+                >
+                  <option value="">Select</option>
+                  {filteredSubCategories.map((sc) => (
+                    <option key={sc.id} value={sc.id}>{sc.name}</option>
+                  ))}
+                </SearchableSelectField>
+              </div>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Primary UOM <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <select
-                    required
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px", background: "#fff" }}
-                    value={formState.uom_id}
-                    onChange={(e) => setFormState({ ...formState, uom_id: e.target.value })}
-                  >
-                    <option value="">Select UOM</option>
-                    {uoms.items.map((u) => (
-                      <option key={u.id} value={u.id}>{u.name} ({u.code})</option>
-                    ))}
-                  </select>
-                </div>
+              {/* Row 3: HSN Code*, GST %, Import Duty */}
+              <div className="pm-grid-3">
+                <SearchableSelectField
+                  id="product-hsn"
+                  label="HSN Code *"
+                  required
+                  value={formState.hsn_id || ""}
+                  onChange={(hsnId) => {
+                    const match = allTaxes.find((h) => h.id === hsnId);
+                    setFormState((prev) => ({
+                      ...prev,
+                      hsn_id: hsnId,
+                      gst_percent: match ? String(match.gst_percent) : prev.gst_percent,
+                      import_duty: match ? String(match.import_duty_percent) : prev.import_duty,
+                    }));
+                  }}
+                  errorMessage={formErrors.hsn_id}
+                >
+                  <option value="">Select</option>
+                  {allTaxes.map((h) => (
+                    <option key={h.id} value={h.id}>{h.hsn_number}</option>
+                  ))}
+                </SearchableSelectField>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Min. Price Without GST (₹)
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    GST %
                   </label>
                   <input
                     type="number"
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px" }}
-                    placeholder="0.00"
-                    value={formState.standard_price}
-                    onChange={(e) => setFormState({ ...formState, standard_price: e.target.value })}
+                    step="any"
+                    className="pm-form-input"
+                    readOnly
+                    disabled
+                    title="Set on the Taxes master for this HSN Code"
+                    value={formState.gst_percent ?? ""}
                   />
                 </div>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Pack. Qty
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Import Duty
+                  </label>
+                  <input
+                    type="text"
+                    className="pm-form-input"
+                    readOnly
+                    disabled
+                    title="Set on the Taxes master for this HSN Code"
+                    value={formState.import_duty ?? ""}
+                  />
+                </div>
+              </div>
+
+              {/* Row 4: UOM *, Packaging Quantity *, Packaging Net Weight */}
+              <div className="pm-grid-3">
+                <SearchableSelectField
+                  id="product-uom"
+                  label="UOM *"
+                  required
+                  value={formState.uom_id || ""}
+                  onChange={(v) => setFormState({ ...formState, uom_id: v })}
+                  errorMessage={formErrors.uom_id}
+                >
+                  <option value="">Select</option>
+                  {allUoms.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.code ? `${u.code} (${u.name})` : u.name}
+                    </option>
+                  ))}
+                </SearchableSelectField>
+
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Packaging Quantity <span className="req">*</span>
                   </label>
                   <input
                     type="number"
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px" }}
-                    value={formState.packaging_quantity}
+                    step="any"
+                    className="pm-form-input"
+                    required
+                    value={formState.packaging_quantity ?? "1"}
                     onChange={(e) => setFormState({ ...formState, packaging_quantity: e.target.value })}
                   />
                 </div>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Pack. Gross Weight (kg)
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Packaging Net Weight
                   </label>
                   <input
                     type="number"
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px" }}
-                    value={formState.packaging_gross_weight}
+                    step="any"
+                    className="pm-form-input"
+                    value={formState.packaging_net_weight ?? ""}
+                    onChange={(e) => setFormState({ ...formState, packaging_net_weight: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Row 5: Packaging Gross Weight *, Minimum Price Without GST */}
+              <div className="pm-grid-3">
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Packaging Gross Weight <span className="req">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="pm-form-input"
+                    required
+                    value={formState.packaging_gross_weight ?? "0"}
                     onChange={(e) => setFormState({ ...formState, packaging_gross_weight: e.target.value })}
                   />
                 </div>
 
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                    Pack. Unit CBM
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Minimum Price <em>Without GST</em>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="pm-form-input"
+                    value={formState.standard_price ?? ""}
+                    onChange={(e) => setFormState({ ...formState, standard_price: e.target.value })}
+                  />
+                </div>
+
+                <div className="pm-form-group" />
+              </div>
+
+              {/* Dimensions For CBM */}
+              <h3 className="pm-section-heading">Dimensions For CBM</h3>
+              <div className="pm-grid-4">
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Length (CM) <span className="req">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="pm-form-input"
+                    required
+                    value={formState.length_cm ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const newCbm = computeCbm(val, formState.width_cm, formState.height_cm);
+                      setFormState((prev) => ({
+                        ...prev,
+                        length_cm: val,
+                        packaging_unit_cbm: newCbm || prev.packaging_unit_cbm,
+                      }));
+                    }}
+                  />
+                </div>
+
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Width (CM) <span className="req">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="pm-form-input"
+                    required
+                    value={formState.width_cm ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const newCbm = computeCbm(formState.length_cm, val, formState.height_cm);
+                      setFormState((prev) => ({
+                        ...prev,
+                        width_cm: val,
+                        packaging_unit_cbm: newCbm || prev.packaging_unit_cbm,
+                      }));
+                    }}
+                  />
+                </div>
+
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Height (CM) <span className="req">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="pm-form-input"
+                    required
+                    value={formState.height_cm ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const newCbm = computeCbm(formState.length_cm, formState.width_cm, val);
+                      setFormState((prev) => ({
+                        ...prev,
+                        height_cm: val,
+                        packaging_unit_cbm: newCbm || prev.packaging_unit_cbm,
+                      }));
+                    }}
+                  />
+                </div>
+
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Packaging Unit CBM
                   </label>
                   <input
                     type="number"
                     step="0.000001"
-                    style={{ width: "100%", height: "38px", padding: "0 12px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px" }}
-                    value={formState.packaging_unit_cbm}
+                    className="pm-form-input"
+                    value={formState.packaging_unit_cbm ?? ""}
                     onChange={(e) => setFormState({ ...formState, packaging_unit_cbm: e.target.value })}
                   />
                 </div>
               </div>
 
-              <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>
+              {/* Image Of Product */}
+              <div className="pm-image-section">
+                <label className="pm-image-label">
+                  Image Of Product <span className="pm-info-icon" title="Upload a clear product photo (PNG, JPG, WEBP)">ⓘ</span>
+                </label>
+                <div className="pm-image-box">
+                  {formState.image_url ? (
+                    <img src={formState.image_url} alt="Product" />
+                  ) : (
+                    <div className="pm-image-placeholder">
+                      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
+                      </svg>
+                    </div>
+                  )}
+                </div>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  style={{ display: "none" }}
+                  accept="image/*"
+                  onChange={handleImageFile}
+                />
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    className="pm-btn-select-image"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Select Image
+                  </button>
+                  {formState.image_url && (
+                    <button
+                      type="button"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#ef4444",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                        fontWeight: 600,
+                      }}
+                      onClick={() => setFormState({ ...formState, image_url: "" })}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Specification */}
+              <div className="pm-editor-wrapper">
+                <label className="pm-editor-label">Specification</label>
+                <div className="pm-editor-box">
+                  <div className="pm-editor-toolbar">
+                    <button type="button" className="pm-tb-btn" title="Source">Source</button>
+                    <button type="button" className="pm-tb-btn" title="Cut">✂</button>
+                    <button type="button" className="pm-tb-btn" title="Copy">📋</button>
+                    <div className="pm-tb-divider" />
+                    <button type="button" className="pm-tb-btn" title="Bold" style={{ fontWeight: 800 }}>B</button>
+                    <button type="button" className="pm-tb-btn" title="Italic" style={{ fontStyle: "italic" }}>I</button>
+                    <button type="button" className="pm-tb-btn" title="Underline" style={{ textDecoration: "underline" }}>U</button>
+                    <button type="button" className="pm-tb-btn" title="Strikethrough" style={{ textDecoration: "line-through" }}>S</button>
+                    <button type="button" className="pm-tb-btn" title="Subscript">x₂</button>
+                    <button type="button" className="pm-tb-btn" title="Superscript">x²</button>
+                    <button type="button" className="pm-tb-btn" title="Remove Format">Tₓ</button>
+                    <div className="pm-tb-divider" />
+                    <button type="button" className="pm-tb-btn" title="Numbered List">1.≡</button>
+                    <button type="button" className="pm-tb-btn" title="Bulleted List">•≡</button>
+                    <button type="button" className="pm-tb-btn" title="Outdent">←</button>
+                    <button type="button" className="pm-tb-btn" title="Indent">→</button>
+                    <button type="button" className="pm-tb-btn" title="Blockquote">“”</button>
+                    <div className="pm-tb-divider" />
+                    <button type="button" className="pm-tb-btn" title="Align Left">≡</button>
+                    <button type="button" className="pm-tb-btn" title="Center">≍</button>
+                    <button type="button" className="pm-tb-btn" title="Align Right">≡</button>
+                    <button type="button" className="pm-tb-btn" title="Justify">≣</button>
+                    <div className="pm-tb-divider" />
+                    <button type="button" className="pm-tb-btn" title="Link">🔗</button>
+                    <button type="button" className="pm-tb-btn" title="Unlink">⛓️‍💥</button>
+                    <button type="button" className="pm-tb-btn" title="Insert Image">🖼️</button>
+                    <button type="button" className="pm-tb-btn" title="Insert Table">⊞</button>
+                    <button type="button" className="pm-tb-btn" title="Horizontal Line">—</button>
+                    <button type="button" className="pm-tb-btn" title="Special Character">Ω</button>
+                    <div className="pm-tb-divider" />
+                    <select className="pm-tb-select" title="Styles" defaultValue="Styles">
+                      <option>Styles</option>
+                      <option>Italic Title</option>
+                      <option>Subtitle</option>
+                      <option>Special Container</option>
+                    </select>
+                    <select className="pm-tb-select" title="Format" defaultValue="Format">
+                      <option>Format</option>
+                      <option>Paragraph</option>
+                      <option>Heading 1</option>
+                      <option>Heading 2</option>
+                      <option>Heading 3</option>
+                    </select>
+                    <select className="pm-tb-select" title="Size" defaultValue="Size">
+                      <option>Size</option>
+                      <option>10px</option>
+                      <option>12px</option>
+                      <option>14px</option>
+                      <option>16px</option>
+                      <option>18px</option>
+                    </select>
+                    <button type="button" className="pm-tb-btn" title="Text Color" style={{ color: "#ef4444", fontWeight: 700 }}>A ▾</button>
+                    <button type="button" className="pm-tb-btn" title="Background Color" style={{ background: "#fef08a", fontWeight: 700 }}>A ▾</button>
+                  </div>
+                  <textarea
+                    className="pm-editor-textarea"
+                    placeholder=""
+                    value={formState.specification || ""}
+                    onChange={(e) => setFormState({ ...formState, specification: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Dimensions */}
+              <div className="pm-dimensions-wrapper">
+                <h3 className="pm-section-heading" style={{ marginTop: 0 }}>Dimensions</h3>
+                <button
+                  type="button"
+                  className="pm-btn-add-row"
+                  onClick={handleAddDimensionRow}
+                >
+                  + Add Row
+                </button>
+                {dimensionRows.length > 0 && (
+                  <table className="pm-dim-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: "60px", textAlign: "center" }}>#</th>
+                        <th>Dimension / Description</th>
+                        <th style={{ width: "120px" }}>Length (CM)</th>
+                        <th style={{ width: "120px" }}>Width (CM)</th>
+                        <th style={{ width: "120px" }}>Height (CM)</th>
+                        <th style={{ width: "130px" }}>CBM</th>
+                        <th style={{ width: "70px", textAlign: "center" }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dimensionRows.map((row, idx) => (
+                        <tr key={row.id}>
+                          <td style={{ textAlign: "center", color: "#64748b", fontWeight: 500 }}>{idx + 1}</td>
+                          <td>
+                            <input
+                              type="text"
+                              className="pm-dim-input"
+                              placeholder="e.g. Master Carton, Unit Box..."
+                              value={row.title}
+                              onChange={(e) => handleUpdateDimensionRow(row.id, "title", e.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="any"
+                              className="pm-dim-input"
+                              placeholder="L"
+                              value={row.length}
+                              onChange={(e) => handleUpdateDimensionRow(row.id, "length", e.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="any"
+                              className="pm-dim-input"
+                              placeholder="W"
+                              value={row.width}
+                              onChange={(e) => handleUpdateDimensionRow(row.id, "width", e.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="any"
+                              className="pm-dim-input"
+                              placeholder="H"
+                              value={row.height}
+                              onChange={(e) => handleUpdateDimensionRow(row.id, "height", e.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="0.000001"
+                              className="pm-dim-input"
+                              placeholder="0.000000"
+                              value={row.cbm}
+                              onChange={(e) => handleUpdateDimensionRow(row.id, "cbm", e.target.value)}
+                            />
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <button
+                              type="button"
+                              className="pm-btn-delete-row"
+                              title="Delete Row"
+                              onClick={() => handleDeleteDimensionRow(row.id)}
+                            >
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Submit Button */}
+              <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
                 <button
                   type="submit"
-                  className="pm-btn-add"
+                  className="pm-btn-submit"
+                  aria-label="Save Product"
                   disabled={formSubmitting}
                 >
-                  {formSubmitting ? "Saving..." : "Save Product"}
+                  {formSubmitting ? "Submitting..." : "Submit"}
                 </button>
                 <button
                   type="button"
-                  className="pm-btn-reset"
-                  onClick={() => setIsFormOpen(false)}
+                  className="pm-btn-back"
+                  onClick={handleBack}
                 >
                   Cancel
                 </button>
@@ -1335,7 +1923,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
               apiBase="/masters/products"
               entityName="product"
               importHeaders={IMPORT_HEADERS}
-              onSummary={() => {}}
+              onSummary={() => { }}
               onError={(msg) => setErrorMessageBanner(msg)}
               onComplete={() => loadProducts()}
               onExportCsv={() => {
@@ -1926,7 +2514,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                       else subCatName = "—";
                     }
 
-                    const hsn = PRODUCT_HSN_MAP[name] || "8422.30.00";
+                    const hsn = p.hsn_number || PRODUCT_HSN_MAP[name] || "8422.30.00";
                     const uomObj = uoms.items.find((u) => u.id === p.uom_id);
                     const uomName = uomObj?.code || uomObj?.name || "Nos";
                     const isChecked = selectedIds.includes(p.id);
@@ -2107,32 +2695,97 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         >
           {drawerProduct && (
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* Product Image Preview if available */}
+              {(drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0])) && (
+                <div style={{ display: "flex", justifyContent: "center", padding: "12px", background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <img
+                    src={drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0]) || undefined}
+                    alt={drawerProduct.product_name_tally || "Product"}
+                    style={{ maxHeight: "160px", maxWidth: "100%", objectFit: "contain", borderRadius: "4px" }}
+                  />
+                </div>
+              )}
+
               <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                <h4 style={{ margin: "0 0 8px", fontSize: "14px", color: "#1e293b" }}>Identity &amp; Classification</h4>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px" }}>
-                  <div><strong>Name (Tally):</strong> {drawerProduct.product_name_tally || "—"}</div>
+                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                  Identity &amp; Classification
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: "13px" }}>
+                  <div><strong>Product Name (Tally):</strong> {drawerProduct.product_name_tally || "—"}</div>
+                  <div><strong>Product Name (Invoice):</strong> {drawerProduct.product_name_invoice || "—"}</div>
                   <div><strong>Product Code:</strong> {drawerProduct.product_code || "—"}</div>
                   <div><strong>Brand:</strong> {brands.items.find((b) => b.id === drawerProduct.brand_id)?.name || "Yinglima"}</div>
+                  <div><strong>Category:</strong> {categories.items.find((c) => c.id === drawerProduct.category_id)?.name || "Machines"}</div>
                   <div><strong>Sub Category:</strong> {subCategories.items.find((sc) => sc.id === drawerProduct.sub_category_id)?.name || "Miscellaneous"}</div>
-                  <div><strong>UOM:</strong> {uoms.items.find((u) => u.id === drawerProduct.uom_id)?.code || "Nos"}</div>
-                  <div><strong>HSN Code:</strong> {PRODUCT_HSN_MAP[drawerProduct.product_name_tally || ""] || "8422.30.00"}</div>
+                  <div><strong>HSN Code:</strong> {drawerProduct.hsn_number || PRODUCT_HSN_MAP[drawerProduct.product_name_tally || ""] || "8422.30.00"}</div>
+                  <div><strong>GST %:</strong> {drawerProduct.gst_percent != null ? `${drawerProduct.gst_percent}%` : "18%"}</div>
+                  <div><strong>Import Duty:</strong> {drawerProduct.import_duty_percent != null ? `${drawerProduct.import_duty_percent}%` : "7.5%"}</div>
+                  <div><strong>UOM:</strong> {uoms.items.find((u) => u.id === drawerProduct.uom_id)?.code || "NOS"}</div>
                 </div>
               </div>
 
               <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                <h4 style={{ margin: "0 0 8px", fontSize: "14px", color: "#1e293b" }}>Packaging &amp; Pricing</h4>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px" }}>
-                  <div><strong>Pack. Qty:</strong> {drawerProduct.packaging_quantity ?? 1}</div>
-                  <div><strong>Pack. Gross Weight:</strong> {drawerProduct.packaging_gross_weight ?? 0} kg</div>
-                  <div><strong>Pack. Unit CBM:</strong> {drawerProduct.packaging_unit_cbm ?? 0}</div>
+                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                  Packaging &amp; Pricing
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: "13px" }}>
+                  <div><strong>Packaging Quantity:</strong> {drawerProduct.packaging_quantity ?? 1}</div>
+                  <div><strong>Packaging Net Weight:</strong> {drawerProduct.packaging_net_weight != null ? `${drawerProduct.packaging_net_weight} kg` : "—"}</div>
+                  <div><strong>Packaging Gross Weight:</strong> {drawerProduct.packaging_gross_weight ?? 0} kg</div>
                   <div><strong>Min. Price Without GST:</strong> {drawerProduct.standard_price ? formatIndianCurrency(drawerProduct.standard_price) : "—"}</div>
                 </div>
               </div>
 
+              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                  Dimensions For CBM
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px", fontSize: "13px" }}>
+                  <div><strong>Length:</strong> {drawerProduct.length_cm ?? drawerProduct.length ?? "—"} cm</div>
+                  <div><strong>Width:</strong> {drawerProduct.width_cm ?? drawerProduct.width ?? "—"} cm</div>
+                  <div><strong>Height:</strong> {drawerProduct.height_cm ?? drawerProduct.height ?? "—"} cm</div>
+                  <div><strong>Packaging Unit CBM:</strong> {drawerProduct.packaging_unit_cbm ?? 0}</div>
+                </div>
+              </div>
+
+              {drawerProduct.dimensions_rows && drawerProduct.dimensions_rows.length > 0 && (
+                <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                    Dynamic Dimensions
+                  </h4>
+                  <table style={{ width: "100%", fontSize: "12.5px", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
+                        <th style={{ padding: "6px 8px" }}>#</th>
+                        <th style={{ padding: "6px 8px" }}>Description</th>
+                        <th style={{ padding: "6px 8px" }}>L (cm)</th>
+                        <th style={{ padding: "6px 8px" }}>W (cm)</th>
+                        <th style={{ padding: "6px 8px" }}>H (cm)</th>
+                        <th style={{ padding: "6px 8px" }}>CBM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {drawerProduct.dimensions_rows.map((row, idx) => (
+                        <tr key={row.id || idx} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                          <td style={{ padding: "6px 8px", color: "#64748b" }}>{idx + 1}</td>
+                          <td style={{ padding: "6px 8px" }}>{row.title || "—"}</td>
+                          <td style={{ padding: "6px 8px" }}>{row.length ?? "—"}</td>
+                          <td style={{ padding: "6px 8px" }}>{row.width ?? "—"}</td>
+                          <td style={{ padding: "6px 8px" }}>{row.height ?? "—"}</td>
+                          <td style={{ padding: "6px 8px" }}>{row.cbm ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
               {drawerProduct.specification && (
-                <div>
-                  <h4 style={{ margin: "0 0 4px", fontSize: "13px", color: "#1e293b" }}>Specification</h4>
-                  <p style={{ margin: 0, fontSize: "13px", color: "#475569" }}>{drawerProduct.specification}</p>
+                <div style={{ background: "#ffffff", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <h4 style={{ margin: "0 0 6px", fontSize: "14px", color: "#1e293b" }}>Specification</h4>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#475569", whiteSpace: "pre-wrap" }}>
+                    {drawerProduct.specification}
+                  </p>
                 </div>
               )}
 

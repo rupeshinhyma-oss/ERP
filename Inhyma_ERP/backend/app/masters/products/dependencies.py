@@ -13,6 +13,7 @@ from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
 from app.masters.products.repository import ProductRepository
 from app.masters.products.service import ProductService
+from app.masters.taxes.repository import TaxRepository
 from app.masters.uom.repository import UomRepository
 
 
@@ -28,4 +29,5 @@ def get_product_service(
         BrandRepository(db),
         UomRepository(db),
         cache_manager,
+        TaxRepository(db),
     )

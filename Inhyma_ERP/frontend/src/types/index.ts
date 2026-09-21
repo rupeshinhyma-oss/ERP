@@ -330,6 +330,70 @@ export interface Product extends MasterRecord {
   standard_price?: number | null;
   is_purchasable?: boolean;
   is_sellable?: boolean;
+  /** FK into the Taxes master (HSN Number / GST % / Import Duty %) -- the field the form's "HSN Code" dropdown actually saves. */
+  hsn_id?: string | null;
+  /** Read-only, denormalized from the linked Tax row; never sent back on save. */
+  hsn_number?: string | null;
+  gst_percent?: number | null;
+  import_duty_percent?: number | null;
+  dimensions_rows?: ProductDimensionRow[] | null;
+}
+
+export interface ProductDimensionRow {
+  id?: string;
+  title?: string;
+  length?: number | string;
+  width?: number | string;
+  height?: number | string;
+  cbm?: number | string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sales (Proforma Invoices)                                          */
+/* ------------------------------------------------------------------ */
+
+export interface ProformaLineItem {
+  id?: string;
+  product_name: string;
+  product_code?: string | null;
+  hsn_code?: string | null;
+  gst_rate?: string | null;
+  quantity: number;
+  uom: string;
+  rate: number;
+  amount: number;
+}
+
+export interface ProformaInvoice {
+  id: string;
+  proforma_no: string;
+  proforma_date: string;
+  expected_delivery_date?: string | null;
+  warehouse: string;
+  lead_source?: string | null;
+  company_name: string;
+  city?: string | null;
+  state?: string | null;
+  sales_person?: string | null;
+  amount_inc_gst: number;
+  discount: number;
+  status: string;
+  remark?: string | null;
+  created_by: string;
+  items: ProformaLineItem[];
+}
+
+export interface ProformaStatusCounts {
+  count: number;
+  amount: number;
+}
+
+export interface ProformaTabCounts {
+  all: ProformaStatusCounts;
+  pending: ProformaStatusCounts;
+  admin_approved: ProformaStatusCounts;
+  confirmed: ProformaStatusCounts;
+  cancelled: ProformaStatusCounts;
 }
 
 /* ------------------------------------------------------------------ */

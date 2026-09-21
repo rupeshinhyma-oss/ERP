@@ -65,6 +65,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "SALE",
     items: [
+      { key: "proforma", label: "Proforma", path: "/proforma-invoice/list", icon: "fileText" },
       { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText" },
     ],
   },
