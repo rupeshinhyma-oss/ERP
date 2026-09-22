@@ -359,9 +359,17 @@ export interface ProformaLineItem {
   hsn_code?: string | null;
   gst_rate?: string | null;
   quantity: number;
-  uom: string;
+  uom?: string | null;
   rate: number;
   amount: number;
+  hsn?: string | null;
+  unit_price?: number;
+  unit_discount?: number;
+  taxable_amount?: number;
+  gst_percent?: number;
+  gst_amount?: number;
+  total?: number;
+  is_additional_charge?: boolean;
 }
 
 export interface ProformaInvoice {
@@ -375,6 +383,15 @@ export interface ProformaInvoice {
   city?: string | null;
   state?: string | null;
   sales_person?: string | null;
+  payment_terms?: string | null;
+  transport_name?: string | null;
+  third_party_delivery?: string | null;
+  transport_destination?: string | null;
+  delivery_type?: string | null;
+  delivery_charge?: string | null;
+  billing_address?: string | null;
+  shipping_address?: string | null;
+  terms_and_conditions?: string | null;
   amount_inc_gst: number;
   discount: number;
   status: string;
@@ -699,7 +716,11 @@ export interface Supplier {
   media_urls?: string | null;
   overall_remarks?: string | null;
   is_active?: boolean;
-  dealing_officer_id?: string | null;
+  city_name?: string | null;
+  state_name?: string | null;
+  country_name?: string | null;
+  category_name?: string | null;
+  sub_category_name?: string | null;
   contacts?: SupplierContact[];
 }
 

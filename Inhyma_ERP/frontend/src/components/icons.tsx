@@ -586,6 +586,34 @@ export function IconDownload(props: IconProps) {
   );
 }
 
+export function IconShoppingCart(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <circle cx="8" cy="21" r="1" />
+      <circle cx="19" cy="21" r="1" />
+      <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
+    </NavSvg>
+  );
+}
+
+export function IconCreditCard(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <rect width="20" height="14" x="2" y="5" rx="2" />
+      <line x1="2" x2="22" y1="10" y2="10" />
+    </NavSvg>
+  );
+}
+
+export function IconQuote(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z" />
+      <path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z" />
+    </NavSvg>
+  );
+}
+
 /** Icon lookup by the string keys the nav config uses. */
 export const ICONS = {
   stock: IconStock,
@@ -594,6 +622,9 @@ export const ICONS = {
   dashboard: IconDashboard,
   factory: IconFactory,
   shoppingBag: IconShoppingBag,
+  shoppingCart: IconShoppingCart,
+  creditCard: IconCreditCard,
+  quote: IconQuote,
   box: IconBox,
   image: IconImage,
   layers: IconLayers,
