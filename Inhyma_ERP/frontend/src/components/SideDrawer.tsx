@@ -20,7 +20,8 @@ import type { ReactNode } from "react";
 import { useBodyScrollLock } from "@/lib/hooks";
 
 export interface SideDrawerProps {
-  open: boolean;
+  open?: boolean;
+  isOpen?: boolean;
   title: ReactNode;
   subtitle?: ReactNode;
   onClose: () => void;
@@ -34,6 +35,7 @@ export interface SideDrawerProps {
 
 export function SideDrawer({
   open,
+  isOpen,
   title,
   subtitle,
   onClose,
@@ -44,11 +46,12 @@ export function SideDrawer({
   className,
   children,
 }: SideDrawerProps) {
-  useBodyScrollLock(open);
+  const isDrawerOpen = Boolean(open ?? isOpen);
+  useBodyScrollLock(isDrawerOpen);
 
   return (
     <div
-      className={`side-drawer-backdrop ${open ? "open" : ""}`}
+      className={`side-drawer-backdrop ${isDrawerOpen ? "open" : ""}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

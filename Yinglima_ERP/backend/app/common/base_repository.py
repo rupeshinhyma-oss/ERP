@@ -35,8 +35,9 @@ search/sort/filter logic per module.
 
 from __future__ import annotations
 
+import builtins
 import uuid
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, List, Tuple, TypeVar
 
 from sqlalchemy import Boolean, Select, String, Text, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -120,7 +121,7 @@ class BaseRepository(Generic[ModelT]):
         limit: int | None = 20,
         filters: dict[str, Any] | None = None,
         order_by: Any | None = None,
-    ) -> list[ModelT]:
+    ) -> List[ModelT]:
         """
         Fetch a page of rows, optionally filtered by exact-match column values.
 
@@ -165,15 +166,26 @@ class BaseRepository(Generic[ModelT]):
             if isinstance(value, str) and isinstance(column.type, (String, Text)):
                 stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
-                try:
-                    stmt = stmt.where(column == uuid.UUID(value))
-                except ValueError:
-                    stmt = stmt.where(column == value)
+                if "," in value:
+                    raw_ids = [x.strip() for x in value.split(",") if x.strip()]
+                    parsed_uuids = []
+                    for raw in raw_ids:
+                        try:
+                            parsed_uuids.append(uuid.UUID(raw))
+                        except ValueError:
+                            pass
+                    if parsed_uuids:
+                        stmt = stmt.where(column.in_(parsed_uuids))
+                else:
+                    try:
+                        stmt = stmt.where(column == uuid.UUID(value))
+                    except ValueError:
+                        stmt = stmt.where(column == value)
             else:
                 stmt = stmt.where(column == value)
         return stmt
 
-    async def paginated_list(self, query: "ListQueryParams") -> tuple[list[ModelT], int]:
+    async def paginated_list(self, query: "ListQueryParams") -> Tuple[List[ModelT], int]:
         """
         Fetch one page of rows plus the total matching count, applying search/sort/filters.
 
@@ -225,7 +237,7 @@ class BaseRepository(Generic[ModelT]):
             # code path that can still issue a separate COUNT(*), and only
             # ever fires for an empty page.
             count_stmt = select(func.count()).select_from(base_stmt.subquery())
-            total = int((await self.session.execute(count_stmt)).scalar_one())
+            total = (await self.session.execute(count_stmt)).scalar_one()
             return [], total
 
         total = int(rows[0][-1])
@@ -279,10 +291,21 @@ class BaseRepository(Generic[ModelT]):
             elif isinstance(value, str) and isinstance(column.type, (String, Text)):
                 stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
-                try:
-                    stmt = stmt.where(column == uuid.UUID(value))
-                except ValueError:
-                    stmt = stmt.where(column == value)
+                if "," in value:
+                    raw_ids = [x.strip() for x in value.split(",") if x.strip()]
+                    parsed_uuids = []
+                    for raw in raw_ids:
+                        try:
+                            parsed_uuids.append(uuid.UUID(raw))
+                        except ValueError:
+                            pass
+                    if parsed_uuids:
+                        stmt = stmt.where(column.in_(parsed_uuids))
+                else:
+                    try:
+                        stmt = stmt.where(column == uuid.UUID(value))
+                    except ValueError:
+                        stmt = stmt.where(column == value)
             else:
                 stmt = stmt.where(column == value)
 

@@ -629,6 +629,7 @@ export function ProductsPage() {
         "Product Code",
         "Brand",
         "Sub Category",
+        "Primary Supplier",
         "HSN Code",
         "UOM",
         "Organization",

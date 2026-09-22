@@ -43,7 +43,6 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "CONTACT",
     items: [
       { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "company.view" },
-      { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
       { key: "buyers", label: "Buyers", path: "/buyers", icon: "shoppingBag", permission: "buyer.view" },
     ],
   },
@@ -66,7 +65,26 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "SALE",
     items: [
       { key: "proforma", label: "Proforma", path: "/proforma-invoice/list", icon: "fileText" },
-      { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText" },
+      { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText", permission: "inquiry.view" },
+      { key: "sales-process", label: "Sales Process", path: "/sales/process", icon: "shoppingCart" },
+      { key: "discount-payments", label: "Discount Payments", path: "/discount-payments/list", icon: "creditCard" },
+    ],
+  },
+  {
+    label: "PURCHASE",
+    items: [
+      { key: "local-purchases", label: "Local Purchase", path: "/purchase-order/list", icon: "shoppingBag", permission: "purchase.view" },
+      { key: "import-purchases", label: "Import Purchase", path: "/purchase-order/import-purchase-list", icon: "truck", permission: "purchase.view" },
+      { key: "purchase-suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
+    ],
+  },
+  {
+    label: "REPORTS",
+    items: [
+      { key: "reports-re-order", label: "Re-Order", path: "/reports/re-order", icon: "stock", permission: "report.view" },
+      { key: "reports-stock-transactions", label: "Stock Transactions", path: "/reports/stock-transactions", icon: "refresh", permission: "report.view" },
+      { key: "reports-deleted-orders", label: "Deleted Orders", path: "/reports/deleted-orders", icon: "trash", permission: "report.view" },
+      { key: "reports-general", label: "General Reports", path: "/reports/general", icon: "fileText", permission: "report.view" },
     ],
   },
   {
@@ -148,7 +166,17 @@ export const PAGE_TITLES: Record<string, string> = {
   dashboard: "Dashboard",
   reports: "Reports & Analytics",
   buyers: "Agents & Buyers",
-  inquiries: "Proforma & Sales",
+  inquiries: "Inquiries",
+  proforma: "Proforma Invoices",
+  "sales-process": "Sales Process",
+  "discount-payments": "Discount Payments",
+  "local-purchases": "Local Purchase",
+  "import-purchases": "Import Purchase",
+  "purchase-suppliers": "Suppliers",
+  "reports-re-order": "Re-Order",
+  "reports-stock-transactions": "Stock Transactions",
+  "reports-deleted-orders": "Deleted Orders",
+  "reports-general": "General Reports",
   planning: "Shipment Planning",
   crm: "Customer Relationship Management",
   sales: "Sales Process",
@@ -230,6 +258,10 @@ export const NAV_ITEMS_BY_KEY: Record<string, NavItem | NavSubItem> = NAV_SECTIO
   {} as Record<string, NavItem | NavSubItem>
 );
 
+if (NAV_ITEMS_BY_KEY["purchase-suppliers"] && !NAV_ITEMS_BY_KEY["suppliers"]) {
+  NAV_ITEMS_BY_KEY["suppliers"] = NAV_ITEMS_BY_KEY["purchase-suppliers"];
+}
+
 /**
  * Old filename -> new path, for bookmark compatibility.
  */
@@ -245,6 +277,8 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/teams.html": "/users",
   "/teams": "/users",
   "/suppliers.html": "/suppliers",
+  "/supplier/list": "/suppliers",
+  "/supplier": "/suppliers",
   "/buyers.html": "/buyers",
   "/inquiries.html": "/inquiries",
   "/masters-countries.html": "/masters/countries",
@@ -259,6 +293,15 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/masters-categories.html": "/masters/categories",
   "/masters-subcategories.html": "/masters/subcategories",
   "/masters-products.html": "/masters/products",
+  "/proforma-invoice/list": "/proforma-invoice/list",
+  "/sale-process/list": "/sales/process",
+  "/sales-process/list": "/sales/process",
+  "/discount-payments/list": "/discount-payments/list",
+  "/purchase/local": "/purchase-order/list",
+  "/purchase/local/list": "/purchase-order/list",
+  "/purchase-order": "/purchase-order/list",
+  "/purchase-order.html": "/purchase-order/list",
+  "/purchase-order/list": "/purchase-order/list",
   "/product-stock": "/product-stock/list",
   "/product-stock.html": "/product-stock/list",
   "/product_stock/list": "/product-stock/list",

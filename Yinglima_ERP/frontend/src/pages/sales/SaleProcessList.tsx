@@ -668,13 +668,19 @@ export function SaleProcessListPage() {
             boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
           }}
         >
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+          <div
+            className="table-scroll"
+            style={{
+              overflowX: "auto",
+              overflowY: "auto",
+              maxHeight: "calc(100vh - 280px)",
+              minHeight: "360px",
+            }}
+          >
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: "13px" }}>
               <thead>
                 <tr
                   style={{
-                    background: "#f8fafc",
-                    borderBottom: "1px solid #e2e8f0",
                     textAlign: "left",
                     color: "#475569",
                     fontSize: "12px",
@@ -683,16 +689,150 @@ export function SaleProcessListPage() {
                     letterSpacing: "0.5px",
                   }}
                 >
-                  <th style={{ padding: "10px 12px", width: "40px" }}>#</th>
-                  <th style={{ padding: "10px 12px" }}>Order Date</th>
-                  <th style={{ padding: "10px 12px" }}>Order No</th>
-                  <th style={{ padding: "10px 12px" }}>Consignment</th>
-                  <th style={{ padding: "10px 12px" }}>Buyer / Branch</th>
-                  <th style={{ padding: "10px 12px", textAlign: "right" }}>Items Qty</th>
-                  <th style={{ padding: "10px 12px", textAlign: "right" }}>Total Amount</th>
-                  <th style={{ padding: "10px 12px" }}>Status</th>
-                  <th style={{ padding: "10px 12px" }}>Logistics Info</th>
-                  <th style={{ padding: "10px 12px", textAlign: "center", width: "80px" }}>Actions</th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      left: 0,
+                      zIndex: 25,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      width: "40px",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    #
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Order Date
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Order No
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Consignment
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Buyer / Branch
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      textAlign: "right",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Items Qty
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      textAlign: "right",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Total Amount
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Status
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Logistics Info
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "10px 12px",
+                      textAlign: "center",
+                      width: "80px",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -717,19 +857,28 @@ export function SaleProcessListPage() {
                     <tr
                       key={order.id}
                       style={{
-                        borderBottom: "1px solid #f1f5f9",
                         backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fcfdfe",
                         cursor: "pointer",
                       }}
                       onClick={() => setViewOrderId(order.id)}
                     >
-                      <td style={{ padding: "10px 12px", color: "#94a3b8" }}>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          color: "#94a3b8",
+                          position: "sticky",
+                          left: 0,
+                          zIndex: 5,
+                          background: idx % 2 === 0 ? "#ffffff" : "#fcfdfe",
+                          borderBottom: "1px solid #f1f5f9",
+                        }}
+                      >
                         {(page - 1) * pageSize + idx + 1}
                       </td>
-                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: "#334155" }}>
+                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: "#334155", borderBottom: "1px solid #f1f5f9" }}>
                         {order.order_date}
                       </td>
-                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap", borderBottom: "1px solid #f1f5f9" }}>
                         <span
                           style={{
                             fontWeight: 700,
@@ -740,7 +889,7 @@ export function SaleProcessListPage() {
                           {order.order_no}
                         </span>
                       </td>
-                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap", borderBottom: "1px solid #f1f5f9" }}>
                         {order.consignment_code ? (
                           <span
                             style={{
@@ -759,7 +908,7 @@ export function SaleProcessListPage() {
                           <span style={{ color: "#94a3b8" }}>Direct Sale</span>
                         )}
                       </td>
-                      <td style={{ padding: "10px 12px" }}>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
                         <div style={{ fontWeight: 600, color: "#0f172a" }}>{order.buyer_name}</div>
                         {order.buyer_branch_name && (
                           <div style={{ fontSize: "11px", color: "#64748b" }}>
@@ -767,7 +916,7 @@ export function SaleProcessListPage() {
                           </div>
                         )}
                       </td>
-                      <td style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1px solid #f1f5f9" }}>
                         <span style={{ fontWeight: 600, color: "#0f172a" }}>
                           {Number(order.total_quantity).toLocaleString()} pcs
                         </span>
@@ -775,7 +924,7 @@ export function SaleProcessListPage() {
                           {order.item_count} items
                         </div>
                       </td>
-                      <td style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1px solid #f1f5f9" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
                           <span style={{ fontWeight: 800, color: "#0f172a" }}>
                             {order.currency === "USD" ? "$" : "¥"} {Number(order.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -795,10 +944,10 @@ export function SaleProcessListPage() {
                           </span>
                         </div>
                       </td>
-                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap", borderBottom: "1px solid #f1f5f9" }}>
                         {getStatusBadge(order.status)}
                       </td>
-                      <td style={{ padding: "10px 12px", fontSize: "12px", color: "#475569" }}>
+                      <td style={{ padding: "10px 12px", fontSize: "12px", color: "#475569", borderBottom: "1px solid #f1f5f9" }}>
                         {order.container_no ? (
                           <div>Cont: <strong>{order.container_no}</strong></div>
                         ) : order.bl_no ? (
@@ -810,7 +959,7 @@ export function SaleProcessListPage() {
                         )}
                       </td>
                       <td
-                        style={{ padding: "10px 12px", textAlign: "center", position: "relative" }}
+                        style={{ padding: "10px 12px", textAlign: "center", position: "relative", borderBottom: "1px solid #f1f5f9" }}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button

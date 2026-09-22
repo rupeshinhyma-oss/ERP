@@ -498,3 +498,126 @@ logic lives entirely in ERP_Main, which doesn't exist yet.
 - [x] No refactoring was performed anywhere in this phase.
 - [x] No working code was deleted.
 - [x] No performance overhead was introduced (no code changed at all).
+
+---
+
+## 19. Spoke Stabilization & Operational Module Verification Log (September 21, 2026)
+
+> **Context:** Before federating multi-ERP spokes or introducing `ERP_Main`, each core operational module of the active spoke (`Yinglima_ERP`) is being reviewed, tested, and hardened module-by-module under a strict **zero-regression rule**.
+> Every completed task, bug fix, and verification step is documented here so that any developer or agent pulling or pushing code can instantly verify what was completed, what was tested, and how to validate it.
+
+### A. Completed Module Improvements & Hardening
+
+#### 1. Sale Process Module (Consignment Auto-Population & Financial Rollup)
+- **Shipment Planning Integration:** Direct connection between Shipment Planning sheets and Sale Process. Clicking **"⚡ Auto-Load"** reads consignment columns (e.g. `Muminhyma 1`, `Muminhyma 2`) and populates planned items with quantity > 0 without mutating planning grid data or status dots.
+- **Searchable Buyer Combobox:** Custom searchable combobox with auto-focus search, live filtering, and click-outside dismissal in `SaleProcessForm.tsx`.
+- **Consolidated Unit Rate Error Toast:** Replaced multiple individual error toasts with a single consolidated toast (*"N items have unit rate ≤ 0..."*) with red row highlighting and auto-scroll.
+- **Zero-Select Focus:** Inputs for Quantity, Unit Rate (¥/$), and Tax % auto-select on focus (`e.target.select()`) for immediate one-click replacement of default zeros.
+- **Product Master Custom Add:** Fixed API parsing (`Array.isArray(res.data) ? res.data : []`) and upgraded dropdown with HSN codes, product codes, and "+ Add" badges.
+
+#### 2. Supplier Profiles (`frontend/src/pages/Suppliers.tsx`)
+- **Cascading Category ➔ Sub-Category Dropdowns:**
+  - In `Suppliers.tsx`, `formCategoryIds` drives `formSubCategoryIds` options via `/masters/product-sub-categories`.
+  - Selecting a category (e.g. `Chemicals`) filters the sub-category selector so only related sub-categories appear.
+  - **Auto-Pruning:** Deselecting any category automatically prunes any orphaned sub-categories from the selected set.
+  - **Multi-UUID Backend Filtering:** Updated `base_repository.py` to parse comma-separated UUID query parameters (e.g. `category_id=id1,id2`) into `column.in_(parsed_uuids)` without Pyright typing conflicts.
+
+#### 3. Table UI & Dynamic Two-Line Text Clamping (`Suppliers.tsx`, `Buyers.tsx`)
+- **Global `nowrap` Override:** The global table rule (`th, td { height: 38px; white-space: nowrap; }`) in `style.css` was preventing multi-line wrapping. Explicitly overrode target columns with `whiteSpace: "normal"`, `height: "auto"`, and `verticalAlign: "middle"`.
+- **True 2-Line Box Clamp (Option 2):** Applied `-webkit-line-clamp: 2`, `display: "-webkit-box"`, `WebkitBoxOrient: "vertical"`, `wordBreak: "break-word"`, and `lineHeight: 1.35` with full hover tooltips (`title={company_name}`).
+- **Column Breadths Fine-Tuned:**
+  - **Company Name:** Width increased to `290px` (min `200px` / max `290px`) in `Suppliers.tsx` for optimal readability.
+  - **Current Status:** Width tightened to a compact `105px` (min `95px` / max `115px`).
+  - **Multi-Line Header Text:** Added `whiteSpace: "normal"` and `lineHeight: 1.25` on header text labels so compact columns (like `CURRENT STATUS`) wrap onto 2 lines instead of truncating with an ellipsis (`CURRENT S...`).
+
+#### 4. Smart Trash Conflict Detection System (`Product Master`, `Buyers`, `Suppliers`)
+- **Background & Requirement:** When an entry (Product, Buyer, Supplier, etc.) is deleted, it is soft-deleted into the **Trash Bin**. If a user later creates a new entry with the same name or code, the system must trigger the **"Record Already Exists in Trash"** modal offering 1-click restore, opening trash in a new tab, or canceling.
+- **The Issue:**
+  - **Product Master (`MasterPage.tsx`):** Product Master uses a full-page form layout (`useFullPageForm={true}`). When the backend returned `409 (Conflict)` (`"in_trash": true`), `MasterPage.tsx` executed an early return for full-page forms that lacked the `<TrashConflictModal>` element in the DOM. The user remained stuck without feedback.
+  - **Buyer Profiles (`Buyers.tsx`):** The Add/Edit buyer form rendered via `if (modalMode) { return (...) }`, where `<TrashConflictModal>` was similarly missing from the return block. In addition, the backend `BuyerService` was only checking duplicates if identical phone numbers were provided.
+- **The Fixes:**
+  - **`MasterPage.tsx`:** Mounted `<TrashConflictModal>` directly inside `if (useFullPageForm && modalOpen)` full-page form return block.
+  - **`Buyers.tsx`:** Mounted `<TrashConflictModal>` inside the `if (modalMode)` Add/Edit form return block.
+  - **`buyers/repository.py` & `buyers/service.py`:** Added `get_any_by_company_name` to `BuyerRepository` and added company-name conflict/trash checks in `BuyerService.create` and `BuyerService.update` (mirroring `SupplierService`).
+
+---
+
+### B. Summary of Files Modified
+
+| Component | File Path | Status | Changes Made |
+|---|---|---|---|
+| **Backend Core** | [`backend/app/common/base_repository.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/common/base_repository.py) | **MODIFIED** | Comma-separated UUID list parsing for dynamic `.in_()` filters & fixed Pyright typing. |
+| **Backend Buyers** | [`backend/app/buyers/repository.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/buyers/repository.py) | **MODIFIED** | Added `get_any_by_company_name` checking soft-deleted and active buyers. |
+| **Backend Buyers** | [`backend/app/buyers/service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/buyers/service.py) | **MODIFIED** | Added company-name conflict and trash detection (`in_trash: True`) to `create` and `update`. |
+| **Frontend Master Data** | [`frontend/src/components/MasterPage.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/MasterPage.tsx) | **MODIFIED** | Mounted `<TrashConflictModal>` inside full-page form return block (`useFullPageForm`). |
+| **Frontend Suppliers** | [`frontend/src/pages/Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx) | **MODIFIED** | Cascading Category ➔ Sub-Category dropdowns with auto-pruning; Option 2 line clamp; 290px company name; 105px status with 2-line header wrapping. |
+| **Frontend Buyers** | [`frontend/src/pages/Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx) | **MODIFIED** | Option 2 line clamp for Company Name; mounted `<TrashConflictModal>` inside `if (modalMode)`. |
+
+---
+
+### C. Developer Pull & Verification Checklist
+
+When pulling latest changes or switching branches, execute the following to verify integrity:
+
+1. **Verify Frontend Build & Typechecks:**
+   ```bash
+   cd Yinglima_ERP/frontend
+   npm run build
+   ```
+   *Expected:* Exit code 0, 0 TypeScript errors, production bundle compiled cleanly.
+
+2. **Manual Test Checklist:**
+   - **Supplier Category ➔ Sub-Category Cascading:**
+     - Open `http://localhost:5173/suppliers` ➔ click **+ ADD NEW**.
+     - Select Category `Chemicals` ➔ Sub-Categories only show chemical items.
+     - Deselect Category ➔ orphaned sub-categories are automatically pruned.
+   - **Table Text Wrapping & Multi-Line Headers:**
+     - View the Supplier table ➔ Company Names cleanly wrap across 2 lines without blowing out the layout.
+     - Look at the `CURRENT STATUS` column header ➔ cleanly wraps onto 2 lines (`CURRENT` on line 1, `STATUS` on line 2) inside a 105px width.
+   - **Smart Trash Detection (Product Master):**
+     - Go to `http://localhost:5173/masters/products` ➔ **+ New Product**.
+     - Enter a product name currently in Trash (e.g., `Test 78`) and click **Save**.
+     - Modal pops up: *"Product Already Exists in Trash"* with 1-click **Restore** button.
+   - **Smart Trash Detection (Buyer Profiles):**
+     - Go to `http://localhost:5173/buyers` ➔ delete any test buyer (e.g. `Test 81`).
+     - Click **+ Add Buyer** ➔ enter `Test 81` as the Company Name ➔ click **Save Buyer Profile**.
+     - Modal pops up: *"Buyer Already Exists in Trash"* with 1-click **Restore** button.
+
+---
+
+## 20. Local Purchases Automated Bill Extraction & Numeric Precision Controls (Sept 22, 2026)
+
+### A. Dual Bill Document Extraction (`POST /api/v1/purchases/local/extract-bill`)
+- **PDF Bills**: Powered by dynamic OpenAI integration (`gpt-4o-mini`) with regex fallback, automatically extracting supplier name, invoice reference, date, total, and all item lines.
+- **Excel & CSV Bills**: Structured spreadsheet parser that reads top metadata (Vendor, Invoice No, Date, Currency) and maps column headers without confusing item totals or summary rows.
+- **Fuzzy Master Resolution**:
+  - Automatically matches extracted supplier names against the `Supplier` master table.
+  - Automatically matches item codes and descriptions against the `Product` catalog to link `matched_product_id` and default VAT/HSN settings.
+
+### B. Scroll-Wheel Value Lockout & Clean Number Formatting
+- **Accidental Scroll Protection**:
+  - Global `wheel` event handler attached in `src/main.tsx` automatically blurs active `input[type="number"]` elements whenever a wheel event occurs.
+  - Direct `onWheel={(e) => e.currentTarget.blur()}` handlers attached to all quantity, rate, tax, and expense fields in `LocalPurchaseForm.tsx`.
+  - Spin buttons suppressed across all browsers via `src/styles/style.css`.
+- **Floating-Point Precision Fix**:
+  - Quantities and basic totals now strictly apply 2-decimal rounding (`toFixed(2)`), eliminating artifacts like `18.009999999999998` in Grand Total footers and reconciliation banners.
+
+### C. Consolidated Unregistered Products UX & Clean Inline Badging
+- **Clutter-Free Alerting Architecture**:
+  - When a bill is extracted with items not found in the Product Master catalog, placing large red discrepancy alert blocks on every row destroys table vertical alignment and creates visual exhaustion.
+  - **Consolidated Notice Banner**: A single, clean amber alert banner is rendered above Card 4 summarizing: `⚠️ Notice: [N] Products in this bill are not registered in Product Master (Rows #...) — Marked with ⚠️ Not in Master. These will be recorded as one-time purchase items.`
+  - **Subtle Inline Row Indicators**: Unregistered rows display a warm alert border (`#fca5a5`) on the custom name input, paired with a compact pill badge (`⚠️ Not in Master`) and an extracted `Code: [SKU]` tag directly below, preserving table row heights and column alignment.
+  - **Unblocked Local Purchases**: The system seamlessly accepts `product_id: null` for one-time domestic purchase expenses without forcing prior registration into Product Master.
+
+---
+
+## 21. Product Price Directory Frozen Header & Sticky Column Standard (Sept 22, 2026)
+
+### A. Responsive Scroll Container (`.table-scroll`)
+- Enclosed the table within a dedicated scroll wrapper (`maxHeight: calc(100vh - 270px)`, `minHeight: 380px`, `overflowY: auto`, `overflowX: auto`).
+- Replaced `borderCollapse: collapse` with `borderCollapse: separate; borderSpacing: 0` to prevent sticky header clipping artifacts in WebKit and Blink engines.
+
+### B. Vertical & Horizontal Freeze Protection
+- **Vertical Headline Lock**: Every `<th>` element (`Sr. No.`, `Product Name & Code`, `Category & Brand`, `Best Price`, `Primary Supplier`, `Actions`) maintains `position: sticky; top: 0; zIndex: 10/25` with `boxShadow: 0 2px 3px rgba(0,0,0,0.06)` and `borderBottom: 2px solid #cbd5e1`.
+- **Horizontal Sticky `Sr. No.`**: First column (`Sr. No.`) is locked with `position: sticky; left: 0; zIndex: 25` (header) and `zIndex: 5` (body row) ensuring it remains visible when horizontally panning wide screens.
+- **Zero Layout Distortion**: Preserves existing hover pre-fetching (200ms), 0ms sub-table drawer expansion, inline quick pricing, and pagination.

@@ -237,6 +237,16 @@ class BuyerRepository(BaseRepository[Buyer]):
         """Fetch a buyer by ID with its emails/contacts/category links eagerly loaded (all lazy='selectin')."""
         return await self.get_by_id(buyer_id)
 
+    async def get_any_by_company_name(
+        self, company_name: str, *, exclude_id: uuid.UUID | None = None
+    ) -> Buyer | None:
+        """Fetch the buyer matching this Company Name regardless of soft-delete state."""
+        stmt = select(Buyer).where(func.lower(func.trim(Buyer.company_name)) == company_name.strip().lower())
+        if exclude_id is not None:
+            stmt = stmt.where(Buyer.id != exclude_id)
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
     async def list_all(self) -> list[Buyer]:
         """Return every non-deleted buyer, ordered by company name."""
         stmt = self._base_select().order_by(Buyer.company_name)
