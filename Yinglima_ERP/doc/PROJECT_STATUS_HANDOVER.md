@@ -165,6 +165,12 @@ Organized as a structured **3-Layer Procurement Hierarchy**:
    - **Sticky Top Headline**: Enclosed the orders table in a responsive scroll container (`.table-scroll` with `maxHeight: calc(100vh - 280px)`, `minHeight: 360px`, `overflowY: auto`, `overflowX: auto`). All 10 `<th>` headers (`#`, `Order Date`, `Order No`, `Consignment`, `Buyer / Branch`, `Items Qty`, `Total Amount`, `Status`, `Logistics Info`, `Actions`) are configured with `position: sticky; top: 0; zIndex: 10/25` with `borderCollapse: separate; borderSpacing: 0`.
    - **Pinned `#` (Sr. No.) Column**: Pinned `#` with `position: sticky; left: 0; zIndex: 25 (th) / 5 (td)` so order sequence numbers remain in view when panning horizontally.
    - **Row Divider Integrity**: Set explicit `borderBottom: 1px solid #f1f5f9` on each `<td>` cell so row separators render cleanly with `borderCollapse: separate`.
+9. **Smart Trash Pre-Check & Historical Data Protection (`Trash.tsx`, `app/trash/service.py`, `app/trash/routes.py`)**:
+   - **Root Cause Eliminated**: Deleting suppliers or master entities previously threw database foreign key constraint errors (`ForeignKeyViolationError`) if they had links to historical Local Purchases, Inquiry Quotations, RFQs, or Product Suppliers.
+   - **Transaction Dependency Pre-Check**: Added `check_dependencies` across `Supplier`, `Buyer`, `Product`, `Category`, `SubCategory`, `Brand`, `UOM`, and `HSN Code` entities.
+   - **Descriptive Conflict Alerts**: When attempting to permanently delete a single record with active references, a clear, actionable `ConflictException` (HTTP 409) is returned explaining exactly what transactions depend on it (e.g., *"Cannot permanently delete Supplier 'Yinglima Packaging' because it is linked to 3 Local Purchase orders and 2 Inquiry Quotations."*).
+   - **Safe Empty Trash & Nested Savepoints**: For bulk deletion and "Empty Trash", PostgreSQL savepoints (`db.begin_nested()`) are used to permanently remove unlinked records while safely skipping and preserving active transaction records.
+   - **Frontend Transparency**: In `Trash.tsx`, banner notifications dynamically display the backend's informative message explaining how many items were deleted and how many were kept safely archived.
 
 ### B. Verification Checklist for Git Pull / Branch Switch:
 1. **Build & Typing Verification**:

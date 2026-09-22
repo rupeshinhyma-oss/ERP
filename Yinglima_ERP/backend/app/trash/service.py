@@ -8,11 +8,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Type
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import ConflictException, NotFoundException
 
 # Import every model that supports soft-delete (has SoftDeleteMixin), so
 # Trash can list/restore/purge it. This list is deliberately exhaustive --
@@ -186,29 +187,135 @@ class TrashService:
             pass
         return True
 
+    async def check_dependencies(self, entity_type: str, item_id: uuid.UUID) -> list[str]:
+        """
+        Check whether an entity is referenced by historical/active business records.
+        Returns a human-readable list of dependencies (e.g. ['2 Local Purchase orders', '1 Inquiry Quotation']).
+        """
+        deps: list[str] = []
+        if entity_type == "Supplier":
+            # Check local purchases
+            try:
+                from app.purchases.local.models import LocalPurchase
+                lp_res = await self.db.execute(
+                    select(func.count()).select_from(LocalPurchase).where(LocalPurchase.supplier_id == item_id)
+                )
+                lp_count = lp_res.scalar_one()
+                if lp_count > 0:
+                    deps.append(f"{lp_count} Local Purchase order{'s' if lp_count > 1 else ''}")
+            except Exception:
+                pass
+
+            # Check inquiry quotes and RFQs
+            try:
+                from app.inquiries.models import Quotation, RFQ
+                q_res = await self.db.execute(
+                    select(func.count()).select_from(Quotation).where(Quotation.supplier_id == item_id)
+                )
+                q_count = q_res.scalar_one()
+                if q_count > 0:
+                    deps.append(f"{q_count} Inquiry Quotation{'s' if q_count > 1 else ''}")
+
+                rfq_res = await self.db.execute(
+                    select(func.count()).select_from(RFQ).where(RFQ.supplier_id == item_id)
+                )
+                rfq_count = rfq_res.scalar_one()
+                if rfq_count > 0:
+                    deps.append(f"{rfq_count} RFQ Dispatch{'es' if rfq_count > 1 else ''}")
+            except Exception:
+                pass
+
+        elif entity_type == "Buyer":
+            try:
+                from app.inquiries.models import Inquiry
+                inq_res = await self.db.execute(
+                    select(func.count()).select_from(Inquiry).where(Inquiry.buyer_id == item_id)
+                )
+                inq_count = inq_res.scalar_one()
+                if inq_count > 0:
+                    deps.append(f"{inq_count} Inquiry{'ies' if inq_count > 1 else ''}")
+            except Exception:
+                pass
+
+            try:
+                from app.sales.models import SaleOrder
+                so_res = await self.db.execute(
+                    select(func.count()).select_from(SaleOrder).where(SaleOrder.buyer_id == item_id)
+                )
+                so_count = so_res.scalar_one()
+                if so_count > 0:
+                    deps.append(f"{so_count} Sale Order{'s' if so_count > 1 else ''}")
+            except Exception:
+                pass
+
+        elif entity_type == "Product":
+            try:
+                from app.inquiries.models import InquiryItem
+                ii_res = await self.db.execute(
+                    select(func.count()).select_from(InquiryItem).where(InquiryItem.product_id == item_id)
+                )
+                ii_count = ii_res.scalar_one()
+                if ii_count > 0:
+                    deps.append(f"{ii_count} Inquiry Line Item{'s' if ii_count > 1 else ''}")
+            except Exception:
+                pass
+
+            try:
+                from app.purchases.local.models import LocalPurchaseItem
+                lpi_res = await self.db.execute(
+                    select(func.count()).select_from(LocalPurchaseItem).where(LocalPurchaseItem.product_id == item_id)
+                )
+                lpi_count = lpi_res.scalar_one()
+                if lpi_count > 0:
+                    deps.append(f"{lpi_count} Local Purchase Item{'s' if lpi_count > 1 else ''}")
+            except Exception:
+                pass
+
+            try:
+                from app.sales.models import SaleOrderItem
+                soi_res = await self.db.execute(
+                    select(func.count()).select_from(SaleOrderItem).where(SaleOrderItem.product_id == item_id)
+                )
+                soi_count = soi_res.scalar_one()
+                if soi_count > 0:
+                    deps.append(f"{soi_count} Sale Order Item{'s' if soi_count > 1 else ''}")
+            except Exception:
+                pass
+
+        elif entity_type in ("Category", "SubCategory", "Brand", "UOM", "HSN Code"):
+            try:
+                col_name = {
+                    "Category": "category_id",
+                    "SubCategory": "sub_category_id",
+                    "Brand": "brand_id",
+                    "UOM": "uom_id",
+                    "HSN Code": "hsn_code_id",
+                }.get(entity_type)
+                if col_name and hasattr(Product, col_name):
+                    col = getattr(Product, col_name)
+                    prod_res = await self.db.execute(
+                        select(func.count()).select_from(Product).where(col == item_id)
+                    )
+                    prod_count = prod_res.scalar_one()
+                    if prod_count > 0:
+                        deps.append(f"{prod_count} Product{'s' if prod_count > 1 else ''}")
+            except Exception:
+                pass
+
+        return deps
+
     async def hard_delete_item(self, entity_type: str, item_id: str) -> bool:
         """
         Permanently delete a soft-deleted item from the database.
 
-        Phase 8: no longer commits internally -- see ``restore_item``'s
-        docstring above; the same reasoning applies here.
-
-        Bug fix: ``PlanningSheet.rows``/``.columns`` cascade fine on
-        delete (``cascade="all, delete-orphan"``), but
-        ``PlanningChangeLog.sheet_id`` is a plain FK with NO
-        ``ondelete`` and NO ORM relationship/cascade at all -- it isn't
-        reachable from ``PlanningSheet`` in the object graph. Any sheet
-        that has ever been edited (row/column/cell change) has rows
-        here, so deleting the sheet used to hit a database-level
-        foreign-key violation, surfaced to the user as a generic
-        "unexpected error" and leaving the item stuck in Trash forever.
-        We explicitly clear the sheet's change-log rows first so the
-        FK is satisfied before the sheet itself is deleted.
+        Checks for existing transaction/business references before deleting.
+        If references exist, blocks deletion and explains the dependencies to protect
+        audit/accounting integrity.
         """
         if entity_type not in MODEL_MAP:
             raise NotFoundException(f"Unknown entity type '{entity_type}'.")
 
-        model_cls, _, _ = MODEL_MAP[entity_type]
+        model_cls, name_attr, _ = MODEL_MAP[entity_type]
         uid = uuid.UUID(item_id)
         stmt = select(model_cls).where(model_cls.id == uid)
         res = await self.db.execute(stmt)
@@ -217,38 +324,48 @@ class TrashService:
         if row is None:
             raise NotFoundException(f"{entity_type} with ID '{item_id}' not found.")
 
+        item_name = getattr(row, name_attr, None) or f"{entity_type} {item_id}"
+
+        # 1. Check for historical foreign-key dependencies before deleting
+        deps = await self.check_dependencies(entity_type, uid)
+        if deps:
+            deps_str = ", ".join(deps)
+            raise ConflictException(
+                f"Cannot permanently delete {entity_type} '{item_name}' because it is linked to {deps_str}. "
+                "This record will remain safely Archived in Trash to protect accounting and historical records."
+            )
+
         if entity_type == "Planning Sheet":
             await self.db.execute(delete(PlanningChangeLog).where(PlanningChangeLog.sheet_id == uid))
 
-        await self.db.delete(row)
-        await self.db.flush()
+        try:
+            async with self.db.begin_nested():
+                await self.db.delete(row)
+                await self.db.flush()
+        except IntegrityError:
+            raise ConflictException(
+                f"Cannot permanently delete {entity_type} '{item_name}' because other records in the system depend on it. "
+                "This record will remain safely Archived in Trash."
+            )
+
         return True
 
-    async def empty_trash(self) -> int:
+    async def empty_trash(self) -> tuple[int, int]:
         """
-        Permanently hard-delete ALL soft-deleted records across all models.
+        Permanently hard-delete soft-deleted records across all models.
+        Skips records that have active foreign-key dependencies so that
+        past transaction history (Local Purchases, Inquiry Quotes) remains protected.
 
-        Phase 8 item 17 (bulk operations): this used to SELECT every
-        soft-deleted row into Python objects and issue one
-        ``session.delete()`` per row -- for a large trash bin, that means
-        loading potentially thousands of full ORM objects into memory
-        just to delete them. Replaced with one bulk
-        ``DELETE ... WHERE deleted_at IS NOT NULL`` statement per model
-        (13 statements total, each O(1) round trips instead of O(n) ORM
-        deletes), still inside a single transaction committed once by the
-        route/session dependency -- correctness (all-or-nothing) is
-        unchanged, only the mechanism got cheaper.
+        Returns:
+            (deleted_count, skipped_count)
         """
-        count = 0
+        deleted_count = 0
+        skipped_count = 0
+
         for entity_type, (model_cls, _, _) in MODEL_MAP.items():
             if not hasattr(model_cls, "deleted_at"):
                 continue
 
-            # Same FK gap as hard_delete_item() above: PlanningChangeLog
-            # rows referencing a to-be-deleted PlanningSheet aren't
-            # cascaded automatically, so clear them first or the bulk
-            # DELETE below fails with a foreign-key violation and no
-            # trash gets emptied at all.
             if entity_type == "Planning Sheet":
                 await self.db.execute(
                     delete(PlanningChangeLog).where(
@@ -258,13 +375,29 @@ class TrashService:
                     )
                 )
 
-            stmt = delete(model_cls).where(model_cls.deleted_at.is_not(None))
+            stmt = select(model_cls).where(model_cls.deleted_at.is_not(None))
             res = await self.db.execute(stmt)
-            count += res.rowcount or 0
+            rows = res.scalars().all()
 
-        if count > 0:
+            for row in rows:
+                uid = row.id
+                deps = await self.check_dependencies(entity_type, uid)
+                if deps:
+                    skipped_count += 1
+                    continue
+
+                try:
+                    async with self.db.begin_nested():
+                        await self.db.delete(row)
+                        await self.db.flush()
+                        deleted_count += 1
+                except IntegrityError:
+                    skipped_count += 1
+
+        if deleted_count > 0:
             await self.db.flush()
-        return count
+
+        return deleted_count, skipped_count
 
     async def purge_expired(self, *, retention_days: int | None = None) -> dict[str, int]:
         """
