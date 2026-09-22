@@ -2448,6 +2448,41 @@ export function HrmsDashboardPage() {
                 />
               </div>
 
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div className="form-group">
+                  <label className="form-label">Latitude</label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    min="-90"
+                    max="90"
+                    className="form-control"
+                    value={editFormData.latitude}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, latitude: parseFloat(e.target.value) || 0 })
+                    }
+                    style={{ fontFamily: "monospace", fontWeight: 600 }}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Longitude</label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    min="-180"
+                    max="180"
+                    className="form-control"
+                    value={editFormData.longitude}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, longitude: parseFloat(e.target.value) || 0 })
+                    }
+                    style={{ fontFamily: "monospace", fontWeight: 600 }}
+                    required
+                  />
+                </div>
+              </div>
+
               <div className="form-group">
                 <label className="form-label">Radius (meters): {editFormData.radius_meters}m</label>
                 <input

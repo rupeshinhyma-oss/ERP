@@ -450,4 +450,81 @@ describe("Inhyma ERP HRMS — Google Maps Platform Universal Location Search", (
     // CRITICAL REQUIREMENT: No browser window.alert() was called
     expect(alertSpy).not.toHaveBeenCalled();
   });
+
+  it("Step 2 Accuracy: Latitude and Longitude are editable in the telemetry cards and directly update map coords and saved data", async () => {
+    const mockConfirm = vi.fn();
+    const reverseSpy = vi.spyOn(googleMaps, "reverseGeocodeGoogle").mockResolvedValue({
+      place_id: "ChIJ_exact_high_precision_pin",
+      formatted_address: "Exact Pin Location, High Precision Street, Mumbai, Maharashtra 400001",
+      address_components: [
+        { long_name: "Exact Tower", short_name: "Exact Tower", types: ["premise"] },
+        { long_name: "High Precision Street", short_name: "High Precision St", types: ["route"] },
+        { long_name: "Fort", short_name: "Fort", types: ["sublocality_level_1"] },
+        { long_name: "Mumbai", short_name: "Mumbai", types: ["locality"] },
+        { long_name: "Maharashtra", short_name: "MH", types: ["administrative_area_level_1"] },
+        { long_name: "400001", short_name: "400001", types: ["postal_code"] },
+        { long_name: "India", short_name: "IN", types: ["country"] },
+      ],
+      geometry: { location: { lat: () => 18.932201, lng: () => 72.833501 } },
+    } as any);
+
+    render(
+      <AddressMapConfirmModal
+        open={true}
+        onClose={vi.fn()}
+        onConfirm={mockConfirm}
+        mode="office"
+        initialData={{
+          name: "Mumbai High Precision HQ",
+          location_type: "OFFICE",
+          address: "Initial Address, Mumbai",
+          latitude: 19.0,
+          longitude: 72.8,
+          radius_meters: 100,
+          place_id: "ChIJ_initial_place",
+        }}
+      />
+    );
+
+    // Proceed to Step 2
+    const continueBtn = screen.getByRole("button", { name: /Continue to Map/i });
+    fireEvent.click(continueBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("input-latitude")).toBeTruthy();
+      expect(screen.getByTestId("input-longitude")).toBeTruthy();
+    });
+
+    const latInput = screen.getByTestId("input-latitude") as HTMLInputElement;
+    const lngInput = screen.getByTestId("input-longitude") as HTMLInputElement;
+
+    expect(latInput.value).toBe("19.000000");
+    expect(lngInput.value).toBe("72.800000");
+
+    // Directly edit latitude to 18.932201
+    fireEvent.change(latInput, { target: { value: "18.932201" } });
+    // Directly edit longitude to 72.833501
+    fireEvent.change(lngInput, { target: { value: "72.833501" } });
+
+    // Triggers blur to invoke precision reverse geocode
+    fireEvent.blur(lngInput);
+
+    await waitFor(() => {
+      expect(reverseSpy).toHaveBeenCalledWith(18.932201, 72.833501);
+      expect(screen.getByTestId("mock-map-lat").textContent).toBe("18.932201");
+      expect(screen.getByTestId("mock-map-lng").textContent).toBe("72.833501");
+    });
+
+    // Save and verify edited exact coordinates are persisted
+    const saveBtn = screen.getByRole("button", { name: /Confirm Location/i });
+    fireEvent.click(saveBtn);
+
+    expect(mockConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Mumbai High Precision HQ",
+        latitude: 18.932201,
+        longitude: 72.833501,
+      })
+    );
+  });
 });

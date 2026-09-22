@@ -63,11 +63,15 @@ export function LocationMapPicker({
 
   const [isResolving, setIsResolving] = useState(false);
   const [activeCoords, setActiveCoords] = useState({ lat: latitude, lng: longitude });
+  const [latInput, setLatInput] = useState<string>(latitude ? latitude.toFixed(6) : "");
+  const [lngInput, setLngInput] = useState<string>(longitude ? longitude.toFixed(6) : "");
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Sync coords from prop
   useEffect(() => {
     setActiveCoords({ lat: latitude, lng: longitude });
+    setLatInput(latitude ? latitude.toFixed(6) : "");
+    setLngInput(longitude ? longitude.toFixed(6) : "");
   }, [latitude, longitude]);
 
   // Subscribe to global Google Maps errors (auth failure, billing, network)
@@ -130,6 +134,8 @@ export function LocationMapPicker({
             const lat = Number(pos.lat().toFixed(6));
             const lng = Number(pos.lng().toFixed(6));
             setActiveCoords({ lat, lng });
+            setLatInput(lat.toFixed(6));
+            setLngInput(lng.toFixed(6));
           }
         });
 
@@ -144,6 +150,8 @@ export function LocationMapPicker({
           const newLat = Number(pos.lat().toFixed(6));
           const newLng = Number(pos.lng().toFixed(6));
           setActiveCoords({ lat: newLat, lng: newLng });
+          setLatInput(newLat.toFixed(6));
+          setLngInput(newLng.toFixed(6));
 
           setIsResolving(true);
           try {
@@ -188,6 +196,8 @@ export function LocationMapPicker({
             const newLat = Number(pos.lat().toFixed(6));
             const newLng = Number(pos.lng().toFixed(6));
             setActiveCoords({ lat: newLat, lng: newLng });
+            setLatInput(newLat.toFixed(6));
+            setLngInput(newLng.toFixed(6));
 
             setIsResolving(true);
             try {
@@ -269,6 +279,8 @@ export function LocationMapPicker({
     const newLat = Number((activeCoords.lat + dLat).toFixed(6));
     const newLng = Number((activeCoords.lng + dLng).toFixed(6));
     setActiveCoords({ lat: newLat, lng: newLng });
+    setLatInput(newLat.toFixed(6));
+    setLngInput(newLng.toFixed(6));
 
     const newPos = { lat: newLat, lng: newLng };
     if (markerRef.current && circleRef.current && mapInstanceRef.current) {
@@ -305,6 +317,88 @@ export function LocationMapPicker({
       onChange?.({ latitude: newLat, longitude: newLng });
     } finally {
       setIsResolving(false);
+    }
+  };
+
+  // Direct manual coordinate editing handlers for increased accuracy
+  const handleDirectLatChange = (val: string) => {
+    setLatInput(val);
+    const parsedLat = parseFloat(val);
+    if (!isNaN(parsedLat) && parsedLat >= -90 && parsedLat <= 90) {
+      const newPos = { lat: parsedLat, lng: activeCoords.lng };
+      setActiveCoords(newPos);
+      if (markerRef.current && circleRef.current && mapInstanceRef.current) {
+        markerRef.current.setPosition(newPos);
+        circleRef.current.setCenter(newPos);
+        mapInstanceRef.current.panTo(newPos);
+      }
+      onChange?.({
+        latitude: parsedLat,
+        longitude: activeCoords.lng,
+      });
+    }
+  };
+
+  const handleDirectLngChange = (val: string) => {
+    setLngInput(val);
+    const parsedLng = parseFloat(val);
+    if (!isNaN(parsedLng) && parsedLng >= -180 && parsedLng <= 180) {
+      const newPos = { lat: activeCoords.lat, lng: parsedLng };
+      setActiveCoords(newPos);
+      if (markerRef.current && circleRef.current && mapInstanceRef.current) {
+        markerRef.current.setPosition(newPos);
+        circleRef.current.setCenter(newPos);
+        mapInstanceRef.current.panTo(newPos);
+      }
+      onChange?.({
+        latitude: activeCoords.lat,
+        longitude: parsedLng,
+      });
+    }
+  };
+
+  const handleDirectBlur = async () => {
+    const parsedLat = parseFloat(latInput);
+    const parsedLng = parseFloat(lngInput);
+    if (
+      !isNaN(parsedLat) &&
+      parsedLat >= -90 &&
+      parsedLat <= 90 &&
+      !isNaN(parsedLng) &&
+      parsedLng >= -180 &&
+      parsedLng <= 180
+    ) {
+      setLatInput(parsedLat.toFixed(6));
+      setLngInput(parsedLng.toFixed(6));
+      setIsResolving(true);
+      try {
+        const geocodeResult = await reverseGeocodeGoogle(parsedLat, parsedLng);
+        const parsed = parseGoogleAddressComponents(geocodeResult);
+        onChange?.({
+          latitude: parsedLat,
+          longitude: parsedLng,
+          address: parsed.formatted_address,
+          verification: {
+            place_id: parsed.place_id,
+            building: parsed.building,
+            unit_floor: parsed.unit_floor,
+            street: parsed.street,
+            locality: parsed.locality,
+            city: parsed.city,
+            state: parsed.state,
+            pin_code: parsed.pin_code,
+            country: parsed.country,
+            display_name: parsed.formatted_address,
+            address: parsed.formatted_address,
+            latitude: parsedLat,
+            longitude: parsedLng,
+          },
+        });
+      } catch {
+        onChange?.({ latitude: parsedLat, longitude: parsedLng });
+      } finally {
+        setIsResolving(false);
+      }
     }
   };
 
@@ -419,18 +513,66 @@ export function LocationMapPicker({
           fontSize: "12px",
         }}
       >
-        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
-          <div>
-            <span style={{ color: "var(--color-muted)" }}>Latitude: </span>
-            <strong style={{ color: "var(--color-text)", fontFamily: "monospace" }}>
-              {activeCoords.lat.toFixed(6)}
-            </strong>
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ color: "var(--color-muted)", fontSize: "12px", fontWeight: 600 }}>Latitude:</span>
+            {readOnly ? (
+              <strong style={{ color: "var(--color-text)", fontFamily: "monospace" }}>
+                {activeCoords.lat.toFixed(6)}
+              </strong>
+            ) : (
+              <input
+                type="number"
+                step="0.000001"
+                min="-90"
+                max="90"
+                aria-label="Latitude"
+                className="form-control"
+                value={latInput}
+                onChange={(e) => handleDirectLatChange(e.target.value)}
+                onBlur={handleDirectBlur}
+                style={{
+                  width: "115px",
+                  height: "26px",
+                  padding: "2px 6px",
+                  fontSize: "12px",
+                  fontFamily: "monospace",
+                  fontWeight: 700,
+                  color: "var(--color-text)",
+                  background: "var(--color-surface, #ffffff)",
+                }}
+              />
+            )}
           </div>
-          <div>
-            <span style={{ color: "var(--color-muted)" }}>Longitude: </span>
-            <strong style={{ color: "var(--color-text)", fontFamily: "monospace" }}>
-              {activeCoords.lng.toFixed(6)}
-            </strong>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ color: "var(--color-muted)", fontSize: "12px", fontWeight: 600 }}>Longitude:</span>
+            {readOnly ? (
+              <strong style={{ color: "var(--color-text)", fontFamily: "monospace" }}>
+                {activeCoords.lng.toFixed(6)}
+              </strong>
+            ) : (
+              <input
+                type="number"
+                step="0.000001"
+                min="-180"
+                max="180"
+                aria-label="Longitude"
+                className="form-control"
+                value={lngInput}
+                onChange={(e) => handleDirectLngChange(e.target.value)}
+                onBlur={handleDirectBlur}
+                style={{
+                  width: "115px",
+                  height: "26px",
+                  padding: "2px 6px",
+                  fontSize: "12px",
+                  fontFamily: "monospace",
+                  fontWeight: 700,
+                  color: "var(--color-text)",
+                  background: "var(--color-surface, #ffffff)",
+                }}
+              />
+            )}
           </div>
         </div>
 

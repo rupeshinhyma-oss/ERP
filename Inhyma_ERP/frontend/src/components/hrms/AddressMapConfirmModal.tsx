@@ -17,6 +17,7 @@ import {
   searchGooglePlaces,
   fetchGooglePlaceDetails,
   geocodeGoogleAddress,
+  reverseGeocodeGoogle,
   parseGoogleAddressComponents,
   subscribeGoogleMapsError,
 } from "@/lib/googleMaps";
@@ -110,6 +111,14 @@ export function AddressMapConfirmModal({
     finalAddress: initialData?.address || "",
   });
 
+  const [latInput, setLatInput] = useState<string>(
+    initialData?.latitude ? initialData.latitude.toFixed(6) : ""
+  );
+  const [lngInput, setLngInput] = useState<string>(
+    initialData?.longitude ? initialData.longitude.toFixed(6) : ""
+  );
+  const coordReverseTimerRef = useRef<any>(null);
+
   const [verificationCard, setVerificationCard] = useState<LocationVerificationData>({
     place_id: initialData?.place_id,
     building: initialData?.building || "",
@@ -162,6 +171,8 @@ export function AddressMapConfirmModal({
         lng: initialData?.longitude || 0,
         finalAddress: initialData?.address || "",
       });
+      setLatInput(initialData?.latitude ? initialData.latitude.toFixed(6) : "");
+      setLngInput(initialData?.longitude ? initialData.longitude.toFixed(6) : "");
       setVerificationCard({
         place_id: initialData?.place_id,
         building: initialData?.building || "",
@@ -272,6 +283,8 @@ export function AddressMapConfirmModal({
         lng: parsed.longitude,
         finalAddress: resolvedAddress,
       });
+      setLatInput(parsed.latitude ? parsed.latitude.toFixed(6) : "");
+      setLngInput(parsed.longitude ? parsed.longitude.toFixed(6) : "");
 
       setVerificationCard({
         place_id: pred.place_id,
@@ -351,6 +364,8 @@ export function AddressMapConfirmModal({
         lng: parsed.longitude,
         finalAddress: resolvedAddress,
       });
+      setLatInput(parsed.latitude ? parsed.latitude.toFixed(6) : "");
+      setLngInput(parsed.longitude ? parsed.longitude.toFixed(6) : "");
 
       setVerificationCard({
         place_id: parsed.place_id,
@@ -379,7 +394,10 @@ export function AddressMapConfirmModal({
         address.toLowerCase().includes("lodha") ||
         address.toLowerCase().includes("state")
       ) {
-        const parts = address.split(",").map((p) => p.trim());
+        const fallbackLat = prev.lat || 19.198251;
+        const fallbackLng = prev.lng || 72.948232;
+        setLatInput(fallbackLat.toFixed(6));
+        setLngInput(fallbackLng.toFixed(6));
         setCoords((prev) => ({
           lat: prev.lat || 19.198251,
           lng: prev.lng || 72.948232,
@@ -417,6 +435,8 @@ export function AddressMapConfirmModal({
     address?: string;
     verification?: LocationVerificationData;
   }) => {
+    setLatInput(newPos.latitude.toFixed(6));
+    setLngInput(newPos.longitude.toFixed(6));
     setCoords((prev) => ({
       lat: newPos.latitude,
       lng: newPos.longitude,
@@ -441,6 +461,87 @@ export function AddressMapConfirmModal({
         latitude: newPos.latitude,
         longitude: newPos.longitude,
       }));
+    }
+  };
+
+  // Direct editing of Latitude and Longitude to maximize accuracy
+  const triggerReverseGeocodeCoords = async (newLat: number, newLng: number) => {
+    setIsResolving(true);
+    try {
+      const geocodeResult = await reverseGeocodeGoogle(newLat, newLng);
+      const parsed = parseGoogleAddressComponents(geocodeResult);
+      const resolvedAddress = parsed.formatted_address;
+      setCoords((prev) => ({
+        ...prev,
+        lat: newLat,
+        lng: newLng,
+        finalAddress: resolvedAddress || prev.finalAddress,
+      }));
+      setVerificationCard((prev) => ({
+        place_id: parsed.place_id || prev.place_id,
+        building: parsed.building || prev.building || "",
+        unit_floor: parsed.unit_floor || prev.unit_floor || "",
+        street: parsed.street || prev.street || "",
+        locality: parsed.locality || prev.locality || "",
+        city: parsed.city || prev.city || "",
+        state: parsed.state || prev.state || "",
+        pin_code: parsed.pin_code || prev.pin_code || "",
+        country: parsed.country || prev.country || "",
+        display_name: resolvedAddress || prev.display_name,
+        address: resolvedAddress || prev.display_name,
+        latitude: newLat,
+        longitude: newLng,
+      }));
+    } catch {
+      // Retain coordinates even if reverse geocode service fails
+      setCoords((prev) => ({ ...prev, lat: newLat, lng: newLng }));
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  const handleLatitudeChange = (rawVal: string) => {
+    setLatInput(rawVal);
+    const parsedLat = parseFloat(rawVal);
+    if (!isNaN(parsedLat) && parsedLat >= -90 && parsedLat <= 90) {
+      setCoords((prev) => ({ ...prev, lat: parsedLat }));
+      if (coordReverseTimerRef.current) clearTimeout(coordReverseTimerRef.current);
+      coordReverseTimerRef.current = setTimeout(() => {
+        if (coords.lng !== 0) {
+          triggerReverseGeocodeCoords(parsedLat, coords.lng);
+        }
+      }, 700);
+    }
+  };
+
+  const handleLongitudeChange = (rawVal: string) => {
+    setLngInput(rawVal);
+    const parsedLng = parseFloat(rawVal);
+    if (!isNaN(parsedLng) && parsedLng >= -180 && parsedLng <= 180) {
+      setCoords((prev) => ({ ...prev, lng: parsedLng }));
+      if (coordReverseTimerRef.current) clearTimeout(coordReverseTimerRef.current);
+      coordReverseTimerRef.current = setTimeout(() => {
+        if (coords.lat !== 0) {
+          triggerReverseGeocodeCoords(coords.lat, parsedLng);
+        }
+      }, 700);
+    }
+  };
+
+  const handleCoordinateBlur = () => {
+    const parsedLat = parseFloat(latInput);
+    const parsedLng = parseFloat(lngInput);
+    if (
+      !isNaN(parsedLat) &&
+      parsedLat >= -90 &&
+      parsedLat <= 90 &&
+      !isNaN(parsedLng) &&
+      parsedLng >= -180 &&
+      parsedLng <= 180
+    ) {
+      setLatInput(parsedLat.toFixed(6));
+      setLngInput(parsedLng.toFixed(6));
+      triggerReverseGeocodeCoords(parsedLat, parsedLng);
     }
   };
 
@@ -968,12 +1069,62 @@ export function AddressMapConfirmModal({
                     padding: "8px 12px",
                   }}
                 >
-                  <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-muted)" }}>
-                    LATITUDE
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    <label
+                      htmlFor="modal-lat-input"
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        color: "var(--color-muted)",
+                        marginBottom: 0,
+                        cursor: "pointer",
+                      }}
+                    >
+                      LATITUDE
+                    </label>
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        color: "var(--color-primary)",
+                        fontWeight: 600,
+                        background: "var(--color-primary-soft, #eff6ff)",
+                        padding: "1px 5px",
+                        borderRadius: "3px",
+                      }}
+                    >
+                      Editable
+                    </span>
                   </div>
-                  <div style={{ fontSize: "13.5px", fontWeight: 700, color: "var(--color-text)", marginTop: "2px" }}>
-                    {coords.lat.toFixed(6)}
-                  </div>
+                  <input
+                    id="modal-lat-input"
+                    data-testid="input-latitude"
+                    type="number"
+                    step="0.000001"
+                    min="-90"
+                    max="90"
+                    className="form-control"
+                    value={latInput}
+                    onChange={(e) => handleLatitudeChange(e.target.value)}
+                    onBlur={handleCoordinateBlur}
+                    placeholder="e.g. 19.198251"
+                    style={{
+                      fontSize: "13.5px",
+                      fontWeight: 700,
+                      fontFamily: "monospace",
+                      color: "var(--color-text)",
+                      padding: "3px 6px",
+                      height: "30px",
+                      background: "var(--color-surface, #ffffff)",
+                      border: "1px solid var(--color-border)",
+                    }}
+                  />
                 </div>
 
                 <div
@@ -984,12 +1135,62 @@ export function AddressMapConfirmModal({
                     padding: "8px 12px",
                   }}
                 >
-                  <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-muted)" }}>
-                    LONGITUDE
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    <label
+                      htmlFor="modal-lng-input"
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        color: "var(--color-muted)",
+                        marginBottom: 0,
+                        cursor: "pointer",
+                      }}
+                    >
+                      LONGITUDE
+                    </label>
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        color: "var(--color-primary)",
+                        fontWeight: 600,
+                        background: "var(--color-primary-soft, #eff6ff)",
+                        padding: "1px 5px",
+                        borderRadius: "3px",
+                      }}
+                    >
+                      Editable
+                    </span>
                   </div>
-                  <div style={{ fontSize: "13.5px", fontWeight: 700, color: "var(--color-text)", marginTop: "2px" }}>
-                    {coords.lng.toFixed(6)}
-                  </div>
+                  <input
+                    id="modal-lng-input"
+                    data-testid="input-longitude"
+                    type="number"
+                    step="0.000001"
+                    min="-180"
+                    max="180"
+                    className="form-control"
+                    value={lngInput}
+                    onChange={(e) => handleLongitudeChange(e.target.value)}
+                    onBlur={handleCoordinateBlur}
+                    placeholder="e.g. 72.948232"
+                    style={{
+                      fontSize: "13.5px",
+                      fontWeight: 700,
+                      fontFamily: "monospace",
+                      color: "var(--color-text)",
+                      padding: "3px 6px",
+                      height: "30px",
+                      background: "var(--color-surface, #ffffff)",
+                      border: "1px solid var(--color-border)",
+                    }}
+                  />
                 </div>
 
                 <div
