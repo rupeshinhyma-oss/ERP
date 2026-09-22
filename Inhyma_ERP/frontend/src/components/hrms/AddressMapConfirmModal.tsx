@@ -219,9 +219,6 @@ export function AddressMapConfirmModal({
     } catch (err: any) {
       console.warn("Google Places Autocomplete error:", err);
       setPredictions([]);
-      if (err?.message) {
-        setErrorMsg(err.message);
-      }
     } finally {
       setIsSearching(false);
     }
@@ -387,42 +384,35 @@ export function AddressMapConfirmModal({
       setStep(2);
     } catch (err: any) {
       console.warn("Google Geocoding error:", err);
-      // Fallback for headless test environments or offline preview
-      if (
-        import.meta.env.MODE === "test" ||
-        coords.lat !== 0 ||
-        address.toLowerCase().includes("lodha") ||
-        address.toLowerCase().includes("state")
-      ) {
-        const fallbackLat = prev.lat || 19.198251;
-        const fallbackLng = prev.lng || 72.948232;
-        setLatInput(fallbackLat.toFixed(6));
-        setLngInput(fallbackLng.toFixed(6));
-        setCoords((prev) => ({
-          lat: prev.lat || 19.198251,
-          lng: prev.lng || 72.948232,
-          finalAddress: address.trim(),
-        }));
-        setVerificationCard({
-          place_id: selectedPlaceId || "google-place-id",
-          building: parts[0] || "",
-          unit_floor: "",
-          street: parts[1] || "",
-          locality: parts[2] || "",
-          city: parts[3] || "",
-          state: parts[4] || "",
-          pin_code: "400604",
-          country: "India",
-          display_name: address.trim(),
-          address: address.trim(),
-        });
-        setStep(2);
-      } else {
-        setNotFound(true);
-        setErrorMsg(
-          "We couldn't find an exact match on Google Maps. Please choose one of the suggestions or refine your search."
-        );
-      }
+      // Fallback: When Google Geocoding fails or is denied on GCP, gracefully advance to Step 2
+      // so the user can interactively place the pin or type exact Latitude & Longitude directly
+      const fallbackLat = coords.lat || 19.198251;
+      const fallbackLng = coords.lng || 72.948232;
+      const parts = address.trim().split(",").map((s) => s.trim());
+      setLatInput(fallbackLat.toFixed(6));
+      setLngInput(fallbackLng.toFixed(6));
+      setCoords({
+        lat: fallbackLat,
+        lng: fallbackLng,
+        finalAddress: address.trim(),
+      });
+      setVerificationCard({
+        place_id: selectedPlaceId || "google-place-id",
+        building: parts[0] || address.trim(),
+        unit_floor: "",
+        street: parts[1] || "",
+        locality: parts[2] || "",
+        city: parts[3] || "",
+        state: parts[4] || "",
+        pin_code: "400604",
+        country: "India",
+        display_name: address.trim(),
+        address: address.trim(),
+        latitude: fallbackLat,
+        longitude: fallbackLng,
+      });
+      setNotFound(false);
+      setStep(2);
     } finally {
       setIsResolving(false);
     }
@@ -681,9 +671,44 @@ export function AddressMapConfirmModal({
               border: "1px solid var(--color-danger, #ef4444)",
               color: "var(--color-danger, #ef4444)",
               fontWeight: 500,
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
             }}
           >
-            {errorMsg}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+              <span>{errorMsg}</span>
+              <button
+                type="button"
+                onClick={() => setErrorMsg(null)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "inherit",
+                  fontSize: "16px",
+                  lineHeight: 1,
+                  padding: "2px 4px",
+                }}
+                title="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+            {errorMsg.toLowerCase().includes("denied") && (
+              <div style={{ fontSize: "12px", color: "var(--color-text)", fontWeight: 400, marginTop: "2px" }}>
+                <strong>Tip:</strong> Ensure <strong>Places API (New)</strong> and <strong>Geocoding API</strong> are enabled in your{" "}
+                <a
+                  href="https://console.developers.google.com/apis/api/places.googleapis.com/overview?project=3190679331"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--color-primary)", textDecoration: "underline", fontWeight: 600 }}
+                >
+                  Google Cloud Console
+                </a>
+                . You can also proceed directly to Map Confirmation to position the pin or type coordinates manually.
+              </div>
+            )}
           </div>
         )}
 
@@ -834,6 +859,50 @@ export function AddressMapConfirmModal({
                       Searching Places...
                     </span>
                   )}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: "6px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "6px",
+                  }}
+                >
+                  <span style={{ fontSize: "11.5px", color: "var(--color-muted)" }}>
+                    Type an address to search, or position the pin on the map.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const fallbackLat = coords.lat || 19.198251;
+                      const fallbackLng = coords.lng || 72.948232;
+                      setCoords((prev) => ({
+                        ...prev,
+                        lat: fallbackLat,
+                        lng: fallbackLng,
+                        finalAddress: address.trim() || prev.finalAddress || "Manual Pin Location",
+                      }));
+                      setLatInput(fallbackLat.toFixed(6));
+                      setLngInput(fallbackLng.toFixed(6));
+                      setNotFound(false);
+                      setStep(2);
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--color-primary)",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      padding: "2px 0",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    Set pin on map / enter coordinates directly →
+                  </button>
                 </div>
 
                 {/* Zero Results Banner (Only after API returns 0 results, never while typing) */}

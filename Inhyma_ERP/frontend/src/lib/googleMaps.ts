@@ -405,46 +405,81 @@ export async function searchGooglePlaces(
   if (!trimmed) return [];
 
   const maps = await loadGoogleMapsSdk();
-  if (!maps.places?.AutocompleteService) {
-    throw new Error("Google Maps Places AutocompleteService is not available.");
+
+  // 1. Try modern Places API (New) AutocompleteSuggestion if available
+  try {
+    const placesLib = (maps as any).importLibrary
+      ? await (maps as any).importLibrary("places")
+      : maps.places;
+
+    if (placesLib?.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
+      const response = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+        input: trimmed,
+        includedRegionCodes: options?.componentRestrictions?.country
+          ? [options.componentRestrictions.country]
+          : undefined,
+      });
+
+      if (response?.suggestions && response.suggestions.length > 0) {
+        return response.suggestions
+          .map((s: any) => {
+            const pred = s.placePrediction;
+            if (!pred) return null;
+            return {
+              place_id: pred.placeId || "",
+              description: pred.text?.toString() || "",
+              structured_formatting: {
+                main_text: pred.structuredFormat?.mainText?.toString() || pred.text?.toString() || "",
+                secondary_text: pred.structuredFormat?.secondaryText?.toString() || "",
+              },
+              types: pred.types || [],
+            } as google.maps.places.AutocompletePrediction;
+          })
+          .filter(Boolean) as google.maps.places.AutocompletePrediction[];
+      }
+      if (response?.suggestions) {
+        return [];
+      }
+    }
+  } catch (newPlacesErr: any) {
+    // Graceful fallback to legacy AutocompleteService
+    console.debug?.("Places API (New) AutocompleteSuggestion fallback:", newPlacesErr);
   }
 
-  return withRetry(
-    () =>
-      new Promise<google.maps.places.AutocompletePrediction[]>((resolve, reject) => {
-        const service = new maps.places.AutocompleteService();
-        service.getPlacePredictions(
-          {
-            input: trimmed,
-            ...options,
-          },
-          (predictions, status) => {
-            if (status === maps.places.PlacesServiceStatus.OK) {
-              resolve(predictions || []);
-            } else if (status === maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-              resolve([]);
-            } else if (status === maps.places.PlacesServiceStatus.REQUEST_DENIED) {
-              const errDetail: GoogleMapsErrorDetail = {
-                type: "REQUEST_DENIED",
-                message:
-                  "Google Places request denied. Please check your API key, domain restrictions, and billing status.",
-              };
-              notifyGoogleMapsError(errDetail);
-              reject(new Error(errDetail.message));
-            } else if (status === maps.places.PlacesServiceStatus.OVER_QUERY_LIMIT) {
-              const errDetail: GoogleMapsErrorDetail = {
-                type: "OVER_QUERY_LIMIT",
-                message: "Google Maps request quota exceeded. Please check your Google Cloud quota limits.",
-              };
-              notifyGoogleMapsError(errDetail);
-              reject(new Error(errDetail.message));
-            } else {
-              resolve([]);
-            }
+  // 2. Legacy AutocompleteService
+  if (!maps.places?.AutocompleteService) {
+    return [];
+  }
+
+  return new Promise<google.maps.places.AutocompletePrediction[]>((resolve) => {
+    try {
+      const service = new maps.places.AutocompleteService();
+      service.getPlacePredictions(
+        {
+          input: trimmed,
+          ...options,
+        },
+        (predictions, status) => {
+          if (status === maps.places.PlacesServiceStatus.OK && predictions) {
+            resolve(predictions);
+          } else if (status === maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+            resolve([]);
+          } else if (status === maps.places.PlacesServiceStatus.REQUEST_DENIED) {
+            // Log warning without blasting a modal-wide red banner on typing
+            console.warn(
+              "Google Places request denied: Places API (New) or Places API is not enabled on your Google Cloud project."
+            );
+            resolve([]);
+          } else {
+            resolve([]);
           }
-        );
-      })
-  );
+        }
+      );
+    } catch (legacyErr) {
+      console.warn("AutocompleteService error:", legacyErr);
+      resolve([]);
+    }
+  });
 }
 
 /**
@@ -463,6 +498,45 @@ export async function fetchGooglePlaceDetails(
   ]
 ): Promise<google.maps.places.PlaceResult> {
   const maps = await loadGoogleMapsSdk();
+
+  // 1. Try modern Places API (New) Place class if available
+  try {
+    const placesLib = (maps as any).importLibrary
+      ? await (maps as any).importLibrary("places")
+      : maps.places;
+
+    if (placesLib?.Place) {
+      const place = new placesLib.Place({ id: placeId });
+      await place.fetchFields({
+        fields: ["id", "displayName", "formattedAddress", "location", "addressComponents", "types"],
+      });
+      if (place.location) {
+        const rawLat = typeof place.location.lat === "function" ? place.location.lat() : place.location.lat;
+        const rawLng = typeof place.location.lng === "function" ? place.location.lng() : place.location.lng;
+        return {
+          place_id: place.id || placeId,
+          name: place.displayName || "",
+          formatted_address: place.formattedAddress || "",
+          geometry: {
+            location: {
+              lat: () => rawLat,
+              lng: () => rawLng,
+            },
+          },
+          address_components: (place.addressComponents || []).map((c: any) => ({
+            long_name: c.longText || c.text || "",
+            short_name: c.shortText || c.text || "",
+            types: c.types || [],
+          })),
+          types: place.types || [],
+        } as any;
+      }
+    }
+  } catch (newPlaceErr) {
+    console.debug?.("Places API (New) Place.fetchFields fallback:", newPlaceErr);
+  }
+
+  // 2. Legacy PlacesService
   if (!maps.places?.PlacesService) {
     throw new Error("Google Maps PlacesService is not available.");
   }
