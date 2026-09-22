@@ -474,33 +474,63 @@ class LocalPurchaseService:
         if not rows:
             return BillExtractionResponse(notes="Excel file was empty.")
 
-        # Find header row
+        # 1. Parse Top Metadata (Supplier, Invoice No, Date, etc.)
+        sup_name: str | None = None
+        inv_no: str | None = None
+        inv_date: date | None = None
+        currency: str = "RMB"
+        inv_total_explicit: float | None = None
+
+        for r in rows[:15]:
+            if not r:
+                continue
+            for idx, cell in enumerate(r):
+                if cell is None:
+                    continue
+                txt = str(cell).strip().lower()
+                val = str(r[idx + 1]).strip() if idx + 1 < len(r) and r[idx + 1] is not None else None
+
+                if any(k in txt for k in ("supplier", "vendor", "company")) and not sup_name and val:
+                    sup_name = val
+                elif any(k in txt for k in ("invoice no", "inv no", "bill no", "invoice #")) and not inv_no and val:
+                    inv_no = val
+                elif any(k in txt for k in ("invoice date", "bill date", "date:")) and not inv_date and val:
+                    try:
+                        inv_date = date.fromisoformat(val[:10])
+                    except Exception:
+                        pass
+                elif "currency" in txt and val:
+                    currency = val
+
+        # 2. Find header row & map columns
         header_idx = -1
         col_map: dict[str, int] = {}
-        for r_idx, row in enumerate(rows[:15]):
-            row_str = [str(c).lower().strip() for c in row if c is not None]
+        for r_idx, row in enumerate(rows[:20]):
             for c_idx, cell in enumerate(row):
                 if cell is None:
                     continue
                 c_low = str(cell).lower().strip()
-                if any(k in c_low for k in ("item", "product", "description", "part")):
-                    col_map["product_name"] = c_idx
-                elif any(k in c_low for k in ("code", "model", "item no", "part no")):
-                    col_map["product_code"] = c_idx
-                elif "hsn" in c_low:
-                    col_map["hsn_code"] = c_idx
-                elif any(k in c_low for k in ("qty", "quantity", "count")):
-                    col_map["quantity"] = c_idx
-                elif any(k in c_low for k in ("rate", "price", "unit cost", "unit rate")):
-                    col_map["unit_rate"] = c_idx
-                elif any(k in c_low for k in ("vat", "tax", "gst")):
-                    col_map["vat_rate"] = c_idx
-                elif any(k in c_low for k in ("total", "amount")):
+                if any(k in c_low for k in ("item total", "line total", "total (", "amount")):
                     col_map["item_total"] = c_idx
+                elif any(k in c_low for k in ("hsn", "sac")):
+                    col_map["hsn_code"] = c_idx
+                elif any(k in c_low for k in ("vat %", "vat rate", "tax %", "gst")):
+                    col_map["vat_rate"] = c_idx
+                elif any(k in c_low for k in ("unit rate", "unit price", "rate (", "price")):
+                    col_map["unit_rate"] = c_idx
+                elif any(k in c_low for k in ("qty", "quantity", "count", "nos", "pcs")):
+                    col_map["quantity"] = c_idx
+                elif any(k in c_low for k in ("product code", "item code", "item no", "code", "model", "part no")):
+                    col_map["product_code"] = c_idx
+                elif any(k in c_low for k in ("product name", "description", "product", "item name")):
+                    col_map["product_name"] = c_idx
 
             if "product_name" in col_map or "product_code" in col_map:
                 header_idx = r_idx
                 break
+
+        # Match supplier in Supplier Master
+        sup_id, matched_sup_name = await self.match_supplier(sup_name or "") if sup_name else (None, None)
 
         extracted_items: list[BillExtractionItem] = []
         if header_idx >= 0:
@@ -508,9 +538,24 @@ class LocalPurchaseService:
                 if not row or all(c is None or str(c).strip() == "" for c in row):
                     continue
 
+                # Skip summary / total rows
+                row_str = " ".join(str(c).lower() for c in row if c is not None)
+                if any(w in row_str for w in ("total", "sub total", "grand total", "vat", "basic")):
+                    for c in row:
+                        try:
+                            f_val = float(str(c).replace(",", ""))
+                            if f_val > 0:
+                                inv_total_explicit = f_val
+                        except Exception:
+                            pass
+                    continue
+
                 name = str(row[col_map["product_name"]]).strip() if "product_name" in col_map and row[col_map["product_name"]] else ""
                 code = str(row[col_map["product_code"]]).strip() if "product_code" in col_map and row[col_map["product_code"]] else None
                 hsn = str(row[col_map["hsn_code"]]).strip() if "hsn_code" in col_map and row[col_map["hsn_code"]] else None
+
+                if not name and not code:
+                    continue
 
                 # Extract quantity
                 qty_raw = row[col_map["quantity"]] if "quantity" in col_map else 1
@@ -535,8 +580,6 @@ class LocalPurchaseService:
 
                 if not name and code:
                     name = code
-                if not name:
-                    continue
 
                 # Match in product master
                 p_id, p_code, p_hsn, p_vat = await self.match_product(code or name)
@@ -554,13 +597,18 @@ class LocalPurchaseService:
                     )
                 )
 
-        invoice_val = sum(i.item_total * (1 + (i.vat_rate / 100.0)) for i in extracted_items)
+        calculated_invoice_val = sum(i.item_total * (1 + (i.vat_rate / 100.0)) for i in extracted_items)
+        final_inv_val = inv_total_explicit or round(calculated_invoice_val, 2) if calculated_invoice_val > 0 else None
 
         return BillExtractionResponse(
-            currency="RMB",
-            invoice_total_value=round(invoice_val, 2) if invoice_val > 0 else None,
+            supplier_name=matched_sup_name or sup_name,
+            supplier_id=sup_id,
+            invoice_no=inv_no,
+            invoice_date=inv_date,
+            currency=currency,
+            invoice_total_value=final_inv_val,
             items=extracted_items,
-            confidence=0.9,
+            confidence=0.95,
             notes=f"Extracted {len(extracted_items)} items from spreadsheet.",
         )
 
@@ -577,17 +625,18 @@ class LocalPurchaseService:
         if not full_text.strip():
             return BillExtractionResponse(notes="Could not extract text from PDF.")
 
-        # Attempt OpenAI extraction if API key is configured
-        if OPENAI_API_KEY:
+        # Attempt AI extraction if OpenAI or Gemini key is configured
+        openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if openai_key:
             try:
-                return await self._extract_with_openai(full_text)
+                return await self._extract_with_openai(full_text, openai_key)
             except Exception as e:
                 logger.warning("OpenAI bill extraction failed, falling back to regex: %s", e)
 
         # Regex fallback parser
         return await self._extract_with_regex(full_text)
 
-    async def _extract_with_openai(self, text: str) -> BillExtractionResponse:
+    async def _extract_with_openai(self, text: str, api_key: str) -> BillExtractionResponse:
         """Use OpenAI to parse structured bill details."""
         prompt = (
             "You are an expert procurement accountant. Extract invoice details from the following invoice text.\n"
@@ -606,7 +655,7 @@ class LocalPurchaseService:
         )
 
         headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         body = {
@@ -650,7 +699,7 @@ class LocalPurchaseService:
             inv_date = None
             if parsed.get("invoice_date"):
                 try:
-                    inv_date = date.fromisoformat(str(parsed["invoice_date"]).strip())
+                    inv_date = date.fromisoformat(str(parsed["invoice_date"]).strip()[:10])
                 except ValueError:
                     inv_date = None
 

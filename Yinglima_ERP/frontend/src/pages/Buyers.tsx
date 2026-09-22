@@ -2453,6 +2453,16 @@ export function BuyersPage() {
               </div>
             )}
           </div>
+          <TrashConflictModal
+            isOpen={Boolean(trashConflict)}
+            conflictInfo={trashConflict}
+            onClose={() => setTrashConflict(null)}
+            onRestored={async () => {
+              setTrashConflict(null);
+              setModalMode(null);
+              reload();
+            }}
+          />
         </main>
       </AppShell>
     );
@@ -2855,9 +2865,9 @@ export function BuyersPage() {
                         key={colIdx}
                         style={{
                           padding: colIdx === 0 || colIdx === 1 ? "10px 8px" : "10px 14px",
-                          width: colIdx === 0 ? "40px" : colIdx === 1 ? "75px" : undefined,
-                          minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "75px" : undefined,
-                          maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "85px" : undefined,
+                          width: colIdx === 0 ? "40px" : colIdx === 1 ? "75px" : colIdx === 2 ? "240px" : undefined,
+                          minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "75px" : colIdx === 2 ? "160px" : undefined,
+                          maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "85px" : colIdx === 2 ? "240px" : undefined,
                           textAlign: colIdx === 0 || colIdx === 1 ? "center" : colIdx === 11 ? "center" : "left",
                           fontWeight: 700,
                           color: "#475569",
@@ -2988,11 +2998,24 @@ export function BuyersPage() {
                       2: (
                         <a
                           href="#"
+                          title={r.company_name}
                           onClick={(e) => {
                             e.preventDefault();
                             setDetailBuyer(r);
                           }}
-                          style={{ color: "#2563eb", fontWeight: 600, textDecoration: "none" }}
+                          style={{
+                            color: "#2563eb",
+                            fontWeight: 600,
+                            textDecoration: "none",
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            wordBreak: "break-word",
+                            lineHeight: "1.35",
+                            maxHeight: "2.7em",
+                          }}
                         >
                           {r.company_name}
                         </a>
@@ -3168,11 +3191,13 @@ export function BuyersPage() {
                             key={colIdx}
                             style={{
                               padding: colIdx === 0 || colIdx === 1 ? "10px 8px" : "10px 14px",
-                              width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
-                              minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
-                              maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
+                              width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : colIdx === 2 ? "240px" : undefined,
+                              minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : colIdx === 2 ? "160px" : undefined,
+                              maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : colIdx === 2 ? "240px" : undefined,
                               textAlign: colIdx === 0 || colIdx === 1 ? "center" : "left",
                               whiteSpace: colIdx === 2 ? "normal" : "nowrap",
+                              height: colIdx === 2 ? "auto" : undefined,
+                              verticalAlign: "middle",
                               ...getFreezeStyle(colIdx, false),
                             }}
                           >

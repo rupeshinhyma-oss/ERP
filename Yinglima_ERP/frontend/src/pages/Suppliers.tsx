@@ -72,6 +72,7 @@ import type {
   ImportSummary,
   PaginationMeta,
   Product,
+  ProductSubCategory,
   Supplier,
   SupplierContact,
 } from "@/types";
@@ -688,6 +689,7 @@ export function SuppliersPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const existingSuppliers = useLookup<Supplier>("/suppliers", 500);
+  const subCategoriesLookup = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
 
   async function resolveCountryPhoneCode(countryId: string | null): Promise<string> {
     if (!countryId) return "+86";
@@ -2463,7 +2465,18 @@ export function SuppliersPage() {
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category (multiple)</label>
                       <SearchableDropdownMultiPanel
                         values={formCategoryIds}
-                        onChange={setFormCategoryIds}
+                        onChange={(newCatIds) => {
+                          setFormCategoryIds(newCatIds);
+                          // Auto-prune any subCategoryIds that no longer belong to selected categories
+                          if (newCatIds.length > 0) {
+                            setFormSubCategoryIds((prevSubIds) => {
+                              const validCategorySubIds = subCategoriesLookup.items
+                                .filter((sc) => newCatIds.includes(sc.category_id))
+                                .map((sc) => sc.id);
+                              return prevSubIds.filter((id) => validCategorySubIds.includes(id));
+                            });
+                          }
+                        }}
                         placeholder="-- Select Categories --"
                         fetchOptions={searchFetcher("/masters/product-categories")}
                         fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
@@ -2478,8 +2491,31 @@ export function SuppliersPage() {
                       <SearchableDropdownMultiPanel
                         values={formSubCategoryIds}
                         onChange={setFormSubCategoryIds}
-                        placeholder="-- Select Sub-Categories --"
-                        fetchOptions={searchFetcher("/masters/product-sub-categories")}
+                        placeholder={formCategoryIds.length > 0 ? "-- Select Sub-Categories --" : "-- Select Categories First (or search all) --"}
+                        fetchOptions={async (query, signal) => {
+                          const q = query.trim().toLowerCase();
+                          let items = subCategoriesLookup.items;
+                          if (items.length === 0) {
+                            try {
+                              const { data } = await apiGet<{ id: string; name: string; code?: string; category_id: string }[]>(
+                                "/masters/product-sub-categories?page=1&page_size=500&sort_order=asc&status=active",
+                                { signal }
+                              );
+                              if (data) items = data as ProductSubCategory[];
+                            } catch {
+                              // fallback
+                            }
+                          }
+                          if (formCategoryIds.length > 0) {
+                            items = items.filter((sc) => formCategoryIds.includes(sc.category_id));
+                          }
+                          if (q) {
+                            items = items.filter(
+                              (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
+                            );
+                          }
+                          return items.map((sc) => ({ value: sc.id, label: sc.name }));
+                        }}
                         fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                       />
                     </div>
@@ -3741,6 +3777,12 @@ export function SuppliersPage() {
                     onChange={(v) => {
                       setCurrentPage(1);
                       setCategoryFilter(v);
+                      if (v && subCategoryFilter) {
+                        const sc = subCategoriesLookup.items.find((item) => item.id === subCategoryFilter);
+                        if (sc && sc.category_id !== v) {
+                          setSubCategoryFilter(null);
+                        }
+                      }
                     }}
                     placeholder="Filter: Product Category"
                     fetchOptions={searchFetcher("/masters/product-categories")}
@@ -3756,7 +3798,9 @@ export function SuppliersPage() {
                       setSubCategoryFilter(v);
                     }}
                     placeholder="Filter: Sub Category"
-                    fetchOptions={searchFetcher("/masters/product-sub-categories")}
+                    fetchOptions={searchFetcher("/masters/product-sub-categories", (): Record<string, string> =>
+                      categoryFilter ? { category_id: categoryFilter } : {}
+                    )}
                     fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                   />
                 </div>
@@ -4119,7 +4163,20 @@ export function SuppliersPage() {
                         <th
                           key={`col-${idx}-${label}`}
                           style={{
-                            ...(isSrNo ? { width: "75px", minWidth: "75px", maxWidth: "85px", textAlign: "center" } : isAction ? { textAlign: "center" } : {}),
+                            height: "auto",
+                            minHeight: "36px",
+                            whiteSpace: "normal",
+                            verticalAlign: "middle",
+                            padding: "6px 8px",
+                            ...(isSrNo
+                              ? { width: "75px", minWidth: "75px", maxWidth: "85px", textAlign: "center" }
+                              : isAction
+                              ? { textAlign: "center" }
+                              : idx === 2
+                              ? { width: "290px", minWidth: "200px", maxWidth: "290px" }
+                              : idx === 11
+                              ? { width: "105px", minWidth: "95px", maxWidth: "115px" }
+                              : {}),
                             ...getFreezeStyle(idx, true),
                           }}
                         >
@@ -4145,7 +4202,7 @@ export function SuppliersPage() {
                                     : `Click to sort by ${label} (Ascending)`
                                 }
                               >
-                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                <span style={{ whiteSpace: "normal", wordBreak: "normal", lineHeight: 1.25 }}>
                                   {label}
                                 </span>
                                 {isSorted ? (
@@ -4231,12 +4288,37 @@ export function SuppliersPage() {
                               );
                             case 2:
                               return (
-                                <td key="cell-2" style={getFreezeStyle(2, false)}>
+                                <td
+                                  key="cell-2"
+                                  style={{
+                                    width: "290px",
+                                    minWidth: "200px",
+                                    maxWidth: "290px",
+                                    whiteSpace: "normal",
+                                    height: "auto",
+                                    verticalAlign: "middle",
+                                    ...getFreezeStyle(2, false),
+                                  }}
+                                >
                                   <a
                                     href="#"
+                                    title={s.company_name}
                                     onClick={(e) => {
                                       e.preventDefault();
                                       setDrawerSupplier(s);
+                                    }}
+                                    style={{
+                                      display: "-webkit-box",
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: "vertical",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      wordBreak: "break-word",
+                                      lineHeight: "1.35",
+                                      maxHeight: "2.7em",
+                                      fontWeight: 600,
+                                      color: "#0061f2",
+                                      textDecoration: "none",
                                     }}
                                   >
                                     {s.company_name}
@@ -4270,7 +4352,7 @@ export function SuppliersPage() {
                               );
                             case 11:
                               return (
-                                <td key="cell-11" style={getFreezeStyle(11, false)}>
+                                <td key="cell-11" style={{ width: "105px", minWidth: "95px", maxWidth: "115px", ...getFreezeStyle(11, false) }}>
                                   <StatusPill value={s.current_status} />
                                 </td>
                               );

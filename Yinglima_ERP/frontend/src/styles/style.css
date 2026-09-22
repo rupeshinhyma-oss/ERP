@@ -54,6 +54,16 @@
   box-sizing: border-box;
 }
 
+/* Disable accidental spin buttons and wheel jumps on numeric inputs */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
 html,
 body {
   height: 100%;

@@ -475,10 +475,11 @@ The RBAC engine secures every endpoint via `require_permission(code)` dependenci
   - **Structured Error Details:** If a match is found with `deleted_at IS NOT NULL`, the backend raises `ConflictException` with structured details: `{ "in_trash": True, "trash_id": "<uuid>", "entity_type": "<Entity>", "name": "<Name>", "code": "<Code>" }`. If an active conflict exists, it raises standard 409 Conflict.
   - **Collision-Free Code Generators (`code_exists_anywhere`):** Code slugs (`CAT-XXX`, `BR-XXX`, `ST-XXX`, `CMP-XXX`) check both active and soft-deleted records so auto-increments never collide with soft-deleted slugs.
   - **Interactive Frontend Modal (`TrashConflictModal.tsx`):**
-    - Surfaced across all Master pages (`MasterPage.tsx`), Product Master, Buyer Management (`Buyers.tsx`), Supplier Directory (`Suppliers.tsx`), and Quick Inquiry Drawer (`Inquiries.tsx`).
+    - Surfaced across all Master pages (`MasterPage.tsx` — both standard modal dialogs and full-page form layouts `useFullPageForm`), Product Master, Buyer Management (`Buyers.tsx` — both list view and Add/Edit form `modalMode`), Supplier Directory (`Suppliers.tsx`), and Quick Inquiry Drawer (`Inquiries.tsx`).
     - **1-Click Restore Action:** Calls `POST /api/v1/trash/restore`, restores the item, invalidates the global dropdown cache via `cache_manager.invalidate_dropdown()`, refreshes the active list, and smoothly closes the modal.
     - **Zero Form Loss Guarantee:** If the user clicks `[ Change Name / Cancel ]`, the conflict modal dismisses while leaving the user's active creation/edit form completely open with all form fields, tags, and item rows preserved.
     - **Inquiry Workflow Integration:** In `QuickInquiryDrawer`, if a consignment code exists in Trash, the modal offers `[ 🔄 Restore & Append My Items ]`, automatically restoring the consignment and appending newly specified line items into it without losing any of the user's inputs.
+    - **Universal Coverage:** Both `SupplierService` and `BuyerService` enforce `get_any_by_company_name()` to ensure duplicate and trash detection triggers reliably regardless of phone number variations.
 
 ### 8.13. Organization & System Profile
 - **Endpoints:** `GET /organizations/profile`, `PATCH /organizations/profile`.
@@ -503,6 +504,7 @@ The RBAC engine secures every endpoint via `require_permission(code)` dependenci
   - **Strict 1st-Conversation AI Quotation Extraction Policy:** AI quotation extraction operates strictly on the initial quotation reply from a supplier for each product line item (`inquiry_item_id`, `supplier_id`). Once the initial quotation is recorded in the Quotation Matrix, all subsequent messages between the sales team and the supplier (negotiations, counter-offers, shipping questions, chit-chat) are saved directly into the conversation history without invoking the AI extractor (0 OpenAI tokens consumed, zero latency, and zero risk of overwriting or duplicating baseline quotations).
   - **Body-First Item Matching for Multi-Product RFQs:** Inbound email replies evaluate the email message body first for explicit product codes and product names before checking the subject line. This prevents email threads with multiple products from falsely inheriting the subject line's first product code, ensuring quotes for secondary items (e.g. Ink Roll vs Band Sealer) route to the correct unquoted line item.
   - **WeCom & WeChat Integration (`wechat_service.py`):** Encrypted bidirectional integration using Tencent WeCom API. Generates bilingual Markdown RFQ cards. Smart resolution resolves both Chinese (`+86`) 11-digit numbers and Indian (`+91`) 10-digit numbers, as well as direct WeCom UserIDs. Strict response validation verifies `errcode: 0` before logging success badges.
+  - **Tencent WeCom Enterprise "Blue Tick" (企业认证) Verification Standard:** Enables unrestricted external WeChat communication with factory managers (`微信互通`), unlocks high-throughput automated API limits for the ERP RFQ bot, and prevents anti-spam throttling. Verified via `work.weixin.qq.com` (accessed via Hong Kong/Singapore VPN nodes from India) at 300 RMB/year (~₹3,600 INR) for Chinese entity (*Yinglima Wenzhou*) with Chinese Business License (营业执照) and bank verification, or $99 USD/year (~₹8,300 INR) for overseas entities. Third-party review takes 1–3 business days to grant the official verified V badge.
   - **Automated Inbound Email Worker (`email_inbound_worker.py`):** Listens via IMAP for incoming supplier replies. Prioritizes exact sender email matching against `SupplierEmail` and `SupplierContact` directories before fallback text search (strictly excluding host procurement company names like "Yinglima" to prevent false positive supplier resolution from email signatures). Robust consignment code matching scans all registered database consignment codes against the subject line (supporting multi-word codes with spaces like `[SEA 1]`, prefix brackets, and case variations) and falls back to explicit product code matching (`#FNB-02391`) before supplier historical RFQ lookup. When an unquoted supplier reply arrives, extracts quotation unit prices, quantities, lead times, and terms via OpenAI GPT-4o-mini, automatically inserts `Quotation` records with mandatory `quantity` fields and product-specific line item matching, and broadcasts real-time WebSocket events.
   - **WeChat Callback Ingestion (`routes.py: /wechat/callback`):** Handles incoming supplier replies from WeChat/WeCom. Decrypts XML payloads, stores conversational message history, accurately extracts consignment codes with spaces and brackets, enforces the 1st-conversation extraction policy (skipping AI for subsequent chatter), and creates initial quotation rows with real-time UI notification.
   - **Supplier Thread Resolution:** Dynamic fallback lookup maps unlinked message sender emails to registered suppliers and prevents duplicate vendor dropdown entries.
@@ -525,10 +527,10 @@ The RBAC engine secures every endpoint via `require_permission(code)` dependenci
   - Main row displays Product Photo, Name, Code, Category, Brand, Best Price badge (green if priced, amber if unpriced), and Primary Supplier with an interactive `[ N Suppliers ▾ ]` badge.
   - Expanding a row renders a dedicated comparison sub-table detailing every vendor who quoted that SKU: Supplier Name, Location, Quoted Price, Currency, MOQ, Notes/Terms, and Quote Date.
   - Includes an inline quick-add quote bar (`+ Add Another Supplier Quote:`) to link additional suppliers and prices directly within the table.
-- **Products Master Aligned Top Filter Toolbar:**
-  - **Funnel Toggle Button (`filterOpen`):** Dedicated header action button styled in active blue (`#0061f2`) or slate (`#475569`) that toggles an expandable filter panel above the table card.
-  - **Expandable Filter Panel:** Renders `Category` (scoped to product categories), `Sub Category` (dynamically scoped to selected Category), `Brand` (brands lookup), `Pricing Status` (`All`, `Priced Items Only`, `Unpriced Items Only`), and action buttons `[Reset]` (clears all filters and search) and `[Search]` (triggers query execution).
-  - **Integrated Table Toolbar:** Relocated the catalog search bar with instant `✕` clear and the `Items/Page` selector (`10`, `50`, `100`) into the table card's top bar, matching the Products Master layout.
+- **Integrated Table Toolbar & Sticky Frozen Header Standard:**
+  - Relocated the catalog search bar with instant `✕` clear and the `Items/Page` selector (`10`, `50`, `100`) into the table card's top bar, matching the Products Master layout.
+  - **Frozen Table Headline**: Wrapped table in a responsive scroll container (`.table-scroll` with `maxHeight: calc(100vh - 270px)`, `minHeight: 380px`, `overflowY: auto`). Table headers (`Sr. No.`, `Product Name & Code`, `Category & Brand`, `Best Price`, `Primary Supplier`, `Actions`) are set to `position: sticky; top: 0; zIndex: 10/25` with `borderCollapse: separate; borderSpacing: 0`. When scrolling through long pages of products (50–100 items), the entire header row stays permanently frozen at the top of the card.
+  - **Sticky First Column**: `Sr. No.` column remains pinned on horizontal pan via `position: sticky; left: 0; zIndex: 25/5`.
 - **Universal Filter-Aware Bulk Export Engine (`GET /api/v1/inventory/product-prices/export`):**
   - **`📥 Export ▾` Dropdown:** Header toolbar dropdown supporting `📊 Export to Excel (.xlsx)` and `📄 Export to CSV (.csv)` with live loading feedback (`⏳ Exporting...`).
   - **Filter Awareness:** Respects active filters (`search`, `category_id`, `sub_category_id`, `brand_id`, `has_price`). If filtered, exports the filtered subset; if unfiltered, streams the entire directory catalog (up to 50,000 products, eliminating the former 200-row limit).
@@ -608,7 +610,14 @@ The RBAC engine secures every endpoint via `require_permission(code)` dependenci
   - Card 2 Expenses, Card 3 Product Search, Card 4 Items Table, and Card 5 Summary Cards automatically stretch to 100% of viewport width seamlessly at any browser zoom level (50%, 80%, 100%, 125%, 150%) matching the Product Master responsive standard.
 - **Dual-Mode Automated Bill Extraction (PDF & Excel):**
   - **Excel / CSV:** Parses `.xlsx`, `.xls`, `.csv` via `openpyxl`/`csv` to map headers (`Product/Item`, `Code/Model`, `HSN`, `Qty`, `Rate`, `VAT%`), fuzzy matching items against the Product Master.
-  - **PDF & Scanned Bills:** Extracts text via `pypdf` and executes structured AI invoice extraction via OpenAI GPT-4o-mini (with fallback pattern matching), extracting supplier name, invoice no, invoice date, currency, total value, and table lines directly into the form.
+  - **PDF & Scanned Bills:** Extracts text via `pypdf` and executes structured AI invoice extraction via OpenAI GPT-4o-mini (with dynamic key resolution and fallback pattern matching), extracting supplier name, invoice no, invoice date, currency, total value, and table lines directly into the form.
+  - **Consolidated Unregistered Products Notice Banner:** When extracted line items are not present in the Product Master catalog, a clean warning banner appears above Card 4 summarizing: `⚠️ Notice: [N] Products in this bill are not registered in Product Master (Rows #...) — Marked with ⚠️ Not in Master. These will be recorded as one-time purchase items.` This eliminates UI clutter compared to scattering full error alerts across every row.
+  - **Subtle Inline Row-Level Indicators:** Unregistered rows feature a subtle warm border (`#fca5a5`), a compact pill badge (`⚠️ Not in Master`), and an extracted `Code: [SKU]` badge directly below the custom product name input, preserving table row height and vertical alignment.
+  - **Zero-Block Domestic Recording:** Local purchases allow saving custom line items (`product_id: null`) as domestic/one-time expenses without forcing prior registration in Product Master.
+- **Scroll-Wheel Value Lockout & Precision Decimal Formatting (`main.tsx`, `style.css`, `LocalPurchaseForm.tsx`):**
+  - **Scroll-Wheel Lockout:** Global window wheel listener blurs numeric inputs, and all numeric fields in `LocalPurchaseForm.tsx` enforce `onWheel={(e) => e.currentTarget.blur()}` to prevent mouse scrolling from accidentally altering quantities, unit rates, expenses, or invoice totals.
+  - **Spin Button Suppression:** Global CSS in `style.css` suppresses number stepper arrows across Chrome, Safari, Edge, and Firefox.
+  - **Precision Decimal Rounding:** Computations enforce 2-decimal rounding (`toFixed(2)`) on `totalQuantity`, eliminating float display artifacts like `18.009999999999998`.
 - **Corporate Openpyxl Export Engine (`GET /api/v1/purchases/local/export`):**
   - Exports filtered or complete purchase listings with Dark Navy (`#1E3A8A`) headers, frozen panes (`A2`), auto-filters, zebra striping, and currency formatting.
 - **Local Purchase Details Preview Modal (`LocalPurchaseDetailModal.tsx`):**
@@ -955,6 +964,27 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Subsequent Follow-ups & Negotiations**: Once `QT-AUTO-XX` exists for `(inquiry_item_id, supplier_id)`, all subsequent negotiation emails, price discussions, and delivery conversations bypass AI extraction (**0 OpenAI API calls**) and are appended directly to the `Emails` timeline.
 - **Thread-Aware Item Inheritance**: Short follow-up emails without explicit SKU numbers automatically inherit the product item (`inquiry_item_id`) from the active thread history with that supplier.
 - **Smart Hybrid Real-Time & Fallback Sync**: The Inquiries module leverages primary real-time WebSocket push updates (`useLiveModule("inquiries")`) for sub-second zero-latency display of incoming WeChat and parsed email quotes, backed by a gentle 15-second visibility-aware fallback poll that automatically pauses when the browser tab is hidden and instantly refreshes upon window focus to eliminate network congestion and CPU overhead.
+
+### Local Purchase Orders & Automated Bill Extraction Engine (`app/purchases/local`)
+- **Dual Format Support**: Supports both **PDF bills** and **Excel / CSV spreadsheets** (`.xlsx`, `.xls`, `.csv`) via `POST /api/v1/purchases/local/extract-bill`.
+- **Header Metadata Extraction**:
+  - Automatically identifies `Supplier Name`, `Invoice No`, `Invoice Date`, `Currency`, and `Invoice Total Value (with VAT)`.
+  - Runs fuzzy search against the `Supplier` master table to automatically select and link the vendor's `supplier_id`.
+- **Product Line Items Extraction**:
+  - Automatically extracts: `Product Code`, `Product Name`, `HSN Code`, `Quantity`, `Unit Rate`, `VAT Rate %`, and `Item Total`.
+  - Filters out summary rows (`Basic Total`, `VAT Total`, `Grand Total`, etc.) to prevent duplicate or phantom items.
+- **Smart Product Master Fuzzy Matching**:
+  - Evaluates each extracted product code and name against the active `Product` database table.
+  - Automatically attaches `matched_product_id` and inherits the default VAT % and HSN code directly from the master catalog.
+- **Value-Based (VB) Landing Expense Engine**:
+  - Automatically distributes packing, freight, offloading, and miscellaneous expenses proportionally across line items based on basic value.
+- **Scroll-Wheel Value Lockout & Clean Numeric Formatting**:
+  - Global window wheel listener and input-level blur handlers suppress accidental mouse-wheel number increments/decrements while scrolling the page.
+  - Calculations apply strict 2-decimal rounding and `.toLocaleString()` formatting to eliminate floating-point anomalies (e.g. `18.009999999999998`).
+- **Reference Test Assets**:
+  - Standard Sample Bills: `doc/example bil/sample_supplier_bill.xlsx` & `doc/example bil/sample_supplier_bill.pdf`
+  - Imperfect Stress-Test Bills: `doc/example bil/messy_noisy_bill.xlsx` & `doc/example bil/imperfect_messy_bill.pdf`
+
 ### Universal Search & Deep-Linking Architecture (`GET /search?q=`)
 - **Global Search Endpoint (`app.search.service`)**: Searches asynchronously across Organization, Users, Suppliers, Buyers, Products, Product Categories & Sub-Categories, Brands, HSN Codes, Geography Masters (Countries, States, Cities), Currencies & UOM, **Inquiries & Consignments** (`ConsignmentCode`, `InquiryItem`), and **Trash** (soft-deleted records across all models via `MODEL_MAP`).
 - **Client-Side Deep-Linking (`UniversalSearch.tsx`)**: Clicking a search result carries the matched record's UUID via query parameter (e.g. `/suppliers?id=8973e972-...`, `/buyers?id=...`, `/masters/products?id=...`, `/users?id=...`, `/inquiries?buyerId=...&inquiryId=...`, `/trash?q=...`).

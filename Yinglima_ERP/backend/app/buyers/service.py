@@ -200,6 +200,23 @@ class BuyerService:
         await self._validate_sub_categories(sub_category_ids)
         self._validate_potential_reason(field_values.get("potential"), field_values.get("potential_reason"))
 
+        existing_name = await self.repository.get_any_by_company_name(company_name)
+        if existing_name is not None:
+            if existing_name.deleted_at is not None:
+                raise ConflictException(
+                    f"Buyer '{company_name}' already exists in the Trash.",
+                    details={
+                        "in_trash": True,
+                        "trash_id": str(existing_name.id),
+                        "entity_type": "Buyer",
+                        "name": existing_name.company_name,
+                    },
+                )
+            raise ConflictException(
+                f"Buyer '{company_name}' already exists in Buyer Master.",
+                details={"existing": {"id": str(existing_name.id), "name": existing_name.company_name}},
+            )
+
         dup_match = await self.repository.find_duplicate(
             company_name=company_name,
             calling_number=field_values.get("contact_calling_number"),
@@ -244,24 +261,57 @@ class BuyerService:
         return await self.get_by_id_or_raise(buyer.id)
 
     async def update(self, buyer_id: uuid.UUID, **field_values: Any) -> Buyer:
-        """Update an existing buyer profile, enforcing every document business rule."""
+        """
+        Update an existing buyer profile.
+
+        Validates country existence, category/sub-category existence, the
+        duplicate rule (if company name or phone numbers are being
+        changed), the one-way status transition, and the potential-reason
+        rule. Eagerly invalidates the cached buyer list.
+        """
         buyer = await self.get_by_id_or_raise(buyer_id)
 
         category_ids = field_values.pop("category_ids", None)
         sub_category_ids = field_values.pop("sub_category_ids", None)
         emails = field_values.pop("emails", None)
 
-        if field_values.get("country_id"):
+        if "country_id" in field_values and field_values["country_id"] is not None:
             await self._validate_country(field_values["country_id"])
         if category_ids is not None:
             await self._validate_categories(category_ids)
         if sub_category_ids is not None:
             await self._validate_sub_categories(sub_category_ids)
 
-        new_company_name = field_values.get("company_name") or buyer.company_name
+        new_company_name = field_values.get("company_name", buyer.company_name)
         new_calling = field_values.get("contact_calling_number", buyer.contact_calling_number)
         new_whatsapp = field_values.get("contact_whatsapp_number", buyer.contact_whatsapp_number)
-        if any(k in field_values for k in ("company_name", "contact_calling_number", "contact_whatsapp_number")):
+
+        phone_changed = (
+            "contact_calling_number" in field_values and field_values["contact_calling_number"] != buyer.contact_calling_number
+        ) or (
+            "contact_whatsapp_number" in field_values and field_values["contact_whatsapp_number"] != buyer.contact_whatsapp_number
+        )
+        name_changed = "company_name" in field_values and field_values["company_name"] != buyer.company_name
+
+        if name_changed:
+            existing_name = await self.repository.get_any_by_company_name(new_company_name, exclude_id=buyer_id)
+            if existing_name is not None:
+                if existing_name.deleted_at is not None:
+                    raise ConflictException(
+                        f"Buyer '{new_company_name}' already exists in the Trash.",
+                        details={
+                            "in_trash": True,
+                            "trash_id": str(existing_name.id),
+                            "entity_type": "Buyer",
+                            "name": existing_name.company_name,
+                        },
+                    )
+                raise ConflictException(
+                    f"Buyer '{new_company_name}' already exists in Buyer Master.",
+                    details={"existing": {"id": str(existing_name.id), "name": existing_name.company_name}},
+                )
+
+        if phone_changed or name_changed:
             dup_match = await self.repository.find_duplicate(
                 company_name=new_company_name,
                 calling_number=new_calling,

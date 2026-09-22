@@ -495,6 +495,7 @@ export function LocalPurchaseFormPage() {
 
     itemsTotalBasic = Number(itemsTotalBasic.toFixed(2));
     itemsTotalVat = Number(itemsTotalVat.toFixed(2));
+    totalQuantity = Number(totalQuantity.toFixed(2));
     const itemsTotalGross = Number((itemsTotalBasic + itemsTotalVat).toFixed(2));
 
     // 2. Value-Based Expense Ratio
@@ -1163,6 +1164,7 @@ export function LocalPurchaseFormPage() {
                       }
                     }}
                     onFocus={(e) => e.currentTarget.select()}
+                    onWheel={(e) => e.currentTarget.blur()}
                     required
                     style={{
                       width: "100%",
@@ -1305,6 +1307,7 @@ export function LocalPurchaseFormPage() {
                     setPackingForwarding(v === "" ? "" : Number(v));
                   }}
                   onFocus={(e) => e.currentTarget.select()}
+                  onWheel={(e) => e.currentTarget.blur()}
                   style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }}
                 />
               </div>
@@ -1328,6 +1331,7 @@ export function LocalPurchaseFormPage() {
                     setTransportExpense(v === "" ? "" : Number(v));
                   }}
                   onFocus={(e) => e.currentTarget.select()}
+                  onWheel={(e) => e.currentTarget.blur()}
                   style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }}
                 />
               </div>
@@ -1351,6 +1355,7 @@ export function LocalPurchaseFormPage() {
                     setOffloadingExpense(v === "" ? "" : Number(v));
                   }}
                   onFocus={(e) => e.currentTarget.select()}
+                  onWheel={(e) => e.currentTarget.blur()}
                   style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }}
                 />
               </div>
@@ -1374,6 +1379,7 @@ export function LocalPurchaseFormPage() {
                     setOtherExpense(v === "" ? "" : Number(v));
                   }}
                   onFocus={(e) => e.currentTarget.select()}
+                  onWheel={(e) => e.currentTarget.blur()}
                   style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }}
                 />
               </div>
@@ -1712,6 +1718,42 @@ export function LocalPurchaseFormPage() {
               </div>
             )}
 
+            {/* Unregistered Products Notice Banner (Consolidated) */}
+            {items.length > 0 && items.some((it) => !it.product_id) && (
+              <div
+                style={{
+                  padding: "10px 18px",
+                  background: "#fffbeb",
+                  borderBottom: "1px solid #fde68a",
+                  color: "#92400e",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span style={{ fontSize: "14px" }}>⚠️</span>
+                  <span>
+                    <strong>
+                      {items.filter((it) => !it.product_id).length === 1
+                        ? "1 Product in this bill is not registered in Product Master:"
+                        : `${items.filter((it) => !it.product_id).length} Products in this bill are not registered in Product Master:`}
+                    </strong>{" "}
+                    {items.filter((it) => !it.product_id).length === 1
+                      ? `"${items.find((it) => !it.product_id)?.product_name}"`
+                      : `(Rows #${items.map((it, i) => (!it.product_id ? i + 1 : null)).filter(Boolean).join(", #")})`}
+                    <span style={{ color: "#78350f", fontWeight: 400, marginLeft: "6px" }}>
+                      — Marked with <span style={{ padding: "1px 5px", fontSize: "11px", fontWeight: 700, background: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca", borderRadius: "3px" }}>⚠️ Not in Master</span>. These will be recorded as one-time purchase items.
+                    </span>
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Items Table */}
             <div className="table-scroll" style={{ maxHeight: "calc(100vh - 350px)", minHeight: "220px", border: "none", borderRadius: 0, overflowY: "visible" }}>
               <table>
@@ -1807,26 +1849,68 @@ export function LocalPurchaseFormPage() {
                                 value={item.product_name}
                                 onChange={(e) => handleItemChange(idx, "product_name", e.target.value)}
                                 required
-                                style={{ width: "100%", padding: "6px 8px", borderRadius: "4px", border: "1px solid #cbd5e1", fontSize: "12.5px", fontWeight: 600, boxSizing: "border-box" }}
+                                style={{
+                                  width: "100%",
+                                  padding: "6px 8px",
+                                  borderRadius: "4px",
+                                  border: "1px solid #fca5a5",
+                                  background: "#fffdfb",
+                                  fontSize: "12.5px",
+                                  fontWeight: 600,
+                                  boxSizing: "border-box",
+                                }}
                               />
-                              {item.planning_sheet_name && (
+                              <div style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap", marginTop: "3px" }}>
                                 <span
                                   style={{
-                                    display: "inline-block",
-                                    marginTop: "2px",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "3px",
                                     padding: "1px 6px",
                                     fontSize: "10.5px",
                                     fontWeight: 700,
-                                    background: "#e0f2fe",
-                                    color: "#0369a1",
+                                    background: "#fef2f2",
+                                    color: "#dc2626",
                                     borderRadius: "4px",
-                                    border: "1px solid #bae6fd",
+                                    border: "1px solid #fecaca",
                                   }}
-                                  title={`Planned from ${item.planning_sheet_name}`}
+                                  title="This product was not found in Product Master catalog and will be saved as a custom / one-time purchase item."
                                 >
-                                  📦 Planned
+                                  ⚠️ Not in Master
                                 </span>
-                              )}
+                                {item.product_code && (
+                                  <span
+                                    style={{
+                                      padding: "1px 6px",
+                                      fontSize: "10.5px",
+                                      fontWeight: 600,
+                                      background: "#f8fafc",
+                                      color: "#64748b",
+                                      borderRadius: "4px",
+                                      border: "1px solid #e2e8f0",
+                                    }}
+                                    title={`Bill Product Code: ${item.product_code}`}
+                                  >
+                                    Code: {item.product_code}
+                                  </span>
+                                )}
+                                {item.planning_sheet_name && (
+                                  <span
+                                    style={{
+                                      padding: "1px 6px",
+                                      fontSize: "10.5px",
+                                      fontWeight: 700,
+                                      background: "#e0f2fe",
+                                      color: "#0369a1",
+                                      borderRadius: "4px",
+                                      border: "1px solid #bae6fd",
+                                    }}
+                                    title={`Planned from ${item.planning_sheet_name}`}
+                                  >
+                                    📦 Planned
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           )}
                         </td>
@@ -1851,6 +1935,7 @@ export function LocalPurchaseFormPage() {
                             value={item.quantity}
                             onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
                             onFocus={(e) => e.currentTarget.select()}
+                            onWheel={(e) => e.currentTarget.blur()}
                             onBlur={(e) => {
                               if (e.target.value === "" || Number(e.target.value) <= 0) {
                                 handleItemChange(idx, "quantity", 1);
@@ -1872,6 +1957,7 @@ export function LocalPurchaseFormPage() {
                             value={item.unit_rate}
                             onChange={(e) => handleItemChange(idx, "unit_rate", e.target.value)}
                             onFocus={(e) => e.currentTarget.select()}
+                            onWheel={(e) => e.currentTarget.blur()}
                             onBlur={(e) => {
                               if (e.target.value === "") {
                                 handleItemChange(idx, "unit_rate", 0);
@@ -1918,6 +2004,7 @@ export function LocalPurchaseFormPage() {
                             value={item.vat_rate}
                             onChange={(e) => handleItemChange(idx, "vat_rate", e.target.value)}
                             onFocus={(e) => e.currentTarget.select()}
+                            onWheel={(e) => e.currentTarget.blur()}
                             onBlur={(e) => {
                               if (e.target.value === "") {
                                 handleItemChange(idx, "vat_rate", 0);
@@ -1981,7 +2068,9 @@ export function LocalPurchaseFormPage() {
                       <td colSpan={3} style={{ textAlign: "right", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                         Grand Total:
                       </td>
-                      <td style={{ textAlign: "right" }}>{calculations.totalQuantity}</td>
+                      <td style={{ textAlign: "right" }}>
+                        {Number(calculations.totalQuantity).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      </td>
                       <td colSpan={2}></td>
                       <td style={{ textAlign: "right", color: "#0f172a", fontSize: "13.5px" }}>
                         {currencySymbol} {calculations.itemsTotalBasic.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
