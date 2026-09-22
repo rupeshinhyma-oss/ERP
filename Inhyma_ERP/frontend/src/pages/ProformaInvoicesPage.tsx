@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import type { ProformaInvoice, ProformaTabCounts } from "@/types";
 
 function formatIndianCurrency(amount: number): string {

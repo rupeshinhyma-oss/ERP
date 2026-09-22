@@ -974,32 +974,280 @@ select::-ms-expand {
 }
 
 .modal-dialog-card {
-  background: #ffffff !important;
+  background: var(--color-surface, #ffffff) !important;
   border-radius: 12px !important;
   height: auto !important;
   max-height: 90vh !important;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
-  border: 1px solid #e2e8f0 !important;
+  border: 1px solid var(--color-border, #e2e8f0) !important;
   animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
   overflow: hidden !important;
+  color: var(--color-text, #0f172a);
 }
 
 .modal-dialog-card .modal-header {
-  padding: 16px 22px;
-  background: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 16px 24px;
+  background: var(--color-surface, #ffffff);
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
 }
 
 .modal-dialog-card .modal-header h2 {
   font-size: 16px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text, #0f172a);
+  margin: 0;
 }
 
 .modal-dialog-card form {
   height: auto;
-  max-height: calc(90vh - 60px);
+  max-height: calc(90vh - 65px);
   overflow-y: auto;
+}
+
+/* Universal ERP Form Control */
+.form-control {
+  height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border-strong, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 13.5px;
+  font-family: inherit;
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text, #0f172a);
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 10px 12px;
+}
+
+.form-control:focus {
+  border-color: var(--color-primary, #0061f2);
+  box-shadow: 0 0 0 3px var(--color-primary-soft, #eff6ff);
+}
+
+.form-control::placeholder {
+  color: var(--color-muted, #94a3b8);
+  opacity: 0.85;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text, #0f172a);
+  margin-bottom: 4px;
+  display: block;
+}
+
+/* ERP Stepper & Chips */
+.erp-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 14px 20px;
+  background: var(--color-bg, #f8fafc);
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+}
+
+.erp-chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--color-border-strong, #cbd5e1);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text, #0f172a);
+  transition: all 0.15s ease;
+}
+
+.erp-chip:hover {
+  border-color: var(--color-primary, #0061f2);
+  background: var(--color-primary-soft, #eff6ff);
+  color: var(--color-primary, #0061f2);
+}
+
+.erp-chip.active {
+  background: var(--color-primary, #0061f2);
+  color: #ffffff;
+  border-color: var(--color-primary, #0061f2);
+  box-shadow: 0 1px 3px rgba(0, 97, 242, 0.25);
+}
+
+/* ==========================================================================
+   Universal Address Search & Verification Card Styles
+   ========================================================================== */
+.erp-address-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.erp-address-search-input {
+  width: 100%;
+  height: 38px;
+  padding: 8px 36px 8px 36px;
+  font-size: 13.5px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--color-border-strong, #cbd5e1);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text, #0f172a);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.erp-address-search-input:focus {
+  border-color: var(--color-primary, #0061f2);
+  box-shadow: 0 0 0 3px rgba(0, 97, 242, 0.12);
+}
+
+.erp-search-icon-left {
+  position: absolute;
+  left: 11px;
+  color: var(--color-muted, #64748b);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+}
+
+.erp-search-spinner-right {
+  position: absolute;
+  right: 11px;
+  display: flex;
+  align-items: center;
+  color: var(--color-primary, #0061f2);
+}
+
+.erp-suggestions-panel {
+  margin-top: 8px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-surface, #ffffff);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.erp-suggestion-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border-subtle, #f1f5f9);
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  transition: background 0.15s ease;
+}
+
+.erp-suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.erp-suggestion-item:hover,
+.erp-suggestion-item.selected {
+  background: var(--color-primary-soft, #eff6ff);
+}
+
+.erp-suggestion-item.selected {
+  border-left: 3px solid var(--color-primary, #0061f2);
+}
+
+.erp-place-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--color-bg, #f1f5f9);
+  color: var(--color-muted, #475569);
+  white-space: nowrap;
+}
+
+.erp-verification-card {
+  background: var(--color-surface, #ffffff);
+  border: 1.5px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.erp-verification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border-subtle, #f1f5f9);
+  padding-bottom: 8px;
+}
+
+.erp-verification-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px 14px;
+}
+
+.erp-verification-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .erp-verification-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.erp-verification-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.erp-verification-bottom {
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-subtle, #f1f5f9);
+  font-size: 12px;
+  color: var(--color-muted, #64748b);
+  line-height: 1.4;
+}
+
+.erp-verification-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.erp-verification-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-muted, #64748b);
+}
+
+.erp-verification-field-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text, #0f172a);
+  word-break: break-word;
 }
 
 /* ==========================================================================
