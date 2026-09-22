@@ -1277,30 +1277,113 @@ export function ProductPricesPage() {
               )}
             </div>
           </div>
-          <div style={{ overflowX: "auto" }}>
-            <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 270px)", minHeight: "380px", overflowY: "auto", overflowX: "auto" }}>
+            <table className="table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
-                  <th style={{ padding: "12px 14px", width: "70px", minWidth: "70px", textAlign: "center", color: "#475569", whiteSpace: "nowrap" }}>
+                <tr style={{ textAlign: "left" }}>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      left: 0,
+                      zIndex: 25,
+                      background: "#f8fafc",
+                      padding: "12px 14px",
+                      width: "70px",
+                      minWidth: "70px",
+                      textAlign: "center",
+                      color: "#475569",
+                      whiteSpace: "nowrap",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                    }}
+                  >
                     Sr. No.
                   </th>
                   <th
                     onClick={() => handleSort("product_name_tally")}
-                    style={{ padding: "12px 14px", color: "#475569", minWidth: "260px", cursor: "pointer", userSelect: "none" }}
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "12px 14px",
+                      color: "#475569",
+                      minWidth: "260px",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                    }}
                     title="Click to sort by Product Name"
                   >
                     Product Name &amp; Code {sortBy === "product_name_tally" ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
                   </th>
-                  <th style={{ padding: "12px 14px", color: "#475569", width: "160px" }}>Category &amp; Brand</th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "12px 14px",
+                      color: "#475569",
+                      width: "160px",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                    }}
+                  >
+                    Category &amp; Brand
+                  </th>
                   <th
                     onClick={() => handleSort("best_price")}
-                    style={{ padding: "12px 14px", color: "#475569", width: "150px", cursor: "pointer", userSelect: "none" }}
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "12px 14px",
+                      color: "#475569",
+                      width: "150px",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                    }}
                     title="Click to sort by Best Price"
                   >
                     Best Price (Quote) {sortBy === "best_price" ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
                   </th>
-                  <th style={{ padding: "12px 14px", color: "#475569", minWidth: "220px" }}>Primary Supplier</th>
-                  <th style={{ padding: "12px 14px", color: "#475569", width: "150px", textAlign: "center" }}>Actions</th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "12px 14px",
+                      color: "#475569",
+                      minWidth: "220px",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                    }}
+                  >
+                    Primary Supplier
+                  </th>
+                  <th
+                    style={{
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 10,
+                      background: "#f8fafc",
+                      padding: "12px 14px",
+                      color: "#475569",
+                      width: "150px",
+                      textAlign: "center",
+                      borderBottom: "2px solid #cbd5e1",
+                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                    }}
+                  >
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1340,8 +1423,20 @@ export function ProductPricesPage() {
                             transition: "background 0.15s ease",
                           }}
                         >
-                          {/* Sr No */}
-                          <td style={{ padding: "12px 14px", textAlign: "center", fontWeight: 600, color: "#64748b", fontSize: "13px" }}>
+                          {/* Sr No (Sticky on horizontal scroll) */}
+                          <td
+                            style={{
+                              position: "sticky",
+                              left: 0,
+                              zIndex: 5,
+                              backgroundColor: isExpanded ? "#f1f5f9" : idx % 2 === 0 ? "#ffffff" : "#fafafa",
+                              padding: "12px 14px",
+                              textAlign: "center",
+                              fontWeight: 600,
+                              color: "#64748b",
+                              fontSize: "13px",
+                            }}
+                          >
                             {srNo}
                           </td>
 

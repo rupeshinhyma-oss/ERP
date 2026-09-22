@@ -1784,6 +1784,16 @@ export function MasterPage<T extends MasterRecord>({
             message={alertPopup?.message || ""}
             onClose={() => setAlertPopup(null)}
           />
+          <TrashConflictModal
+            isOpen={Boolean(trashConflict)}
+            conflictInfo={trashConflict}
+            onClose={() => setTrashConflict(null)}
+            onRestored={async () => {
+              closeModal();
+              setTrashConflict(null);
+              reload();
+            }}
+          />
         </main>
       </AppShell>
     );

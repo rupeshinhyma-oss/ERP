@@ -42,7 +42,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -276,7 +276,16 @@ class PlanningRow(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
         "PlanningCell", back_populates="row", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (Index("ix_planning_rows_sheet_position", "sheet_id", "position"),)
+    __table_args__ = (
+        Index("ix_planning_rows_sheet_position", "sheet_id", "position"),
+        Index(
+            "uq_planning_rows_sheet_linked_record_active",
+            "sheet_id",
+            "linked_record_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND linked_record_id IS NOT NULL"),
+        ),
+    )
 
 
 class PlanningColumn(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):

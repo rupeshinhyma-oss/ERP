@@ -166,10 +166,21 @@ class BaseRepository(Generic[ModelT]):
             if isinstance(value, str) and isinstance(column.type, (String, Text)):
                 stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
-                try:
-                    stmt = stmt.where(column == uuid.UUID(value))
-                except ValueError:
-                    stmt = stmt.where(column == value)
+                if "," in value:
+                    raw_ids = [x.strip() for x in value.split(",") if x.strip()]
+                    parsed_uuids = []
+                    for raw in raw_ids:
+                        try:
+                            parsed_uuids.append(uuid.UUID(raw))
+                        except ValueError:
+                            pass
+                    if parsed_uuids:
+                        stmt = stmt.where(column.in_(parsed_uuids))
+                else:
+                    try:
+                        stmt = stmt.where(column == uuid.UUID(value))
+                    except ValueError:
+                        stmt = stmt.where(column == value)
             else:
                 stmt = stmt.where(column == value)
         return stmt
@@ -280,10 +291,21 @@ class BaseRepository(Generic[ModelT]):
             elif isinstance(value, str) and isinstance(column.type, (String, Text)):
                 stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
-                try:
-                    stmt = stmt.where(column == uuid.UUID(value))
-                except ValueError:
-                    stmt = stmt.where(column == value)
+                if "," in value:
+                    raw_ids = [x.strip() for x in value.split(",") if x.strip()]
+                    parsed_uuids = []
+                    for raw in raw_ids:
+                        try:
+                            parsed_uuids.append(uuid.UUID(raw))
+                        except ValueError:
+                            pass
+                    if parsed_uuids:
+                        stmt = stmt.where(column.in_(parsed_uuids))
+                else:
+                    try:
+                        stmt = stmt.where(column == uuid.UUID(value))
+                    except ValueError:
+                        stmt = stmt.where(column == value)
             else:
                 stmt = stmt.where(column == value)
 

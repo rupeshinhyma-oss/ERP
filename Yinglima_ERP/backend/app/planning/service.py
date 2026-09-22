@@ -301,8 +301,8 @@ class PlanningService:
         self,
         *,
         name: str,
-        organization_id: uuid.UUID,
-        branch_id: str,
+        organization_id: uuid.UUID | None = None,
+        branch_id: str | None = None,
         mum_group_label: str = "Mum",
         description: str | None = None,
         user_id: uuid.UUID,
@@ -317,22 +317,25 @@ class PlanningService:
             raise ConflictException(f"A sheet named {name!r} already exists.")
 
         # Validate organization_id/branch_id against Product Master's real
-        # organization/branch list -- every sheet must represent one
+        # organization/branch list if provided -- every sheet must represent one
         # actual, existing branch, not just a name that sounds like one.
-        branch_id = (branch_id or "").strip()
-        if not branch_id:
-            raise BadRequestException("A branch is required to create a sheet.")
-        if self.company_repository is None:
-            raise BadRequestException("Cannot validate the selected branch right now -- please try again.")
-        organization = await self.company_repository.get_by_id(organization_id)
-        if organization is None:
-            raise BadRequestException("The selected organization does not exist.")
-        branch_ids_on_org = {str(b.get("id")) for b in (organization.branches or []) if isinstance(b, dict)}
-        if branch_id not in branch_ids_on_org:
-            raise BadRequestException(
-                f"{branch_id!r} is not a branch of {organization.name!r}. "
-                "Pick a branch from that organization's own list."
-            )
+        if organization_id is not None or branch_id:
+            branch_id = (branch_id or "").strip()
+            if not branch_id:
+                raise BadRequestException("A branch is required to create a sheet.")
+            if organization_id is None:
+                raise BadRequestException("An organization is required when a branch is specified.")
+            if self.company_repository is None:
+                raise BadRequestException("Cannot validate the selected branch right now -- please try again.")
+            organization = await self.company_repository.get_by_id(organization_id)
+            if organization is None:
+                raise BadRequestException("The selected organization does not exist.")
+            branch_ids_on_org = {str(b.get("id")) for b in (organization.branches or []) if isinstance(b, dict)}
+            if branch_id not in branch_ids_on_org:
+                raise BadRequestException(
+                    f"{branch_id!r} is not a branch of {organization.name!r}. "
+                    "Pick a branch from that organization's own list."
+                )
 
         position = await self.sheet_repository.next_position()
         sheet = await self.sheet_repository.create(
@@ -404,9 +407,11 @@ class PlanningService:
         *,
         name: str,
         mum_group_label: str,
-        description: str | None,
+        description: str | None = None,
         user_id: uuid.UUID,
         username: str,
+        organization_id: uuid.UUID | None = None,
+        branch_id: str | None = None,
     ) -> PlanningSheet:
         """
         Create a new sheet with the exact same column structure as an existing one.
@@ -444,17 +449,17 @@ class PlanningService:
         if await self.sheet_repository.get_by_name(name):
             raise ConflictException(f"A sheet named {name!r} already exists.")
 
-        org_id = source_sheet.organization_id
-        b_id = source_sheet.branch_id
-        if org_id is None or not b_id:
+        target_org_id = source_sheet.organization_id
+        target_branch_id = source_sheet.branch_id
+        if target_org_id is None or not target_branch_id:
             if self.company_repository:
                 companies = await self.company_repository.list(limit=1)
                 if companies:
-                    org_id = org_id or companies[0].id
+                    target_org_id = target_org_id or companies[0].id
                     branches = companies[0].branches or []
                     if branches and isinstance(branches[0], dict):
-                        b_id = b_id or str(branches[0].get("id", ""))
-        if org_id is None or not b_id:
+                        target_branch_id = target_branch_id or str(branches[0].get("id", ""))
+        if target_org_id is None or not target_branch_id:
             raise BadRequestException(
                 "Source sheet has no associated organization or branch. "
                 "Please configure an organization and branch before duplicating."
@@ -462,8 +467,8 @@ class PlanningService:
 
         new_sheet = await self.create_sheet(
             name=name,
-            organization_id=org_id,
-            branch_id=b_id,
+            organization_id=target_org_id,
+            branch_id=target_branch_id,
             description=description,
             user_id=user_id,
             username=username,
@@ -2751,13 +2756,55 @@ class PlanningService:
 
         # If the source record was deleted or soft-deleted, clean up any planning rows and cells linked to it
         if source_module_key == "product":
+            from datetime import datetime, timezone
             from app.masters.products.models import Product
-            stmt_p = select(Product.id).where(Product.id == record_id, Product.deleted_at.is_(None))
+
+            stmt_p = select(Product).where(Product.id == record_id, Product.deleted_at.is_(None))
             active_prod = (await self.row_repository.session.execute(stmt_p)).scalar_one_or_none()
             if active_prod is None:
                 deleted_rows = await self.row_repository.soft_delete_linked_to_record(record_id)
                 await self.cell_repository.unlink_or_clear_record(record_id)
                 return deleted_rows
+
+            # Immediately auto-sync this product to all planning sheets matching its organization and branches
+            active_sheets = await self.sheet_repository.list_active()
+            prod_org_ids = [str(o) for o in (active_prod.organization_ids or [])]
+            prod_branch_ids = [str(b) for b in (active_prod.branch_ids or [])]
+            for s in active_sheets:
+                if (
+                    s.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP
+                    and s.item_source_module == "product"
+                    and s.organization_id is not None
+                ):
+                    org_match = str(s.organization_id) in prod_org_ids
+                    branch_match = s.branch_id is None or (s.branch_id in prod_branch_ids)
+                    if org_match and branch_match:
+                        exists_stmt = select(PlanningRow.id).where(
+                            PlanningRow.sheet_id == s.id,
+                            PlanningRow.linked_record_id == record_id,
+                            PlanningRow.deleted_at.is_(None),
+                        )
+                        exists = (await self.row_repository.session.execute(exists_stmt)).scalar_one_or_none()
+                        if not exists:
+                            await self.auto_populate_rows_from_item_source(
+                                s.id,
+                                limit=None,
+                                user_id=s.created_by,
+                                username="system",
+                                organization_id=s.organization_id,
+                                branch_id=s.branch_id,
+                            )
+                    else:
+                        remove_stmt = (
+                            update(PlanningRow)
+                            .where(
+                                PlanningRow.sheet_id == s.id,
+                                PlanningRow.linked_record_id == record_id,
+                                PlanningRow.deleted_at.is_(None),
+                            )
+                            .values({PlanningRow.deleted_at: datetime.now(timezone.utc)})
+                        )
+                        await self.row_repository.session.execute(remove_stmt)
 
         # --- 1. LINKED_LOOKUP cells pointing at this exact record ---
         affected_cells = await self.cell_repository.list_linked_to_record(record_id)
