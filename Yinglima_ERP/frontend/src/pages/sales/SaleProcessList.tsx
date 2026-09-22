@@ -825,7 +825,7 @@ export function SaleProcessListPage() {
                       background: "#f8fafc",
                       padding: "10px 12px",
                       textAlign: "center",
-                      width: "80px",
+                      width: "170px",
                       whiteSpace: "nowrap",
                       borderBottom: "2px solid #cbd5e1",
                       boxShadow: "0 2px 3px rgba(0,0,0,0.06)",
@@ -962,120 +962,77 @@ export function SaleProcessListPage() {
                       </td>
                       <td
                         style={{
-                          padding: "10px 12px",
+                          padding: "8px 10px",
                           textAlign: "center",
-                          position: "relative",
+                          whiteSpace: "nowrap",
                           borderBottom: "1px solid #f1f5f9",
-                          zIndex: openActionId === order.id ? 200 : 1,
                         }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenActionId(openActionId === order.id ? null : order.id);
-                          }}
-                          style={{
-                            background: openActionId === order.id ? "#e2e8f0" : "none",
-                            border: "1px solid #cbd5e1",
-                            borderRadius: "4px",
-                            padding: "4px 8px",
-                            cursor: "pointer",
-                            fontSize: "14px",
-                            color: "#334155",
-                          }}
-                        >
-                          ⋮
-                        </button>
-
-                        {openActionId === order.id && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
+                        <div style={{ display: "inline-flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
+                          <button
+                            type="button"
+                            title="View Details"
+                            onClick={() => setViewOrderId(order.id)}
                             style={{
-                              position: "absolute",
-                              right: "12px",
-                              ...(idx >= Math.max(1, orders.length - 2)
-                                ? { bottom: "100%", marginBottom: "4px" }
-                                : { top: "100%", marginTop: "2px" }),
-                              background: "#ffffff",
-                              borderRadius: "6px",
-                              border: "1px solid #cbd5e1",
-                              boxShadow: "0 10px 25px rgba(0,0,0,0.18)",
-                              zIndex: 9999,
-                              minWidth: "140px",
-                              textAlign: "left",
-                              overflow: "hidden",
+                              background: "#f0f9ff",
+                              color: "#0284c7",
+                              border: "1px solid #bae6fd",
+                              borderRadius: "4px",
+                              padding: "4px 8px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
                             }}
                           >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenActionId(null);
-                                setViewOrderId(order.id);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                border: "none",
-                                background: "none",
-                                textAlign: "left",
-                                fontSize: "13px",
-                                cursor: "pointer",
-                                color: "#334155",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                            >
-                              👁️ View Details
-                            </button>
+                            👁️ View
+                          </button>
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenActionId(null);
-                                navigate(`/sale/process/${order.id}/edit`);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                border: "none",
-                                background: "none",
-                                textAlign: "left",
-                                fontSize: "13px",
-                                cursor: "pointer",
-                                color: "#334155",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                            >
-                              ✏️ Edit Order
-                            </button>
+                          <button
+                            type="button"
+                            title="Edit Order"
+                            onClick={() => navigate(`/sale/process/${order.id}/edit`)}
+                            style={{
+                              background: "#f8fafc",
+                              color: "#334155",
+                              border: "1px solid #cbd5e1",
+                              borderRadius: "4px",
+                              padding: "4px 8px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                            }}
+                          >
+                            ✏️ Edit
+                          </button>
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenActionId(null);
-                                handleDelete(order.id, order.order_no);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                border: "none",
-                                background: "none",
-                                textAlign: "left",
-                                fontSize: "13px",
-                                cursor: "pointer",
-                                color: "#dc2626",
-                                borderTop: "1px solid #f1f5f9",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")}
-                              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                            >
-                              🗑️ Delete
-                            </button>
-                          </div>
-                        )}
+                          <button
+                            type="button"
+                            title="Delete Order"
+                            onClick={() => handleDelete(order.id, order.order_no)}
+                            style={{
+                              background: "#fef2f2",
+                              color: "#dc2626",
+                              border: "1px solid #fecaca",
+                              borderRadius: "4px",
+                              padding: "4px 8px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                            }}
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
