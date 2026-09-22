@@ -206,22 +206,15 @@ class TrashService:
             except Exception:
                 pass
 
-            # Check inquiry quotes and RFQs
+            # Check inquiry quotes
             try:
-                from app.inquiries.models import Quotation, RFQ
+                from app.inquiries.models import Quotation
                 q_res = await self.db.execute(
                     select(func.count()).select_from(Quotation).where(Quotation.supplier_id == item_id)
                 )
                 q_count = q_res.scalar_one()
                 if q_count > 0:
                     deps.append(f"{q_count} Inquiry Quotation{'s' if q_count > 1 else ''}")
-
-                rfq_res = await self.db.execute(
-                    select(func.count()).select_from(RFQ).where(RFQ.supplier_id == item_id)
-                )
-                rfq_count = rfq_res.scalar_one()
-                if rfq_count > 0:
-                    deps.append(f"{rfq_count} RFQ Dispatch{'es' if rfq_count > 1 else ''}")
             except Exception:
                 pass
 
@@ -289,7 +282,7 @@ class TrashService:
                     "SubCategory": "sub_category_id",
                     "Brand": "brand_id",
                     "UOM": "uom_id",
-                    "HSN Code": "hsn_code_id",
+                    "HSN Code": "hsn_id",
                 }.get(entity_type)
                 if col_name and hasattr(Product, col_name):
                     col = getattr(Product, col_name)
