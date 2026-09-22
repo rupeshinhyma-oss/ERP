@@ -77,7 +77,6 @@ const SAMPLE_PRODUCTS = [
   { product_name: "Automatic Liquid Filling Machine", hsn: "84223000", rate: 185000, gst_percent: 18 },
   { product_name: "Semi-Automatic Strapping Machine", hsn: "84224000", rate: 28000, gst_percent: 18 },
 ];
->>>>>>> origin/main
 
 function formatIndianCurrency(amount: number): string {
   return "₹ " + (amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
