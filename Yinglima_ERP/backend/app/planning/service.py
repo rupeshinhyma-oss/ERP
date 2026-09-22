@@ -444,8 +444,30 @@ class PlanningService:
         if await self.sheet_repository.get_by_name(name):
             raise ConflictException(f"A sheet named {name!r} already exists.")
 
+        org_id = source_sheet.organization_id
+        b_id = source_sheet.branch_id
+        if org_id is None or not b_id:
+            if self.company_repository:
+                companies = await self.company_repository.list(limit=1)
+                if companies:
+                    org_id = org_id or companies[0].id
+                    branches = companies[0].branches or []
+                    if branches and isinstance(branches[0], dict):
+                        b_id = b_id or str(branches[0].get("id", ""))
+        if org_id is None or not b_id:
+            raise BadRequestException(
+                "Source sheet has no associated organization or branch. "
+                "Please configure an organization and branch before duplicating."
+            )
+
         new_sheet = await self.create_sheet(
-            name=name, description=description, user_id=user_id, username=username, auto_populate=True
+            name=name,
+            organization_id=org_id,
+            branch_id=b_id,
+            description=description,
+            user_id=user_id,
+            username=username,
+            auto_populate=True,
         )
         # create_sheet() always defaults mum_group_label to "Mum" via the
         # ORM column default -- overwrite it with the requested one before
@@ -3782,6 +3804,7 @@ class PlanningService:
             if (
                 entry.action == PlanningChangeAction.CELL_STATUS_CHANGED
                 and entry.new_value == PlanningCellStatusColor.BLUE_ORDERED.value
+                and entry.column_id is not None
             ):
                 if entry.column_id not in blue_by_col or entry.created_at < blue_by_col[entry.column_id]:
                     blue_by_col[entry.column_id] = entry.created_at
