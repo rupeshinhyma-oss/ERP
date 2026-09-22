@@ -292,12 +292,7 @@ export function TrashPage() {
           )}
         </div>
 
-        <Banner error={error} />
-        {successMsg && (
-          <div className="banner banner-success" style={{ marginBottom: "16px" }}>
-            {successMsg}
-          </div>
-        )}
+        <Banner error={error} success={successMsg} />
 
         {/* Toolbar & Filters */}
         <div
