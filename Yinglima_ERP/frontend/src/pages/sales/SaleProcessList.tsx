@@ -859,6 +859,8 @@ export function SaleProcessListPage() {
                       style={{
                         backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fcfdfe",
                         cursor: "pointer",
+                        position: openActionId === order.id ? "relative" : undefined,
+                        zIndex: openActionId === order.id ? 150 : undefined,
                       }}
                       onClick={() => setViewOrderId(order.id)}
                     >
@@ -868,7 +870,7 @@ export function SaleProcessListPage() {
                           color: "#94a3b8",
                           position: "sticky",
                           left: 0,
-                          zIndex: 5,
+                          zIndex: openActionId === order.id ? 155 : 5,
                           background: idx % 2 === 0 ? "#ffffff" : "#fcfdfe",
                           borderBottom: "1px solid #f1f5f9",
                         }}
@@ -895,9 +897,9 @@ export function SaleProcessListPage() {
                             style={{
                               padding: "3px 8px",
                               borderRadius: "4px",
-                              background: "#e0f2fe",
-                              color: "#0369a1",
-                              fontWeight: 700,
+                              background: "#f0f9ff",
+                              color: "#0284c7",
+                              fontWeight: 600,
                               fontSize: "12px",
                               border: "1px solid #bae6fd",
                             }}
@@ -933,10 +935,10 @@ export function SaleProcessListPage() {
                             style={{
                               fontSize: "10px",
                               fontWeight: 700,
-                              padding: "1px 5px",
-                              borderRadius: "4px",
+                              padding: "1px 4px",
+                              borderRadius: "3px",
                               background: order.currency === "USD" ? "#ecfdf5" : "#eff6ff",
-                              color: order.currency === "USD" ? "#047857" : "#1d4ed8",
+                              color: order.currency === "USD" ? "#059669" : "#2563eb",
                               border: `1px solid ${order.currency === "USD" ? "#a7f3d0" : "#bfdbfe"}`,
                             }}
                           >
@@ -959,7 +961,13 @@ export function SaleProcessListPage() {
                         )}
                       </td>
                       <td
-                        style={{ padding: "10px 12px", textAlign: "center", position: "relative", borderBottom: "1px solid #f1f5f9" }}
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "center",
+                          position: "relative",
+                          borderBottom: "1px solid #f1f5f9",
+                          zIndex: openActionId === order.id ? 200 : 1,
+                        }}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button
@@ -969,13 +977,13 @@ export function SaleProcessListPage() {
                             setOpenActionId(openActionId === order.id ? null : order.id);
                           }}
                           style={{
-                            background: "none",
-                            border: "1px solid #e2e8f0",
+                            background: openActionId === order.id ? "#e2e8f0" : "none",
+                            border: "1px solid #cbd5e1",
                             borderRadius: "4px",
                             padding: "4px 8px",
                             cursor: "pointer",
                             fontSize: "14px",
-                            color: "#64748b",
+                            color: "#334155",
                           }}
                         >
                           ⋮
@@ -983,15 +991,18 @@ export function SaleProcessListPage() {
 
                         {openActionId === order.id && (
                           <div
+                            onClick={(e) => e.stopPropagation()}
                             style={{
                               position: "absolute",
                               right: "12px",
-                              top: "38px",
+                              ...(idx >= Math.max(1, orders.length - 2)
+                                ? { bottom: "100%", marginBottom: "4px" }
+                                : { top: "100%", marginTop: "2px" }),
                               background: "#ffffff",
                               borderRadius: "6px",
-                              border: "1px solid #e2e8f0",
-                              boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
-                              zIndex: 100,
+                              border: "1px solid #cbd5e1",
+                              boxShadow: "0 10px 25px rgba(0,0,0,0.18)",
+                              zIndex: 9999,
                               minWidth: "140px",
                               textAlign: "left",
                               overflow: "hidden",
