@@ -367,7 +367,7 @@ export function AppShell({
             zIndex: 900,
           }}
         >
-          {/* Left: Mobile hamburger & breadcrumb or title */}
+          {/* Left: Mobile hamburger */}
           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
             <button
               type="button"
@@ -382,12 +382,6 @@ export function AppShell({
                 <line x1="3" y1="18" x2="21" y2="18" />
               </svg>
             </button>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>
-                {currentTitle}
-              </span>
-            </div>
           </div>
 
           {/* Right: Quick actions, user profile */}
