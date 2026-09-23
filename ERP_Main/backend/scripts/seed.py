@@ -4,8 +4,8 @@ Bootstrap / Seed Script for ERP_Main Global Control Plane.
 Runs in order:
 1. scripts.seed_registry        -- registers Yinglima and Inhyma ERP instances and modules
 2. scripts.seed_platform_authz   -- seeds the 32 platform permissions and 4 starter roles
-3. Bootstrap Platform Super Admin -- seeds admin@platform.local (role: SUPER_ADMIN)
-4. Bootstrap Global User         -- seeds admin@platform.local with memberships to Yinglima & Inhyma
+3. Bootstrap Platform Super Admin -- seeds admin@example.com (role: SUPER_ADMIN)
+4. Bootstrap Global User         -- seeds admin@example.com with memberships to Yinglima & Inhyma
 
 Idempotent: safe to run multiple times. Existing records are preserved and never overwritten.
 

@@ -13,7 +13,7 @@ describe("Auth Store", () => {
 
     Auth.setSession("test-access-token", {
       id: "admin-1",
-      email: "admin@platform.local",
+      email: "admin@example.com",
       display_name: "Platform Admin",
       role: "SUPER_ADMIN",
       is_active: true,
@@ -22,7 +22,7 @@ describe("Auth Store", () => {
 
     expect(Auth.isLoggedIn()).toBe(true);
     expect(Auth.getAccessToken()).toBe("test-access-token");
-    expect(Auth.getPlatformAdmin()?.email).toBe("admin@platform.local");
+    expect(Auth.getPlatformAdmin()?.email).toBe("admin@example.com");
     expect(Auth.isSuperAdmin()).toBe(true);
 
     Auth.clear();

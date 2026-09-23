@@ -26,7 +26,7 @@ describe("AppShell Component", () => {
   it("renders sidebar navigation and brand when authenticated", () => {
     Auth.setSession("valid-test-token", {
       id: "admin-1",
-      email: "admin@platform.local",
+      email: "admin@example.com",
       display_name: "Master Admin",
       role: "SUPER_ADMIN",
       is_active: true,

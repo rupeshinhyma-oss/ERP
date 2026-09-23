@@ -62,7 +62,7 @@ describe("Memberships Page", () => {
     localStorage.clear();
     Auth.setSession("test-token", {
       id: "admin-1",
-      email: "admin@platform.local",
+      email: "admin@example.com",
       display_name: "Admin",
       role: "SUPER_ADMIN",
       is_active: true,
