@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
-import { StockTransferPage, INITIAL_TRANSFERS, StockTransferSkeletonRows } from "../StockTransferPage";
+import { StockTransferPage, StockTransferSkeletonRows } from "../StockTransferPage";
 
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", async () => {

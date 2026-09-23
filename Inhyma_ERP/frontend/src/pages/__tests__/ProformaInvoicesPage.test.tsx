@@ -185,18 +185,18 @@ describe("Proforma Invoices Page & Filter", () => {
     expect(screen.getByRole("button", { name: /next/i })).toBeTruthy();
   });
 
-  it("includes all SALE parts in nav.ts (Proforma, Inquiries, Sales Process, Discount Payments)", () => {
+  it("includes all SALE parts in nav.ts (Proforma, Sales Process, Discount Payments)", () => {
     const saleSection = NAV_SECTIONS.find((s) => s.label === "SALE");
     expect(saleSection).toBeDefined();
 
     const saleKeys = saleSection?.items.map((i) => i.key);
     expect(saleKeys).toContain("proforma");
-    expect(saleKeys).toContain("inquiries");
+    expect(saleKeys).not.toContain("inquiries");
     expect(saleKeys).toContain("sales-process");
     expect(saleKeys).toContain("discount-payments");
     expect(saleKeys).not.toContain("quotation");
 
-    expect(saleSection?.items.length).toBe(4);
+    expect(saleSection?.items.length).toBe(3);
   });
 
   it("includes PURCHASE and REPORTS sections in nav.ts matching legacy ERP", () => {

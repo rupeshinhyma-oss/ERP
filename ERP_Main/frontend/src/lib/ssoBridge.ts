@@ -178,7 +178,7 @@ export async function processIncomingSsoHandover(): Promise<
       const sessionData: EcosystemSessionData = {
         session_id: finalSessionId,
         email: targetEmail,
-        display_name: "Platform Super Admin",
+        display_name: "Super Admin",
         role: targetRole,
         user_type: "platform_admin",
         allowed_erps: allowedErps,

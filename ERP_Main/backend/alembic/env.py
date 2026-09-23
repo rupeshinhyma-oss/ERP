@@ -27,9 +27,13 @@ from app.reporting import models as _reporting_models  # noqa: F401
 from app.sync_policy import models as _sync_policy_models  # noqa: F401
 
 config = context.config
-import re
-_sync_url = re.sub(r"([?&])ssl=([a-zA-Z0-9_-]+)", r"\1sslmode=\2", settings.sync_database_url)
-config.set_main_option("sqlalchemy.url", _sync_url.replace("%", "%%"))
+_configured_url = config.get_main_option("sqlalchemy.url")
+if not _configured_url:
+    import re
+    _sync_url = re.sub(r"([?&])ssl=([a-zA-Z0-9_-]+)", r"\1sslmode=\2", settings.sync_database_url)
+    config.set_main_option("sqlalchemy.url", _sync_url.replace("%", "%%"))
+elif _configured_url.startswith("sqlite+aiosqlite://"):
+    config.set_main_option("sqlalchemy.url", _configured_url.replace("sqlite+aiosqlite://", "sqlite://"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

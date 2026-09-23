@@ -546,7 +546,7 @@ export function SuppliersPage() {
   const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerSupplier, setDrawerSupplier] = useState<Supplier | null>(null);
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
+  const [pinnedCols] = useState<Record<number, "left" | "right">>(() => {
     const saved = localStorage.getItem("suppliers_pinned_cols_v2");
     if (saved !== null) {
       try {

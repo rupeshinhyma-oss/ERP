@@ -107,7 +107,7 @@ async def establish_ecosystem_session(
         is_super_admin = True
         user_type = "platform_admin"
         role = "super_admin" if admin.role == PlatformAdminRole.SUPER_ADMIN else "admin"
-        display_name = admin.display_name or "Platform Super Admin"
+        display_name = admin.display_name or "Super Admin"
         allowed_erps = ["*"]  # Super admin has unrestricted access to all ERPs
     else:
         # Check GlobalUser
@@ -120,7 +120,7 @@ async def establish_ecosystem_session(
                 is_super_admin = True
                 user_type = "platform_admin"
                 role = "super_admin"
-                display_name = "Platform Super Admin"
+                display_name = "Super Admin"
                 allowed_erps = ["*"]
             else:
                 raise HTTPException(

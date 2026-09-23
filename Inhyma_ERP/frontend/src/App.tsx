@@ -31,8 +31,6 @@ import { EffectivePermissionsPage } from "@/pages/EffectivePermissions";
 import { PositionsPage } from "@/pages/org/Positions";
 import { CompaniesPage } from "@/pages/Companies";
 import { SuppliersPage } from "@/pages/Suppliers";
-import { BuyersPage } from "@/pages/Buyers";
-import { InquiriesPage } from "@/pages/Inquiries";
 import { ProformaInvoicesPage } from "@/pages/ProformaInvoicesPage";
 import { ProformaInvoicePdfPage } from "@/pages/ProformaInvoicePdfPage";
 import { SalesOrderPdfPage } from "@/pages/SalesOrderPdfPage";
@@ -154,8 +152,7 @@ export function App() {
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/supplier/list" element={<SuppliersPage />} />
           <Route path="/supplier" element={<SuppliersPage />} />
-          <Route path="/buyers" element={<BuyersPage />} />
-          <Route path="/inquiries" element={<InquiriesPage />} />
+          <Route path="/inquiries" element={<Navigate to="/proforma-invoice/list" replace />} />
           <Route path="/proforma-invoice/list" element={<ProformaInvoicesPage />} />
           <Route path="/proforma-invoice/add" element={<ProformaInvoicesPage defaultAdd={true} />} />
           <Route path="/proforma-invoice/addedit" element={<ProformaInvoicesPage defaultAdd={true} />} />

@@ -50,6 +50,8 @@ class CompanyCurrentStatus(str, Enum):
 
     NEW = "new"
     EXISTING = "existing"
+    ACTIVE = "active"
+    INACTIVE = "inactive"
 
 
 class CompanyPotential(str, Enum):

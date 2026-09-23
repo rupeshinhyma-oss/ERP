@@ -30,3 +30,20 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 def anyio_backend() -> str:
     """Restrict async tests to the asyncio backend only."""
     return "asyncio"
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def reset_peer_health_states() -> AsyncGenerator[None, None]:
+    """Ensure circuit breaker peer_health_states table does not contaminate test runs."""
+    yield
+    try:
+        from sqlalchemy import update
+        from app.database.engine import get_sessionmaker
+        from app.integration.models import PeerHealthState
+        async with get_sessionmaker()() as session:
+            await session.execute(
+                update(PeerHealthState).values(circuit_state="CLOSED", consecutive_failures=0, cooldown_until=None)
+            )
+            await session.commit()
+    except Exception:
+        pass

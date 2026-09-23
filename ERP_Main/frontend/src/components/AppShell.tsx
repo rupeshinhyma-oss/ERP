@@ -45,6 +45,11 @@ export function AppShell({
   const { profile, isLoggedIn, isSuperAdmin } = useAuth();
   const userEmail = profile ? ("primary_email" in profile ? profile.primary_email : profile.email) : "";
   const userRole = profile ? ("role" in profile ? profile.role : "GLOBAL_USER") : "";
+  const rawDisplayName = profile?.display_name || userEmail || "Platform Admin";
+  const userDisplayName =
+    rawDisplayName === "Platform Super Admin" || rawDisplayName === "Platform SuperAdmin"
+      ? "Super Admin"
+      : rawDisplayName;
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -138,7 +143,7 @@ export function AppShell({
         <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc" }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ width: 36, height: 36, margin: "0 auto 16px", border: "3px solid #e2e8f0", borderTopColor: "#0061f2", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Authorizing Platform Super Admin Single Sign-On...</div>
+            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Authorizing Super Admin Single Sign-On...</div>
           </div>
         </div>
       );
@@ -432,11 +437,11 @@ export function AppShell({
                     fontWeight: 700,
                   }}
                 >
-                  {initials(profile?.display_name || userEmail)}
+                  {initials(userDisplayName)}
                 </div>
                 <div style={{ textAlign: "left", display: "flex", flexDirection: "column" }}>
                   <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text)" }}>
-                    {profile?.display_name || userEmail || "Platform Admin"}
+                    {userDisplayName}
                   </span>
                   <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>
                     {roleLabel(userRole, Auth.getPrincipalType())}
@@ -463,7 +468,7 @@ export function AppShell({
                 >
                   <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
                     <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-text)" }}>
-                      {profile?.display_name || "Platform Admin"}
+                      {userDisplayName}
                     </div>
                     <div style={{ fontSize: "11px", color: "var(--color-muted)", wordBreak: "break-all" }}>
                       {userEmail}

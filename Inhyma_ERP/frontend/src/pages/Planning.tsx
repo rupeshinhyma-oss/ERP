@@ -58,12 +58,10 @@ import type {
 const SOURCE_MODULE_API: Record<string, string> = {
   product: "/masters/products",
   supplier: "/suppliers",
-  buyer: "/buyers",
 };
 const SOURCE_MODULE_LABEL_FIELD: Record<string, string> = {
   product: "product_name",
   supplier: "company_name",
-  buyer: "company_name",
 };
 import { BUILTIN_STATUS_COLORS } from "@/types/planning";
 
