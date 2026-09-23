@@ -130,6 +130,24 @@ export function Memberships() {
     [erps]
   );
 
+  // Check if a membership belongs to Admin or Super Admin (who maintains permanent full system access)
+  const isMembershipForAdmin = useCallback(
+    (m?: ErpMembership | null) => {
+      if (!m) return false;
+      const user = users.find((u) => u.id === m.global_user_id);
+      const email = (m.user_email || user?.primary_email || user?.email || "").toLowerCase();
+      const name = (m.user_display_name || user?.display_name || "").toLowerCase();
+      return (
+        email === "admin@example.com" ||
+        email.startsWith("admin@") ||
+        name.includes("super admin") ||
+        name === "admin" ||
+        name === "administrator"
+      );
+    },
+    [users]
+  );
+
   // Create / Link Membership
   const handleLink = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,6 +182,11 @@ export function Memberships() {
   // Safe Unlink Membership
   const handleUnlink = async () => {
     if (!unlinkTarget) return;
+    if (isMembershipForAdmin(unlinkTarget)) {
+      toast("Admin accounts have complete system access and cannot be unlinked.", "warning");
+      setUnlinkTarget(null);
+      return;
+    }
     setUnlinking(true);
     try {
       await apiDelete(`/global/identity/memberships/${unlinkTarget.id}/link`);
@@ -187,6 +210,11 @@ export function Memberships() {
   const handleExecuteLifecycleAction = async () => {
     if (!actionTarget) return;
     const { membership, action } = actionTarget;
+    if (isMembershipForAdmin(membership) && action !== "verify") {
+      toast("Admin accounts have complete system access and cannot be suspended or revoked.", "warning");
+      setActionTarget(null);
+      return;
+    }
     setPerformingAction(true);
     try {
       await apiPost(`/global/memberships/${membership.id}/${action}`);
@@ -590,70 +618,104 @@ export function Memberships() {
                         style={{ textAlign: "right" }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div style={{ display: "flex", justifyContent: "flex-end", gap: "6px" }}>
-                          {/* Quick Lifecycle Actions */}
-                          {m.status === "PENDING" && (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline"
-                              style={{ color: "var(--color-success)", borderColor: "#bbf7d0", fontSize: "11px", padding: "3px 8px" }}
-                              onClick={() => setActionTarget({ membership: m, action: "verify" })}
-                              title="Verify membership"
-                            >
-                              Verify
-                            </button>
+                        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "6px" }}>
+                          {isMembershipForAdmin(m) ? (
+                            <>
+                              <span
+                                className="badge badge-active"
+                                style={{
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  padding: "3px 8px",
+                                  backgroundColor: "#ecfdf5",
+                                  color: "#065f46",
+                                  border: "1px solid #a7f3d0",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                                title="Admin maintains complete system access"
+                              >
+                                <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: "#10b981" }} />
+                                Full Access
+                              </span>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline"
+                                style={{ color: "var(--color-text-secondary)", fontSize: "11px", padding: "3px 8px" }}
+                                onClick={() => setDetailMembership(m)}
+                                title="Inspect details"
+                              >
+                                Details
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {/* Quick Lifecycle Actions for regular added users */}
+                              {m.status === "PENDING" && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline"
+                                  style={{ color: "var(--color-success)", borderColor: "#bbf7d0", fontSize: "11px", padding: "3px 8px" }}
+                                  onClick={() => setActionTarget({ membership: m, action: "verify" })}
+                                  title="Verify membership"
+                                >
+                                  Verify
+                                </button>
+                              )}
+                              {m.status === "ACTIVE" && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline"
+                                  style={{ color: "#ea580c", borderColor: "#fed7aa", fontSize: "11px", padding: "3px 8px" }}
+                                  onClick={() => setActionTarget({ membership: m, action: "suspend" })}
+                                  title="Suspend membership"
+                                >
+                                  Suspend
+                                </button>
+                              )}
+                              {m.status === "SUSPENDED" && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline"
+                                  style={{ color: "var(--color-primary)", borderColor: "#bae6fd", fontSize: "11px", padding: "3px 8px" }}
+                                  onClick={() => setActionTarget({ membership: m, action: "restore" })}
+                                  title="Restore membership"
+                                >
+                                  Restore
+                                </button>
+                              )}
+                              {m.status !== "REVOKED" && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline"
+                                  style={{ color: "var(--color-danger)", borderColor: "#fecaca", fontSize: "11px", padding: "3px 8px" }}
+                                  onClick={() => setActionTarget({ membership: m, action: "revoke" })}
+                                  title="Revoke membership"
+                                >
+                                  Revoke
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline"
+                                style={{ color: "var(--color-text-secondary)", fontSize: "11px", padding: "3px 8px" }}
+                                onClick={() => setDetailMembership(m)}
+                                title="Inspect details"
+                              >
+                                Details
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline"
+                                style={{ color: "var(--color-danger)", borderColor: "#fecaca", fontSize: "11px", padding: "3px 8px" }}
+                                onClick={() => setUnlinkTarget(m)}
+                                title="Unlink membership safely"
+                              >
+                                Unlink
+                              </button>
+                            </>
                           )}
-                          {m.status === "ACTIVE" && (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline"
-                              style={{ color: "#ea580c", borderColor: "#fed7aa", fontSize: "11px", padding: "3px 8px" }}
-                              onClick={() => setActionTarget({ membership: m, action: "suspend" })}
-                              title="Suspend membership"
-                            >
-                              Suspend
-                            </button>
-                          )}
-                          {m.status === "SUSPENDED" && (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline"
-                              style={{ color: "var(--color-primary)", borderColor: "#bae6fd", fontSize: "11px", padding: "3px 8px" }}
-                              onClick={() => setActionTarget({ membership: m, action: "restore" })}
-                              title="Restore membership"
-                            >
-                              Restore
-                            </button>
-                          )}
-                          {m.status !== "REVOKED" && (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline"
-                              style={{ color: "var(--color-danger)", borderColor: "#fecaca", fontSize: "11px", padding: "3px 8px" }}
-                              onClick={() => setActionTarget({ membership: m, action: "revoke" })}
-                              title="Revoke membership"
-                            >
-                              Revoke
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline"
-                            style={{ color: "var(--color-text-secondary)", fontSize: "11px", padding: "3px 8px" }}
-                            onClick={() => setDetailMembership(m)}
-                            title="Inspect details"
-                          >
-                            Details
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline"
-                            style={{ color: "var(--color-danger)", borderColor: "#fecaca", fontSize: "11px", padding: "3px 8px" }}
-                            onClick={() => setUnlinkTarget(m)}
-                            title="Unlink membership safely"
-                          >
-                            Unlink
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1062,53 +1124,75 @@ export function Memberships() {
                 <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--color-text-secondary)", textTransform: "uppercase" }}>
                   Membership Actions
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-                  {detailMembership.status === "PENDING" && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setActionTarget({ membership: detailMembership, action: "verify" })}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
+                  {isMembershipForAdmin(detailMembership) ? (
+                    <span
+                      className="badge badge-active"
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        padding: "6px 12px",
+                        backgroundColor: "#ecfdf5",
+                        color: "#065f46",
+                        border: "1px solid #a7f3d0",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
                     >
-                      Verify Membership
-                    </button>
+                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
+                      Full System Access (Admin)
+                    </span>
+                  ) : (
+                    <>
+                      {detailMembership.status === "PENDING" && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => setActionTarget({ membership: detailMembership, action: "verify" })}
+                        >
+                          Verify Membership
+                        </button>
+                      )}
+                      {detailMembership.status === "ACTIVE" && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ color: "#ea580c" }}
+                          onClick={() => setActionTarget({ membership: detailMembership, action: "suspend" })}
+                        >
+                          Suspend Membership
+                        </button>
+                      )}
+                      {detailMembership.status === "SUSPENDED" && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => setActionTarget({ membership: detailMembership, action: "restore" })}
+                        >
+                          Restore to Active
+                        </button>
+                      )}
+                      {detailMembership.status !== "REVOKED" && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ color: "var(--color-danger)" }}
+                          onClick={() => setActionTarget({ membership: detailMembership, action: "revoke" })}
+                        >
+                          Revoke Membership
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline"
+                        style={{ color: "var(--color-danger)", borderColor: "#fecaca" }}
+                        onClick={() => setUnlinkTarget(detailMembership)}
+                      >
+                        Unlink Membership
+                      </button>
+                    </>
                   )}
-                  {detailMembership.status === "ACTIVE" && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ color: "#ea580c" }}
-                      onClick={() => setActionTarget({ membership: detailMembership, action: "suspend" })}
-                    >
-                      Suspend Membership
-                    </button>
-                  )}
-                  {detailMembership.status === "SUSPENDED" && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setActionTarget({ membership: detailMembership, action: "restore" })}
-                    >
-                      Restore to Active
-                    </button>
-                  )}
-                  {detailMembership.status !== "REVOKED" && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ color: "var(--color-danger)" }}
-                      onClick={() => setActionTarget({ membership: detailMembership, action: "revoke" })}
-                    >
-                      Revoke Membership
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline"
-                    style={{ color: "var(--color-danger)", borderColor: "#fecaca" }}
-                    onClick={() => setUnlinkTarget(detailMembership)}
-                  >
-                    Unlink Membership
-                  </button>
                 </div>
               </div>
             </div>

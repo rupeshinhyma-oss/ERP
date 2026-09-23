@@ -168,6 +168,30 @@ export function GlobalUsers() {
     loadUserDetailData(user.id);
   };
 
+  // Check if detailUser is an Admin / Super Admin with full permanent platform access
+  const isDetailUserAdmin = useMemo(() => {
+    if (!detailUser) return false;
+    const email = (detailUser.primary_email || detailUser.email || "").toLowerCase();
+    const name = (detailUser.display_name || "").toLowerCase();
+    if (
+      email === "admin@example.com" ||
+      email.startsWith("admin@") ||
+      name.includes("super admin") ||
+      name === "admin" ||
+      name === "administrator"
+    ) {
+      return true;
+    }
+    return userRoles.some(
+      (r) =>
+        r.is_active &&
+        (r.role_key.toUpperCase() === "SUPER_ADMIN" ||
+          r.role_key.toUpperCase() === "ADMIN" ||
+          r.role_key.toUpperCase() === "PLATFORM_SUPER_ADMIN" ||
+          r.role_key.toUpperCase() === "PLATFORM_ADMIN")
+    );
+  }, [detailUser, userRoles]);
+
   // Filtered Users
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
@@ -296,6 +320,10 @@ export function GlobalUsers() {
 
   // Membership Actions inside User Detail
   const handleMembershipAction = async (membershipId: string, action: "verify" | "suspend" | "restore" | "revoke" | "unlink") => {
+    if (isDetailUserAdmin && (action === "suspend" || action === "revoke" || action === "unlink")) {
+      toast("Admin users have complete permanent system access and cannot be suspended, revoked, or unlinked.", "warning");
+      return;
+    }
     try {
       if (action === "verify") {
         await apiPost(`/global/memberships/${membershipId}/verify`, {});
@@ -1154,53 +1182,74 @@ export function GlobalUsers() {
                                 </div>
                               </div>
 
-                              <div style={{ display: "flex", gap: "6px" }}>
-                                {m.status === "PENDING" && (
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => handleMembershipAction(m.id, "verify")}
-                                  >
-                                    Verify
-                                  </button>
-                                )}
-                                {m.status === "ACTIVE" && (
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => handleMembershipAction(m.id, "suspend")}
-                                  >
-                                    Suspend
-                                  </button>
-                                )}
-                                {m.status === "SUSPENDED" && (
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => handleMembershipAction(m.id, "restore")}
-                                  >
-                                    Restore
-                                  </button>
-                                )}
-                                {m.status !== "REVOKED" && (
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => handleMembershipAction(m.id, "revoke")}
-                                  >
-                                    Revoke
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary btn-sm"
-                                  style={{ color: "#dc2626" }}
-                                  onClick={() => handleMembershipAction(m.id, "unlink")}
-                                  title="Safe unlinking (local user preserved)"
+                              {isDetailUserAdmin ? (
+                                <span
+                                  className="badge badge-active"
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 600,
+                                    padding: "4px 10px",
+                                    backgroundColor: "#ecfdf5",
+                                    color: "#065f46",
+                                    border: "1px solid #a7f3d0",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "5px",
+                                  }}
+                                  title="Admin maintains complete system access across all ERP environments"
                                 >
-                                  Unlink
-                                </button>
-                              </div>
+                                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
+                                  Full System Access
+                                </span>
+                              ) : (
+                                <div style={{ display: "flex", gap: "6px" }}>
+                                  {m.status === "PENDING" && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => handleMembershipAction(m.id, "verify")}
+                                    >
+                                      Verify
+                                    </button>
+                                  )}
+                                  {m.status === "ACTIVE" && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => handleMembershipAction(m.id, "suspend")}
+                                    >
+                                      Suspend
+                                    </button>
+                                  )}
+                                  {m.status === "SUSPENDED" && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => handleMembershipAction(m.id, "restore")}
+                                    >
+                                      Restore
+                                    </button>
+                                  )}
+                                  {m.status !== "REVOKED" && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => handleMembershipAction(m.id, "revoke")}
+                                    >
+                                      Revoke
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    style={{ color: "#dc2626" }}
+                                    onClick={() => handleMembershipAction(m.id, "unlink")}
+                                    title="Safe unlinking (local user preserved)"
+                                  >
+                                    Unlink
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1273,14 +1322,34 @@ export function GlobalUsers() {
                               </div>
 
                               {r.is_active && isSuperAdmin && (
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary btn-sm"
-                                  style={{ color: "#dc2626" }}
-                                  onClick={() => setRevokeAssignmentId(r.id)}
-                                >
-                                  Revoke
-                                </button>
+                                isDetailUserAdmin ? (
+                                  <span
+                                    className="badge badge-active"
+                                    style={{
+                                      fontSize: "11px",
+                                      fontWeight: 600,
+                                      padding: "3px 8px",
+                                      backgroundColor: "#ecfdf5",
+                                      color: "#065f46",
+                                      border: "1px solid #a7f3d0",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                  >
+                                    <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: "#10b981" }} />
+                                    Permanent Role
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    style={{ color: "#dc2626" }}
+                                    onClick={() => setRevokeAssignmentId(r.id)}
+                                  >
+                                    Revoke
+                                  </button>
+                                )
                               )}
                             </div>
                           );

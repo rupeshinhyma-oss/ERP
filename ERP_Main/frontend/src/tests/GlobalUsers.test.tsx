@@ -233,5 +233,136 @@ describe("GlobalUsers Page", () => {
       expect(screen.getByText("platform.erp.read")).toBeDefined();
     });
   });
+
+  it("hides Suspend, Revoke, and Unlink buttons for Super Admin and displays Full System Access", async () => {
+    const adminUser = {
+      id: "u-admin",
+      display_name: "Super Admin",
+      primary_email: "admin@example.com",
+      status: "ACTIVE",
+      created_at: "2026-01-01T00:00:00Z",
+    };
+
+    vi.spyOn(apiModule, "apiGet").mockImplementation((url: string) => {
+      if (url.includes("/global/users?")) return Promise.resolve([adminUser]);
+      if (url.includes("/global/erps")) return Promise.resolve(mockErps);
+      if (url.includes("/memberships")) {
+        return Promise.resolve([
+          {
+            id: "mem-admin-1",
+            global_user_id: "u-admin",
+            erp_instance_id: "erp-1",
+            local_user_id: "loc-admin",
+            status: "ACTIVE",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ]);
+      }
+      if (url.includes("/roles")) {
+        return Promise.resolve([
+          {
+            id: "assign-admin",
+            global_user_id: "u-admin",
+            role_id: "r-admin",
+            role_key: "SUPER_ADMIN",
+            scope: "GLOBAL",
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    render(
+      <MemoryRouter>
+        <GlobalUsers />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Super Admin")).toBeDefined();
+    });
+
+    // Open Details
+    fireEvent.click(screen.getByText("Details"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Global User: Super Admin")).toBeDefined();
+    });
+
+    // Click Memberships tab
+    fireEvent.click(screen.getByText("Memberships (1)"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Full System Access")).toBeDefined();
+    });
+
+    // Verify Suspend, Revoke, and Unlink are NOT present
+    expect(screen.queryByText("Suspend")).toBeNull();
+    expect(screen.queryByText("Revoke")).toBeNull();
+    expect(screen.queryByText("Unlink")).toBeNull();
+  });
+
+  it("shows Suspend, Revoke, and Unlink buttons for added regular users", async () => {
+    const regularUser = {
+      id: "u-regular",
+      display_name: "Regular Operator",
+      primary_email: "operator@company.com",
+      status: "ACTIVE",
+      created_at: "2026-01-01T00:00:00Z",
+    };
+
+    vi.spyOn(apiModule, "apiGet").mockImplementation((url: string) => {
+      if (url.includes("/global/users?")) return Promise.resolve([regularUser]);
+      if (url.includes("/global/erps")) return Promise.resolve(mockErps);
+      if (url.includes("/memberships")) {
+        return Promise.resolve([
+          {
+            id: "mem-reg-1",
+            global_user_id: "u-regular",
+            erp_instance_id: "erp-1",
+            local_user_id: "loc-reg-1",
+            status: "ACTIVE",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ]);
+      }
+      if (url.includes("/roles")) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([]);
+    });
+
+    render(
+      <MemoryRouter>
+        <GlobalUsers />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Regular Operator")).toBeDefined();
+    });
+
+    // Open Details
+    fireEvent.click(screen.getByText("Details"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Global User: Regular Operator")).toBeDefined();
+    });
+
+    // Click Memberships tab
+    fireEvent.click(screen.getByText("Memberships (1)"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Suspend")).toBeDefined();
+      expect(screen.getByText("Revoke")).toBeDefined();
+      expect(screen.getByText("Unlink")).toBeDefined();
+    });
+
+    // Verify Full System Access is NOT present for added user
+    expect(screen.queryByText("Full System Access")).toBeNull();
+  });
 });
+
 
