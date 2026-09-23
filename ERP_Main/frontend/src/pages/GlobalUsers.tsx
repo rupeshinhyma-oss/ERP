@@ -104,6 +104,10 @@ export function GlobalUsers() {
   const [revokeAssignmentId, setRevokeAssignmentId] = useState<string | null>(null);
   const [revokingRole, setRevokingRole] = useState(false);
 
+  // Quick Disable Confirmation for regular users
+  const [confirmDisableUser, setConfirmDisableUser] = useState<GlobalUser | null>(null);
+  const [disablingUser, setDisablingUser] = useState(false);
+
   const fetchUsers = useCallback(async (silent = false) => {
     if (!silent) {
       setLoading(true);
@@ -168,20 +172,24 @@ export function GlobalUsers() {
     loadUserDetailData(user.id);
   };
 
-  // Check if detailUser is an Admin / Super Admin with full permanent platform access
-  const isDetailUserAdmin = useMemo(() => {
-    if (!detailUser) return false;
-    const email = (detailUser.primary_email || detailUser.email || "").toLowerCase();
-    const name = (detailUser.display_name || "").toLowerCase();
-    if (
+  // Check if a given user is Admin / Super Admin (who has complete platform access)
+  const isRowUserAdmin = useCallback((u?: GlobalUser | null) => {
+    if (!u) return false;
+    const email = (u.primary_email || u.email || "").toLowerCase();
+    const name = (u.display_name || "").toLowerCase();
+    return (
       email === "admin@example.com" ||
       email.startsWith("admin@") ||
       name.includes("super admin") ||
       name === "admin" ||
       name === "administrator"
-    ) {
-      return true;
-    }
+    );
+  }, []);
+
+  // Check if detailUser is an Admin / Super Admin with full permanent platform access
+  const isDetailUserAdmin = useMemo(() => {
+    if (!detailUser) return false;
+    if (isRowUserAdmin(detailUser)) return true;
     return userRoles.some(
       (r) =>
         r.is_active &&
@@ -190,7 +198,7 @@ export function GlobalUsers() {
           r.role_key.toUpperCase() === "PLATFORM_SUPER_ADMIN" ||
           r.role_key.toUpperCase() === "PLATFORM_ADMIN")
     );
-  }, [detailUser, userRoles]);
+  }, [detailUser, userRoles, isRowUserAdmin]);
 
   // Filtered Users
   const filteredUsers = useMemo(() => {
@@ -287,6 +295,42 @@ export function GlobalUsers() {
       toast("Failed to change user status: " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  // Quick Disable / Enable for Added/Regular Users
+  const handleExecuteDisable = async () => {
+    if (!confirmDisableUser || isRowUserAdmin(confirmDisableUser)) return;
+    setDisablingUser(true);
+    try {
+      await apiPatch(`/global/users/${confirmDisableUser.id}/status`, {
+        status: "DISABLED",
+      });
+      toast(`User ${confirmDisableUser.display_name} has been disabled.`, "info");
+      setConfirmDisableUser(null);
+      await fetchUsers(true);
+      if (detailUser && detailUser.id === confirmDisableUser.id) {
+        setDetailUser((prev) => (prev ? { ...prev, status: "DISABLED" } : null));
+      }
+    } catch (err) {
+      toast("Failed to disable user: " + (err instanceof Error ? err.message : String(err)), "error");
+    } finally {
+      setDisablingUser(false);
+    }
+  };
+
+  const handleEnableUser = async (u: GlobalUser) => {
+    try {
+      await apiPatch(`/global/users/${u.id}/status`, {
+        status: "ACTIVE",
+      });
+      toast(`User ${u.display_name} enabled and restored to active status.`, "success");
+      await fetchUsers(true);
+      if (detailUser && detailUser.id === u.id) {
+        setDetailUser((prev) => (prev ? { ...prev, status: "ACTIVE" } : null));
+      }
+    } catch (err) {
+      toast("Failed to enable user: " + (err instanceof Error ? err.message : String(err)), "error");
     }
   };
 
@@ -677,38 +721,52 @@ export function GlobalUsers() {
                             type="button"
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleOpenDetail(u)}
-                            title="View Details & Access"
-                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
+                            title="View User Details & Ecosystem Access"
+                            style={{ fontSize: "12px", padding: "4px 12px", borderRadius: "5px", fontWeight: 500 }}
                           >
-                            Details
+                            View
                           </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => handleOpenEdit(u)}
-                            title="Edit User"
-                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => handleOpenStatus(u)}
-                            title="Change Status"
-                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
-                          >
-                            Status
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => handleOpenProvision(u)}
-                            title="Provision to ERP (Flow A)"
-                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
-                          >
-                            Provision
-                          </button>
+                          {!isRowUserAdmin(u) && (
+                            u.status === "DISABLED" ? (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleEnableUser(u)}
+                                title="Enable user account"
+                                style={{
+                                  fontSize: "12px",
+                                  padding: "4px 10px",
+                                  borderRadius: "5px",
+                                  fontWeight: 500,
+                                  color: "#059669",
+                                  borderColor: "#a7f3d0",
+                                  backgroundColor: "#ecfdf5",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Enable
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setConfirmDisableUser(u)}
+                                title="Disable user account"
+                                style={{
+                                  fontSize: "12px",
+                                  padding: "4px 10px",
+                                  borderRadius: "5px",
+                                  fontWeight: 500,
+                                  color: "#dc2626",
+                                  borderColor: "#fecaca",
+                                  backgroundColor: "#fef2f2",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Disable
+                              </button>
+                            )
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1026,12 +1084,38 @@ export function GlobalUsers() {
         )}
       </Modal>
 
-      {/* USER DETAIL MODAL / DRAWER */}
+      {/* USER DETAIL MODAL / DRAWER (VIEW ONLY WITH EDIT) */}
       {detailUser && (
         <Modal
           open={Boolean(detailUser)}
           onClose={() => setDetailUser(null)}
-          title={`Global User: ${detailUser.display_name}`}
+          title={
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", paddingRight: "16px" }}>
+              <span style={{ fontWeight: 700, fontSize: "16px" }}>Global User: {detailUser.display_name}</span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleOpenEdit(detailUser)}
+                style={{
+                  fontSize: "12px",
+                  padding: "4px 12px",
+                  borderRadius: "5px",
+                  fontWeight: 500,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  backgroundColor: "#ffffff",
+                  borderColor: "#cbd5e1",
+                  color: "var(--color-text)",
+                  cursor: "pointer",
+                }}
+                title="Edit this user profile"
+              >
+                <ICONS.edit width={13} height={13} />
+                Edit
+              </button>
+            </div>
+          }
         >
           <div>
             {/* Header / Tabs */}
@@ -1078,6 +1162,45 @@ export function GlobalUsers() {
                 {/* TAB 1: OVERVIEW */}
                 {detailTab === "overview" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "12px 16px",
+                        background: "#f8fafc",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                      }}
+                    >
+                      <div>
+                        <strong style={{ fontSize: "13.5px", color: "var(--color-text)" }}>
+                          Identity Profile
+                        </strong>
+                        <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "2px" }}>
+                          Display name, primary ecosystem email, and SSO external identifier.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleOpenEdit(detailUser)}
+                        style={{
+                          fontSize: "12px",
+                          padding: "5px 14px",
+                          borderRadius: "5px",
+                          fontWeight: 600,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <ICONS.edit width={13} height={13} />
+                        Edit Profile
+                      </button>
+                    </div>
+
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                       <div>
                         <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Platform User ID</span>
@@ -1085,7 +1208,46 @@ export function GlobalUsers() {
                       </div>
                       <div>
                         <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Status</span>
-                        <div><StatusBadge status={detailUser.status} /></div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                          <StatusBadge status={detailUser.status} />
+                          {!isRowUserAdmin(detailUser) && (
+                            detailUser.status === "DISABLED" ? (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleEnableUser(detailUser)}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "2px 8px",
+                                  borderRadius: "4px",
+                                  fontWeight: 500,
+                                  color: "#059669",
+                                  borderColor: "#a7f3d0",
+                                  backgroundColor: "#ecfdf5",
+                                }}
+                              >
+                                Enable Account
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setConfirmDisableUser(detailUser)}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "2px 8px",
+                                  borderRadius: "4px",
+                                  fontWeight: 500,
+                                  color: "#dc2626",
+                                  borderColor: "#fecaca",
+                                  backgroundColor: "#fef2f2",
+                                }}
+                              >
+                                Disable Account
+                              </button>
+                            )
+                          )}
+                        </div>
                       </div>
                       <div>
                         <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Primary Email</span>
@@ -1570,6 +1732,22 @@ export function GlobalUsers() {
         loading={revokingRole}
         onConfirm={handleRevokeRole}
         onCancel={() => setRevokeAssignmentId(null)}
+      />
+
+      {/* CONFIRM DISABLE USER MODAL */}
+      <ConfirmDialog
+        open={Boolean(confirmDisableUser)}
+        title="Disable User Account?"
+        message={
+          confirmDisableUser
+            ? `Are you sure you want to disable ${confirmDisableUser.display_name} (${confirmDisableUser.primary_email || confirmDisableUser.email})? The user will be blocked from logging into the platform and accessing linked ERP accounts.`
+            : ""
+        }
+        confirmLabel="Disable User"
+        danger
+        loading={disablingUser}
+        onConfirm={handleExecuteDisable}
+        onCancel={() => setConfirmDisableUser(null)}
       />
 
     </AppShell>

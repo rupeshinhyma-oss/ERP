@@ -81,8 +81,7 @@ describe("GlobalUsers Page", () => {
 
 
     // Check action buttons
-    expect(screen.getAllByText("Details").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Provision").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("View").length).toBeGreaterThan(0);
   });
 
 
@@ -210,18 +209,18 @@ describe("GlobalUsers Page", () => {
       expect(screen.getByText("Alice Wang")).toBeDefined();
     });
 
-    // Click "Details" on Alice Wang
-    const detailsBtns = screen.getAllByText("Details");
-    fireEvent.click(detailsBtns[0]);
-
+    // Click "View" on Alice Wang
+    const viewBtns = screen.getAllByText("View");
+    fireEvent.click(viewBtns[0]);
 
     await waitFor(() => {
       expect(screen.getByText("Global User: Alice Wang")).toBeDefined();
       expect(screen.getByText("Memberships (1)")).toBeDefined();
       expect(screen.getByText("Platform Roles (1)")).toBeDefined();
       expect(screen.getByText("Access Summary")).toBeDefined();
+      // Has Edit button in View drawer
+      expect(screen.getAllByText("Edit").length).toBeGreaterThan(0);
     });
-
 
     // Switch to Access Summary Tab
     const accessTab = screen.getByText("Access Summary");
@@ -234,7 +233,7 @@ describe("GlobalUsers Page", () => {
     });
   });
 
-  it("hides Suspend, Revoke, and Unlink buttons for Super Admin and displays Full System Access", async () => {
+  it("renders only View for Super Admin (no Disable) and displays Full System Access with Edit in drawer", async () => {
     const adminUser = {
       id: "u-admin",
       display_name: "Super Admin",
@@ -284,11 +283,16 @@ describe("GlobalUsers Page", () => {
       expect(screen.getByText("Super Admin")).toBeDefined();
     });
 
-    // Open Details
-    fireEvent.click(screen.getByText("Details"));
+    // For Admin: row only has View button, no Disable button
+    expect(screen.getByText("View")).toBeDefined();
+    expect(screen.queryByText("Disable")).toBeNull();
+
+    // Open View
+    fireEvent.click(screen.getByText("View"));
 
     await waitFor(() => {
       expect(screen.getByText("Global User: Super Admin")).toBeDefined();
+      expect(screen.getAllByText("Edit").length).toBeGreaterThan(0);
     });
 
     // Click Memberships tab
@@ -304,7 +308,7 @@ describe("GlobalUsers Page", () => {
     expect(screen.queryByText("Unlink")).toBeNull();
   });
 
-  it("shows Suspend, Revoke, and Unlink buttons for added regular users", async () => {
+  it("shows View and red painted Disable button for added regular users", async () => {
     const regularUser = {
       id: "u-regular",
       display_name: "Regular Operator",
@@ -344,11 +348,16 @@ describe("GlobalUsers Page", () => {
       expect(screen.getByText("Regular Operator")).toBeDefined();
     });
 
-    // Open Details
-    fireEvent.click(screen.getByText("Details"));
+    // For regular users: has View AND Disable buttons
+    expect(screen.getByText("View")).toBeDefined();
+    expect(screen.getByText("Disable")).toBeDefined();
+
+    // Open View
+    fireEvent.click(screen.getByText("View"));
 
     await waitFor(() => {
       expect(screen.getByText("Global User: Regular Operator")).toBeDefined();
+      expect(screen.getAllByText("Edit").length).toBeGreaterThan(0);
     });
 
     // Click Memberships tab
