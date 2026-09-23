@@ -7,14 +7,30 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createSsoHandoverUrl, ECOSYSTEM_ERPS } from "@/lib/ssoBridge";
+import { getCachedBrandName, subscribeBrandName } from "@/lib/brand";
 
 interface EcosystemSwitcherProps {
   currentKey?: string;
+  organizationName?: string;
 }
 
-export function EcosystemSwitcher({ currentKey = "inhyma" }: EcosystemSwitcherProps) {
+export function EcosystemSwitcher({ currentKey = "inhyma", organizationName }: EcosystemSwitcherProps) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [brandName, setBrandName] = useState(() => getCachedBrandName());
+
+  useEffect(() => {
+    return subscribeBrandName((newName) => {
+      setBrandName(newName);
+    });
+  }, []);
+
+  const currentErp = ECOSYSTEM_ERPS.find((erp) => erp.key === currentKey);
+  const displayName =
+    organizationName ||
+    (currentKey === "control-plane"
+      ? "ERP Dashboard"
+      : (brandName || currentErp?.name || "Inhyma ERP"));
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -54,8 +70,9 @@ export function EcosystemSwitcher({ currentKey = "inhyma" }: EcosystemSwitcherPr
           borderRadius: "6px",
           cursor: "pointer",
           transition: "all 0.15s ease",
+          whiteSpace: "nowrap",
         }}
-        title="Switch ERP Application or Return to Global Control Panel"
+        title={`Current: ${displayName}. Switch ERP Application or Return to Global Control Panel`}
       >
         <svg
           width="15"
@@ -72,7 +89,7 @@ export function EcosystemSwitcher({ currentKey = "inhyma" }: EcosystemSwitcherPr
           <polyline points="2 17 12 22 22 17" />
           <polyline points="2 12 12 17 22 12" />
         </svg>
-        <span>ERP Switcher</span>
+        <span>{displayName}</span>
         <svg
           width="12"
           height="12"

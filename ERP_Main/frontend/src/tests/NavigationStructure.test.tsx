@@ -148,7 +148,7 @@ describe("8 Primary Navigation Sections Specification", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("ERP Switcher")).toBeDefined();
+    expect(document.getElementById("header-erp-switcher-btn")?.textContent).toContain("ERP Dashboard");
     expect(screen.queryByText("Search projections...")).toBeNull();
   });
 

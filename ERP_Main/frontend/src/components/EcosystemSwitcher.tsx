@@ -10,11 +10,19 @@ import { createSsoHandoverUrl, ECOSYSTEM_ERPS } from "@/lib/ssoBridge";
 
 interface EcosystemSwitcherProps {
   currentKey?: string;
+  organizationName?: string;
 }
 
-export function EcosystemSwitcher({ currentKey = "control-plane" }: EcosystemSwitcherProps) {
+export function EcosystemSwitcher({ currentKey = "control-plane", organizationName }: EcosystemSwitcherProps) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const currentErp = ECOSYSTEM_ERPS.find((erp) => erp.key === currentKey);
+  const displayName =
+    organizationName ||
+    (currentKey === "control-plane"
+      ? "ERP Dashboard"
+      : (currentErp ? currentErp.name : "ERP Dashboard"));
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -54,8 +62,9 @@ export function EcosystemSwitcher({ currentKey = "control-plane" }: EcosystemSwi
           borderRadius: "6px",
           cursor: "pointer",
           transition: "all 0.15s ease",
+          whiteSpace: "nowrap",
         }}
-        title="Switch ERP Application or Return to ERP Dashboard"
+        title={`Current: ${displayName}. Switch ERP Application or Return to ERP Dashboard`}
         id="header-erp-switcher-btn"
       >
         <svg
@@ -73,7 +82,7 @@ export function EcosystemSwitcher({ currentKey = "control-plane" }: EcosystemSwi
           <polyline points="2 17 12 22 22 17" />
           <polyline points="2 12 12 17 22 12" />
         </svg>
-        <span>ERP Switcher</span>
+        <span>{displayName}</span>
         <svg
           width="12"
           height="12"
