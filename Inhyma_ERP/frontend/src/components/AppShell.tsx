@@ -1089,11 +1089,16 @@ function Sidebar({
               }
 
               const Icon = ICONS[item.icon];
+              const isItemActive =
+                item.key === activeKey ||
+                (item.key === "purchase-suppliers" && activeKey === "suppliers") ||
+                (item.key === "suppliers" && activeKey === "purchase-suppliers");
+
               return (
                 <Link
                   key={item.key}
                   to={item.path || "#"}
-                  className={`nav-item ${item.key === activeKey ? "active" : ""}`}
+                  className={`nav-item ${isItemActive ? "active" : ""}`}
                   title={collapsed ? item.label : undefined}
                 >
                   <Icon />

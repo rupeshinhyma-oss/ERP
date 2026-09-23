@@ -454,14 +454,28 @@ async def list_product_stock(
 
         if db_records:
             items = []
+            _FALLBACK_META = {
+                "Sensor (Banding)": ("SEN-001", "Omron"),
+                "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen": ("MACH-001", "Yinglima"),
+                "XLSG36100 Capping Machine": ("MACH-002", "Yinglima"),
+                "Automatic Tube Filling & Sealing Machine": ("MACH-003", "Yinglima"),
+                "Semi Automatic MAP (Vacuum + 2 Gases) Tray/Cup Sealing Machine": ("MACH-004", "Yinglima"),
+            }
             for r in db_records:
+                p_code = r.product_code
+                p_brand = r.brand
+                if (not p_code or p_code == "-") and r.product_name_tally in _FALLBACK_META:
+                    p_code = _FALLBACK_META[r.product_name_tally][0]
+                if (not p_brand or p_brand == "-") and r.product_name_tally in _FALLBACK_META:
+                    p_brand = _FALLBACK_META[r.product_name_tally][1]
+
                 items.append({
                     "id": str(r.id),
                     "sr_no": r.sr_no,
                     "product_name_tally": r.product_name_tally,
                     "product_name": r.product_name_tally,
-                    "product_code": r.product_code,
-                    "brand": r.brand,
+                    "product_code": p_code or "-",
+                    "brand": p_brand or "-",
                     "category": r.category,
                     "sub_category": r.sub_category,
                     "hsn_code": r.hsn_code,

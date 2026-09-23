@@ -31,9 +31,16 @@ import { EffectivePermissionsPage } from "@/pages/EffectivePermissions";
 import { PositionsPage } from "@/pages/org/Positions";
 import { CompaniesPage } from "@/pages/Companies";
 import { SuppliersPage } from "@/pages/Suppliers";
-import { BuyersPage } from "@/pages/Buyers";
-import { InquiriesPage } from "@/pages/Inquiries";
 import { ProformaInvoicesPage } from "@/pages/ProformaInvoicesPage";
+import { ProformaInvoicePdfPage } from "@/pages/ProformaInvoicePdfPage";
+import { SalesOrderPdfPage } from "@/pages/SalesOrderPdfPage";
+import { SaleProcessListPage } from "@/pages/sales/SaleProcessList";
+import { SaleProcessFormPage } from "@/pages/sales/SaleProcessForm";
+import { DiscountPaymentsPage } from "@/pages/sales/DiscountPaymentsPage";
+import { LocalPurchasePage } from "@/pages/purchase/LocalPurchasePage";
+import { LocalPurchasePdfPage } from "@/pages/LocalPurchasePdfPage";
+import { ImportPurchasePage } from "@/pages/purchase/ImportPurchasePage";
+import { ImportPurchasePdfPage } from "@/pages/ImportPurchasePdfPage";
 import { PlanningPage } from "@/pages/Planning";
 import { TasksPage } from "@/pages/tasks/TasksPage";
 import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
@@ -83,6 +90,7 @@ import { AddAdjustmentOrderPage } from "@/pages/AddAdjustmentOrderPage";
 import { StockTransferPage } from "@/pages/StockTransferPage";
 import { TransferOrderPdfPage } from "@/pages/TransferOrderPdfPage";
 import { AddTransferOrderPage } from "@/pages/AddTransferOrderPage";
+import { HrmsDashboardPage } from "@/pages/hrms/HrmsDashboardPage";
 
 export function App() {
   const navigate = useNavigate();
@@ -143,10 +151,120 @@ export function App() {
           <Route path="/positions" element={<PositionsPage />} />
           <Route path="/companies" element={<CompaniesPage />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
-          <Route path="/buyers" element={<BuyersPage />} />
-          <Route path="/inquiries" element={<InquiriesPage />} />
+          <Route path="/supplier/list" element={<SuppliersPage />} />
+          <Route path="/supplier" element={<SuppliersPage />} />
+          <Route path="/inquiries" element={<Navigate to="/proforma-invoice/list" replace />} />
           <Route path="/proforma-invoice/list" element={<ProformaInvoicesPage />} />
           <Route path="/proforma-invoice/add" element={<ProformaInvoicesPage defaultAdd={true} />} />
+          <Route path="/proforma-invoice/addedit" element={<ProformaInvoicesPage defaultAdd={true} />} />
+          <Route path="/proforma-invoice/addedit/:id" element={<ProformaInvoicesPage defaultAdd={true} />} />
+          <Route path="/proforma-invoice/download-proforma-invoice/:id" element={<ProformaInvoicePdfPage />} />
+          <Route path="/proforma-invoice/download-proforma-invoice" element={<ProformaInvoicePdfPage />} />
+          <Route path="/proforma-invoice/pdf/:id" element={<ProformaInvoicePdfPage />} />
+          <Route path="/proforma-invoice/pdf" element={<ProformaInvoicePdfPage />} />
+          <Route path="/proforma-invoice" element={<Navigate to="/proforma-invoice/list" replace />} />
+          <Route path="/sales/process" element={<SaleProcessListPage />} />
+          <Route path="/sales/process/add" element={<SaleProcessFormPage />} />
+          <Route path="/sales/process/edit/:id" element={<SaleProcessFormPage />} />
+          <Route path="/sale-process/list" element={<Navigate to="/sales/process" replace />} />
+          <Route path="/sales-process/list" element={<Navigate to="/sales/process" replace />} />
+          <Route path="/sale-order/list" element={<SaleProcessListPage />} />
+          <Route path="/sale-order/add" element={<SaleProcessFormPage />} />
+          <Route path="/sale-order/addedit" element={<SaleProcessFormPage />} />
+          <Route path="/sale-order/addedit/:id" element={<SaleProcessFormPage />} />
+          <Route path="/sale-order/invoice/:id" element={<SalesOrderPdfPage />} />
+          <Route path="/sale-order/invoice" element={<SalesOrderPdfPage />} />
+          <Route path="/sale-order/download-sale-order/:id" element={<SalesOrderPdfPage />} />
+          <Route path="/sale-order/download-sale-order" element={<SalesOrderPdfPage />} />
+          <Route path="/sale-order/pdf/:id" element={<SalesOrderPdfPage />} />
+          <Route path="/sale-order/pdf" element={<SalesOrderPdfPage />} />
+          <Route path="/sales/process/pdf/:id" element={<SalesOrderPdfPage />} />
+          <Route path="/sales/process/pdf" element={<SalesOrderPdfPage />} />
+          <Route path="/sale-order" element={<Navigate to="/sale-order/list" replace />} />
+          <Route path="/discount-payments/list" element={<DiscountPaymentsPage />} />
+          <Route path="/discount-payments" element={<Navigate to="/discount-payments/list" replace />} />
+          <Route path="/sale-discount/list" element={<DiscountPaymentsPage />} />
+          <Route path="/sale-discount" element={<Navigate to="/sale-discount/list" replace />} />
+
+          {/* PURCHASE routes */}
+          <Route path="/purchase-order/list" element={<LocalPurchasePage />} />
+          <Route path="/purchase-order/add" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase-order/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase-order/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase-order/bill-file/:id" element={<LocalPurchasePdfPage />} />
+          <Route path="/purchase-order/bill-file" element={<LocalPurchasePdfPage />} />
+          <Route path="/purchase-order/pdf/:id" element={<LocalPurchasePdfPage />} />
+          <Route path="/purchase-order/pdf" element={<LocalPurchasePdfPage />} />
+          <Route path="/purchase/bill-file/:id" element={<LocalPurchasePdfPage />} />
+          <Route path="/purchase-order" element={<Navigate to="/purchase-order/list" replace />} />
+          <Route path="/purchase/local" element={<Navigate to="/purchase-order/list" replace />} />
+          <Route path="/purchase/local/list" element={<Navigate to="/purchase-order/list" replace />} />
+          <Route path="/purchase/local/add" element={<Navigate to="/purchase-order/addedit" replace />} />
+          <Route path="/purchase/local/addedit" element={<Navigate to="/purchase-order/addedit" replace />} />
+          {/* IMPORT PURCHASE routes */}
+          <Route path="/purchase-order/import-purchase-list" element={<ImportPurchasePage />} />
+          <Route path="/purchase/import" element={<ImportPurchasePage />} />
+          <Route path="/purchase/import/list" element={<Navigate to="/purchase-order/import-purchase-list" replace />} />
+          <Route path="/purchase-order/import" element={<Navigate to="/purchase-order/import-purchase-list" replace />} />
+          <Route path="/purchase-order/import/list" element={<Navigate to="/purchase-order/import-purchase-list" replace />} />
+          <Route path="/purchase-order/import-purchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase-order/import-purchase/addedit/:id" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase-order/import-purchase/add" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/import/add" element={<Navigate to="/purchase-order/import-purchase/addedit" replace />} />
+          <Route path="/purchase-order/import-bill-file/:id" element={<ImportPurchasePdfPage />} />
+          <Route path="/purchase-order/import-bill-file" element={<ImportPurchasePdfPage />} />
+          <Route path="/purchase/import/bill-file/:id" element={<ImportPurchasePdfPage />} />
+
+          {/* REPORTS routes */}
+          <Route
+            path="/reports/re-order"
+            element={
+              <ComingSoonPage
+                activeKey="reports-re-order"
+                title="Re-Order Report"
+                subtitle="Review low stock triggers and items requiring replenishment"
+                breadcrumbLabel="Re-Order"
+                featureName="Re-Order Report"
+              />
+            }
+          />
+          <Route
+            path="/reports/stock-transactions"
+            element={
+              <ComingSoonPage
+                activeKey="reports-stock-transactions"
+                title="Stock Transactions"
+                subtitle="Audit inventory inflows, outflows, transfers, and adjustments"
+                breadcrumbLabel="Stock Transactions"
+                featureName="Stock Transactions"
+              />
+            }
+          />
+          <Route
+            path="/reports/deleted-orders"
+            element={
+              <ComingSoonPage
+                activeKey="reports-deleted-orders"
+                title="Deleted Orders"
+                subtitle="Review records and logs of cancelled or deleted order items"
+                breadcrumbLabel="Deleted Orders"
+                featureName="Deleted Orders"
+              />
+            }
+          />
+          <Route
+            path="/reports/general"
+            element={
+              <ComingSoonPage
+                activeKey="reports-general"
+                title="General Reports"
+                subtitle="Generate and download business summaries and consolidated reports"
+                breadcrumbLabel="General Reports"
+                featureName="General Reports"
+              />
+            }
+          />
+
           <Route path="/planning" element={<PlanningPage />} />
           <Route path="/tasks/my" element={<Navigate to="/tasks?tab=my" replace />} />
           <Route path="/tasks" element={<TasksPage />} />
@@ -167,6 +285,13 @@ export function App() {
             }
           />
           <Route path="/marketing-tasks" element={<Navigate to="/marketing-task/list" replace />} />
+
+          {/* HRMS Module - Consolidated into Attendance Module with internal tabs */}
+          <Route path="/hrms" element={<HrmsDashboardPage />} />
+          <Route path="/hrms/dashboard" element={<Navigate to="/hrms" replace />} />
+          <Route path="/hrms/locations" element={<Navigate to="/hrms?tab=locations" replace />} />
+          <Route path="/hrms/employee-locations" element={<Navigate to="/hrms?tab=locations" replace />} />
+          <Route path="/hrms/wfh-requests" element={<Navigate to="/hrms?tab=history" replace />} />
 
           <Route path="/masters/company-list" element={<CompanyListPage />} />
           <Route path="/masters/countries" element={<CountriesPage />} />

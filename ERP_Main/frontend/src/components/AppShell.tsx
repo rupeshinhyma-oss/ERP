@@ -25,11 +25,13 @@ import {
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { globalEcosystemLogout } from "@/lib/ecosystemSession";
 import { Breadcrumb } from "./Breadcrumb";
+import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { ICONS } from "./icons";
 
 interface AppShellProps {
   activeKey: string;
   pageTitle?: string;
+  pageSubtitle?: string;
   breadcrumbs?: string[];
   actions?: ReactNode;
   children: ReactNode;
@@ -38,6 +40,7 @@ interface AppShellProps {
 export function AppShell({
   activeKey,
   pageTitle,
+  pageSubtitle,
   breadcrumbs,
   actions,
   children,
@@ -45,6 +48,11 @@ export function AppShell({
   const { profile, isLoggedIn, isSuperAdmin } = useAuth();
   const userEmail = profile ? ("primary_email" in profile ? profile.primary_email : profile.email) : "";
   const userRole = profile ? ("role" in profile ? profile.role : "GLOBAL_USER") : "";
+  const rawDisplayName = profile?.display_name || userEmail || "Platform Admin";
+  const userDisplayName =
+    rawDisplayName === "Platform Super Admin" || rawDisplayName === "Platform SuperAdmin"
+      ? "Super Admin"
+      : rawDisplayName;
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -138,7 +146,7 @@ export function AppShell({
         <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc" }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ width: 36, height: 36, margin: "0 auto 16px", border: "3px solid #e2e8f0", borderTopColor: "#0061f2", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Authorizing Platform Super Admin Single Sign-On...</div>
+            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Authorizing Super Admin Single Sign-On...</div>
           </div>
         </div>
       );
@@ -271,7 +279,10 @@ export function AppShell({
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                   {visibleItems.map((item) => {
-                    const isActive = activeKey === item.key;
+                    const isActive =
+                      activeKey === item.key ||
+                      (item.key === "users" &&
+                        ["roles", "permissions", "memberships", "access-policies", "conflicts"].includes(activeKey));
                     const IconComponent = ICONS[item.icon] || ICONS.dashboard;
 
                     return (
@@ -361,7 +372,7 @@ export function AppShell({
             zIndex: 900,
           }}
         >
-          {/* Left: Mobile hamburger & breadcrumb or title */}
+          {/* Left: Mobile hamburger */}
           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
             <button
               type="button"
@@ -376,31 +387,12 @@ export function AppShell({
                 <line x1="3" y1="18" x2="21" y2="18" />
               </svg>
             </button>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>
-                {currentTitle}
-              </span>
-            </div>
           </div>
 
           {/* Right: Quick actions, user profile */}
           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-            {/* Quick search bar */}
-            <Link
-              to="/search"
-              className="header-search-bar"
-              title="Universal Search (Press / to focus)"
-              id="header-search-btn"
-            >
-              <div className="header-search-bar-content">
-                <span className="header-search-bar-icon">
-                  <ICONS.search width={15} height={15} />
-                </span>
-                <span className="header-search-bar-text">Search projections...</span>
-              </div>
-              <kbd className="header-search-bar-kbd">/</kbd>
-            </Link>
+            {/* ERP Ecosystem Switcher */}
+            <EcosystemSwitcher currentKey="control-plane" />
 
             {/* User Profile Dropdown */}
             <div style={{ position: "relative" }} ref={userMenuRef}>
@@ -432,11 +424,11 @@ export function AppShell({
                     fontWeight: 700,
                   }}
                 >
-                  {initials(profile?.display_name || userEmail)}
+                  {initials(userDisplayName)}
                 </div>
                 <div style={{ textAlign: "left", display: "flex", flexDirection: "column" }}>
                   <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text)" }}>
-                    {profile?.display_name || userEmail || "Platform Admin"}
+                    {userDisplayName}
                   </span>
                   <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>
                     {roleLabel(userRole, Auth.getPrincipalType())}
@@ -463,7 +455,7 @@ export function AppShell({
                 >
                   <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
                     <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-text)" }}>
-                      {profile?.display_name || "Platform Admin"}
+                      {userDisplayName}
                     </div>
                     <div style={{ fontSize: "11px", color: "var(--color-muted)", wordBreak: "break-all" }}>
                       {userEmail}
@@ -558,6 +550,11 @@ export function AppShell({
               >
                 {currentTitle}
               </h1>
+              {pageSubtitle && (
+                <div style={{ color: "var(--color-muted, #64748b)", fontSize: "13px", marginTop: "4px" }}>
+                  {pageSubtitle}
+                </div>
+              )}
             </div>
             {actions && <div className="page-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>{actions}</div>}
           </div>

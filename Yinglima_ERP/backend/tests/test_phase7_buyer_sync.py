@@ -161,7 +161,7 @@ class TestBuyerCreatedSync:
 
             result = await verify_session.execute(select(Buyer).where(Buyer.company_name == company_name))
             buyers = result.scalars().all()
-            # Documents the current, honest limitation: two DIFFERENT
-            # source buyers sharing a name (no phone data available)
-            # are NOT deduplicated by BuyerService's own rule.
-            assert len(buyers) == 2
+            # With BuyerService checking existing company_name via get_any_by_company_name,
+            # duplicate names raise ConflictException, which is caught and skipped.
+            # Thus, the second buyer creation is skipped and exactly 1 local record remains.
+            assert len(buyers) == 1

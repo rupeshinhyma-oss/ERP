@@ -15,7 +15,6 @@ from app.api.v1.health import router as health_router
 from app.api.v1.internal_users import router as internal_users_router
 from app.audit.routes import router as audit_router
 from app.auth.routes import router as auth_router
-from app.buyers.routes import router as buyers_router
 from app.cache.routes import router as cache_router
 from app.core.responses import build_success_response
 from app.events.routes import router as events_router
@@ -70,6 +69,7 @@ from app.trash.routes import router as trash_router
 from app.users.routes import router as users_router
 from app.inventory.routes import router as inventory_router
 from app.sales.routes import router as sales_router
+from app.hrms.routes import router as hrms_router
 
 api_router = APIRouter()
 
@@ -151,9 +151,6 @@ api_router.include_router(companies_router)
 # Phase 8: Supplier Management.
 api_router.include_router(suppliers_router)
 
-# Buyers (Client) Management.
-api_router.include_router(buyers_router)
-
 # Inquiries (Requirement) workflow -- two-layer consignment planning.
 api_router.include_router(inquiries_router)
 api_router.include_router(public_quotes_router)
@@ -176,6 +173,7 @@ api_router.include_router(internal_users_router)
 api_router.include_router(integration_router)
 api_router.include_router(inventory_router)
 api_router.include_router(sales_router)
+api_router.include_router(hrms_router)
 
 from app.durable_events.routes import router as durable_events_router  # noqa: E402
 

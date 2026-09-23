@@ -377,8 +377,9 @@ export function GlobalUsers() {
   return (
     <AppShell
       activeKey="users"
-      pageTitle="Global Users Directory"
-      breadcrumbs={["Identity & Access", "Global Users"]}
+      pageTitle="Global Users"
+      pageSubtitle="Manage global platform identities, authentication status, and ERP memberships."
+      breadcrumbs={["User & Access", "Global Users"]}
       actions={
         <button
           type="button"
@@ -396,97 +397,149 @@ export function GlobalUsers() {
 
       <Banner error={error} />
 
-      {/* Filter and Search Bar */}
-      <div
-        className="card"
-        style={{
-          padding: "16px 20px",
-          marginBottom: "20px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "16px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: "1 1 300px" }}>
-          <div style={{ position: "relative", width: "100%", maxWidth: "380px" }}>
-            <span
+      {/* Unified Table Card with Integrated Search Toolbar */}
+      <div className="card" style={{ padding: 0, overflow: "hidden", border: "1px solid var(--color-border, #e2e8f0)", borderRadius: "10px", boxShadow: "0 1px 3px rgba(0, 0, 0, 0.05)" }}>
+        {/* Filter and Search Bar */}
+        <div
+          style={{
+            padding: "14px 20px",
+            borderBottom: "1px solid var(--color-border, #e2e8f0)",
+            background: "var(--color-surface, #ffffff)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "12px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <div style={{ position: "relative", width: "320px" }}>
+              <span
+                style={{
+                  position: "absolute",
+                  left: "11px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "var(--color-muted, #94a3b8)",
+                  display: "flex",
+                  pointerEvents: "none",
+                }}
+              >
+                <ICONS.search width={15} height={15} />
+              </span>
+              <input
+                type="text"
+                id="input-search-users"
+                placeholder="Search by name, email or ID..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  width: "100%",
+                  height: "36px",
+                  paddingLeft: "34px",
+                  paddingRight: search ? "28px" : "12px",
+                  fontSize: "13px",
+                  color: "var(--color-text, #1e293b)",
+                  background: "var(--color-surface, #ffffff)",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "6px",
+                  outline: "none",
+                  boxSizing: "border-box",
+                  transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+                }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    padding: "2px",
+                    display: "flex",
+                  }}
+                  title="Clear search"
+                >
+                  <ICONS.x width={14} height={14} />
+                </button>
+              )}
+            </div>
+
+            <select
+              id="select-status-filter"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
               style={{
-                position: "absolute",
-                left: "12px",
-                top: "50%",
-                transform: "translateY(-50%)",
-                color: "var(--color-muted)",
+                width: "140px",
+                height: "36px",
+                fontSize: "13px",
+                color: "#334155",
+                background: "#ffffff",
+                border: "1px solid #cbd5e1",
+                borderRadius: "6px",
+                paddingLeft: "10px",
+                paddingRight: "30px",
+                cursor: "pointer",
+                outline: "none",
+                boxSizing: "border-box",
               }}
             >
-              <ICONS.search width={16} height={16} />
-            </span>
-            <input
-              type="text"
-              id="input-search-users"
-              placeholder="Search by name, email or external ID..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="form-control"
-              style={{ paddingLeft: "36px", height: "38px" }}
-            />
+              {STATUS_FILTERS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <select
-            id="select-status-filter"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="form-control"
-            style={{ width: "160px", height: "38px" }}
-          >
-            {STATUS_FILTERS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ fontSize: "13px", color: "var(--color-muted, #64748b)", fontWeight: 500 }}>
+              Showing <strong style={{ color: "var(--color-text, #1e293b)" }}>{filteredUsers.length}</strong> {filteredUsers.length === 1 ? "user" : "users"}
+            </span>
+          </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span style={{ fontSize: "13px", color: "var(--color-muted)", fontWeight: 500 }}>
-            Showing <strong>{filteredUsers.length}</strong> {filteredUsers.length === 1 ? "user" : "users"}
-          </span>
-        </div>
-      </div>
-
-      {/* Users Table */}
-      {loading ? (
-        <SkeletonTable rows={8} cols={6} />
-      ) : filteredUsers.length === 0 ? (
-        <EmptyState
-          title="No Global Users Found"
-          description={
-            search || statusFilter !== "ALL"
-              ? "No global users matched your filter criteria."
-              : "No global platform identities exist yet. Create your first Global User to get started."
-          }
-          action={
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setCreateModalOpen(true)}
-            >
-              Create Global User
-            </button>
-          }
-        />
-      ) : (
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {/* Users Table */}
+        {loading ? (
+          <div style={{ padding: "20px" }}>
+            <SkeletonTable rows={8} cols={5} />
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <div style={{ padding: "40px 20px" }}>
+            <EmptyState
+              title="No Global Users Found"
+              description={
+                search || statusFilter !== "ALL"
+                  ? "No global users matched your filter criteria."
+                  : "No global platform identities exist yet. Create your first Global User to get started."
+              }
+              action={
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setCreateModalOpen(true)}
+                >
+                  Create Global User
+                </button>
+              }
+            />
+          </div>
+        ) : (
           <div className="table-responsive">
             <table className="table" style={{ margin: 0 }}>
               <thead>
-                <tr>
-                  <th style={{ width: "30%" }}>Global Identity</th>
-                  <th style={{ width: "25%" }}>Primary Email</th>
-                  <th style={{ width: "15%" }}>Status</th>
-                  <th style={{ width: "15%" }}>Created</th>
-                  <th style={{ width: "15%", textAlign: "right" }}>Actions</th>
+                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                  <th style={{ width: "28%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Global Identity</th>
+                  <th style={{ width: "24%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Primary Email</th>
+                  <th style={{ width: "12%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</th>
+                  <th style={{ width: "14%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Created</th>
+                  <th style={{ width: "22%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -502,16 +555,22 @@ export function GlobalUsers() {
                     : "GU";
 
                   return (
-                    <tr key={u.id} id={`user-row-${u.id}`}>
-                      <td>
+                    <tr
+                      key={u.id}
+                      id={`user-row-${u.id}`}
+                      style={{ transition: "background-color 0.12s ease" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                    >
+                      <td style={{ padding: "12px 20px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                           <div
                             style={{
                               width: "36px",
                               height: "36px",
-                              borderRadius: "50%",
-                              backgroundColor: "#e0e7ff",
-                              color: "#4338ca",
+                              borderRadius: "8px",
+                              background: "linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%)",
+                              color: "#3730a3",
                               fontWeight: 700,
                               fontSize: "13px",
                               display: "flex",
@@ -530,6 +589,8 @@ export function GlobalUsers() {
                                 cursor: "pointer",
                               }}
                               onClick={() => handleOpenDetail(u)}
+                              onMouseEnter={(e) => (e.currentTarget.style.color = "#2563eb")}
+                              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text)")}
                             >
                               {u.display_name}
                             </div>
@@ -547,9 +608,9 @@ export function GlobalUsers() {
                           </div>
                         </div>
                       </td>
-                      <td>
+                      <td style={{ padding: "12px 20px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <span style={{ fontFamily: "monospace", fontSize: "13px" }}>{email}</span>
+                          <span style={{ fontFamily: "monospace", fontSize: "13px", color: "var(--color-text)" }}>{email}</span>
                           <button
                             type="button"
                             title="Copy email"
@@ -563,25 +624,33 @@ export function GlobalUsers() {
                               cursor: "pointer",
                               color: "var(--color-muted)",
                               padding: "2px",
+                              display: "flex",
                             }}
                           >
                             <ICONS.copy width={12} height={12} />
                           </button>
                         </div>
                       </td>
-                      <td>
+                      <td style={{ padding: "12px 20px" }}>
                         <StatusBadge status={u.status} />
                       </td>
-                      <td style={{ fontSize: "13px", color: "var(--color-muted)" }}>
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
+                      <td style={{ fontSize: "13px", color: "var(--color-muted)", padding: "12px 20px" }}>
+                        {u.created_at
+                          ? new Date(u.created_at).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })
+                          : "—"}
                       </td>
-                      <td style={{ textAlign: "right" }}>
-                        <div style={{ display: "inline-flex", gap: "6px" }}>
+                      <td style={{ textAlign: "right", padding: "12px 20px" }}>
+                        <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleOpenDetail(u)}
                             title="View Details & Access"
+                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
                           >
                             Details
                           </button>
@@ -590,6 +659,7 @@ export function GlobalUsers() {
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleOpenEdit(u)}
                             title="Edit User"
+                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
                           >
                             Edit
                           </button>
@@ -598,6 +668,7 @@ export function GlobalUsers() {
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleOpenStatus(u)}
                             title="Change Status"
+                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
                           >
                             Status
                           </button>
@@ -606,6 +677,7 @@ export function GlobalUsers() {
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleOpenProvision(u)}
                             title="Provision to ERP (Flow A)"
+                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
                           >
                             Provision
                           </button>
@@ -617,8 +689,8 @@ export function GlobalUsers() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* CREATE USER MODAL */}
       <Modal

@@ -73,7 +73,17 @@ export const Auth = {
     const raw = localStorage.getItem(PROFILE_KEY);
     if (!raw) return null;
     try {
-      return JSON.parse(raw) as CurrentUser;
+      const parsed = JSON.parse(raw) as CurrentUser;
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        "display_name" in parsed &&
+        ((parsed as any).display_name === "Platform Super Admin" ||
+          (parsed as any).display_name === "Platform SuperAdmin")
+      ) {
+        (parsed as any).display_name = "Super Admin";
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -121,6 +131,15 @@ export const Auth = {
   },
 
   updateProfile(profile: CurrentUser): void {
+    if (
+      profile &&
+      typeof profile === "object" &&
+      "display_name" in profile &&
+      ((profile as any).display_name === "Platform Super Admin" ||
+        (profile as any).display_name === "Platform SuperAdmin")
+    ) {
+      (profile as any).display_name = "Super Admin";
+    }
     const oldRaw = localStorage.getItem(PROFILE_KEY);
     const nextRaw = JSON.stringify(profile);
     localStorage.setItem(PROFILE_KEY, nextRaw);
@@ -173,7 +192,7 @@ export function roleLabel(role?: string | null, principalType?: PrincipalType | 
     return "Global User";
   }
   if (!role) return "Platform Administrator";
-  if (role === "SUPER_ADMIN") return "Platform Super Admin";
+  if (role === "SUPER_ADMIN") return "Super Admin";
   if (role === "PLATFORM_ADMIN") return "Platform Admin";
   if (role === "AUDITOR") return "Platform Auditor";
   if (role === "OPERATOR") return "Platform Operator";

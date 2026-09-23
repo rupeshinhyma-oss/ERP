@@ -103,7 +103,7 @@ describe("GlobalUsers Page", () => {
       expect(screen.getByText("Alice Wang")).toBeDefined();
     });
 
-    const searchInput = screen.getByPlaceholderText("Search by name, email or external ID...");
+    const searchInput = screen.getByPlaceholderText("Search by name, email or ID...");
     fireEvent.change(searchInput, { target: { value: "Bob" } });
 
     expect(screen.queryByText("Alice Wang")).toBeNull();

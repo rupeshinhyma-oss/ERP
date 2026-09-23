@@ -58,7 +58,7 @@ describe("Auth Store", () => {
   });
 
   it("formats role labels correctly", () => {
-    expect(roleLabel("SUPER_ADMIN")).toBe("Platform Super Admin");
+    expect(roleLabel("SUPER_ADMIN")).toBe("Super Admin");
     expect(roleLabel("PLATFORM_ADMIN")).toBe("Platform Admin");
     expect(roleLabel("AUDITOR")).toBe("Platform Auditor");
     expect(roleLabel(undefined)).toBe("Platform Administrator");

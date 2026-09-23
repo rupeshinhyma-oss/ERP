@@ -175,7 +175,7 @@ class Settings(BaseSettings):
         description="Bootstrap platform admin password.",
     )
     BOOTSTRAP_ADMIN_NAME: str = Field(
-        default="Platform Super Admin",
+        default="Super Admin",
         description="Bootstrap platform admin display name.",
     )
 

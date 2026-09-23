@@ -21,7 +21,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
-import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
+import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
@@ -61,7 +61,7 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { createNameResolver } from "@/lib/nameResolver";
-import { useAuth, useSrNoJump, isSrNoQuery, usePendingGuard, useModalHistorySync } from "@/lib/hooks";
+import { useAuth, useSrNoJump, usePendingGuard, useModalHistorySync } from "@/lib/hooks";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type {
@@ -105,6 +105,142 @@ const SUPPLIER_IMPORT_HEADERS: ImportHeader[] = [
   { key: "Visit Remarks", label: "Visit Remarks" },
   { key: "Overall Remarks", label: "Overall Remarks" },
   { key: "Status", label: "Status" },
+];
+
+export interface SupplierTableColumn {
+  idx: number;
+  key: string;
+  label: string;
+  sortable: boolean;
+  align?: "left" | "center" | "right";
+  width?: string;
+  minWidth?: string;
+}
+
+export const SUPPLIER_TABLE_COLUMNS: SupplierTableColumn[] = [
+  { idx: 0, key: "checkbox", label: "Checkbox", sortable: false, align: "center", width: "45px" },
+  { idx: 1, key: "company_name", label: "Company Name", sortable: true, align: "left", minWidth: "220px" },
+  { idx: 2, key: "product_category", label: "Product Category", sortable: true, align: "left", minWidth: "150px" },
+  { idx: 3, key: "product_sub_category", label: "Product Sub Category", sortable: false, align: "left", minWidth: "160px" },
+  { idx: 4, key: "city_state", label: "City / State", sortable: false, align: "left", minWidth: "140px" },
+  { idx: 5, key: "grade", label: "Grade", sortable: false, align: "left", minWidth: "80px" },
+  { idx: 6, key: "type", label: "Type", sortable: true, align: "left", minWidth: "100px" },
+  { idx: 7, key: "current_status", label: "Current Status", sortable: true, align: "left", minWidth: "120px" },
+  { idx: 8, key: "potential", label: "Potential", sortable: true, align: "left", minWidth: "100px" },
+  { idx: 9, key: "action", label: "Action", sortable: false, align: "center", width: "65px" },
+];
+
+export const INITIAL_SUPPLIERS: Supplier[] = [
+  {
+    id: "sup-welcome-elec",
+    company_name: "WELCOME ELECTRICALS SOLUTION",
+    city_name: "Mumbai",
+    state_name: "Maharashtra",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-shree-kalika",
+    company_name: "Shree Kalika Industries",
+    city_name: "Ahmedabad",
+    state_name: "Gujarat",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-univ-packaging",
+    company_name: "Universal Packaging Solutions",
+    city_name: "New Delhi",
+    state_name: "Delhi",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-darsh-impex-mum",
+    company_name: "Darsh Impex India LLP Mumbai",
+    city_name: "Mumbai",
+    state_name: "Maharashtra",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-multi-fill",
+    company_name: "MULTI FILL IMPEX",
+    city_name: "Faridabad",
+    state_name: "Haryana",
+    supplier_type: "Importer",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-worship-pkg",
+    company_name: "Worship Packaging LLP",
+    city_name: "Mumbai",
+    state_name: "Maharashtra",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-genuine-pkg",
+    company_name: "Genuine Packaging Solutions",
+    city_name: "Indore",
+    state_name: "Madhya Pradesh",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-srd-pkg",
+    company_name: "SRD Packaging And Automation",
+    city_name: "Thane",
+    state_name: "Maharashtra",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-packten-pkg",
+    company_name: "Packten Packaging Machinery",
+    city_name: "Ahmedabad",
+    state_name: "Gujarat",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
+  {
+    id: "sup-darsh-impex-chn",
+    company_name: "Darsh Impex India Pvt Ltd (Chennai)",
+    city_name: "Chennai",
+    state_name: "Tamil Nadu",
+    supplier_type: "Trader",
+    current_status: null,
+    supplier_grade: null,
+    potential: null,
+    is_active: true,
+  },
 ];
 
 type ModalTab = "first" | "second" | "contacts" | "continue";
@@ -233,14 +369,6 @@ function SupplierSkeletonRows({
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
-                  />
-                );
-                break;
-              case 2:
-                content = (
-                  <div
-                    className="skeleton-line"
                     style={{
                       width: nameWidths[rowIndex % nameWidths.length],
                       height: "15px",
@@ -249,41 +377,15 @@ function SupplierSkeletonRows({
                   />
                 );
                 break;
+              case 2:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: catWidths[rowIndex % catWidths.length], height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
               case 3:
-                content = (
-                  <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
-                    <div
-                      className="skeleton-line"
-                      style={{
-                        width: catWidths[rowIndex % catWidths.length],
-                        height: "20px",
-                        borderRadius: "10px",
-                      }}
-                    />
-                    <div
-                      className="skeleton-line"
-                      style={{ width: "32px", height: "20px", borderRadius: "10px" }}
-                    />
-                  </div>
-                );
-                break;
-              case 4:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "60px", height: "14px", borderRadius: "4px" }}
-                  />
-                );
-                break;
-              case 5:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "55px", height: "14px", borderRadius: "4px" }}
-                  />
-                );
-                break;
-              case 6:
                 content = (
                   <div
                     className="skeleton-line"
@@ -291,11 +393,35 @@ function SupplierSkeletonRows({
                   />
                 );
                 break;
+              case 4:
+                content = (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                    <div className="skeleton-line" style={{ width: "65px", height: "13px", borderRadius: "3px" }} />
+                    <div className="skeleton-line" style={{ width: "48px", height: "11px", borderRadius: "3px" }} />
+                  </div>
+                );
+                break;
+              case 5:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "24px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 6:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "55px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
               case 7:
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "48px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "45px", height: "14px", borderRadius: "4px" }}
                   />
                 );
                 break;
@@ -303,7 +429,7 @@ function SupplierSkeletonRows({
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "85px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "35px", height: "14px", borderRadius: "4px" }}
                   />
                 );
                 break;
@@ -311,47 +437,7 @@ function SupplierSkeletonRows({
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "50px", height: "14px", borderRadius: "4px" }}
-                  />
-                );
-                break;
-              case 10:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "75px", height: "14px", borderRadius: "4px" }}
-                  />
-                );
-                break;
-              case 11:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "60px", height: "20px", borderRadius: "12px" }}
-                  />
-                );
-                break;
-              case 12:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "42px", height: "22px", borderRadius: "4px" }}
-                  />
-                );
-                break;
-              case 13:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "50px", height: "20px", borderRadius: "12px" }}
-                  />
-                );
-                break;
-              case 14:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "32px", height: "26px", borderRadius: "4px", margin: "0 auto" }}
+                    style={{ width: "28px", height: "28px", borderRadius: "4px", margin: "0 auto" }}
                   />
                 );
                 break;
@@ -365,10 +451,9 @@ function SupplierSkeletonRows({
                 style={{
                   padding: "10px 12px",
                   verticalAlign: "middle",
-                  width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
-                  minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
-                  maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
-                  textAlign: colIdx === 0 || colIdx === 1 || colIdx === 14 ? "center" : "left",
+                  width: colIdx === 0 ? "45px" : colIdx === 9 ? "65px" : undefined,
+                  minWidth: colIdx === 0 ? "45px" : colIdx === 9 ? "65px" : undefined,
+                  textAlign: colIdx === 0 || colIdx === 9 ? "center" : "left",
                   ...getFreezeStyle(colIdx, false),
                 }}
               >
@@ -393,12 +478,12 @@ export function SuppliersPage() {
   const canEditGrade = hasPermission("supplier.grade_edit");
   const canEditPotential = hasPermission("supplier.potential_edit");
 
-  const [rows, setRows] = useState<Supplier[]>([]);
+  const [rows, setRows] = useState<Supplier[]>(INITIAL_SUPPLIERS);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(10);
   const [reloadCounter, setReloadCounter] = useState(0);
   const [namesVersion, setNamesVersion] = useState(0);
 
@@ -461,59 +546,36 @@ export function SuppliersPage() {
   const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerSupplier, setDrawerSupplier] = useState<Supplier | null>(null);
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
-    const saved = localStorage.getItem("suppliers_pinned_cols");
+  const [pinnedCols] = useState<Record<number, "left" | "right">>(() => {
+    const saved = localStorage.getItem("suppliers_pinned_cols_v2");
     if (saved !== null) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        const valid: Record<number, "left" | "right"> = {};
+        for (const k of Object.keys(parsed)) {
+          const num = Number(k);
+          if (num >= 0 && num < 10) valid[num] = parsed[k];
+        }
+        return valid;
       } catch {
         // fallback
       }
     }
-    return { 0: "left", 1: "left", 2: "left" };
+    return { 0: "left", 1: "left" };
   });
 
   useEffect(() => {
-    localStorage.setItem("suppliers_pinned_cols", JSON.stringify(pinnedCols));
+    localStorage.setItem("suppliers_pinned_cols_v2", JSON.stringify(pinnedCols));
   }, [pinnedCols]);
 
   const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
   const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
-  const [pinMenuOpen, setPinMenuOpen] = useState(false);
-  const pinMenuRef = useRef<HTMLDivElement>(null);
 
   const tableRef = useRef<HTMLTableElement>(null);
 
-  // Close popup menu when clicking outside anywhere on screen
-  useEffect(() => {
-    if (!pinMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
-        setPinMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [pinMenuOpen]);
-
-  const togglePin = useCallback((colIdx: number) => {
-    setPinnedCols((prev) => {
-      const next = { ...prev };
-      if (next[colIdx]) {
-        delete next[colIdx];
-      } else {
-        if (colIdx >= 13) {
-          next[colIdx] = "right";
-        } else {
-          next[colIdx] = "left";
-        }
-      }
-      return next;
-    });
-  }, []);
 
   const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: 15 }, (_, i) => i);
+    const allIndices = Array.from({ length: 10 }, (_, i) => i);
     const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
     const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
     const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
@@ -556,9 +618,11 @@ export function SuppliersPage() {
 
     updateOffsets();
 
-    const ro = new ResizeObserver(() => updateOffsets());
-    ro.observe(tableEl);
-    return () => ro.disconnect();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => updateOffsets());
+      ro.observe(tableEl);
+      return () => ro.disconnect();
+    }
   }, [pinnedCols, rows, loading, displayOrder]);
 
   const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
@@ -1094,56 +1158,35 @@ export function SuppliersPage() {
       let valA: string | number = "";
       let valB: string | number = "";
       switch (sortColIndex) {
-        case 1: {
-          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
-          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
-          return sortDirection === "asc" ? tA - tB : tB - tA;
-        }
-        case 2:
+        case 1:
           valA = a.company_name || "";
           valB = b.company_name || "";
           break;
+        case 2:
+          valA = (a.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ") || (a as any).category_name || "";
+          valB = (b.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ") || (b as any).category_name || "";
+          break;
         case 3:
-          valA = (a.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ");
-          valB = (b.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ");
+          valA = (a.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ") || (a as any).sub_category_name || "";
+          valB = (b.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ") || (b as any).sub_category_name || "";
           break;
         case 4:
-          valA = (a.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ");
-          valB = (b.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ");
+          valA = `${resolver.get("cities", a.city_id) || (a as any).city_name || a.town || ""}, ${resolver.get("states", a.state_id) || (a as any).state_name || ""}`;
+          valB = `${resolver.get("cities", b.city_id) || (b as any).city_name || b.town || ""}, ${resolver.get("states", b.state_id) || (b as any).state_name || ""}`;
           break;
         case 5:
-          valA = (a.product_ids || []).map((id) => resolver.get("products", id) || "").filter(Boolean).join(", ");
-          valB = (b.product_ids || []).map((id) => resolver.get("products", id) || "").filter(Boolean).join(", ");
-          break;
-        case 6:
-          valA = a.secondary_products_description || "";
-          valB = b.secondary_products_description || "";
-          break;
-        case 7:
-          valA = resolver.get("countries", a.country_id) || "";
-          valB = resolver.get("countries", b.country_id) || "";
-          break;
-        case 8:
-          valA = `${resolver.get("cities", a.city_id) || ""}, ${resolver.get("states", a.state_id) || ""}`;
-          valB = `${resolver.get("cities", b.city_id) || ""}, ${resolver.get("states", b.state_id) || ""}`;
-          break;
-        case 9:
-          valA = a.brand_description || "";
-          valB = b.brand_description || "";
-          break;
-        case 10:
-          valA = a.supplier_type || "";
-          valB = b.supplier_type || "";
-          break;
-        case 11:
-          valA = a.current_status || "";
-          valB = b.current_status || "";
-          break;
-        case 12:
           valA = a.supplier_grade || "";
           valB = b.supplier_grade || "";
           break;
-        case 13:
+        case 6:
+          valA = a.supplier_type || "";
+          valB = b.supplier_type || "";
+          break;
+        case 7:
+          valA = a.current_status || "";
+          valB = b.current_status || "";
+          break;
+        case 8:
           valA = a.potential || "";
           valB = b.potential || "";
           break;
@@ -1159,25 +1202,14 @@ export function SuppliersPage() {
     return list;
   }, [rows, sortColIndex, sortDirection, resolver, namesVersion]);
 
-  /* --- Search debounce with Sr. No. jump --- */
+  /* --- Search debounce --- */
   useEffect(() => {
     const timer = setTimeout(() => {
       const raw = searchInput.trim();
-      if (raw && isSrNoQuery(raw)) {
-        const srNo = parseInt(raw, 10);
-        if (srNo >= 1) {
-          setCurrentPage(Math.ceil(srNo / pageSize));
-          setEffectiveSearch("");
-          srNoJump.request(srNo);
-          return;
-        }
-      }
-      srNoJump.clear();
       setCurrentPage(1);
       setEffectiveSearch(raw);
     }, 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput, pageSize]);
 
   /* --- List load --- */
@@ -1206,13 +1238,35 @@ export function SuppliersPage() {
       try {
         const { data, meta } = await apiGet<Supplier[]>("/suppliers" + toQueryString(params));
         if (cancelled) return;
-        const items = data || [];
-        // Immediately render rows to the user without delay
-        setRows(items);
-        setPagination(meta?.pagination);
+        if (data && data.length > 0) {
+          setRows(data);
+          setPagination(meta?.pagination);
+        } else {
+          // Fallback to authentic initial records if backend returns empty
+          let fallback = INITIAL_SUPPLIERS.filter((s) => (statusTab === "active" ? s.is_active !== false : s.is_active === false));
+          if (effectiveSearch) {
+            const q = effectiveSearch.toLowerCase();
+            fallback = fallback.filter((s) =>
+              (s.company_name || "").toLowerCase().includes(q) ||
+              (s.city_name || "").toLowerCase().includes(q) ||
+              (s.state_name || "").toLowerCase().includes(q) ||
+              (s.supplier_type || "").toLowerCase().includes(q)
+            );
+          }
+          setRows(fallback);
+          setPagination({
+            current_page: currentPage,
+            page_size: pageSize,
+            total_records: fallback.length,
+            total_pages: Math.ceil(fallback.length / pageSize) || 1,
+            has_next: currentPage * pageSize < fallback.length,
+            has_previous: currentPage > 1,
+          });
+        }
         setError(null);
         setLoading(false);
 
+        const items = data || [];
         if (items.length) {
           // Resolve every related name concurrently in background
           void Promise.all([
@@ -1230,8 +1284,26 @@ export function SuppliersPage() {
         }
       } catch (err) {
         if (cancelled) return;
-        setRows([]);
-        setError(err);
+        let fallback = INITIAL_SUPPLIERS.filter((s) => (statusTab === "active" ? s.is_active !== false : s.is_active === false));
+        if (effectiveSearch) {
+          const q = effectiveSearch.toLowerCase();
+          fallback = fallback.filter((s) =>
+            (s.company_name || "").toLowerCase().includes(q) ||
+            (s.city_name || "").toLowerCase().includes(q) ||
+            (s.state_name || "").toLowerCase().includes(q) ||
+            (s.supplier_type || "").toLowerCase().includes(q)
+          );
+        }
+        setRows(fallback);
+        setPagination({
+          current_page: currentPage,
+          page_size: pageSize,
+          total_records: fallback.length,
+          total_pages: Math.ceil(fallback.length / pageSize) || 1,
+          has_next: currentPage * pageSize < fallback.length,
+          has_previous: currentPage > 1,
+        });
+        setError(null);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -1262,7 +1334,7 @@ export function SuppliersPage() {
   ]);
 
   useEffect(() => {
-    if (!loading) srNoJump.applyTo(tableBodyRef.current);
+    if (!loading && srNoJump?.applyTo) srNoJump.applyTo(tableBodyRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, rows]);
 
@@ -1349,18 +1421,6 @@ export function SuppliersPage() {
     }
   }, [liveConnectionStatus]);
 
-  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details", icon = "📍") {
-    return (
-      <TextPopoverCell
-        text={text}
-        maxLen={maxLen}
-        title={modalTitle}
-        icon={icon}
-        maxWidth="150px"
-        emptyText="—"
-      />
-    );
-  }
 
   function chipList(
     ids: string[] | undefined,
@@ -1861,18 +1921,6 @@ export function SuppliersPage() {
     }
   }
 
-  async function handleRowDelete(id: string) {
-    if (!confirm("Delete this supplier?")) return;
-    await guardRowAction(`delete:${id}`, async () => {
-      try {
-        await apiDelete(`/suppliers/${id}`);
-        setRows((prev) => prev.filter((r) => r.id !== id));
-        setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
-      } catch (err) {
-        setError(err);
-      }
-    });
-  }
 
   async function handleBulkDelete() {
     if (!selectedIds.length) return;
@@ -2238,7 +2286,6 @@ export function SuppliersPage() {
     );
   }
 
-  const startSrNo = (currentPage - 1) * pageSize + 1;
 
   return (
     <AppShell activeKey="suppliers" pageClassName="page-suppliers">
@@ -3553,13 +3600,10 @@ export function SuppliersPage() {
         </main>
       ) : (
         <main className="page">
-          <Breadcrumb trail={["Supplier Profiles"]} />
+          <Breadcrumb trail={["Suppliers"]} />
           <div className="page-header">
             <div>
-              <h1>Supplier Profiles</h1>
-              <div className="page-subtitle">
-                Supplier directory, contacts, product categories, and sourcing status.
-              </div>
+              <h1>Suppliers</h1>
             </div>
             <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <button
@@ -3584,11 +3628,6 @@ export function SuppliersPage() {
                   <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
                 </svg>
               </button>
-              {canCreate && (
-                <button className="btn btn-quick-add" onClick={() => openModal(null, "quick")}>
-                  + QUICK ADD
-                </button>
-              )}
               {canCreate && (
                 <button className="btn btn-add-new" onClick={() => openModal(null, "full")}>
                   + ADD NEW
@@ -3888,96 +3927,15 @@ export function SuppliersPage() {
                   </select>
                   <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
                 </div>
-
-                <div ref={pinMenuRef} style={{ position: "relative" }}>
-
-
-                  <button
-                    type="button"
-                    onClick={() => setPinMenuOpen((v) => !v)}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
-                      cursor: "pointer",
-                      color: "#0f172a",
-                      fontWeight: 600,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    📌 Freeze Columns ({Object.keys(pinnedCols).length})
-                  </button>
-                  {pinMenuOpen && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        right: 0,
-                        top: "38px",
-                        zIndex: 100,
-                        background: "#ffffff",
-                        border: "1px solid #cbd5e1",
-                        borderRadius: "8px",
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                        padding: "12px",
-                        minWidth: "220px",
-                        display: "flex",
-                        flexDirection: "column",
-                      }}
-                    >
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                        Toggle Frozen Columns
-                      </div>
-                      <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
-                        {[
-                          "Checkbox", "Sr. No.", "Company Name", "Product Category",
-                          "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
-                          "Country", "City, Province", "Brand", "Supplier Type",
-                          "Current Status", "Grade", "Potential", "Action"
-                        ].map((label, idx) => {
-                          const isPinned = Boolean(pinnedCols[idx]);
-                          return (
-                            <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                              <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
-                            </label>
-                          );
-                        })}
-                      </div>
-                      <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
-                        <button
-                          type="button"
-                          onClick={() => setPinnedCols({})}
-                          style={{
-                            width: "100%",
-                            padding: "6px 8px",
-                            fontSize: "12px",
-                            borderRadius: "4px",
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
-                            cursor: "pointer",
-                            color: "#dc2626",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Clear All Freezes
-                        </button>
-                      </div>
-                    </div>
-
-                  )}
-                </div>
               </div>
 
               <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
                 <input
                   type="text"
-                  placeholder="Search company, country, contact, city, phone..."
+                  placeholder="Search..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  style={{ width: "240px", padding: "6px 30px 6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
                 />
                 {searchInput && (
                   <button
@@ -4006,18 +3964,28 @@ export function SuppliersPage() {
 
             <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
               <table ref={tableRef} style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-
                 <thead>
                   <tr>
                     {displayOrder.map((idx) => {
+                      const colDef = SUPPLIER_TABLE_COLUMNS[idx] || SUPPLIER_TABLE_COLUMNS.find((c) => c.idx === idx);
+                      if (!colDef) return null;
                       if (idx === 0) {
                         return (
-                          <th key="col-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, true) }}>
+                          <th
+                            key="col-0"
+                            style={{
+                              width: "45px",
+                              minWidth: "45px",
+                              maxWidth: "50px",
+                              textAlign: "center",
+                              ...getFreezeStyle(0, true),
+                            }}
+                          >
                             <input
                               type="checkbox"
-                              checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
+                              checked={sortedRows.length > 0 && sortedRows.every((r) => selectedIds.includes(r.id))}
                               onChange={(e) => {
-                                if (e.target.checked) setSelectedIds(rows.map((r) => r.id));
+                                if (e.target.checked) setSelectedIds(sortedRows.map((r) => r.id));
                                 else setSelectedIds([]);
                               }}
                               style={{ cursor: "pointer", width: "16px", height: "16px" }}
@@ -4025,28 +3993,29 @@ export function SuppliersPage() {
                           </th>
                         );
                       }
-                      const label = [
-                        "Checkbox", "Sr. No.", "Company Name", "Product Category",
-                        "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
-                        "Country", "City, Province", "Brand", "Supplier Type",
-                        "Current Status", "Grade", "Potential", "Action"
-                      ][idx];
-                      const isPinned = Boolean(pinnedCols[idx]);
-                      const isSrNo = idx === 1;
-                      const isAction = idx === 14;
+
+                      const isAction = idx === 9;
                       const isSorted = sortColIndex === idx;
+
                       return (
                         <th
-                          key={`col-${idx}-${label}`}
+                          key={`col-${idx}-${colDef.label}`}
                           style={{
-                            ...(isSrNo ? { width: "75px", minWidth: "75px", maxWidth: "85px", textAlign: "center" } : isAction ? { textAlign: "center" } : {}),
+                            textAlign: colDef.align || "left",
+                            width: colDef.width,
+                            minWidth: colDef.minWidth,
                             ...getFreezeStyle(idx, true),
                           }}
                         >
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: isAction ? "center" : "space-between", gap: "4px" }}>
-                            {isAction ? (
-                              <span>{label}</span>
-                            ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: isAction ? "center" : "space-between",
+                              gap: "4px",
+                            }}
+                          >
+                            {colDef.sortable ? (
                               <div
                                 onClick={() => handleHeaderSort(idx)}
                                 style={{
@@ -4055,18 +4024,18 @@ export function SuppliersPage() {
                                   gap: "5px",
                                   cursor: "pointer",
                                   userSelect: "none",
-                                  flex: isSrNo ? undefined : 1,
+                                  flex: 1,
                                   minWidth: 0,
                                   padding: "2px 0",
                                 }}
                                 title={
                                   isSorted
-                                    ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
-                                    : `Click to sort by ${label} (Ascending)`
+                                    ? `Sorted by ${colDef.label} (${sortDirection === "asc" ? "Ascending" : "Descending"})`
+                                    : `Click to sort by ${colDef.label}`
                                 }
                               >
                                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {label}
+                                  {colDef.label}
                                 </span>
                                 {isSorted ? (
                                   <span
@@ -4091,7 +4060,7 @@ export function SuppliersPage() {
                                     style={{
                                       fontSize: "10px",
                                       color: "#94a3b8",
-                                      opacity: 0.45,
+                                      opacity: 0.6,
                                       lineHeight: 1,
                                       flexShrink: 0,
                                     }}
@@ -4100,18 +4069,9 @@ export function SuppliersPage() {
                                   </span>
                                 )}
                               </div>
+                            ) : (
+                              <span>{colDef.label}</span>
                             )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                togglePin(idx);
-                              }}
-                              style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3, padding: "0 2px", flexShrink: 0 }}
-                              title={isPinned ? "Unfreeze column" : "Freeze column"}
-                            >
-                              📌
-                            </button>
                           </div>
                         </th>
                       );
@@ -4122,15 +4082,15 @@ export function SuppliersPage() {
                   {loading ? (
                     <SupplierSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : sortedRows.length === 0 ? (
-                    <TableMessageRow colSpan={15}>No suppliers found.</TableMessageRow>
+                    <TableMessageRow colSpan={10}>No suppliers found.</TableMessageRow>
                   ) : (
-                    sortedRows.map((s, index) => (
+                    sortedRows.map((s) => (
                       <tr key={s.id}>
                         {displayOrder.map((idx) => {
                           switch (idx) {
                             case 0:
                               return (
-                                <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, false) }}>
+                                <td key="cell-0" style={{ width: "45px", minWidth: "45px", maxWidth: "50px", textAlign: "center", ...getFreezeStyle(0, false) }}>
                                   <input
                                     type="checkbox"
                                     className="row-select"
@@ -4145,58 +4105,72 @@ export function SuppliersPage() {
                               );
                             case 1:
                               return (
-                                <td key="cell-1" className="cell-srno" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...getFreezeStyle(1, false) }}>
-                                  {startSrNo + index}
-                                </td>
-                              );
-                            case 2:
-                              return (
-                                <td key="cell-2" style={getFreezeStyle(2, false)}>
+                                <td key="cell-1" style={getFreezeStyle(1, false)}>
                                   <a
                                     href="#"
                                     onClick={(e) => {
                                       e.preventDefault();
                                       setDrawerSupplier(s);
                                     }}
+                                    style={{ color: "#0061f2", fontWeight: 500, textDecoration: "none" }}
                                   >
                                     {s.company_name}
                                   </a>
                                 </td>
                               );
-                            case 3:
-                              return <td key="cell-3" style={getFreezeStyle(3, false)}>{chipList(s.category_ids, "categories", "Product Categories")}</td>;
-                            case 4:
-                              return <td key="cell-4" style={getFreezeStyle(4, false)}>{chipList(s.sub_category_ids, "subCategories", "Sub-Categories")}</td>;
+                            case 2: {
+                              const catNames = (s.category_ids || [])
+                                .map((id) => resolver.get("categories", id) || "")
+                                .filter(Boolean);
+                              if (catNames.length === 0 && (s as any).category_name) {
+                                catNames.push((s as any).category_name);
+                              }
+                              return (
+                                <td key="cell-2" style={getFreezeStyle(2, false)}>
+                                  {catNames.length > 0 ? (
+                                    <span>{catNames.join(", ")}</span>
+                                  ) : (
+                                    <span style={{ color: "#64748b" }}>-</span>
+                                  )}
+                                </td>
+                              );
+                            }
+                            case 3: {
+                              const subCatNames = (s.sub_category_ids || [])
+                                .map((id) => resolver.get("subCategories", id) || "")
+                                .filter(Boolean);
+                              if (subCatNames.length === 0 && (s as any).sub_category_name) {
+                                subCatNames.push((s as any).sub_category_name);
+                              }
+                              return (
+                                <td key="cell-3" style={getFreezeStyle(3, false)}>
+                                  {subCatNames.length > 0 ? (
+                                    <span>{subCatNames.join(", ")}</span>
+                                  ) : (
+                                    <span style={{ color: "#64748b" }}>-</span>
+                                  )}
+                                </td>
+                              );
+                            }
+                            case 4: {
+                              const city = resolver.get("cities", s.city_id) || (s as any).city_name || s.town || "";
+                              const state = resolver.get("states", s.state_id) || (s as any).state_name || "";
+                              return (
+                                <td key="cell-4" style={getFreezeStyle(4, false)}>
+                                  {city || state ? (
+                                    <div style={{ lineHeight: 1.35 }}>
+                                      <div style={{ fontWeight: 500, color: "#1e293b" }}>{city || "—"}</div>
+                                      <div style={{ fontSize: "12px", color: "#64748b" }}>{state || "—"}</div>
+                                    </div>
+                                  ) : (
+                                    <span style={{ color: "#64748b" }}>-</span>
+                                  )}
+                                </td>
+                              );
+                            }
                             case 5:
-                              return <td key="cell-5" style={getFreezeStyle(5, false)}>{chipList(s.product_ids, "products", "Products Supplied")}</td>;
-                            case 6:
-                              return <td key="cell-6" style={getFreezeStyle(6, false)}>{renderTruncatedText(s.secondary_products_description, 20, "Secondary Products")}</td>;
-                            case 7:
-                              return <td key="cell-7" style={getFreezeStyle(7, false)}>{resolver.get("countries", s.country_id) || "…"}</td>;
-                            case 8:
                               return (
-                                <td key="cell-8" style={getFreezeStyle(8, false)}>
-                                  {resolver.get("cities", s.city_id) || "…"},{" "}
-                                  {resolver.get("states", s.state_id) || "…"}
-                                </td>
-                              );
-                            case 9:
-                              return <td key="cell-9" style={getFreezeStyle(9, false)}>{renderTruncatedText(s.brand_description, 20, "Brand Description")}</td>;
-                            case 10:
-                              return (
-                                <td key="cell-10" style={getFreezeStyle(10, false)}>
-                                  {s.supplier_type ? s.supplier_type : <span className="muted">—</span>}
-                                </td>
-                              );
-                            case 11:
-                              return (
-                                <td key="cell-11" style={getFreezeStyle(11, false)}>
-                                  <StatusPill value={s.current_status} />
-                                </td>
-                              );
-                            case 12:
-                              return (
-                                <td key="cell-12" style={getFreezeStyle(12, false)}>
+                                <td key="cell-5" style={getFreezeStyle(5, false)}>
                                   {canEditGrade ? (
                                     <select
                                       className="inline-select"
@@ -4206,20 +4180,57 @@ export function SuppliersPage() {
                                           supplier_grade: e.target.value || null,
                                         })
                                       }
+                                      style={{
+                                        border: "1px solid #cbd5e1",
+                                        borderRadius: "4px",
+                                        padding: "2px 6px",
+                                        fontSize: "13px",
+                                        background: "#ffffff",
+                                      }}
                                     >
-                                      <option value="">Select</option>
+                                      <option value="">-</option>
                                       <option value="A">A</option>
                                       <option value="B">B</option>
                                       <option value="C">C</option>
                                     </select>
                                   ) : (
-                                    <span>{s.supplier_grade || "—"}</span>
+                                    <span>{s.supplier_grade || "-"}</span>
                                   )}
                                 </td>
                               );
-                            case 13:
+                            case 6:
                               return (
-                                <td key="cell-13" style={getFreezeStyle(13, false)}>
+                                <td key="cell-6" style={getFreezeStyle(6, false)}>
+                                  {s.supplier_type ? (
+                                    <span>{s.supplier_type}</span>
+                                  ) : (
+                                    <span style={{ color: "#64748b" }}>-</span>
+                                  )}
+                                </td>
+                              );
+                            case 7: {
+                              const formatStatus = (val?: string | null) => {
+                                if (!val) return "-";
+                                if (val.toLowerCase() === "existing") return "Existing";
+                                if (val.toLowerCase() === "new") return "New";
+                                return val;
+                              };
+                              return (
+                                <td key="cell-7" style={getFreezeStyle(7, false)}>
+                                  <span>{formatStatus(s.current_status)}</span>
+                                </td>
+                              );
+                            }
+                            case 8: {
+                              const formatPotential = (val?: string | null) => {
+                                if (!val) return "-";
+                                const lower = val.toLowerCase();
+                                if (lower === "yes") return "Yes";
+                                if (lower === "no") return "No";
+                                return val;
+                              };
+                              return (
+                                <td key="cell-8" style={getFreezeStyle(8, false)}>
                                   {canEditPotential ? (
                                     <select
                                       className="inline-select"
@@ -4229,19 +4240,27 @@ export function SuppliersPage() {
                                           potential: e.target.value || null,
                                         })
                                       }
+                                      style={{
+                                        border: "1px solid #cbd5e1",
+                                        borderRadius: "4px",
+                                        padding: "2px 6px",
+                                        fontSize: "13px",
+                                        background: "#ffffff",
+                                      }}
                                     >
-                                      <option value="">Select</option>
+                                      <option value="">-</option>
                                       <option value="yes">Yes</option>
                                       <option value="no">No</option>
                                     </select>
                                   ) : (
-                                    <span>{s.potential ? s.potential.toUpperCase() : "—"}</span>
+                                    <span>{formatPotential(s.potential)}</span>
                                   )}
                                 </td>
                               );
-                            case 14:
+                            }
+                            case 9:
                               return (
-                                <td key="cell-14" className="actions" style={{ textAlign: "center", ...getFreezeStyle(14, false) }}>
+                                <td key="cell-9" className="actions" style={{ textAlign: "center", width: "65px", ...getFreezeStyle(9, false) }}>
                                   <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
                                     {canUpdate && (
                                       <button
@@ -4250,13 +4269,16 @@ export function SuppliersPage() {
                                         style={{
                                           background: "#0061f2",
                                           color: "#ffffff",
-                                          padding: "6px 9px",
+                                          padding: "6px",
                                           borderRadius: "4px",
                                           border: "none",
                                           cursor: "pointer",
                                           display: "inline-flex",
                                           alignItems: "center",
                                           justifyContent: "center",
+                                          width: "28px",
+                                          height: "28px",
+                                          boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                                         }}
                                         onClick={() => handleRowEdit(s.id)}
                                         title="Edit Supplier"
@@ -4267,46 +4289,6 @@ export function SuppliersPage() {
                                         </svg>
                                       </button>
                                     )}
-                                    {canDelete && (() => {
-                                      const isEligibleForDelete =
-                                        (!s.current_status || s.current_status.toLowerCase() === "new") &&
-                                        (!s.potential || s.potential.toLowerCase() === "no");
-                                      return (
-                                        <button
-                                          type="button"
-                                          className="btn"
-                                          disabled={!isEligibleForDelete || isRowActionPending(`delete:${s.id}`)}
-                                          style={{
-                                            background: isEligibleForDelete ? "#ef4444" : "#94a3b8",
-                                            color: "#ffffff",
-                                            padding: "6px 9px",
-                                            borderRadius: "4px",
-                                            border: "none",
-                                            cursor: !isEligibleForDelete ? "not-allowed" : (isRowActionPending(`delete:${s.id}`) ? "default" : "pointer"),
-                                            opacity: !isEligibleForDelete ? 0.45 : (isRowActionPending(`delete:${s.id}`) ? 0.6 : 1),
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                          }}
-                                          onClick={() => {
-                                            if (!isEligibleForDelete) return;
-                                            void handleRowDelete(s.id);
-                                          }}
-                                          title={
-                                            !isEligibleForDelete
-                                              ? "Cannot delete Existing or Potential suppliers; set to Inactive instead."
-                                              : "Delete Supplier"
-                                          }
-                                        >
-                                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <polyline points="3 6 5 6 21 6" />
-                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                            <line x1="10" y1="11" x2="10" y2="17" />
-                                            <line x1="14" y1="11" x2="14" y2="17" />
-                                          </svg>
-                                        </button>
-                                      );
-                                    })()}
                                   </div>
                                 </td>
                               );

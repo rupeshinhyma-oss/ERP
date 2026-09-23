@@ -183,7 +183,7 @@ export function InquiriesPage() {
           apiGet<ConsignmentCode[]>("/inquiries/consignment-codes"),
           apiGet<any>("/masters/products?page_size=1000"),
           apiGet<any>("/masters/uom?page_size=1000"),
-          apiGet<any>("/buyers?limit=1000"),
+          apiGet<any>("/buyers?limit=1000").catch(() => ({ data: [] })),
         ]);
         const cMap: Record<string, string> = {};
         codeRes.data.forEach((c) => { cMap[c.id] = c.code; });

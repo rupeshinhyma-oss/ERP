@@ -40,12 +40,12 @@ describe("8 Primary Navigation Sections Specification", () => {
     });
   });
 
-  it("contains all 8 required navigation groups with correct section labels", () => {
-    expect(NAV_SECTIONS).toHaveLength(8);
+  it("contains all required navigation groups with correct section labels", () => {
+    expect(NAV_SECTIONS).toHaveLength(7);
 
     const sectionLabels = NAV_SECTIONS.map((s) => s.label);
     expect(sectionLabels).toContain("DASHBOARD");
-    expect(sectionLabels).toContain("ERPS");
+    expect(sectionLabels).not.toContain("ERPS");
     expect(sectionLabels).toContain("USERS & ACCESS");
     expect(sectionLabels).toContain("ORGANIZATIONS");
     expect(sectionLabels).toContain("INTEGRATIONS");
@@ -54,10 +54,8 @@ describe("8 Primary Navigation Sections Specification", () => {
     expect(sectionLabels).toContain("SETTINGS");
   });
 
-  it("verifies ERPs section tabs and paths", () => {
-    expect(ERP_SECTION_TABS).toHaveLength(1);
-    const keys = ERP_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual(["erp-switcher"]);
+  it("verifies ERPs section is removed from sidebar tabs", () => {
+    expect(ERP_SECTION_TABS).toHaveLength(0);
   });
 
   it("verifies Users & Access section tabs and paths", () => {
@@ -141,7 +139,7 @@ describe("8 Primary Navigation Sections Specification", () => {
     expect(deptsLink.getAttribute("href")).toBe("/organizations/departments");
   });
 
-  it("renders AppShell with search button and slash shortcut indicator", () => {
+  it("renders AppShell with ERP Switcher dropdown button", () => {
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>
         <AppShell activeKey="dashboard" pageTitle="Dashboard">
@@ -150,16 +148,16 @@ describe("8 Primary Navigation Sections Specification", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("/")).toBeDefined();
-    expect(screen.getByText("Search projections...")).toBeDefined();
+    expect(document.getElementById("header-erp-switcher-btn")?.textContent).toContain("ERP Dashboard");
+    expect(screen.queryByText("Search projections...")).toBeNull();
   });
 
-  it("guarantees every single navigation item across all 8 sections has a unique distinct icon", () => {
+  it("guarantees every single navigation item across all sections has a unique distinct icon", () => {
     const allItems = NAV_SECTIONS.flatMap((s) => s.items);
     const icons = allItems.map((item) => item.icon);
     const uniqueIcons = new Set(icons);
 
-    expect(allItems.length).toBe(36);
+    expect(allItems.length).toBe(31);
     expect(uniqueIcons.size).toBe(allItems.length);
   });
 });

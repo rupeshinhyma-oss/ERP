@@ -80,9 +80,9 @@ from app.masters.company_sectors.models import CompanySector
 from app.masters.warehouses.models import Warehouse
 from app.masters.uom.models import UnitOfMeasurement
 from app.organizations.models import Organization
+from app.buyers.models import Buyer
 from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem
 from app.search.schemas import SearchResultItem, UniversalSearchResponse
-from app.buyers.models import Buyer
 from app.suppliers.models import Supplier
 from app.trash.service import MODEL_MAP
 from app.users.models import User
@@ -213,40 +213,6 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
     except Exception as e:
         logger.warning("Error searching Suppliers: %s", e)
 
-    # 3b. Buyers (Clients)
-    try:
-        stmt = select(Buyer).where(
-            _not_deleted(Buyer),
-            or_(
-                Buyer.company_name.ilike(pattern),
-                Buyer.contact_full_name.ilike(pattern),
-                Buyer.city.ilike(pattern),
-                Buyer.product_range.ilike(pattern),
-                Buyer.currently_buying_from.ilike(pattern),
-                Buyer.overall_remarks.ilike(pattern),
-                Buyer.tax_id_number.ilike(pattern),
-            ),
-        ).limit(LIMIT_PER_ENTITY)
-        buyers = (await db.execute(stmt)).scalars().all()
-        for b in buyers:
-            grade_or_type = (
-                f"Grade {b.buyer_grade.value}"
-                if b.buyer_grade
-                else (b.buyer_type.upper() if b.buyer_type else "Buyer Profile")
-            )
-            subtitle = b.product_range or (f"City: {b.city} | {grade_or_type}" if b.city else grade_or_type)
-            results.append(
-                SearchResultItem(
-                    category="Buyers",
-                    id=str(b.id),
-                    title=b.company_name,
-                    subtitle=subtitle,
-                    target_url="./buyers.html",
-                    icon="shoppingBag",
-                )
-            )
-    except Exception as e:
-        logger.warning("Error searching Buyers: %s", e)
 
     # 4. Products
     try:

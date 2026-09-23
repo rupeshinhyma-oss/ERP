@@ -43,8 +43,6 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "CONTACT",
     items: [
       { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "company.view" },
-      { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
-      { key: "buyers", label: "Buyers", path: "/buyers", icon: "shoppingBag", permission: "buyer.view" },
     ],
   },
   {
@@ -58,15 +56,31 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "layers", permission: "category.view" },
       { key: "masters-subcategories", label: "Sub Categories", path: "/masters/subcategories", icon: "folderTree", permission: "subcategory.view" },
       { key: "masters-brands", label: "Brands", path: "/masters/brands", icon: "award", permission: "brand.view" },
-      { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", icon: "network", permission: "suppliertype.view" },
-      { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", icon: "idCard", permission: "buyertype.view" },
     ],
   },
   {
     label: "SALE",
     items: [
       { key: "proforma", label: "Proforma", path: "/proforma-invoice/list", icon: "fileText" },
-      { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText" },
+      { key: "sales-process", label: "Sales Process", path: "/sales/process", icon: "shoppingCart" },
+      { key: "discount-payments", label: "Discount Payments", path: "/discount-payments/list", icon: "creditCard" },
+    ],
+  },
+  {
+    label: "PURCHASE",
+    items: [
+      { key: "local-purchases", label: "Local Purchase", path: "/purchase-order/list", icon: "shoppingBag", permission: "purchase.view" },
+      { key: "import-purchases", label: "Import Purchase", path: "/purchase-order/import-purchase-list", icon: "truck", permission: "purchase.view" },
+      { key: "purchase-suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
+    ],
+  },
+  {
+    label: "REPORTS",
+    items: [
+      { key: "reports-re-order", label: "Re-Order", path: "/reports/re-order", icon: "stock", permission: "report.view" },
+      { key: "reports-stock-transactions", label: "Stock Transactions", path: "/reports/stock-transactions", icon: "refresh", permission: "report.view" },
+      { key: "reports-deleted-orders", label: "Deleted Orders", path: "/reports/deleted-orders", icon: "trash", permission: "report.view" },
+      { key: "reports-general", label: "General Reports", path: "/reports/general", icon: "fileText", permission: "report.view" },
     ],
   },
   {
@@ -81,6 +95,12 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
       { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
       { key: "marketing-tasks", label: "Marketing Tasks", path: "/marketing-task/list", icon: "messageSquare" },
+    ],
+  },
+  {
+    label: "HRMS",
+    items: [
+      { key: "hrms", label: "HRMS", path: "/hrms", icon: "hrms" },
     ],
   },
   {
@@ -109,6 +129,8 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-agent-types", label: "Agent Types", path: "/masters/agent-types", permission: "agenttype.view" },
           { key: "masters-company-categories", label: "Company Categories", path: "/masters/company-categories", permission: "companycategory.view" },
           { key: "masters-company-sectors", label: "Company Sectors", path: "/masters/company-sectors", permission: "companysector.view" },
+          { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", permission: "suppliertype.view" },
+          { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", permission: "buyertype.view" },
           { key: "masters-warehouses", label: "Warehouses", path: "/masters/warehouses", permission: "warehouse.view" },
           { key: "masters-uom", label: "UOM", path: "/masters/uom", permission: "uom.view" },
           { key: "masters-billing-company", label: "Billing Company", path: "/masters/billing-company", permission: "billingcompany.view" },
@@ -141,8 +163,17 @@ export const PAGE_TITLES: Record<string, string> = {
   trash: "Trash Management",
   dashboard: "Dashboard",
   reports: "Reports & Analytics",
-  buyers: "Agents & Buyers",
-  inquiries: "Proforma & Sales",
+  inquiries: "Inquiries",
+  proforma: "Proforma Invoices",
+  "sales-process": "Sales Process",
+  "discount-payments": "Discount Payments",
+  "local-purchases": "Local Purchase",
+  "import-purchases": "Import Purchase",
+  "purchase-suppliers": "Suppliers",
+  "reports-re-order": "Re-Order",
+  "reports-stock-transactions": "Stock Transactions",
+  "reports-deleted-orders": "Deleted Orders",
+  "reports-general": "General Reports",
   planning: "Shipment Planning",
   crm: "Customer Relationship Management",
   sales: "Sales Process",
@@ -150,7 +181,7 @@ export const PAGE_TITLES: Record<string, string> = {
   inventory: "Inventory & Stock",
   manufacturing: "Manufacturing",
   finance: "Finance & Accounts",
-  hrms: "Human Resource Management",
+  hrms: "HRMS",
   organization: "Organization Settings",
   users: "Users",
   employees: "Employees",
@@ -224,6 +255,10 @@ export const NAV_ITEMS_BY_KEY: Record<string, NavItem | NavSubItem> = NAV_SECTIO
   {} as Record<string, NavItem | NavSubItem>
 );
 
+if (NAV_ITEMS_BY_KEY["purchase-suppliers"] && !NAV_ITEMS_BY_KEY["suppliers"]) {
+  NAV_ITEMS_BY_KEY["suppliers"] = NAV_ITEMS_BY_KEY["purchase-suppliers"];
+}
+
 /**
  * Old filename -> new path, for bookmark compatibility.
  */
@@ -239,8 +274,10 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/teams.html": "/users",
   "/teams": "/users",
   "/suppliers.html": "/suppliers",
-  "/buyers.html": "/buyers",
-  "/inquiries.html": "/inquiries",
+  "/supplier/list": "/suppliers",
+  "/supplier": "/suppliers",
+  "/inquiries.html": "/proforma-invoice/list",
+  "/inquiries": "/proforma-invoice/list",
   "/masters-countries.html": "/masters/countries",
   "/masters-states.html": "/masters/states",
   "/masters-districts.html": "/masters/districts",
@@ -253,6 +290,15 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/masters-categories.html": "/masters/categories",
   "/masters-subcategories.html": "/masters/subcategories",
   "/masters-products.html": "/masters/products",
+  "/proforma-invoice/list": "/proforma-invoice/list",
+  "/sale-process/list": "/sales/process",
+  "/sales-process/list": "/sales/process",
+  "/discount-payments/list": "/discount-payments/list",
+  "/purchase/local": "/purchase-order/list",
+  "/purchase/local/list": "/purchase-order/list",
+  "/purchase-order": "/purchase-order/list",
+  "/purchase-order.html": "/purchase-order/list",
+  "/purchase-order/list": "/purchase-order/list",
   "/product-stock": "/product-stock/list",
   "/product-stock.html": "/product-stock/list",
   "/product_stock/list": "/product-stock/list",
@@ -284,6 +330,8 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/technical-tasks.html": "/technical-task/list",
   "/marketing-tasks": "/marketing-task/list",
   "/marketing-tasks.html": "/marketing-task/list",
+  "/hrms.html": "/hrms",
+  "/hrms/dashboard": "/hrms",
   // Both of these were already redirect-only stubs in the original.
   "/employee-detail.html": "/users",
   "/employee-form.html": "/users",
