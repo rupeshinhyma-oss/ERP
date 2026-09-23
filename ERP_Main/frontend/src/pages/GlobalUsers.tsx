@@ -402,47 +402,93 @@ export function GlobalUsers() {
         {/* Filter and Search Bar */}
         <div
           style={{
-            padding: "16px 20px",
+            padding: "14px 20px",
             borderBottom: "1px solid var(--color-border, #e2e8f0)",
             background: "var(--color-surface, #ffffff)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             flexWrap: "wrap",
-            gap: "16px",
+            gap: "12px",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: "1 1 360px" }}>
-            <div style={{ position: "relative", width: "100%", maxWidth: "380px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <div style={{ position: "relative", width: "320px" }}>
               <span
                 style={{
                   position: "absolute",
-                  left: "12px",
+                  left: "11px",
                   top: "50%",
                   transform: "translateY(-50%)",
                   color: "var(--color-muted, #94a3b8)",
                   display: "flex",
+                  pointerEvents: "none",
                 }}
               >
-                <ICONS.search width={16} height={16} />
+                <ICONS.search width={15} height={15} />
               </span>
               <input
                 type="text"
                 id="input-search-users"
-                placeholder="Search by name, email or external ID..."
+                placeholder="Search by name, email or ID..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="form-control"
-                style={{ paddingLeft: "36px", height: "38px", fontSize: "13.5px" }}
+                style={{
+                  width: "100%",
+                  height: "36px",
+                  paddingLeft: "34px",
+                  paddingRight: search ? "28px" : "12px",
+                  fontSize: "13px",
+                  color: "var(--color-text, #1e293b)",
+                  background: "var(--color-surface, #ffffff)",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "6px",
+                  outline: "none",
+                  boxSizing: "border-box",
+                  transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+                }}
               />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    padding: "2px",
+                    display: "flex",
+                  }}
+                  title="Clear search"
+                >
+                  <ICONS.x width={14} height={14} />
+                </button>
+              )}
             </div>
 
             <select
               id="select-status-filter"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="form-control"
-              style={{ width: "160px", height: "38px", fontSize: "13.5px" }}
+              style={{
+                width: "140px",
+                height: "36px",
+                fontSize: "13px",
+                color: "#334155",
+                background: "#ffffff",
+                border: "1px solid #cbd5e1",
+                borderRadius: "6px",
+                paddingLeft: "10px",
+                paddingRight: "30px",
+                cursor: "pointer",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
             >
               {STATUS_FILTERS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
