@@ -1089,32 +1089,31 @@ export function GlobalUsers() {
         <Modal
           open={Boolean(detailUser)}
           onClose={() => setDetailUser(null)}
-          title={
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", paddingRight: "16px" }}>
-              <span style={{ fontWeight: 700, fontSize: "16px" }}>Global User: {detailUser.display_name}</span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => handleOpenEdit(detailUser)}
-                style={{
-                  fontSize: "12px",
-                  padding: "4px 12px",
-                  borderRadius: "5px",
-                  fontWeight: 500,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  backgroundColor: "#ffffff",
-                  borderColor: "#cbd5e1",
-                  color: "var(--color-text)",
-                  cursor: "pointer",
-                }}
-                title="Edit this user profile"
-              >
-                <ICONS.edit width={13} height={13} />
-                Edit
-              </button>
-            </div>
+          title={`Global User: ${detailUser.display_name}`}
+          subtitle="Platform Identity & Unified Access Control"
+          headerAction={
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleOpenEdit(detailUser)}
+              style={{
+                fontSize: "12px",
+                padding: "5px 12px",
+                borderRadius: "6px",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                backgroundColor: "#ffffff",
+                border: "1px solid #cbd5e1",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                cursor: "pointer",
+              }}
+              title="Edit this user profile"
+            >
+              <ICONS.edit width={13} height={13} />
+              Edit
+            </button>
           }
         >
           <div>
@@ -1162,38 +1161,117 @@ export function GlobalUsers() {
                 {/* TAB 1: OVERVIEW */}
                 {detailTab === "overview" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    {/* Hero Identity Card */}
                     <div
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "12px 16px",
-                        background: "#f8fafc",
-                        borderRadius: "8px",
+                        background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
                         border: "1px solid #e2e8f0",
+                        borderRadius: "10px",
+                        padding: "16px 20px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "16px",
                       }}
                     >
-                      <div>
-                        <strong style={{ fontSize: "13.5px", color: "var(--color-text)" }}>
-                          Identity Profile
-                        </strong>
-                        <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "2px" }}>
-                          Display name, primary ecosystem email, and SSO external identifier.
+                      <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                        <div
+                          style={{
+                            width: "48px",
+                            height: "48px",
+                            borderRadius: "50%",
+                            background: isDetailUserAdmin
+                              ? "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)"
+                              : "linear-gradient(135deg, #0284c7 0%, #2563eb 100%)",
+                            color: "#ffffff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: 700,
+                            fontSize: "16px",
+                            boxShadow: "0 2px 6px rgba(0, 97, 242, 0.2)",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {detailUser.display_name
+                            ? detailUser.display_name
+                                .trim()
+                                .split(/\s+/)
+                                .map((n) => n[0])
+                                .slice(0, 2)
+                                .join("")
+                                .toUpperCase()
+                            : "GU"}
+                        </div>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <h4 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+                              {detailUser.display_name}
+                            </h4>
+                            <StatusBadge status={detailUser.status} />
+                            {isDetailUserAdmin && (
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  fontWeight: 700,
+                                  padding: "2px 8px",
+                                  borderRadius: "4px",
+                                  backgroundColor: "#ede9fe",
+                                  color: "#5b21b6",
+                                  border: "1px solid #ddd6fe",
+                                }}
+                              >
+                                👑 System Admin
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                            <span style={{ fontSize: "13px", color: "#475569", fontWeight: 500 }}>
+                              {detailUser.primary_email || detailUser.email || "—"}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const emailToCopy = detailUser.primary_email || detailUser.email || "";
+                                if (emailToCopy) {
+                                  navigator.clipboard.writeText(emailToCopy);
+                                  toast("Email copied to clipboard.", "info");
+                                }
+                              }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#94a3b8",
+                                cursor: "pointer",
+                                padding: "2px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                              }}
+                              title="Copy email to clipboard"
+                            >
+                              <ICONS.copy width={12} height={12} />
+                            </button>
+                          </div>
                         </div>
                       </div>
+
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
                         onClick={() => handleOpenEdit(detailUser)}
                         style={{
                           fontSize: "12px",
-                          padding: "5px 14px",
-                          borderRadius: "5px",
+                          padding: "6px 14px",
+                          borderRadius: "6px",
                           fontWeight: 600,
                           display: "inline-flex",
                           alignItems: "center",
                           gap: "6px",
+                          backgroundColor: "#ffffff",
+                          border: "1px solid #cbd5e1",
+                          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
                           cursor: "pointer",
+                          flexShrink: 0,
                         }}
                       >
                         <ICONS.edit width={13} height={13} />
@@ -1201,105 +1279,347 @@ export function GlobalUsers() {
                       </button>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                      <div>
-                        <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Platform User ID</span>
-                        <div style={{ fontFamily: "monospace", fontSize: "12px" }}>{detailUser.id}</div>
+                    {/* Security & Identity Card */}
+                    <div
+                      style={{
+                        background: "#ffffff",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "10px",
+                        padding: "16px 20px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "14px",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "10px" }}>
+                        <ICONS.shield width={15} height={15} color="#0061f2" />
+                        <strong style={{ fontSize: "12.5px", color: "#334155", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                          Platform Identity & Security
+                        </strong>
                       </div>
-                      <div>
-                        <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Status</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 20px" }}>
+                        <div>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                            Platform User ID
+                          </span>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
+                            <code
+                              style={{
+                                fontFamily: "monospace",
+                                fontSize: "11.5px",
+                                background: "#f8fafc",
+                                padding: "3px 8px",
+                                borderRadius: "4px",
+                                border: "1px solid #e2e8f0",
+                                color: "#334155",
+                                wordBreak: "break-all",
+                              }}
+                            >
+                              {detailUser.id}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(detailUser.id);
+                                toast("Platform User ID copied.", "info");
+                              }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#94a3b8",
+                                cursor: "pointer",
+                                padding: "2px",
+                                display: "inline-flex",
+                              }}
+                              title="Copy Platform User ID"
+                            >
+                              <ICONS.copy width={12} height={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                            Identity Provider (SSO)
+                          </span>
+                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 500 }}>
+                            {detailUser.external_identity_id ? (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                <ICONS.link width={12} height={12} color="#0061f2" />
+                                {detailUser.external_identity_id}
+                              </span>
+                            ) : (
+                              <span style={{ color: "#64748b", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                <ICONS.key width={12} height={12} color="#94a3b8" />
+                                Native Platform Identity (Local)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                            Created At
+                          </span>
+                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#334155" }}>
+                            {detailUser.created_at ? new Date(detailUser.created_at).toLocaleString() : "—"}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                            Updated At
+                          </span>
+                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#334155" }}>
+                            {detailUser.updated_at ? new Date(detailUser.updated_at).toLocaleString() : "—"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Status Governance Footer */}
+                      <div
+                        style={{
+                          marginTop: "2px",
+                          paddingTop: "12px",
+                          borderTop: "1px solid #f1f5f9",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          flexWrap: "wrap",
+                          gap: "10px",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                            Account Status:
+                          </span>
                           <StatusBadge status={detailUser.status} />
-                          {!isRowUserAdmin(detailUser) && (
-                            <>
+                        </div>
+
+                        {!isDetailUserAdmin ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleOpenStatus(detailUser)}
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 10px",
+                                borderRadius: "4px",
+                                fontWeight: 500,
+                              }}
+                              title="Change lifecycle status (Active / Suspended / Disabled)"
+                            >
+                              Change Status
+                            </button>
+                            {detailUser.status === "DISABLED" ? (
                               <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
-                                onClick={() => handleOpenStatus(detailUser)}
+                                onClick={() => handleEnableUser(detailUser)}
                                 style={{
                                   fontSize: "11px",
-                                  padding: "2px 8px",
+                                  padding: "3px 10px",
                                   borderRadius: "4px",
-                                  fontWeight: 500,
+                                  fontWeight: 600,
+                                  color: "#059669",
+                                  borderColor: "#a7f3d0",
+                                  backgroundColor: "#ecfdf5",
                                 }}
-                                title="Change lifecycle status (Active / Suspended / Disabled)"
                               >
-                                Change Status
+                                Enable Account
                               </button>
-                              {detailUser.status === "DISABLED" ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => handleEnableUser(detailUser)}
-                                  style={{
-                                    fontSize: "11px",
-                                    padding: "2px 8px",
-                                    borderRadius: "4px",
-                                    fontWeight: 500,
-                                    color: "#059669",
-                                    borderColor: "#a7f3d0",
-                                    backgroundColor: "#ecfdf5",
-                                  }}
-                                >
-                                  Enable Account
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => setConfirmDisableUser(detailUser)}
-                                  style={{
-                                    fontSize: "11px",
-                                    padding: "2px 8px",
-                                    borderRadius: "4px",
-                                    fontWeight: 500,
-                                    color: "#dc2626",
-                                    borderColor: "#fecaca",
-                                    backgroundColor: "#fef2f2",
-                                  }}
-                                >
-                                  Disable Account
-                                </button>
-                              )}
-                            </>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setConfirmDisableUser(detailUser)}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "3px 10px",
+                                  borderRadius: "4px",
+                                  fontWeight: 600,
+                                  color: "#dc2626",
+                                  borderColor: "#fecaca",
+                                  backgroundColor: "#fef2f2",
+                                }}
+                              >
+                                Disable Account
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: "12px", color: "#059669", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
+                            Protected Platform Administrator
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Ecosystem Footprint Card */}
+                    <div
+                      style={{
+                        background: "#ffffff",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "10px",
+                        padding: "16px 20px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "12px",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <ICONS.globe width={15} height={15} color="#0061f2" />
+                          <strong style={{ fontSize: "12.5px", color: "#334155", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                            Ecosystem Footprint
+                          </strong>
+                        </div>
+                        <span style={{ fontSize: "12px", color: "#64748b" }}>
+                          {userMemberships.length} linked environment{userMemberships.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                        {/* ERP Memberships summary */}
+                        <div
+                          style={{
+                            padding: "12px 14px",
+                            background: "#f8fafc",
+                            borderRadius: "8px",
+                            border: "1px solid #e2e8f0",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>Linked ERPs</span>
+                            <button
+                              type="button"
+                              onClick={() => setDetailTab("memberships")}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "#0061f2",
+                                fontSize: "11.5px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                padding: 0,
+                              }}
+                            >
+                              View all ({userMemberships.length}) →
+                            </button>
+                          </div>
+                          {userMemberships.length === 0 ? (
+                            <div style={{ fontSize: "12px", color: "#94a3b8" }}>No ERP memberships linked yet.</div>
+                          ) : (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                              {userMemberships.map((m) => {
+                                const erp = erps.find((e) => e.id === m.erp_instance_id);
+                                return (
+                                  <span
+                                    key={m.id}
+                                    style={{
+                                      fontSize: "11px",
+                                      padding: "3px 8px",
+                                      borderRadius: "4px",
+                                      backgroundColor: "#ffffff",
+                                      border: "1px solid #cbd5e1",
+                                      color: "#334155",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                  >
+                                    <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: m.status === "ACTIVE" ? "#10b981" : "#f59e0b" }} />
+                                    {erp?.name || m.erp_name || "Business ERP"}
+                                  </span>
+                                );
+                              })}
+                            </div>
                           )}
                         </div>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Primary Email</span>
-                        <div style={{ fontWeight: 600 }}>{detailUser.primary_email || detailUser.email}</div>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>External Identity</span>
-                        <div>{detailUser.external_identity_id || "None (Local Platform)"}</div>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Created At</span>
-                        <div style={{ fontSize: "13px" }}>
-                          {detailUser.created_at ? new Date(detailUser.created_at).toLocaleString() : "—"}
-                        </div>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Updated At</span>
-                        <div style={{ fontSize: "13px" }}>
-                          {detailUser.updated_at ? new Date(detailUser.updated_at).toLocaleString() : "—"}
+
+                        {/* Platform Roles summary */}
+                        <div
+                          style={{
+                            padding: "12px 14px",
+                            background: "#f8fafc",
+                            borderRadius: "8px",
+                            border: "1px solid #e2e8f0",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>Platform Roles</span>
+                            <button
+                              type="button"
+                              onClick={() => setDetailTab("roles")}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "#0061f2",
+                                fontSize: "11.5px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                padding: 0,
+                              }}
+                            >
+                              View all ({userRoles.filter((r) => r.is_active).length}) →
+                            </button>
+                          </div>
+                          {userRoles.filter((r) => r.is_active).length === 0 ? (
+                            <div style={{ fontSize: "12px", color: "#94a3b8" }}>Standard baseline permissions.</div>
+                          ) : (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                              {userRoles.filter((r) => r.is_active).map((r) => (
+                                <span
+                                  key={r.id}
+                                  style={{
+                                    fontSize: "11px",
+                                    padding: "3px 8px",
+                                    borderRadius: "4px",
+                                    backgroundColor: r.scope === "GLOBAL" ? "#ede9fe" : "#fef3c7",
+                                    color: r.scope === "GLOBAL" ? "#5b21b6" : "#92400e",
+                                    border: `1px solid ${r.scope === "GLOBAL" ? "#ddd6fe" : "#fde68a"}`,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {r.role_key}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
 
                     {detailUser.metadata && Object.keys(detailUser.metadata).length > 0 && (
-                      <div>
-                        <span style={{ fontSize: "12px", color: "var(--color-muted)", display: "block", marginBottom: "4px" }}>
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "10px",
+                          padding: "16px 20px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "8px",
+                        }}
+                      >
+                        <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
                           Metadata Payload
                         </span>
                         <pre
                           style={{
                             background: "#f8fafc",
-                            padding: "10px",
+                            padding: "10px 12px",
                             borderRadius: "6px",
+                            border: "1px solid #e2e8f0",
                             fontSize: "11px",
                             overflow: "auto",
                             maxHeight: "150px",
+                            margin: 0,
                           }}
                         >
                           {JSON.stringify(detailUser.metadata, null, 2)}

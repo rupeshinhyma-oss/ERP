@@ -82,6 +82,8 @@ export interface ModalProps {
   open?: boolean;
   isOpen?: boolean;
   title?: ReactNode;
+  subtitle?: ReactNode;
+  headerAction?: ReactNode;
   onClose: () => void;
   children: ReactNode;
   variant?: "drawer" | "center";
@@ -95,6 +97,8 @@ export function Modal({
   open,
   isOpen,
   title,
+  subtitle,
+  headerAction,
   onClose,
   children,
   variant = "drawer",
@@ -128,18 +132,28 @@ export function Modal({
       >
         {showHeader && (
           <div className="modal-header">
-            <h3 className="modal-title">{title}</h3>
-            {!locked && (
-              <button
-                type="button"
-                className="modal-close"
-                onClick={onClose}
-                aria-label="Close dialog"
-                title="Close"
-              >
-                <IconX width={18} height={18} />
-              </button>
-            )}
+            <div style={{ minWidth: 0, flex: 1, marginRight: "16px" }}>
+              <h3 className="modal-title" style={{ margin: 0 }}>{title}</h3>
+              {subtitle && (
+                <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "2px" }}>
+                  {subtitle}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+              {headerAction}
+              {!locked && (
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={onClose}
+                  aria-label="Close dialog"
+                  title="Close"
+                >
+                  <IconX width={18} height={18} />
+                </button>
+              )}
+            </div>
           </div>
         )}
         <div className="modal-body">{children}</div>
