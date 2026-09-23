@@ -955,7 +955,7 @@ export function GlobalUsers() {
                 >
                   {erps.map((erp) => (
                     <option key={erp.id} value={erp.id}>
-                      {erp.name} ({erp.erp_key}) — v{erp.version}
+                      {erp.name || erp.display_name} ({erp.key || erp.erp_key || "ERP"}){erp.version ? ` — v${erp.version}` : ""}
                     </option>
                   ))}
                 </select>
@@ -1463,7 +1463,7 @@ export function GlobalUsers() {
                 >
                   {erps.map((e) => (
                     <option key={e.id} value={e.id}>
-                      {e.name} ({e.erp_key})
+                      {e.name || e.display_name} ({e.key || e.erp_key || "ERP"})
                     </option>
                   ))}
                 </select>
