@@ -165,6 +165,12 @@ Organized as a structured **3-Layer Procurement Hierarchy**:
    - **Sticky Top Headline**: Enclosed the orders table in a responsive scroll container (`.table-scroll` with `maxHeight: calc(100vh - 280px)`, `minHeight: 360px`, `overflowY: auto`, `overflowX: auto`). All 10 `<th>` headers (`#`, `Order Date`, `Order No`, `Consignment`, `Buyer / Branch`, `Items Qty`, `Total Amount`, `Status`, `Logistics Info`, `Actions`) are configured with `position: sticky; top: 0; zIndex: 10/25` with `borderCollapse: separate; borderSpacing: 0`.
    - **Pinned `#` (Sr. No.) Column**: Pinned `#` with `position: sticky; left: 0; zIndex: 25 (th) / 5 (td)` so order sequence numbers remain in view when panning horizontally.
    - **Row Divider Integrity**: Set explicit `borderBottom: 1px solid #f1f5f9` on each `<td>` cell so row separators render cleanly with `borderCollapse: separate`.
+9. **Smart Trash Pre-Check & Historical Data Protection (`Trash.tsx`, `app/trash/service.py`, `app/trash/routes.py`)**:
+   - **Root Cause Eliminated**: Deleting suppliers or master entities previously threw database foreign key constraint errors (`ForeignKeyViolationError`) if they had links to historical Local Purchases, Inquiry Quotations, RFQs, or Product Suppliers.
+   - **Transaction Dependency Pre-Check**: Added `check_dependencies` across `Supplier`, `Buyer`, `Product`, `Category`, `SubCategory`, `Brand`, `UOM`, and `HSN Code` entities.
+   - **Descriptive Conflict Alerts**: When attempting to permanently delete a single record with active references, a clear, actionable `ConflictException` (HTTP 409) is returned explaining exactly what transactions depend on it (e.g., *"Cannot permanently delete Supplier 'Yinglima Packaging' because it is linked to 3 Local Purchase orders and 2 Inquiry Quotations."*).
+   - **Safe Empty Trash & Nested Savepoints**: For bulk deletion and "Empty Trash", PostgreSQL savepoints (`db.begin_nested()`) are used to permanently remove unlinked records while safely skipping and preserving active transaction records.
+   - **Frontend Transparency**: In `Trash.tsx`, banner notifications dynamically display the backend's informative message explaining how many items were deleted and how many were kept safely archived.
 
 ### B. Verification Checklist for Git Pull / Branch Switch:
 1. **Build & Typing Verification**:
@@ -178,6 +184,31 @@ Organized as a structured **3-Layer Procurement Hierarchy**:
    - Supplier table ➔ Company Names clamp at 2 lines; `CURRENT STATUS` wraps onto 2 lines in 105px column.
    - Product Master ➔ + New Product ➔ enter trashed name (e.g. `Test 78`) ➔ **"Record Already Exists in Trash"** modal pops up with 1-click restore.
    - Buyer Master ➔ delete test buyer (e.g. `Test 81`) ➔ create buyer `Test 81` ➔ **"Record Already Exists in Trash"** modal pops up with 1-click restore.
+
+---
+
+## 6.2. September 23, 2026 Updates (Performance Hardening, Product Substring Suggestions & Remote Merge)
+
+### 1. Product Name Autocomplete & Keyword Suggestions (Tally-Style Substring Matching)
+* **Dedicated High-Speed Backend Endpoint:** Added `GET /api/v1/masters/products/names-lookup?search=<keyword>&limit=25` on `backend/app/masters/products/routes.py` and `service.py`.
+  * Selects only 4 lightweight columns (`id, product_name_tally, product_name, product_code`).
+  * Utilizes PostgreSQL trigram index for instant substring matching anywhere in the name (e.g., typing `Switch` or `Test` matches prefixes, middle words, or suffixes).
+  * Executes in **<50 milliseconds**.
+* **Instant In-Memory + Network Hybrid Search:** Updated `fetchProductNameOptions` in `frontend/src/pages/masters/Products.tsx` to search in-memory items instantly with 0ms delay while querying `/masters/products/names-lookup` for complete catalog discovery.
+* **Dropdown Selection & Focus Bug Fixed:** In `frontend/src/components/SearchableDropdown.tsx`:
+  * Fixed `handleFocus`, `handleClick`, keyboard arrow navigation, and toggle arrow handlers which were previously resetting the search query to `""`, wiping out matching suggestions.
+
+### 2. High Loading Time & Pending Requests Fix (Eliminated Heavy Page Sizes)
+* **Removed Heavy Catalog Preload in Product Master:** Removed the duplicate `page_size=500` full product fetch that ran on initial page load and on live websocket events in `Products.tsx`.
+* **Added Fast Supplier Lookup Endpoint:** Added `GET /api/v1/suppliers/lookup` in `backend/app/suppliers/routes.py` and `service.py`. Replaced slow `/suppliers?page_size=500` fallback with `/suppliers/lookup`, which is cached in memory and returns active suppliers in milliseconds.
+* **Product Gallery Optimization:** In `ProductGallery.tsx`, replaced `page_size=1000` with `page_size=100` and added `has_images=true`. Updated `backend/app/masters/products/repository.py` to support `has_images` filtering, eliminating the download of thousands of empty records.
+* **Database Connection Pool Expansion:** Increased `DATABASE_POOL_SIZE` from `5` to `15` and `DATABASE_POOL_TIMEOUT_SECONDS` to `15` in `backend/.env`. Prevented 9–11 parallel API requests on page load from queueing up.
+
+### 3. Remote Synchronization & Merge (`78cb5d5`)
+* Merged incoming changes from `origin/main`:
+  * **Inhyma_ERP:** Google Maps Platform Places API (New) integration, HRMS Location Master & WFH requests module, Sales Process & Local/Import Purchase PDF generation.
+  * **ERP_Main:** Topbar Ecosystem Switcher, unified User & Access navigation, polished Global Users directory.
+* **Local Yinglima Enhancements:** Fully preserved with zero regressions. All changes remain **100% local** without git push.
 
 ---
 

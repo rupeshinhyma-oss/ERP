@@ -51,15 +51,23 @@ export function SaleProcessListPage() {
 
   // Action Menu & Modal State
   const [openActionId, setOpenActionId] = useState<string | null>(null);
+  const [actionMenuPos, setActionMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [viewOrderId, setViewOrderId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  // Close kebab action menu on outside click
+  // Close kebab action menu on outside click or scroll
   useEffect(() => {
     if (!openActionId) return;
-    const handleOutsideClick = () => setOpenActionId(null);
-    document.addEventListener("click", handleOutsideClick);
-    return () => document.removeEventListener("click", handleOutsideClick);
+    const closeMenu = () => {
+      setOpenActionId(null);
+      setActionMenuPos(null);
+    };
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
   }, [openActionId]);
 
   // Lookups
@@ -859,6 +867,8 @@ export function SaleProcessListPage() {
                       style={{
                         backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fcfdfe",
                         cursor: "pointer",
+                        position: openActionId === order.id ? "relative" : undefined,
+                        zIndex: openActionId === order.id ? 150 : undefined,
                       }}
                       onClick={() => setViewOrderId(order.id)}
                     >
@@ -868,7 +878,7 @@ export function SaleProcessListPage() {
                           color: "#94a3b8",
                           position: "sticky",
                           left: 0,
-                          zIndex: 5,
+                          zIndex: openActionId === order.id ? 155 : 5,
                           background: idx % 2 === 0 ? "#ffffff" : "#fcfdfe",
                           borderBottom: "1px solid #f1f5f9",
                         }}
@@ -895,9 +905,9 @@ export function SaleProcessListPage() {
                             style={{
                               padding: "3px 8px",
                               borderRadius: "4px",
-                              background: "#e0f2fe",
-                              color: "#0369a1",
-                              fontWeight: 700,
+                              background: "#f0f9ff",
+                              color: "#0284c7",
+                              fontWeight: 600,
                               fontSize: "12px",
                               border: "1px solid #bae6fd",
                             }}
@@ -933,10 +943,10 @@ export function SaleProcessListPage() {
                             style={{
                               fontSize: "10px",
                               fontWeight: 700,
-                              padding: "1px 5px",
-                              borderRadius: "4px",
+                              padding: "1px 4px",
+                              borderRadius: "3px",
                               background: order.currency === "USD" ? "#ecfdf5" : "#eff6ff",
-                              color: order.currency === "USD" ? "#047857" : "#1d4ed8",
+                              color: order.currency === "USD" ? "#059669" : "#2563eb",
                               border: `1px solid ${order.currency === "USD" ? "#a7f3d0" : "#bfdbfe"}`,
                             }}
                           >
@@ -959,112 +969,45 @@ export function SaleProcessListPage() {
                         )}
                       </td>
                       <td
-                        style={{ padding: "10px 12px", textAlign: "center", position: "relative", borderBottom: "1px solid #f1f5f9" }}
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "center",
+                          position: "relative",
+                          borderBottom: "1px solid #f1f5f9",
+                        }}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setOpenActionId(openActionId === order.id ? null : order.id);
+                            if (openActionId === order.id) {
+                              setOpenActionId(null);
+                              setActionMenuPos(null);
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const menuHeight = 120;
+                              const spaceBelow = window.innerHeight - rect.bottom;
+                              const showAbove = spaceBelow < menuHeight;
+                              setActionMenuPos({
+                                top: showAbove ? rect.top - menuHeight - 4 : rect.bottom + 4,
+                                right: window.innerWidth - rect.right,
+                              });
+                              setOpenActionId(order.id);
+                            }
                           }}
                           style={{
-                            background: "none",
-                            border: "1px solid #e2e8f0",
+                            background: openActionId === order.id ? "#e2e8f0" : "none",
+                            border: "1px solid #cbd5e1",
                             borderRadius: "4px",
                             padding: "4px 8px",
                             cursor: "pointer",
                             fontSize: "14px",
-                            color: "#64748b",
+                            color: "#334155",
                           }}
                         >
                           ⋮
                         </button>
-
-                        {openActionId === order.id && (
-                          <div
-                            style={{
-                              position: "absolute",
-                              right: "12px",
-                              top: "38px",
-                              background: "#ffffff",
-                              borderRadius: "6px",
-                              border: "1px solid #e2e8f0",
-                              boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
-                              zIndex: 100,
-                              minWidth: "140px",
-                              textAlign: "left",
-                              overflow: "hidden",
-                            }}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenActionId(null);
-                                setViewOrderId(order.id);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                border: "none",
-                                background: "none",
-                                textAlign: "left",
-                                fontSize: "13px",
-                                cursor: "pointer",
-                                color: "#334155",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                            >
-                              👁️ View Details
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenActionId(null);
-                                navigate(`/sale/process/${order.id}/edit`);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                border: "none",
-                                background: "none",
-                                textAlign: "left",
-                                fontSize: "13px",
-                                cursor: "pointer",
-                                color: "#334155",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                            >
-                              ✏️ Edit Order
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenActionId(null);
-                                handleDelete(order.id, order.order_no);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                border: "none",
-                                background: "none",
-                                textAlign: "left",
-                                fontSize: "13px",
-                                cursor: "pointer",
-                                color: "#dc2626",
-                                borderTop: "1px solid #f1f5f9",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")}
-                              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                            >
-                              🗑️ Delete
-                            </button>
-                          </div>
-                        )}
                       </td>
                     </tr>
                   ))
@@ -1072,6 +1015,114 @@ export function SaleProcessListPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Floating Fixed Action Dropdown (Never Clipped by Table Container) */}
+          {openActionId && actionMenuPos && (() => {
+            const activeOrder = orders.find((o) => o.id === openActionId);
+            if (!activeOrder) return null;
+            return (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: "fixed",
+                  top: `${actionMenuPos.top}px`,
+                  right: `${actionMenuPos.right}px`,
+                  background: "#ffffff",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  boxShadow: "0 10px 25px rgba(0,0,0,0.18)",
+                  zIndex: 99999,
+                  minWidth: "145px",
+                  textAlign: "left",
+                  overflow: "hidden",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = activeOrder.id;
+                    setOpenActionId(null);
+                    setActionMenuPos(null);
+                    setViewOrderId(id);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    border: "none",
+                    background: "none",
+                    textAlign: "left",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    color: "#334155",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                >
+                  <span>👁️</span> <span>View Details</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = activeOrder.id;
+                    setOpenActionId(null);
+                    setActionMenuPos(null);
+                    navigate(`/sale/process/${id}/edit`);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    border: "none",
+                    background: "none",
+                    textAlign: "left",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    color: "#334155",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    borderTop: "1px solid #f1f5f9",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                >
+                  <span>✏️</span> <span>Edit Order</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = activeOrder.id;
+                    const orderNo = activeOrder.order_no;
+                    setOpenActionId(null);
+                    setActionMenuPos(null);
+                    handleDelete(id, orderNo);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    border: "none",
+                    background: "none",
+                    textAlign: "left",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    color: "#dc2626",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    borderTop: "1px solid #f1f5f9",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                >
+                  <span>🗑️</span> <span>Delete</span>
+                </button>
+              </div>
+            );
+          })()}
 
           {/* Pagination */}
           <div

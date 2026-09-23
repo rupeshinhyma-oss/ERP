@@ -166,8 +166,9 @@ export function TrashPage() {
       setError(null);
       setSuccessMsg(null);
       try {
-        await apiPost("/trash/permanent-delete", { items: [{ entity_type: entityType, id }] });
-        setSuccessMsg(`Permanently deleted '${name}' from database.`);
+        const res = await apiPost<{ message?: string }>("/trash/permanent-delete", { items: [{ entity_type: entityType, id }] });
+        const msg = res?.data?.message || `Permanently deleted '${name}' from database.`;
+        setSuccessMsg(msg);
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
@@ -188,8 +189,9 @@ export function TrashPage() {
       });
 
       try {
-        await apiPost("/trash/restore", { items: payloadItems });
-        setSuccessMsg(`Successfully restored ${payloadItems.length} selected item(s).`);
+        const res = await apiPost<{ message?: string; restored_count?: number }>("/trash/restore", { items: payloadItems });
+        const msg = res?.data?.message || `Successfully restored ${payloadItems.length} selected item(s).`;
+        setSuccessMsg(msg);
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
@@ -217,8 +219,9 @@ export function TrashPage() {
       });
 
       try {
-        await apiPost("/trash/permanent-delete", { items: payloadItems });
-        setSuccessMsg(`Permanently deleted ${payloadItems.length} item(s) from database.`);
+        const res = await apiPost<{ message?: string; deleted_count?: number }>("/trash/permanent-delete", { items: payloadItems });
+        const msg = res?.data?.message || `Permanently deleted ${res?.data?.deleted_count ?? payloadItems.length} item(s) from database.`;
+        setSuccessMsg(msg);
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
@@ -231,7 +234,7 @@ export function TrashPage() {
     if (items.length === 0) return;
     if (
       !confirm(
-        "Are you sure you want to EMPTY THE TRASH?\n\nALL soft-deleted items will be PERMANENTLY DELETED from the database!"
+        "Are you sure you want to EMPTY THE TRASH?\n\nALL soft-deleted items without active transaction dependencies will be PERMANENTLY DELETED from the database!"
       )
     ) {
       return;
@@ -241,9 +244,9 @@ export function TrashPage() {
       setSuccessMsg(null);
 
       try {
-        const res = await apiPost<{ deleted_count: number }>("/trash/empty", {});
-        const count = res?.data?.deleted_count || 0;
-        setSuccessMsg(`Trash emptied. Permanently deleted ${count} item(s).`);
+        const res = await apiPost<{ deleted_count: number; skipped_count?: number; message?: string }>("/trash/empty", {});
+        const msg = res?.data?.message || `Trash emptied. Permanently deleted ${res?.data?.deleted_count || 0} item(s).`;
+        setSuccessMsg(msg);
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
@@ -289,12 +292,7 @@ export function TrashPage() {
           )}
         </div>
 
-        <Banner error={error} />
-        {successMsg && (
-          <div className="banner banner-success" style={{ marginBottom: "16px" }}>
-            {successMsg}
-          </div>
-        )}
+        <Banner error={error} success={successMsg} />
 
         {/* Toolbar & Filters */}
         <div

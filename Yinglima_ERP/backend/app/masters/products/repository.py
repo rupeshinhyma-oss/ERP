@@ -17,20 +17,26 @@ class ProductRepository(BaseRepository[Product]):
 
     searchable_fields = ("product_code", "product_name", "product_name_tally", "product_name_invoice", "barcode")
     sortable_fields = ("product_code", "product_name", "created_at", "updated_at", "standard_price")
-    filterable_fields = ("status", "category_id", "sub_category_id", "brand_id", "hsn_id", "uom_id", "organization_id")
+    filterable_fields = ("status", "category_id", "sub_category_id", "brand_id", "hsn_id", "uom_id", "organization_id", "has_images")
 
     def __init__(self, session: AsyncSession) -> None:
         """Bind to a DB session, operating on the ``Product`` model."""
         super().__init__(session, Product)
 
-    def _apply_filters(self, stmt: Select, filters: dict[str, Any] | None) -> Select:
-        """Apply filters, matching organization_id against both single and multi-org fields."""
+    def _apply_dynamic_filters(self, stmt: Select, filters: Any) -> Select:
+        """Apply filters, matching organization_id against both single and multi-org fields and has_images."""
         if not filters:
             return stmt
-        from sqlalchemy import String, cast, or_
-        filters_copy = dict(filters)
-        org_id = filters_copy.pop("organization_id", None)
-        stmt = super()._apply_filters(stmt, filters_copy)
+        from sqlalchemy import String, cast, func, or_
+        from app.common.filtering import FilterParams
+
+        exact_copy = dict(filters.exact)
+        org_id = exact_copy.pop("organization_id", None)
+        has_images = exact_copy.pop("has_images", None)
+
+        filters_copy = FilterParams(exact=exact_copy, ranges=filters.ranges)
+        stmt = super()._apply_dynamic_filters(stmt, filters_copy)
+
         if org_id is not None:
             org_str = str(org_id)
             stmt = stmt.where(
@@ -39,6 +45,20 @@ class ProductRepository(BaseRepository[Product]):
                     Product.organization_ids.cast(String).ilike(f"%{org_str}%"),
                 )
             )
+        if has_images is not None:
+            is_true = str(has_images).lower() in ("true", "1", "yes")
+            if is_true:
+                stmt = stmt.where(
+                    Product.images.is_not(None),
+                    func.json_array_length(Product.images) > 0,
+                )
+            else:
+                stmt = stmt.where(
+                    or_(
+                        Product.images.is_(None),
+                        func.json_array_length(Product.images) == 0,
+                    )
+                )
         return stmt
 
     async def get_by_id(self, id_: uuid.UUID) -> Product | None:

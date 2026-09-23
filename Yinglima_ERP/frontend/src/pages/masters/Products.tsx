@@ -31,7 +31,7 @@ import {
   nullIfBlank,
   numOrNull,
 } from "@/components/fields";
-import { API_ORIGIN, apiGet, apiPostMultipart, toQueryString } from "@/lib/api";
+import { API_ORIGIN, apiGet, apiPostMultipart } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type {
   Brand,
@@ -192,17 +192,17 @@ function ProductIdentityFields({
 
       nameCheckTimer.current = setTimeout(async () => {
         try {
-          const { data } = await apiGet<Product[]>(
-            "/masters/products" + toQueryString({ search: trimmed, page: 1, page_size: 25 })
+          const { data } = await apiGet<Array<{ id: string; name: string; code: string }>>(
+            `/masters/products/names-lookup?search=${encodeURIComponent(trimmed)}&limit=25`
           );
           const list = data || [];
           const exact = list.find((p) => {
             if (editingId && String(p.id).toLowerCase() === editingId) return false;
-            const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
+            const pName = (p.name || "").toLowerCase().replace(/[\s-]/g, "");
             return pName === cleanTyped;
           });
           if (exact) {
-            setExactNameDuplicate(exact.product_name_tally || exact.product_name || trimmed);
+            setExactNameDuplicate(exact.name || trimmed);
           } else {
             setExactNameDuplicate(null);
           }
@@ -246,18 +246,18 @@ function ProductIdentityFields({
 
       codeCheckTimer.current = setTimeout(async () => {
         try {
-          const { data } = await apiGet<Product[]>(
-            "/masters/products" + toQueryString({ search: trimmed, page: 1, page_size: 25 })
+          const { data } = await apiGet<Array<{ id: string; name: string; code: string }>>(
+            `/masters/products/names-lookup?search=${encodeURIComponent(trimmed)}&limit=25`
           );
           const list = data || [];
           const exact = list.find((p) => {
             if (editingId && String(p.id).toLowerCase() === editingId) return false;
-            return (p.product_code || "").trim().toLowerCase() === cleanCode;
+            return (p.code || "").trim().toLowerCase() === cleanCode;
           });
           if (exact) {
             setExactCodeDuplicate({
-              code: exact.product_code || trimmed,
-              name: exact.product_name_tally || exact.product_name || "Existing Product",
+              code: exact.code || trimmed,
+              name: exact.name || "Existing Product",
             });
           } else {
             setExactCodeDuplicate(null);
@@ -279,25 +279,50 @@ function ProductIdentityFields({
 
   const fetchProductNameOptions = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
-      if (!term.trim()) return [];
+      const q = term.trim().toLowerCase();
+      const seen = new Set<string>();
+      const results: DropdownOption[] = [];
+
+      // 1. Instant Tally-like local search from catalogProducts (any part of the name matches)
+      if (catalogProducts && catalogProducts.length > 0) {
+        for (const p of catalogProducts) {
+          const name = (p.product_name_tally || p.product_name || "").trim();
+          if (!name) continue;
+          if (!q || name.toLowerCase().includes(q)) {
+            if (!seen.has(name.toLowerCase())) {
+              seen.add(name.toLowerCase());
+              results.push({ value: name, label: name });
+            }
+          }
+        }
+      }
+
+      if (!q) {
+        return results.slice(0, 20);
+      }
+
+      // 2. Query ultra-fast names-lookup endpoint for substring search in full database
       try {
-        const { data } = await apiGet<Product[]>(
-          "/masters/products" + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc" }),
+        const { data } = await apiGet<Array<{ id: string; name: string; code: string }>>(
+          `/masters/products/names-lookup?search=${encodeURIComponent(term.trim())}&limit=25`,
           { signal }
         );
         const list = data || [];
-        return list.map((p) => {
-          const name = p.product_name_tally || p.product_name || "";
-          return {
-            value: name,
-            label: name,
-          };
-        });
+        for (const item of list) {
+          const name = (item.name || "").trim();
+          if (!name) continue;
+          if (!seen.has(name.toLowerCase())) {
+            seen.add(name.toLowerCase());
+            results.push({ value: name, label: name });
+          }
+        }
       } catch {
-        return [];
+        // Return local matches if network request is aborted/fails
       }
+
+      return results;
     },
-    []
+    [catalogProducts]
   );
 
   return (
@@ -388,6 +413,15 @@ export function ProductsPage() {
     let active = true;
     (async () => {
       try {
+        const { data } = await apiGet<{ id: string; company_name: string }[]>("/suppliers/lookup");
+        if (active && Array.isArray(data) && data.length > 0) {
+          setSuppliersList(data);
+          return;
+        }
+      } catch {
+        /* fallback */
+      }
+      try {
         const { data } = await apiGet<{ id: string; company_name: string }[]>("/inventory/product-prices/suppliers-lookup");
         if (active && Array.isArray(data) && data.length > 0) {
           setSuppliersList(data);
@@ -397,7 +431,7 @@ export function ProductsPage() {
         /* fallback to /suppliers */
       }
       try {
-        const res = await apiGet<any>("/suppliers?page_size=500");
+        const res = await apiGet<any>("/suppliers?page=1&page_size=100");
         if (active && res.data) {
           const list = Array.isArray(res.data) ? res.data : (res.data.items || []);
           setSuppliersList(list);
@@ -419,9 +453,18 @@ export function ProductsPage() {
   /* Preload initial products for instant duplicate name & code checking */
   const loadCatalogProducts = useCallback(async () => {
     try {
-      const { data } = await apiGet<Product[]>("/masters/products?page=1&page_size=500&sort_order=desc");
+      const { data } = await apiGet<Array<{ id: string; name: string; code: string }>>(
+        "/masters/products/names-lookup?limit=50"
+      );
       if (Array.isArray(data)) {
-        setCatalogProducts(data);
+        setCatalogProducts(
+          data.map((d) => ({
+            id: d.id,
+            product_name: d.name,
+            product_name_tally: d.name,
+            product_code: d.code,
+          })) as unknown as Product[]
+        );
       }
     } catch (err) {
       console.error("Failed to load catalog products:", err);

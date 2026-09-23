@@ -324,6 +324,17 @@ async def upload_supplier_media(
     return {"success": True, "data": {"url": media_url}}
 
 
+@router.get("/lookup", summary="Lightweight active suppliers lookup")
+async def get_suppliers_lookup(
+    request: Request,
+    service: SupplierService = Depends(get_supplier_service),
+    _current_user: CurrentUser = Depends(require_permission("supplier.view")),
+) -> dict:
+    """Return lightweight list of active suppliers {id, company_name}."""
+    suppliers = await service.list_suppliers_lookup()
+    return build_success_response(data=suppliers, request_id=request.state.request_id)
+
+
 @router.get("/{supplier_id}", summary="Get a supplier")
 async def get_supplier(
     supplier_id: uuid.UUID,

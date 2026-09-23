@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
+from app.core.exceptions import ConflictException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.rbac.dependencies import require_permission
@@ -66,16 +67,31 @@ async def permanent_delete_trash(
     """Permanently delete selected soft-deleted items from the database."""
     service = TrashService(db)
     deleted_count = 0
+    blocked_reasons: list[str] = []
+
     for item in payload.items:
         entity_type = item.get("entity_type")
         item_id = item.get("id")
         if entity_type and item_id:
-            await service.hard_delete_item(entity_type, item_id)
-            deleted_count += 1
+            try:
+                await service.hard_delete_item(entity_type, item_id)
+                deleted_count += 1
+            except ConflictException as exc:
+                if len(payload.items) == 1:
+                    raise
+                blocked_reasons.append(exc.message)
+
+    if blocked_reasons and deleted_count == 0:
+        raise ConflictException("\n".join(blocked_reasons))
+
+    msg = f"Permanently deleted {deleted_count} item(s) from database."
+    if blocked_reasons:
+        msg += f" ({len(blocked_reasons)} item(s) kept archived due to active transaction history)."
 
     return build_success_response(
-        data={"deleted_count": deleted_count, "message": f"Permanently deleted {deleted_count} item(s) from database."},
+        data={"deleted_count": deleted_count, "message": msg},
         request_id=request.state.request_id,
+        message=msg,
     )
 
 
@@ -85,10 +101,23 @@ async def empty_trash(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Permanently delete ALL soft-deleted records from the database."""
+    """Permanently delete ALL soft-deleted records from the database that have no active transaction dependencies."""
     service = TrashService(db)
-    deleted_count = await service.empty_trash()
+    deleted_count, skipped_count = await service.empty_trash()
+    if skipped_count > 0:
+        msg = (
+            f"Permanently deleted {deleted_count} unlinked item(s). "
+            f"{skipped_count} item(s) with active transaction history were kept safely archived."
+        )
+    else:
+        msg = f"Permanently deleted {deleted_count} item(s) from database."
+
     return build_success_response(
-        data={"deleted_count": deleted_count, "message": f"Permanently deleted {deleted_count} item(s) from database."},
+        data={
+            "deleted_count": deleted_count,
+            "skipped_count": skipped_count,
+            "message": msg,
+        },
         request_id=request.state.request_id,
+        message=msg,
     )
