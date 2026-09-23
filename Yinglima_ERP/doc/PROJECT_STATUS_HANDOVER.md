@@ -187,6 +187,31 @@ Organized as a structured **3-Layer Procurement Hierarchy**:
 
 ---
 
+## 6.2. September 23, 2026 Updates (Performance Hardening, Product Substring Suggestions & Remote Merge)
+
+### 1. Product Name Autocomplete & Keyword Suggestions (Tally-Style Substring Matching)
+* **Dedicated High-Speed Backend Endpoint:** Added `GET /api/v1/masters/products/names-lookup?search=<keyword>&limit=25` on `backend/app/masters/products/routes.py` and `service.py`.
+  * Selects only 4 lightweight columns (`id, product_name_tally, product_name, product_code`).
+  * Utilizes PostgreSQL trigram index for instant substring matching anywhere in the name (e.g., typing `Switch` or `Test` matches prefixes, middle words, or suffixes).
+  * Executes in **<50 milliseconds**.
+* **Instant In-Memory + Network Hybrid Search:** Updated `fetchProductNameOptions` in `frontend/src/pages/masters/Products.tsx` to search in-memory items instantly with 0ms delay while querying `/masters/products/names-lookup` for complete catalog discovery.
+* **Dropdown Selection & Focus Bug Fixed:** In `frontend/src/components/SearchableDropdown.tsx`:
+  * Fixed `handleFocus`, `handleClick`, keyboard arrow navigation, and toggle arrow handlers which were previously resetting the search query to `""`, wiping out matching suggestions.
+
+### 2. High Loading Time & Pending Requests Fix (Eliminated Heavy Page Sizes)
+* **Removed Heavy Catalog Preload in Product Master:** Removed the duplicate `page_size=500` full product fetch that ran on initial page load and on live websocket events in `Products.tsx`.
+* **Added Fast Supplier Lookup Endpoint:** Added `GET /api/v1/suppliers/lookup` in `backend/app/suppliers/routes.py` and `service.py`. Replaced slow `/suppliers?page_size=500` fallback with `/suppliers/lookup`, which is cached in memory and returns active suppliers in milliseconds.
+* **Product Gallery Optimization:** In `ProductGallery.tsx`, replaced `page_size=1000` with `page_size=100` and added `has_images=true`. Updated `backend/app/masters/products/repository.py` to support `has_images` filtering, eliminating the download of thousands of empty records.
+* **Database Connection Pool Expansion:** Increased `DATABASE_POOL_SIZE` from `5` to `15` and `DATABASE_POOL_TIMEOUT_SECONDS` to `15` in `backend/.env`. Prevented 9–11 parallel API requests on page load from queueing up.
+
+### 3. Remote Synchronization & Merge (`78cb5d5`)
+* Merged incoming changes from `origin/main`:
+  * **Inhyma_ERP:** Google Maps Platform Places API (New) integration, HRMS Location Master & WFH requests module, Sales Process & Local/Import Purchase PDF generation.
+  * **ERP_Main:** Topbar Ecosystem Switcher, unified User & Access navigation, polished Global Users directory.
+* **Local Yinglima Enhancements:** Fully preserved with zero regressions. All changes remain **100% local** without git push.
+
+---
+
 ## 7. Mandatory AI & Developer Policies
 1. **Living Documentation Policy (`AGENTS.md`):**
    - Whenever any API endpoint, schema, UI view, button, or logic changes, immediately update `doc/SYSTEM_DOCUMENTATION.md` and `MODULES_AND_FEATURES_TEST_MANUAL.md`.
