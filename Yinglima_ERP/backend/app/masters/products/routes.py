@@ -217,6 +217,19 @@ async def upload_product_image(
     return {"success": True, "data": {"url": image_url}}
 
 
+@router.get("/names-lookup", summary="Lightweight product name suggestions")
+async def get_product_names_lookup(
+    request: Request,
+    search: str | None = None,
+    limit: int = 25,
+    service: ProductService = Depends(get_product_service),
+    _current_user: CurrentUser = Depends(require_permission("product.view")),
+) -> dict:
+    """Return lightweight product name suggestions matching search term anywhere in the name."""
+    names = await service.search_product_names(search=search, limit=min(limit, 50))
+    return build_success_response(data=names, request_id=request.state.request_id)
+
+
 @router.get("/{product_id}", summary="Get a product")
 async def get_product(
     product_id: uuid.UUID,

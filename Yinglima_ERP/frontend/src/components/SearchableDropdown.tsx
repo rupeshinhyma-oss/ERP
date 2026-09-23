@@ -189,8 +189,9 @@ export function SearchableDropdown({
     } catch {
       /* ignore */
     }
+    const term = inputValue.trim();
     void search.run(async (signal) => {
-      const found = await fetchOptions("", signal);
+      const found = await fetchOptions(term, signal);
       setOptions(found || []);
       setActiveIndex(-1);
       setOpen(true);
@@ -200,8 +201,9 @@ export function SearchableDropdown({
   function handleClick() {
     if (disabled) return;
     if (!open) {
+      const term = inputValue.trim();
       void search.run(async (signal) => {
-        const found = await fetchOptions("", signal);
+        const found = await fetchOptions(term, signal);
         setOptions(found || []);
         setActiveIndex(-1);
         setOpen(true);
@@ -220,8 +222,9 @@ export function SearchableDropdown({
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
+        const term = inputValue.trim();
         void search.run(async (signal) => {
-          const found = await fetchOptions("", signal);
+          const found = await fetchOptions(term, signal);
           setOptions(found || []);
           setActiveIndex(0);
           setOpen(true);
@@ -362,8 +365,9 @@ export function SearchableDropdown({
             if (open) {
               closeResults();
             } else {
+              const term = inputValue.trim();
               void search.run(async (signal) => {
-                const found = await fetchOptions("", signal);
+                const found = await fetchOptions(term, signal);
                 setOptions(found || []);
                 setActiveIndex(-1);
                 setOpen(true);

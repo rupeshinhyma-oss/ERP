@@ -103,6 +103,35 @@ class ProductService:
         await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, products)
         return products
 
+    async def search_product_names(self, search: str | None = None, limit: int = 25) -> list[dict[str, str]]:
+        """Return lightweight product name suggestions matching search term anywhere in the name/code."""
+        from sqlalchemy import or_, select
+        stmt = (
+            select(Product.id, Product.product_name_tally, Product.product_name, Product.product_code)
+            .where(Product.deleted_at.is_(None))
+        )
+        if search and search.strip():
+            term = search.strip()
+            pattern = f"%{term}%"
+            stmt = stmt.where(
+                or_(
+                    Product.product_name_tally.ilike(pattern),
+                    Product.product_name.ilike(pattern),
+                    Product.product_code.ilike(pattern),
+                )
+            )
+        stmt = stmt.order_by(Product.product_name_tally.asc()).limit(limit)
+        res = await self.repository.session.execute(stmt)
+        rows = res.all()
+        return [
+            {
+                "id": str(r.id),
+                "name": r.product_name_tally or r.product_name or "",
+                "code": r.product_code or "",
+            }
+            for r in rows
+        ]
+
     async def _invalidate_cache(self) -> None:
         """Invalidate the products dropdown cache after any mutation."""
         await self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)

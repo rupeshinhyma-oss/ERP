@@ -235,6 +235,22 @@ class SupplierService:
         potential_blocks_delete = supplier.potential is not None and supplier.potential.value == "yes"
         return not (status_blocks_delete or potential_blocks_delete)
 
+    async def list_suppliers_lookup(self) -> list[dict[str, str]]:
+        """Return lightweight list of active suppliers {id, company_name}, cached in CacheManager."""
+        cached = await self.cache_manager.get_dropdown(DROPDOWN_CACHE_NAME)
+        if cached is not None:
+            return cached
+        from sqlalchemy import select
+        stmt = (
+            select(Supplier.id, Supplier.company_name)
+            .where(Supplier.deleted_at.is_(None), Supplier.is_active.is_(True))
+            .order_by(Supplier.company_name.asc())
+        )
+        res = await self.repository.session.execute(stmt)
+        data = [{"id": str(r.id), "company_name": r.company_name} for r in res.all()]
+        await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, data)
+        return data
+
     async def _invalidate_cache(self) -> None:
         """Invalidate the suppliers dropdown cache after any mutation."""
         await self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)
