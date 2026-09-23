@@ -31,6 +31,7 @@ import { ICONS } from "./icons";
 interface AppShellProps {
   activeKey: string;
   pageTitle?: string;
+  pageSubtitle?: string;
   breadcrumbs?: string[];
   actions?: ReactNode;
   children: ReactNode;
@@ -39,6 +40,7 @@ interface AppShellProps {
 export function AppShell({
   activeKey,
   pageTitle,
+  pageSubtitle,
   breadcrumbs,
   actions,
   children,
@@ -548,6 +550,11 @@ export function AppShell({
               >
                 {currentTitle}
               </h1>
+              {pageSubtitle && (
+                <div style={{ color: "var(--color-muted, #64748b)", fontSize: "13px", marginTop: "4px" }}>
+                  {pageSubtitle}
+                </div>
+              )}
             </div>
             {actions && <div className="page-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>{actions}</div>}
           </div>

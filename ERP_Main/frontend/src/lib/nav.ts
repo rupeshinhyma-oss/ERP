@@ -138,8 +138,8 @@ export const PAGE_TITLES: Record<string, string> = {
   
   // Users & Access
   "/access": "Users & Access Control",
-  "/access/users": "Global Users Directory",
-  "/users": "Global Users Directory",
+  "/access/users": "Global Users",
+  "/users": "Global Users",
   "/access/roles": "Platform Roles",
   "/authz": "Platform Roles & Permissions",
   "/access/permissions": "Platform Permissions",
