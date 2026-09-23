@@ -197,8 +197,9 @@ class ProductService:
             entity_type="Product",
             name=p_name,
             code=clean_code,
-            name_field="product_name",
+            name_field="product_name_tally",
             code_field="product_code",
+            name_only_check_trash=True,
         )
         await self._validate_references(field_values)
 
@@ -268,18 +269,28 @@ class ProductService:
         from app.masters.products.models import Product
 
         product = await self.get_by_id_or_raise(product_id)
+        if "product_name_tally" in field_values and "product_name" not in field_values:
+            field_values["product_name"] = field_values["product_name_tally"]
+        elif "product_name" in field_values and "product_name_tally" not in field_values:
+            field_values["product_name_tally"] = field_values["product_name"]
+
         product_code = field_values.get("product_code")
-        p_name = field_values.get("product_name") or field_values.get("product_name_tally")
-        if product_code or p_name:
+        p_name = field_values.get("product_name_tally") or field_values.get("product_name")
+
+        code_changed = product_code and product_code.strip().lower() != (product.product_code or "").strip().lower()
+        name_changed = p_name and p_name.strip().lower() != (product.product_name_tally or product.product_name or "").strip().lower()
+
+        if code_changed or name_changed:
             await check_trash_or_duplicate(
                 self.repository.session,
                 Product,
                 entity_type="Product",
-                name=p_name,
-                code=product_code,
-                name_field="product_name",
+                name=p_name if name_changed else None,
+                code=product_code if code_changed else None,
+                name_field="product_name_tally",
                 code_field="product_code",
                 exclude_id=product_id,
+                name_only_check_trash=True,
             )
 
         merged = {
