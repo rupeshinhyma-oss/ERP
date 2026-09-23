@@ -40,11 +40,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "USERS & ACCESS",
     items: [
-      { key: "users", label: "Global Users", path: "/access/users", icon: "users" },
-      { key: "roles", label: "Roles", path: "/access/roles", icon: "userCheck", superAdminOnly: true },
-      { key: "permissions", label: "Permissions", path: "/access/permissions", icon: "key", superAdminOnly: true },
-      { key: "memberships", label: "ERP Memberships", path: "/access/memberships", icon: "link" },
-      { key: "access-policies", label: "Access Policies", path: "/access/policies", icon: "lock", superAdminOnly: true },
+      { key: "users", label: "User & Access", path: "/access/users", icon: "users" },
     ],
   },
   {
@@ -103,10 +99,23 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
+export const ACCESS_SECTION_TABS: NavItem[] = [
+  { key: "users", label: "Global Users", path: "/access/users", icon: "users" },
+  { key: "roles", label: "Roles", path: "/access/roles", icon: "userCheck", superAdminOnly: true },
+  { key: "permissions", label: "Permissions", path: "/access/permissions", icon: "key", superAdminOnly: true },
+  { key: "memberships", label: "ERP Memberships", path: "/access/memberships", icon: "link" },
+  { key: "access-policies", label: "Access Policies", path: "/access/policies", icon: "lock", superAdminOnly: true },
+];
+
 export const NAV_ITEMS_BY_KEY: Record<string, NavItem> = {};
 for (const section of NAV_SECTIONS) {
   for (const item of section.items) {
     NAV_ITEMS_BY_KEY[item.key] = item;
+  }
+}
+for (const tab of ACCESS_SECTION_TABS) {
+  if (!NAV_ITEMS_BY_KEY[tab.key]) {
+    NAV_ITEMS_BY_KEY[tab.key] = tab;
   }
 }
 
@@ -198,7 +207,6 @@ export function getSectionTabs(sectionLabel: string): NavItem[] {
 }
 
 export const ERP_SECTION_TABS = getSectionTabs("ERPS");
-export const ACCESS_SECTION_TABS = getSectionTabs("USERS & ACCESS");
 export const ORG_SECTION_TABS = getSectionTabs("ORGANIZATIONS");
 export const INTEGRATION_SECTION_TABS = getSectionTabs("INTEGRATIONS");
 export const SYNC_SECTION_TABS = getSectionTabs("SYNCHRONIZATION");

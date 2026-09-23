@@ -157,7 +157,7 @@ describe("8 Primary Navigation Sections Specification", () => {
     const icons = allItems.map((item) => item.icon);
     const uniqueIcons = new Set(icons);
 
-    expect(allItems.length).toBe(35);
+    expect(allItems.length).toBe(31);
     expect(uniqueIcons.size).toBe(allItems.length);
   });
 });

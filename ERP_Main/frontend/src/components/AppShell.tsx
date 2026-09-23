@@ -277,7 +277,10 @@ export function AppShell({
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                   {visibleItems.map((item) => {
-                    const isActive = activeKey === item.key;
+                    const isActive =
+                      activeKey === item.key ||
+                      (item.key === "users" &&
+                        ["roles", "permissions", "memberships", "access-policies", "conflicts"].includes(activeKey));
                     const IconComponent = ICONS[item.icon] || ICONS.dashboard;
 
                     return (
