@@ -38,12 +38,6 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: "ERPS",
-    items: [
-      { key: "erp-switcher", label: "ERP Switcher", path: "/erps/switcher", icon: "layers" },
-    ],
-  },
-  {
     label: "USERS & ACCESS",
     items: [
       { key: "users", label: "Global Users", path: "/access/users", icon: "users" },

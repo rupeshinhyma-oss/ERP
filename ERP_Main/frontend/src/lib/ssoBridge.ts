@@ -27,6 +27,19 @@ export interface SsoHandoverPayload {
 const SSO_SIGNATURE = "ihm_erp_sso_v1";
 const SSO_VALIDITY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
+const getHost = () => (typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1");
+
+export const getEcosystemErps = () => {
+  const host = getHost();
+  return [
+    { key: "control-plane", name: "ERP Dashboard", hostUrl: `http://${host}:5170/dashboard`, badge: "Control Plane" },
+    { key: "yinglima", name: "Yinglima ERP", hostUrl: `http://${host}:5173/dashboard`, badge: "Active Port 5173" },
+    { key: "inhyma", name: "Inhyma ERP", hostUrl: `http://${host}:5174/dashboard`, badge: "Active Port 5174" },
+  ];
+};
+
+export const ECOSYSTEM_ERPS = getEcosystemErps();
+
 /**
  * Creates an SSO handover launch URL targeting any registered ERP.
  * Automatically passes the active unified session_id.

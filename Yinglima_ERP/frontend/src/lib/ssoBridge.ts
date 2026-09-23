@@ -33,7 +33,7 @@ const getHost = () => (typeof window !== "undefined" && window.location.hostname
 export const getEcosystemErps = () => {
   const host = getHost();
   return [
-    { key: "control-plane", name: "Global Control Panel", hostUrl: `http://${host}:5170/erps/switcher`, badge: "Control Plane" },
+    { key: "control-plane", name: "ERP Dashboard", hostUrl: `http://${host}:5170/dashboard`, badge: "Control Plane" },
     { key: "yinglima", name: "Yinglima ERP", hostUrl: `http://${host}:5173/dashboard`, badge: "Active Port 5173" },
     { key: "inhyma", name: "Inhyma ERP", hostUrl: `http://${host}:5174/dashboard`, badge: "Active Port 5174" },
   ];

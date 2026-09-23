@@ -25,6 +25,7 @@ import {
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { globalEcosystemLogout } from "@/lib/ecosystemSession";
 import { Breadcrumb } from "./Breadcrumb";
+import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { ICONS } from "./icons";
 
 interface AppShellProps {
@@ -391,21 +392,8 @@ export function AppShell({
 
           {/* Right: Quick actions, user profile */}
           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-            {/* Quick search bar */}
-            <Link
-              to="/search"
-              className="header-search-bar"
-              title="Universal Search (Press / to focus)"
-              id="header-search-btn"
-            >
-              <div className="header-search-bar-content">
-                <span className="header-search-bar-icon">
-                  <ICONS.search width={15} height={15} />
-                </span>
-                <span className="header-search-bar-text">Search projections...</span>
-              </div>
-              <kbd className="header-search-bar-kbd">/</kbd>
-            </Link>
+            {/* ERP Ecosystem Switcher */}
+            <EcosystemSwitcher currentKey="control-plane" />
 
             {/* User Profile Dropdown */}
             <div style={{ position: "relative" }} ref={userMenuRef}>

@@ -1,8 +1,8 @@
 /**
- * Ecosystem Switcher Dropdown for Yinglima ERP Topbar.
+ * Ecosystem Switcher Dropdown for ERP Dashboard (ERP_Main) Topbar.
  *
- * Provides one-click instant navigation with seamless Super Admin SSO
- * to Global Control Panel (ERP_Main) and other peer ERP applications.
+ * Matches the exact design, styling, and seamless cross-ERP switching
+ * from Yinglima ERP and Inhyma ERP.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -12,7 +12,7 @@ interface EcosystemSwitcherProps {
   currentKey?: string;
 }
 
-export function EcosystemSwitcher({ currentKey = "yinglima" }: EcosystemSwitcherProps) {
+export function EcosystemSwitcher({ currentKey = "control-plane" }: EcosystemSwitcherProps) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -30,22 +30,6 @@ export function EcosystemSwitcher({ currentKey = "yinglima" }: EcosystemSwitcher
     };
   }, [open]);
 
-  /**
-   * Switching to another ERP (or back to the Global Control Panel)
-   * from inside a spoke app is deliberately a PLAIN navigation, not a
-   * forged handover: this app only holds its own local session, never
-   * a Global User session on ERP_Main, so it has no way to mint a
-   * genuine, signed authorization for another app -- that would just
-   * be a second, weaker door next to the real one.
-   *
-   * The real, secure ERP-to-ERP switch (OIDC-style authorize -> code
-   * -> server-to-server token exchange -> local session) lives on
-   * ERP_Main's own ERP Switcher page, gated by that user's actual
-   * Global User session and ACTIVE membership. So this control simply
-   * takes the user there (or to the target app's normal login/session
-   * check) and lets that real flow run -- it never claims to log
-   * anyone in on their behalf.
-   */
   const handleSwitch = (hostUrl: string) => {
     setOpen(false);
     const target = createSsoHandoverUrl(hostUrl);
@@ -71,7 +55,8 @@ export function EcosystemSwitcher({ currentKey = "yinglima" }: EcosystemSwitcher
           cursor: "pointer",
           transition: "all 0.15s ease",
         }}
-        title="Switch ERP Application or Return to Global Control Panel"
+        title="Switch ERP Application or Return to ERP Dashboard"
+        id="header-erp-switcher-btn"
       >
         <svg
           width="15"
@@ -203,3 +188,5 @@ export function EcosystemSwitcher({ currentKey = "yinglima" }: EcosystemSwitcher
     </div>
   );
 }
+
+export default EcosystemSwitcher;
