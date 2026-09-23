@@ -108,9 +108,14 @@ export function Modal({
 
   if (!isModalOpen) return null;
 
+  const isCenter = variant === "center";
+  const backdropClasses = `modal-backdrop ${isCenter ? "modal-centered-backdrop modal-backdrop-center" : ""}`.trim();
+  const cardClasses = `modal-card ${isCenter ? "modal-dialog-card modal-card-center" : "modal-card-drawer"} ${cardClassName}`.trim();
+
   return (
     <div
-      className={`modal-backdrop ${variant === "center" ? "modal-backdrop-center" : ""}`}
+      className={backdropClasses}
+      style={isCenter ? { display: "flex", justifyContent: "center", alignItems: "center", padding: "20px" } : undefined}
       onClick={(e) => {
         if (!locked && e.target === e.currentTarget) {
           onClose();
@@ -118,7 +123,7 @@ export function Modal({
       }}
     >
       <div
-        className={`modal-card ${variant === "center" ? "modal-card-center" : "modal-card-drawer"} ${cardClassName}`}
+        className={cardClasses}
         style={cardStyle}
       >
         {showHeader && (
@@ -127,10 +132,10 @@ export function Modal({
             {!locked && (
               <button
                 type="button"
-                className="icon-btn"
+                className="modal-close"
                 onClick={onClose}
                 aria-label="Close dialog"
-                style={{ cursor: "pointer" }}
+                title="Close"
               >
                 <IconX width={18} height={18} />
               </button>

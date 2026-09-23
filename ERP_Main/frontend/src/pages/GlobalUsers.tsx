@@ -694,59 +694,66 @@ export function GlobalUsers() {
 
       {/* CREATE USER MODAL */}
       <Modal
-        isOpen={createModalOpen}
+        open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         title="Create Global User"
+        variant="center"
+        cardStyle={{ maxWidth: "520px" }}
       >
         <form onSubmit={handleCreateUser}>
-          <div className="form-group" style={{ marginBottom: "16px" }}>
-            <label className="form-label" htmlFor="create-display-name">
-              Full Name / Display Name <span style={{ color: "red" }}>*</span>
-            </label>
-            <input
-              type="text"
-              id="create-display-name"
-              required
-              className="form-control"
-              placeholder="e.g. Eleanor Vance"
-              value={createDisplayName}
-              onChange={(e) => setCreateDisplayName(e.target.value)}
-            />
+          <div className="modal-form-content">
+            <div className="form-group">
+              <label className="form-label" htmlFor="create-display-name">
+                Full Name / Display Name <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+              </label>
+              <input
+                type="text"
+                id="create-display-name"
+                required
+                className="form-control"
+                placeholder="e.g. Eleanor Vance"
+                value={createDisplayName}
+                onChange={(e) => setCreateDisplayName(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="create-email">
+                Primary Email <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+              </label>
+              <input
+                type="email"
+                id="create-email"
+                required
+                className="form-control"
+                placeholder="e.g. eleanor.vance@company.com"
+                value={createEmail}
+                onChange={(e) => setCreateEmail(e.target.value)}
+              />
+              <span className="form-helper">
+                Global human identity identifier. Email is normalized and deduplicated across the ecosystem.
+              </span>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="create-ext-id">
+                External Identity ID (Optional)
+              </label>
+              <input
+                type="text"
+                id="create-ext-id"
+                className="form-control"
+                placeholder="e.g. auth0|usr_123 or okta_987"
+                value={createExternalId}
+                onChange={(e) => setCreateExternalId(e.target.value)}
+              />
+              <span className="form-helper">
+                Optional single sign-on or directory service identifier.
+              </span>
+            </div>
           </div>
 
-          <div className="form-group" style={{ marginBottom: "16px" }}>
-            <label className="form-label" htmlFor="create-email">
-              Primary Email <span style={{ color: "red" }}>*</span>
-            </label>
-            <input
-              type="email"
-              id="create-email"
-              required
-              className="form-control"
-              placeholder="e.g. eleanor.vance@company.com"
-              value={createEmail}
-              onChange={(e) => setCreateEmail(e.target.value)}
-            />
-            <span style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "4px", display: "block" }}>
-              Global human identity identifier. Email is normalized and deduplicated across the ecosystem.
-            </span>
-          </div>
-
-          <div className="form-group" style={{ marginBottom: "24px" }}>
-            <label className="form-label" htmlFor="create-ext-id">
-              External Identity ID (Optional)
-            </label>
-            <input
-              type="text"
-              id="create-ext-id"
-              className="form-control"
-              placeholder="e.g. auth0|usr_123 or okta_987"
-              value={createExternalId}
-              onChange={(e) => setCreateExternalId(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+          <div className="modal-footer form-actions">
             <button
               type="button"
               className="btn btn-secondary"
@@ -768,53 +775,64 @@ export function GlobalUsers() {
 
       {/* EDIT USER MODAL */}
       <Modal
-        isOpen={editModalOpen}
+        open={editModalOpen}
         onClose={() => setEditModalOpen(false)}
         title="Edit Global User Metadata"
+        variant="center"
+        cardStyle={{ maxWidth: "520px" }}
       >
         <form onSubmit={handleSaveEdit}>
-          <div className="form-group" style={{ marginBottom: "16px" }}>
-            <label className="form-label" htmlFor="edit-display-name">
-              Display Name
-            </label>
-            <input
-              type="text"
-              id="edit-display-name"
-              required
-              className="form-control"
-              value={editDisplayName}
-              onChange={(e) => setEditDisplayName(e.target.value)}
-            />
+          <div className="modal-form-content">
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-display-name">
+                Display Name <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+              </label>
+              <input
+                type="text"
+                id="edit-display-name"
+                required
+                className="form-control"
+                value={editDisplayName}
+                onChange={(e) => setEditDisplayName(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-email">
+                Primary Email <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+              </label>
+              <input
+                type="email"
+                id="edit-email"
+                required
+                className="form-control"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+              />
+              <span className="form-helper">
+                Primary identity email used for ecosystem SSO and authentication.
+              </span>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-ext-id">
+                External Identity ID
+              </label>
+              <input
+                type="text"
+                id="edit-ext-id"
+                className="form-control"
+                placeholder="e.g. auth0|usr_123 or okta_987"
+                value={editExternalId}
+                onChange={(e) => setEditExternalId(e.target.value)}
+              />
+              <span className="form-helper">
+                Optional IdP / external directory identifier.
+              </span>
+            </div>
           </div>
 
-          <div className="form-group" style={{ marginBottom: "16px" }}>
-            <label className="form-label" htmlFor="edit-email">
-              Primary Email
-            </label>
-            <input
-              type="email"
-              id="edit-email"
-              required
-              className="form-control"
-              value={editEmail}
-              onChange={(e) => setEditEmail(e.target.value)}
-            />
-          </div>
-
-          <div className="form-group" style={{ marginBottom: "24px" }}>
-            <label className="form-label" htmlFor="edit-ext-id">
-              External Identity ID
-            </label>
-            <input
-              type="text"
-              id="edit-ext-id"
-              className="form-control"
-              value={editExternalId}
-              onChange={(e) => setEditExternalId(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+          <div className="modal-footer form-actions">
             <button
               type="button"
               className="btn btn-secondary"
@@ -836,52 +854,57 @@ export function GlobalUsers() {
 
       {/* STATUS CHANGE MODAL */}
       <Modal
-        isOpen={statusModalOpen}
+        open={statusModalOpen}
         onClose={() => setStatusModalOpen(false)}
         title="Change Global User Status"
+        variant="center"
+        cardStyle={{ maxWidth: "480px" }}
       >
         {targetStatusUser && (
           <div>
-            <p style={{ fontSize: "14px", color: "var(--color-text)", marginBottom: "16px" }}>
-              Update lifecycle status for <strong>{targetStatusUser.display_name}</strong> (
-              <span style={{ fontFamily: "monospace" }}>{targetStatusUser.primary_email || targetStatusUser.email}</span>):
-            </p>
+            <div className="modal-form-content">
+              <p style={{ fontSize: "14px", color: "var(--color-text)", margin: "0 0 16px 0", lineHeight: 1.5 }}>
+                Update lifecycle status for <strong>{targetStatusUser.display_name}</strong>{" "}
+                (<span style={{ fontFamily: "monospace", color: "var(--color-primary, #0061f2)" }}>{targetStatusUser.primary_email || targetStatusUser.email}</span>):
+              </p>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
-              {(["ACTIVE", "SUSPENDED", "DISABLED"] as GlobalUserStatus[]).map((st) => (
-                <label
-                  key={st}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "10px 14px",
-                    borderRadius: "6px",
-                    border: newStatus === st ? "1px solid #0061f2" : "1px solid #e2e8f0",
-                    background: newStatus === st ? "#eff6ff" : "#ffffff",
-                    cursor: "pointer",
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="user-status"
-                    value={st}
-                    checked={newStatus === st}
-                    onChange={() => setNewStatus(st)}
-                  />
-                  <div>
-                    <strong style={{ fontSize: "13px" }}>{st}</strong>
-                    <div style={{ fontSize: "12px", color: "var(--color-muted)" }}>
-                      {st === "ACTIVE" && "Full platform privileges and single sign-on access."}
-                      {st === "SUSPENDED" && "Temporarily blocked from SSO and control plane operations."}
-                      {st === "DISABLED" && "Deactivated platform identity. Local ERP accounts remain intact."}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {(["ACTIVE", "SUSPENDED", "DISABLED"] as GlobalUserStatus[]).map((st) => (
+                  <label
+                    key={st}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      padding: "12px 14px",
+                      borderRadius: "6px",
+                      border: newStatus === st ? "1.5px solid var(--color-primary, #0061f2)" : "1px solid #e2e8f0",
+                      background: newStatus === st ? "#eff6ff" : "#ffffff",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="user-status"
+                      value={st}
+                      checked={newStatus === st}
+                      onChange={() => setNewStatus(st)}
+                    />
+                    <div>
+                      <strong style={{ fontSize: "13px", color: newStatus === st ? "var(--color-primary, #0061f2)" : "inherit" }}>{st}</strong>
+                      <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "2px" }}>
+                        {st === "ACTIVE" && "Full platform privileges and single sign-on access."}
+                        {st === "SUSPENDED" && "Temporarily blocked from SSO and control plane operations."}
+                        {st === "DISABLED" && "Deactivated platform identity. Local ERP accounts remain intact."}
+                      </div>
                     </div>
-                  </div>
-                </label>
-              ))}
+                  </label>
+                ))}
+              </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+            <div className="modal-footer form-actions">
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -905,51 +928,56 @@ export function GlobalUsers() {
 
       {/* FLOW A PROVISION TO ERP MODAL */}
       <Modal
-        isOpen={provisionModalOpen}
+        open={provisionModalOpen}
         onClose={() => setProvisionModalOpen(false)}
         title="Provision User to ERP (Flow A)"
+        variant="center"
+        cardStyle={{ maxWidth: "540px" }}
       >
         {targetProvisionUser && (
           <form onSubmit={handleExecuteProvision}>
-            <p style={{ fontSize: "14px", color: "var(--color-text)", marginBottom: "16px" }}>
-              Provision <strong>{targetProvisionUser.display_name}</strong> into a registered business ERP.
-              A minimal local account will be created and bound via an active ERP Membership.
-            </p>
+            <div className="modal-form-content">
+              <p style={{ fontSize: "14px", color: "var(--color-text)", margin: "0 0 16px 0", lineHeight: 1.5 }}>
+                Provision <strong>{targetProvisionUser.display_name}</strong> into a registered business ERP.
+                A minimal local account will be created and bound via an active ERP Membership.
+              </p>
 
-            <div className="form-group" style={{ marginBottom: "20px" }}>
-              <label className="form-label" htmlFor="provision-select-erp">
-                Target Business ERP <span style={{ color: "red" }}>*</span>
-              </label>
-              <select
-                id="provision-select-erp"
-                required
-                className="form-control"
-                value={selectedErpId}
-                onChange={(e) => setSelectedErpId(e.target.value)}
+              <div className="form-group">
+                <label className="form-label" htmlFor="provision-select-erp">
+                  Target Business ERP <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+                </label>
+                <select
+                  id="provision-select-erp"
+                  required
+                  className="form-control"
+                  value={selectedErpId}
+                  onChange={(e) => setSelectedErpId(e.target.value)}
+                >
+                  {erps.map((erp) => (
+                    <option key={erp.id} value={erp.id}>
+                      {erp.name} ({erp.erp_key}) — v{erp.version}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div
+                style={{
+                  backgroundColor: "#f8fafc",
+                  padding: "12px 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #e2e8f0",
+                  fontSize: "12px",
+                  color: "var(--color-muted)",
+                  lineHeight: 1.5,
+                }}
               >
-                {erps.map((erp) => (
-                  <option key={erp.id} value={erp.id}>
-                    {erp.name} ({erp.erp_key}) — v{erp.version}
-                  </option>
-                ))}
-              </select>
+                <strong>Architectural Note:</strong> Global provisioning uses the target ERP adapter API.
+                Local organizational roles and business permissions remain strictly authoritative within that ERP.
+              </div>
             </div>
 
-            <div
-              style={{
-                backgroundColor: "#f8fafc",
-                padding: "12px 14px",
-                borderRadius: "6px",
-                fontSize: "12px",
-                color: "var(--color-muted)",
-                marginBottom: "20px",
-              }}
-            >
-              <strong>Architectural Note:</strong> Global provisioning uses the target ERP adapter API.
-              Local organizational roles and business permissions remain strictly authoritative within that ERP.
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+            <div className="modal-footer form-actions">
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -1368,78 +1396,82 @@ export function GlobalUsers() {
 
       {/* ASSIGN ROLE MODAL */}
       <Modal
-        isOpen={assignRoleModalOpen}
+        open={assignRoleModalOpen}
         onClose={() => setAssignRoleModalOpen(false)}
         title="Assign Platform Role"
+        variant="center"
+        cardStyle={{ maxWidth: "520px" }}
       >
         <form onSubmit={handleExecuteAssignRole}>
-          <div className="form-group" style={{ marginBottom: "16px" }}>
-            <label className="form-label" htmlFor="select-role-key">
-              Platform Role <span style={{ color: "red" }}>*</span>
-            </label>
-            <select
-              id="select-role-key"
-              required
-              className="form-control"
-              value={assignRoleKey}
-              onChange={(e) => setAssignRoleKey(e.target.value)}
-            >
-              {availableRoles.map((r) => (
-                <option key={r.id} value={r.role_key}>
-                  {r.display_name} ({r.role_key})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group" style={{ marginBottom: "16px" }}>
-            <label className="form-label">Scope</label>
-            <div style={{ display: "flex", gap: "16px" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="assign-scope"
-                  value="GLOBAL"
-                  checked={assignScope === "GLOBAL"}
-                  onChange={() => setAssignScope("GLOBAL")}
-                />
-                <span>GLOBAL (Platform Wide)</span>
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="assign-scope"
-                  value="ERP"
-                  checked={assignScope === "ERP"}
-                  onChange={() => setAssignScope("ERP")}
-                />
-                <span>ERP-Scoped</span>
-              </label>
-            </div>
-          </div>
-
-          {assignScope === "ERP" && (
-            <div className="form-group" style={{ marginBottom: "20px" }}>
-              <label className="form-label" htmlFor="select-assign-erp">
-                Target ERP Instance <span style={{ color: "red" }}>*</span>
+          <div className="modal-form-content">
+            <div className="form-group">
+              <label className="form-label" htmlFor="select-role-key">
+                Platform Role <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
               </label>
               <select
-                id="select-assign-erp"
+                id="select-role-key"
                 required
                 className="form-control"
-                value={assignErpId}
-                onChange={(e) => setAssignErpId(e.target.value)}
+                value={assignRoleKey}
+                onChange={(e) => setAssignRoleKey(e.target.value)}
               >
-                {erps.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name} ({e.erp_key})
+                {availableRoles.map((r) => (
+                  <option key={r.id} value={r.role_key}>
+                    {r.display_name} ({r.role_key})
                   </option>
                 ))}
               </select>
             </div>
-          )}
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+            <div className="form-group">
+              <label className="form-label">Scope</label>
+              <div style={{ display: "flex", gap: "16px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13.5px" }}>
+                  <input
+                    type="radio"
+                    name="assign-scope"
+                    value="GLOBAL"
+                    checked={assignScope === "GLOBAL"}
+                    onChange={() => setAssignScope("GLOBAL")}
+                  />
+                  <span>GLOBAL (Platform Wide)</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13.5px" }}>
+                  <input
+                    type="radio"
+                    name="assign-scope"
+                    value="ERP"
+                    checked={assignScope === "ERP"}
+                    onChange={() => setAssignScope("ERP")}
+                  />
+                  <span>ERP-Scoped</span>
+                </label>
+              </div>
+            </div>
+
+            {assignScope === "ERP" && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="select-assign-erp">
+                  Target ERP Instance <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+                </label>
+                <select
+                  id="select-assign-erp"
+                  required
+                  className="form-control"
+                  value={assignErpId}
+                  onChange={(e) => setAssignErpId(e.target.value)}
+                >
+                  {erps.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name} ({e.erp_key})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="modal-footer form-actions">
             <button
               type="button"
               className="btn btn-secondary"

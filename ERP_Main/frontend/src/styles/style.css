@@ -930,39 +930,63 @@ select::-ms-expand {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+.modal-card-drawer form {
   height: calc(100vh - 60px);
   overflow: hidden;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer) {
+.modal-card form > .modal-form-content,
+.modal-card form > .modal-body,
+.modal-card .modal-body {
   padding: 20px 24px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar {
+.modal-card form > .form-group {
+  flex: 0 0 auto !important;
+  min-height: auto !important;
+  overflow: visible !important;
+  padding: 0 24px !important;
+}
+
+.modal-card form > :not(.form-actions):not(.modal-footer):not(.modal-form-content):not(.form-group):not(.modal-body) {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar,
+.modal-form-content::-webkit-scrollbar {
   width: 6px;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-track {
+.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-track,
+.modal-form-content::-webkit-scrollbar-track {
   background: #f1f5f9;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb {
+.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb,
+.modal-form-content::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 4px;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb:hover {
+.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb:hover,
+.modal-form-content::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
 
 .modal-card .form-actions,
 .modal-card form > .form-actions,
-.modal-card form > .modal-footer {
+.modal-card form > .modal-footer,
+.modal-footer {
   padding: 16px 24px;
-  background: #ffffff;
+  background: #f8fafc;
   border-top: 1px solid #e2e8f0;
   display: flex;
   align-items: center;
@@ -977,7 +1001,8 @@ select::-ms-expand {
 }
 
 .modal-card .form-actions button,
-.modal-card form > .form-actions button {
+.modal-card form > .form-actions button,
+.modal-footer button {
   height: 38px;
   display: inline-flex;
   align-items: center;
@@ -986,56 +1011,171 @@ select::-ms-expand {
 }
 
 .modal-close {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: none;
-  background: var(--color-bg);
-  color: var(--color-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.15s ease;
 }
 
 .modal-close:hover {
-  background: var(--color-border);
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #e2e8f0;
 }
 
 /* Centered Dialog Modal variant */
-.modal-centered-backdrop {
+.modal-centered-backdrop,
+.modal-backdrop-center {
   justify-content: center !important;
   align-items: center !important;
   padding: 20px !important;
 }
 
-.modal-dialog-card {
+.modal-dialog-card,
+.modal-card-center {
   background: #ffffff !important;
   border-radius: 12px !important;
   height: auto !important;
   max-height: 90vh !important;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+  width: 100% !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.05) !important;
   border: 1px solid #e2e8f0 !important;
   animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
   overflow: hidden !important;
 }
 
-.modal-dialog-card .modal-header {
-  padding: 16px 22px;
-  background: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
+@keyframes modalScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
-.modal-dialog-card .modal-header h2 {
+.modal-dialog-card .modal-header,
+.modal-card-center .modal-header {
+  padding: 18px 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-dialog-card .modal-header h2,
+.modal-card-center .modal-header h2,
+.modal-dialog-card .modal-header h3,
+.modal-card-center .modal-header h3,
+.modal-title {
   font-size: 16px;
   font-weight: 700;
   color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.01em;
 }
 
-.modal-dialog-card form {
+.modal-dialog-card form,
+.modal-card-center form {
+  height: auto !important;
+  max-height: calc(90vh - 60px) !important;
+  overflow-y: auto !important;
+}
+
+.modal-dialog-card .modal-footer,
+.modal-card-center .modal-footer {
+  border-radius: 0 0 12px 12px;
+}
+
+/* ==========================================================================
+   Universal ERP Form Controls & Layout
+   ========================================================================== */
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.form-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 2px;
+  display: block;
+  letter-spacing: -0.01em;
+}
+
+.form-control,
+.form-input,
+.form-select {
+  height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-family: inherit;
+  background: #ffffff;
+  color: #0f172a;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+textarea.form-control,
+textarea.form-input {
   height: auto;
-  max-height: calc(90vh - 60px);
-  overflow-y: auto;
+  min-height: 80px;
+  padding: 10px 12px;
+}
+
+.form-control:focus,
+.form-input:focus,
+.form-select:focus {
+  border-color: #0061f2;
+  box-shadow: 0 0 0 3px rgba(0, 97, 242, 0.12);
+}
+
+.form-control::placeholder,
+.form-input::placeholder {
+  color: #94a3b8;
+  opacity: 0.85;
+}
+
+.form-control:disabled,
+.form-input:disabled,
+.form-select:disabled {
+  background: #f8fafc;
+  color: #64748b;
+  cursor: not-allowed;
+  border-color: #e2e8f0;
+}
+
+.form-helper,
+.form-text {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+  line-height: 1.4;
+  display: block;
+}
+
+.modal-form-content {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* ==========================================================================
