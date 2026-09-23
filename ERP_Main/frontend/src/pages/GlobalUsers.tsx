@@ -1211,41 +1211,57 @@ export function GlobalUsers() {
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
                           <StatusBadge status={detailUser.status} />
                           {!isRowUserAdmin(detailUser) && (
-                            detailUser.status === "DISABLED" ? (
+                            <>
                               <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
-                                onClick={() => handleEnableUser(detailUser)}
+                                onClick={() => handleOpenStatus(detailUser)}
                                 style={{
                                   fontSize: "11px",
                                   padding: "2px 8px",
                                   borderRadius: "4px",
                                   fontWeight: 500,
-                                  color: "#059669",
-                                  borderColor: "#a7f3d0",
-                                  backgroundColor: "#ecfdf5",
                                 }}
+                                title="Change lifecycle status (Active / Suspended / Disabled)"
                               >
-                                Enable Account
+                                Change Status
                               </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => setConfirmDisableUser(detailUser)}
-                                style={{
-                                  fontSize: "11px",
-                                  padding: "2px 8px",
-                                  borderRadius: "4px",
-                                  fontWeight: 500,
-                                  color: "#dc2626",
-                                  borderColor: "#fecaca",
-                                  backgroundColor: "#fef2f2",
-                                }}
-                              >
-                                Disable Account
-                              </button>
-                            )
+                              {detailUser.status === "DISABLED" ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => handleEnableUser(detailUser)}
+                                  style={{
+                                    fontSize: "11px",
+                                    padding: "2px 8px",
+                                    borderRadius: "4px",
+                                    fontWeight: 500,
+                                    color: "#059669",
+                                    borderColor: "#a7f3d0",
+                                    backgroundColor: "#ecfdf5",
+                                  }}
+                                >
+                                  Enable Account
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => setConfirmDisableUser(detailUser)}
+                                  style={{
+                                    fontSize: "11px",
+                                    padding: "2px 8px",
+                                    borderRadius: "4px",
+                                    fontWeight: 500,
+                                    color: "#dc2626",
+                                    borderColor: "#fecaca",
+                                    backgroundColor: "#fef2f2",
+                                  }}
+                                >
+                                  Disable Account
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
