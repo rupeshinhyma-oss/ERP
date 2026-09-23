@@ -697,8 +697,8 @@ export function GlobalUsers() {
         open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         title="Create Global User"
-        variant="center"
-        cardStyle={{ maxWidth: "520px" }}
+        variant="drawer"
+        cardStyle={{ maxWidth: "540px" }}
       >
         <form onSubmit={handleCreateUser}>
           <div className="modal-form-content">
@@ -778,8 +778,8 @@ export function GlobalUsers() {
         open={editModalOpen}
         onClose={() => setEditModalOpen(false)}
         title="Edit Global User Metadata"
-        variant="center"
-        cardStyle={{ maxWidth: "520px" }}
+        variant="drawer"
+        cardStyle={{ maxWidth: "540px" }}
       >
         <form onSubmit={handleSaveEdit}>
           <div className="modal-form-content">
@@ -857,8 +857,8 @@ export function GlobalUsers() {
         open={statusModalOpen}
         onClose={() => setStatusModalOpen(false)}
         title="Change Global User Status"
-        variant="center"
-        cardStyle={{ maxWidth: "480px" }}
+        variant="drawer"
+        cardStyle={{ maxWidth: "500px" }}
       >
         {targetStatusUser && (
           <div>
@@ -931,7 +931,7 @@ export function GlobalUsers() {
         open={provisionModalOpen}
         onClose={() => setProvisionModalOpen(false)}
         title="Provision User to ERP (Flow A)"
-        variant="center"
+        variant="drawer"
         cardStyle={{ maxWidth: "540px" }}
       >
         {targetProvisionUser && (
@@ -1399,8 +1399,8 @@ export function GlobalUsers() {
         open={assignRoleModalOpen}
         onClose={() => setAssignRoleModalOpen(false)}
         title="Assign Platform Role"
-        variant="center"
-        cardStyle={{ maxWidth: "520px" }}
+        variant="drawer"
+        cardStyle={{ maxWidth: "540px" }}
       >
         <form onSubmit={handleExecuteAssignRole}>
           <div className="modal-form-content">
