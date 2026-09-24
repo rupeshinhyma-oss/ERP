@@ -72,6 +72,7 @@ import type {
   ImportSummary,
   PaginationMeta,
   Product,
+  ProductCategory,
   ProductSubCategory,
   Supplier,
   SupplierContact,
@@ -689,6 +690,7 @@ export function SuppliersPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const existingSuppliers = useLookup<Supplier>("/suppliers", 500);
+  const categoriesLookup = useLookup<ProductCategory>("/masters/product-categories", 500);
   const subCategoriesLookup = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
 
   async function resolveCountryPhoneCode(countryId: string | null): Promise<string> {
@@ -2508,13 +2510,34 @@ export function SuppliersPage() {
                           }
                           if (formCategoryIds.length > 0) {
                             items = items.filter((sc) => formCategoryIds.includes(sc.category_id));
+                            items = [...items].sort((a, b) => {
+                              const idxA = formCategoryIds.indexOf(a.category_id);
+                              const idxB = formCategoryIds.indexOf(b.category_id);
+                              if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                              return a.name.localeCompare(b.name);
+                            });
                           }
                           if (q) {
                             items = items.filter(
                               (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
                             );
                           }
-                          return items.map((sc) => ({ value: sc.id, label: sc.name }));
+                          const catMap = new Map<string, string>();
+                          if (categoriesLookup.items.length > 0) {
+                            categoriesLookup.items.forEach((c) => catMap.set(c.id, c.name));
+                          } else {
+                            try {
+                              const { data: cats } = await apiGet<any[]>("/masters/product-categories?page=1&page_size=500", { signal });
+                              if (cats) cats.forEach((c) => catMap.set(c.id, c.name));
+                            } catch {
+                              // fallback
+                            }
+                          }
+                          return items.map((sc) => ({
+                            value: sc.id,
+                            label: sc.name,
+                            group: catMap.get(sc.category_id) || "Other Categories",
+                          }));
                         }}
                         fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                       />

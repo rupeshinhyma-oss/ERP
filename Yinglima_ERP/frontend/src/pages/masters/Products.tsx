@@ -628,11 +628,32 @@ export function ProductsPage() {
               }}
             >
               <option value="">All</option>
-              {scopedFilterSubCategories.map((sc) => (
-                <option key={sc.id} value={sc.id}>
-                  {sc.name}
-                </option>
-              ))}
+              {categoryFilter ? (
+                scopedFilterSubCategories.map((sc) => (
+                  <option key={sc.id} value={sc.id}>
+                    {sc.name}
+                  </option>
+                ))
+              ) : (
+                (() => {
+                  const catMap = new Map(categories.items.map((c) => [c.id, c.name]));
+                  const groups = new Map<string, typeof scopedFilterSubCategories>();
+                  scopedFilterSubCategories.forEach((sc) => {
+                    const cName = catMap.get(sc.category_id) || "Other";
+                    if (!groups.has(cName)) groups.set(cName, []);
+                    groups.get(cName)!.push(sc);
+                  });
+                  return Array.from(groups.entries()).map(([cName, list]) => (
+                    <optgroup key={cName} label={cName}>
+                      {list.map((sc) => (
+                        <option key={sc.id} value={sc.id}>
+                          {sc.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ));
+                })()
+              )}
             </select>
           </div>
 
@@ -1176,11 +1197,32 @@ export function ProductsPage() {
               </SelectField>
               <SelectField id="sub_category_id" label="Sub-Category *" value={f.sub_category_id} onChange={(v) => set("sub_category_id", v)} error={errors.sub_category_id}>
                 <option value="">-- Select Sub-Category --</option>
-                {scopedSubCategories.map((sc) => (
-                  <option key={sc.id} value={sc.id}>
-                    {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
-                  </option>
-                ))}
+                {f.category_id ? (
+                  scopedSubCategories.map((sc) => (
+                    <option key={sc.id} value={sc.id}>
+                      {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
+                    </option>
+                  ))
+                ) : (
+                  (() => {
+                    const catMap = new Map(categories.items.map((c) => [c.id, c.name]));
+                    const groups = new Map<string, typeof scopedSubCategories>();
+                    scopedSubCategories.forEach((sc) => {
+                      const cName = catMap.get(sc.category_id) || "Other";
+                      if (!groups.has(cName)) groups.set(cName, []);
+                      groups.get(cName)!.push(sc);
+                    });
+                    return Array.from(groups.entries()).map(([cName, list]) => (
+                      <optgroup key={cName} label={cName}>
+                        {list.map((sc) => (
+                          <option key={sc.id} value={sc.id}>
+                            {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ));
+                  })()
+                )}
               </SelectField>
               <SelectField
                 id="supplier_id"

@@ -1974,13 +1974,25 @@ export function BuyersPage() {
                           let items = subCategories.items;
                           if (categoryIds.length > 0) {
                             items = items.filter((sc) => categoryIds.includes(sc.category_id));
+                            items = [...items].sort((a, b) => {
+                              const idxA = categoryIds.indexOf(a.category_id);
+                              const idxB = categoryIds.indexOf(b.category_id);
+                              if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                              return a.name.localeCompare(b.name);
+                            });
                           }
                           if (q) {
                             items = items.filter(
                               (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
                             );
                           }
-                          return items.map((sc) => ({ value: sc.id, label: sc.name }));
+                          const catMap = new Map<string, string>();
+                          categories.items.forEach((c) => catMap.set(c.id, c.name));
+                          return items.map((sc) => ({
+                            value: sc.id,
+                            label: sc.name,
+                            group: catMap.get(sc.category_id) || "Other Categories",
+                          }));
                         }}
                         fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                       />

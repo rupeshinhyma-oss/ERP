@@ -24,6 +24,7 @@ import { autoTitleCase } from "@/components/fields";
 export interface DropdownOption {
   value: string;
   label: string;
+  group?: string;
 }
 
 export type FetchOptions = (term: string, signal: AbortSignal) => Promise<DropdownOption[]>;
@@ -425,32 +426,95 @@ export function SearchableDropdown({
             <div className="sd-empty">No matches.</div>
           ) : (
             <>
-              {options.map((opt, i) => {
-                const isSelected = opt.value === value || (label && opt.label.toLowerCase() === label.toLowerCase());
-                return (
-                  <div
-                    key={opt.value}
-                    className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      fontWeight: isSelected ? 600 : 400,
-                      background: isSelected && i !== activeIndex ? "#f0fdf4" : undefined,
-                      color: isSelected && i !== activeIndex ? "#166534" : undefined,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      selectOption(opt);
-                    }}
-                  >
-                    <span>{opt.label}</span>
-                    {isSelected && (
-                      <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: 700 }}>✓</span>
-                    )}
+              {(() => {
+                const hasGroups = options.some((o) => Boolean(o.group));
+                if (!hasGroups) {
+                  return options.map((opt, i) => {
+                    const isSelected = opt.value === value || (label && opt.label.toLowerCase() === label.toLowerCase());
+                    return (
+                      <div
+                        key={opt.value}
+                        className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          fontWeight: isSelected ? 600 : 400,
+                          background: isSelected && i !== activeIndex ? "#f0fdf4" : undefined,
+                          color: isSelected && i !== activeIndex ? "#166534" : undefined,
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          selectOption(opt);
+                        }}
+                      >
+                        <span>{opt.label}</span>
+                        {isSelected && (
+                          <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: 700 }}>✓</span>
+                        )}
+                      </div>
+                    );
+                  });
+                }
+
+                // Render options grouped by category
+                const groupMap = new Map<string, DropdownOption[]>();
+                for (const opt of options) {
+                  const g = opt.group || "Other";
+                  if (!groupMap.has(g)) groupMap.set(g, []);
+                  groupMap.get(g)!.push(opt);
+                }
+
+                let optIndex = 0;
+                return Array.from(groupMap.entries()).map(([groupName, groupItems]) => (
+                  <div key={`group-${groupName}`}>
+                    <div style={{
+                      padding: "6px 12px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: "#475569",
+                      background: "#f8fafc",
+                      borderTop: "1px solid #e2e8f0",
+                      borderBottom: "1px solid #f1f5f9",
+                      letterSpacing: "0.4px",
+                      textTransform: "uppercase",
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 1,
+                    }}>
+                      {groupName}
+                    </div>
+                    {groupItems.map((opt) => {
+                      const currIndex = optIndex++;
+                      const isSelected = opt.value === value || (label && opt.label.toLowerCase() === label.toLowerCase());
+                      return (
+                        <div
+                          key={opt.value}
+                          className={`sd-option ${currIndex === activeIndex ? "sd-active" : ""}`.trim()}
+                          style={{
+                            paddingLeft: "20px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            fontWeight: isSelected ? 600 : 400,
+                            background: isSelected && currIndex !== activeIndex ? "#f0fdf4" : undefined,
+                            color: isSelected && currIndex !== activeIndex ? "#166534" : undefined,
+                          }}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            selectOption(opt);
+                          }}
+                        >
+                          <span>{opt.label}</span>
+                          {isSelected && (
+                            <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: 700 }}>✓</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                ));
+              })()}
               {showCustomOption && (
                 <div
                   className="sd-option"
@@ -1198,44 +1262,172 @@ export function SearchableDropdownMultiPanel({
                   );
                 })()}
 
-                {options.map((opt) => {
-                  const isChecked = selectedValues.has(opt.value);
-                  return (
-                    <div
-                      key={opt.value}
-                      onMouseDown={(e) => { e.preventDefault(); toggleItem(opt); }}
-                      style={{
-                        padding: "8px 12px",
-                        fontSize: "13.5px",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "10px",
-                        background: isChecked ? "#eff6ff" : "transparent",
-                        color: "#1e293b",
-                        transition: "background 0.1s",
-                      }}
-                      onMouseOver={(e) => { if (!isChecked) e.currentTarget.style.background = "#f8fafc"; }}
-                      onMouseOut={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
-                    >
-                      <span style={{
-                        width: "16px",
-                        height: "16px",
-                        border: isChecked ? "2px solid #0061f2" : "2px solid #cbd5e1",
-                        borderRadius: "3px",
-                        background: isChecked ? "#0061f2" : "#ffffff",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                        transition: "all 0.15s",
-                      }}>
-                        {isChecked && <span style={{ color: "#fff", fontSize: "10px", fontWeight: "bold" }}>✓</span>}
-                      </span>
-                      {opt.label}
-                    </div>
-                  );
-                })}
+                {(() => {
+                  const hasGroups = options.some((o) => Boolean(o.group));
+                  if (!hasGroups) {
+                    return options.map((opt) => {
+                      const isChecked = selectedValues.has(opt.value);
+                      return (
+                        <div
+                          key={opt.value}
+                          onMouseDown={(e) => { e.preventDefault(); toggleItem(opt); }}
+                          style={{
+                            padding: "8px 12px",
+                            fontSize: "13.5px",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                            background: isChecked ? "#eff6ff" : "transparent",
+                            color: "#1e293b",
+                            transition: "background 0.1s",
+                          }}
+                          onMouseOver={(e) => { if (!isChecked) e.currentTarget.style.background = "#f8fafc"; }}
+                          onMouseOut={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                        >
+                          <span style={{
+                            width: "16px",
+                            height: "16px",
+                            border: isChecked ? "2px solid #0061f2" : "2px solid #cbd5e1",
+                            borderRadius: "3px",
+                            background: isChecked ? "#0061f2" : "#ffffff",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                            transition: "all 0.15s",
+                          }}>
+                            {isChecked && <span style={{ color: "#fff", fontSize: "10px", fontWeight: "bold" }}>✓</span>}
+                          </span>
+                          {opt.label}
+                        </div>
+                      );
+                    });
+                  }
+
+                  // Grouped options by parent Category
+                  const groupMap = new Map<string, DropdownOption[]>();
+                  for (const opt of options) {
+                    const g = opt.group || "Other";
+                    if (!groupMap.has(g)) groupMap.set(g, []);
+                    groupMap.get(g)!.push(opt);
+                  }
+
+                  return Array.from(groupMap.entries()).map(([groupName, groupItems]) => {
+                    const isGroupAll = groupItems.length > 0 && groupItems.every((opt) => selectedValues.has(opt.value));
+                    const groupSelectedCount = groupItems.filter((opt) => selectedValues.has(opt.value)).length;
+
+                    return (
+                      <div key={`group-${groupName}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        {/* Bold Category Header */}
+                        <div
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            if (isGroupAll) {
+                              const groupValSet = new Set(groupItems.map((o) => o.value));
+                              const next = selected.filter((s) => !groupValSet.has(s.value));
+                              setSelected(next);
+                              onChange(next.map((s) => s.value));
+                            } else {
+                              const existingMap = new Map(selected.map((s) => [s.value, s]));
+                              for (const opt of groupItems) {
+                                existingMap.set(opt.value, opt);
+                              }
+                              const next = Array.from(existingMap.values());
+                              setSelected(next);
+                              onChange(next.map((s) => s.value));
+                            }
+                          }}
+                          style={{
+                            padding: "8px 12px",
+                            fontSize: "12.5px",
+                            fontWeight: 700,
+                            color: isGroupAll ? "#1d4ed8" : "#0f172a",
+                            background: isGroupAll ? "#eff6ff" : "#f1f5f9",
+                            borderTop: "1px solid #e2e8f0",
+                            borderBottom: "1px solid #e2e8f0",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            cursor: "pointer",
+                            userSelect: "none",
+                            position: "sticky",
+                            top: 0,
+                            zIndex: 1,
+                            transition: "background 0.1s",
+                          }}
+                          onMouseOver={(e) => { e.currentTarget.style.background = isGroupAll ? "#dbeafe" : "#e2e8f0"; }}
+                          onMouseOut={(e) => { e.currentTarget.style.background = isGroupAll ? "#eff6ff" : "#f1f5f9"; }}
+                          title={`Click to select/deselect all under ${groupName}`}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{
+                              width: "15px",
+                              height: "15px",
+                              border: isGroupAll ? "2px solid #0061f2" : "2px solid #94a3b8",
+                              borderRadius: "3px",
+                              background: isGroupAll ? "#0061f2" : groupSelectedCount > 0 ? "#93c5fd" : "#ffffff",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              transition: "all 0.15s",
+                            }}>
+                              {isGroupAll && <span style={{ color: "#fff", fontSize: "9px", fontWeight: "bold" }}>✓</span>}
+                              {!isGroupAll && groupSelectedCount > 0 && <span style={{ width: "6px", height: "2px", background: "#ffffff", borderRadius: "1px" }} />}
+                            </span>
+                            <span style={{ fontWeight: 700, color: "#0f172a", letterSpacing: "0.2px" }}>
+                              {groupName}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: "11px", color: isGroupAll ? "#2563eb" : "#64748b", fontWeight: 600 }}>
+                            ({groupSelectedCount}/{groupItems.length} selected)
+                          </span>
+                        </div>
+
+                        {/* Sub-Category Options */}
+                        {groupItems.map((opt) => {
+                          const isChecked = selectedValues.has(opt.value);
+                          return (
+                            <div
+                              key={opt.value}
+                              onMouseDown={(e) => { e.preventDefault(); toggleItem(opt); }}
+                              style={{
+                                padding: "8px 12px 8px 24px",
+                                fontSize: "13px",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "10px",
+                                background: isChecked ? "#eff6ff" : "transparent",
+                                color: "#1e293b",
+                                transition: "background 0.1s",
+                              }}
+                              onMouseOver={(e) => { if (!isChecked) e.currentTarget.style.background = "#f8fafc"; }}
+                              onMouseOut={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                            >
+                              <span style={{
+                                width: "15px",
+                                height: "15px",
+                                border: isChecked ? "2px solid #0061f2" : "2px solid #cbd5e1",
+                                borderRadius: "3px",
+                                background: isChecked ? "#0061f2" : "#ffffff",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                flexShrink: 0,
+                                transition: "all 0.15s",
+                              }}>
+                                {isChecked && <span style={{ color: "#fff", fontSize: "9px", fontWeight: "bold" }}>✓</span>}
+                              </span>
+                              <span>{opt.label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  });
+                })()}
               </>
             )}
           </div>
