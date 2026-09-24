@@ -677,7 +677,6 @@ export const ICONS = {
   grid: IconImage,
   folder: IconLayers,
   sliders: IconSettings,
-  hrms: IconUsers,
   refresh: IconClock,
 } as const;
 

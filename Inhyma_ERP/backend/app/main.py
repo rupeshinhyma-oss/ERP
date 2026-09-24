@@ -91,12 +91,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.execute(text("ALTER TABLE products ADD COLUMN organization_ids JSON;"))
     except Exception:
         pass
-    try:
-        from sqlalchemy import text
-        async with engine.begin() as conn:
-            await conn.execute(text("ALTER TABLE hrms_locations ADD COLUMN IF NOT EXISTS place_id VARCHAR(255);"))
-    except Exception:
-        pass
 
     # Start the background queue worker (Phase 4).
     worker = get_worker()
