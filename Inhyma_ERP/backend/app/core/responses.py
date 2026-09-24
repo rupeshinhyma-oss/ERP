@@ -79,9 +79,13 @@ class ErrorResponse(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
-def _build_meta(*, request_id: str, extra_meta: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_meta(*, request_id: str = "", extra_meta: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build the ``meta`` block, merging in any endpoint-specific metadata (e.g. pagination)."""
-    meta: dict[str, Any] = {"request_id": request_id, "timestamp": datetime.now(timezone.utc).isoformat()}
+    import uuid
+    meta: dict[str, Any] = {
+        "request_id": request_id or str(uuid.uuid4()),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
     if extra_meta:
         meta.update(extra_meta)
     return meta
@@ -90,7 +94,7 @@ def _build_meta(*, request_id: str, extra_meta: dict[str, Any] | None = None) ->
 def build_success_response(
     *,
     data: Any,
-    request_id: str,
+    request_id: str = "",
     message: str = "Success",
     meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:

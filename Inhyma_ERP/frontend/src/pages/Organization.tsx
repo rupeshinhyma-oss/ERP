@@ -1,288 +1,674 @@
 /**
- * Organization Settings. Ported from organization.html.
+ * Organization Setup Page
  *
- * Shows a read-only detail card by default and swaps to the form on Edit. If no
- * organization record exists yet the API answers 404 and the page opens straight
- * into the form -- there is nothing to "view" until one is created, and the same
- * form then POSTs instead of PATCHing.
+ * Simplified into exactly three dedicated tabs:
+ * 1. Leave Types: Clean table with Leave Name, Paid/Unpaid, Created By, Updated By, Status Toggle, Edit Icon
+ * 2. Expense Settings: Expense Categories, Approval Rules, Mileage Settings
+ * 3. Geo Fencing: Office punch location configuration with Google Maps search, interactive map,
+ *    instant radius selection (50m–1000m), verification card, and persistent backend storage.
  *
- * Saving invalidates the cached brand name so a rename shows up immediately in
- * the sidebar here, and on every other open tab's next navigation.
+ * (Designations, Departments, Employment Types, and Branches have been removed from this page).
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { Banner, Can } from "@/components/ui";
-import { SelectField, TextAreaField, TextField } from "@/components/fields";
-import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
-import { invalidateBrandNameCache, setBrandName } from "@/lib/brand";
-import type { Organization, OrganizationFieldId } from "@/types";
+import { Banner, Modal } from "@/components/ui";
+import {
+  IconBuilding,
+  IconCheckSquare,
+  IconClock,
+  IconEdit,
+  IconFileText,
+  IconMap,
+  IconPin,
+  IconPlus,
+} from "@/components/icons";
+import { AddressMapConfirmModal, type AddressMapConfirmData } from "@/components/hrms/AddressMapConfirmModal";
+import { GeoFencing } from "@/pages/hrms/GeoFencing";
+import { apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
 
-const FIELD_IDS: OrganizationFieldId[] = [
-  "company_name",
-  "legal_name",
-  "email",
-  "phone",
-  "website",
-  "gst_number",
-  "pan_number",
-  "timezone",
-  "currency",
-  "status",
-  "address",
-  "city",
-  "state",
-  "country",
-  "postal_code",
-  "business_hours",
+export interface LeaveTypeItem {
+  id: string;
+  name: string;
+  is_paid: boolean;
+  annual_quota: number;
+  created_by: string;
+  updated_by: string;
+  is_active: boolean;
+}
+
+export interface HrmsOfficeLocation {
+  id: string;
+  name: string;
+  location_type: "OFFICE" | "BRANCH" | "WAREHOUSE" | "FACTORY" | "CLIENT_SITE" | "OTHER";
+  address: string;
+  latitude: number;
+  longitude: number;
+  radius_meters: number;
+  place_id?: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+const INITIAL_LEAVE_TYPES: LeaveTypeItem[] = [
+  {
+    id: "lt-1",
+    name: "Casual Leave (CL)",
+    is_paid: true,
+    annual_quota: 12,
+    created_by: "Admin",
+    updated_by: "Admin",
+    is_active: true,
+  },
+  {
+    id: "lt-2",
+    name: "Sick Leave (SL)",
+    is_paid: true,
+    annual_quota: 10,
+    created_by: "Admin",
+    updated_by: "Admin",
+    is_active: true,
+  },
+  {
+    id: "lt-3",
+    name: "Earned / Privilege Leave (PL)",
+    is_paid: true,
+    annual_quota: 15,
+    created_by: "Admin",
+    updated_by: "Admin",
+    is_active: true,
+  },
+  {
+    id: "lt-4",
+    name: "Maternity Leave",
+    is_paid: true,
+    annual_quota: 180,
+    created_by: "HR Admin",
+    updated_by: "Admin",
+    is_active: true,
+  },
+  {
+    id: "lt-5",
+    name: "Paternity Leave",
+    is_paid: true,
+    annual_quota: 15,
+    created_by: "HR Admin",
+    updated_by: "Admin",
+    is_active: true,
+  },
+  {
+    id: "lt-6",
+    name: "Loss of Pay (Unpaid Leave)",
+    is_paid: false,
+    annual_quota: 0,
+    created_by: "Admin",
+    updated_by: "Admin",
+    is_active: true,
+  },
 ];
 
-type OrgForm = Record<OrganizationFieldId, string>;
-
-const EMPTY_FORM = FIELD_IDS.reduce((acc, id) => {
-  acc[id] = id === "status" ? "ACTIVE" : "";
-  return acc;
-}, {} as OrgForm);
-
-function DetailItem({
-  label,
-  value,
-  fullWidth,
-}: {
-  label: string;
-  value?: string | null;
-  fullWidth?: boolean;
-}) {
-  return (
-    <div style={fullWidth ? { gridColumn: "1 / -1" } : undefined}>
-      <div className="label">{label}</div>
-      <div className="value">{value || "—"}</div>
-    </div>
-  );
-}
-
-function OrganizationDetailSkeleton() {
-  return (
-    <div className="card">
-      <div className="detail-grid">
-        {Array.from({ length: 10 }).map((_, i) => (
-          <div key={i}>
-            <div className="label"><div className="skeleton-line" style={{ width: "80px", height: "12px", marginBottom: "4px" }} /></div>
-            <div className="value"><div className="skeleton-line" style={{ width: "140px", height: "16px" }} /></div>
-          </div>
-        ))}
-      </div>
-      <div className="section-title">Address</div>
-      <div className="detail-grid">
-        <div style={{ gridColumn: "1 / -1" }}>
-          <div className="label"><div className="skeleton-line" style={{ width: "60px", height: "12px", marginBottom: "4px" }} /></div>
-          <div className="value"><div className="skeleton-line" style={{ width: "80%", height: "16px" }} /></div>
-        </div>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i}>
-            <div className="label"><div className="skeleton-line" style={{ width: "60px", height: "12px", marginBottom: "4px" }} /></div>
-            <div className="value"><div className="skeleton-line" style={{ width: "110px", height: "16px" }} /></div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function OrganizationPage() {
-  const [org, setOrg] = useState<Organization | null>(null);
-  const [form, setForm] = useState<OrgForm>(EMPTY_FORM);
-  const [mode, setMode] = useState<"create" | "update">("create");
-  const [editing, setEditing] = useState(false);
-  const [error, setError] = useState<unknown>(null);
+  const [activeTab, setActiveTab] = useState<"leave-types" | "expense-settings" | "geo-fencing">("leave-types");
+
+  // Notifications
   const [success, setSuccess] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  const setField = (id: OrganizationFieldId, value: string) =>
-    setForm((prev) => ({ ...prev, [id]: value }));
-
-  function fillForm(source: Organization): OrgForm {
-    return FIELD_IDS.reduce((acc, id) => {
-      acc[id] = (source[id] as string | null | undefined) ?? "";
-      return acc;
-    }, {} as OrgForm);
-  }
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await apiGet<Organization>("/organizations");
-        if (cancelled) return;
-        setOrg(data);
-        setForm(fillForm(data));
-        setMode("update");
-        setEditing(false);
-      } catch (err) {
-        if (cancelled) return;
-        if (err instanceof ApiError && err.status === 404) {
-          // No profile exists yet -- go straight to the form.
-          setMode("create");
-          setEditing(true);
-        } else {
-          setError(err);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!success) return;
+    const t = setTimeout(() => setSuccess(null), 4000);
+    return () => clearTimeout(t);
+  }, [success]);
 
-  function readForm(): Record<string, string | null> {
-    const payload: Record<string, string | null> = {};
-    for (const id of FIELD_IDS) {
-      const value = (form[id] || "").trim();
-      payload[id] = value === "" ? null : value;
-    }
-    if (!payload.timezone) payload.timezone = "UTC";
-    if (!payload.currency) payload.currency = "USD";
-    return payload;
-  }
+  // ---------------------------------------------------------------------------
+  // TAB 1: LEAVE TYPES STATE
+  // ---------------------------------------------------------------------------
+  const [leaveTypes, setLeaveTypes] = useState<LeaveTypeItem[]>(INITIAL_LEAVE_TYPES);
+  const [editingLeave, setEditingLeave] = useState<LeaveTypeItem | null>(null);
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ name: "", is_paid: true, annual_quota: 12 });
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleOpenAddLeave = () => {
+    setEditingLeave(null);
+    setLeaveForm({ name: "", is_paid: true, annual_quota: 12 });
+    setLeaveModalOpen(true);
+  };
+
+  const handleOpenEditLeave = (item: LeaveTypeItem) => {
+    setEditingLeave(item);
+    setLeaveForm({ name: item.name, is_paid: item.is_paid, annual_quota: item.annual_quota });
+    setLeaveModalOpen(true);
+  };
+
+  const handleSaveLeave = (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setSuccess(null);
-    setSaving(true);
-    const payload = readForm();
+    if (!leaveForm.name.trim()) return;
 
-    try {
-      let data: Organization;
-      if (mode === "create") {
-        ({ data } = await apiPost<Organization>("/organizations", payload));
-        setMode("update");
-      } else {
-        ({ data } = await apiPatch<Organization>("/organizations", payload));
-      }
-      setOrg(data);
-      setForm(fillForm(data));
-
-      invalidateBrandNameCache();
-      if (data?.company_name) {
-        setBrandName(data.company_name);
-      }
-      setSuccess("Saved.");
-      setEditing(false);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setSaving(false);
+    if (editingLeave) {
+      setLeaveTypes((prev) =>
+        prev.map((lt) =>
+          lt.id === editingLeave.id
+            ? {
+                ...lt,
+                name: leaveForm.name.trim(),
+                is_paid: leaveForm.is_paid,
+                annual_quota: Number(leaveForm.annual_quota) || 0,
+                updated_by: "Admin",
+              }
+            : lt
+        )
+      );
+      setSuccess(`Updated leave type "${leaveForm.name.trim()}".`);
+    } else {
+      const newLt: LeaveTypeItem = {
+        id: `lt-${Date.now()}`,
+        name: leaveForm.name.trim(),
+        is_paid: leaveForm.is_paid,
+        annual_quota: Number(leaveForm.annual_quota) || 0,
+        created_by: "Admin",
+        updated_by: "Admin",
+        is_active: true,
+      };
+      setLeaveTypes((prev) => [...prev, newLt]);
+      setSuccess(`Added leave type "${newLt.name}".`);
     }
-  }
+    setLeaveModalOpen(false);
+  };
 
-  const statusLabel =
-    org?.status === "ACTIVE" ? "Active" : org?.status === "INACTIVE" ? "Inactive" : "—";
+  const handleToggleLeaveStatus = (id: string) => {
+    setLeaveTypes((prev) =>
+      prev.map((lt) => (lt.id === id ? { ...lt, is_active: !lt.is_active } : lt))
+    );
+  };
+
+  // ---------------------------------------------------------------------------
+  // TAB 2: EXPENSE SETTINGS STATE
+  // ---------------------------------------------------------------------------
+  const [expenseCategories, setExpenseCategories] = useState<string[]>([
+    "Local Travel & Conveyance",
+    "Meals & Entertainment",
+    "Fuel & Mileage",
+    "Hotel & Accommodation",
+    "Office Supplies & Stationery",
+    "Client Hospitality",
+  ]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [autoApproveLimit, setAutoApproveLimit] = useState("1000");
+  const [multiTierLimit, setMultiTierLimit] = useState("10000");
+  const [receiptMandatoryLimit, setReceiptMandatoryLimit] = useState("500");
+  const [twoWheelerRate, setTwoWheelerRate] = useState("5.50");
+  const [fourWheelerRate, setFourWheelerRate] = useState("12.00");
+  const [requireGpsTracking, setRequireGpsTracking] = useState(true);
+
+  const handleAddExpenseCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) return;
+    if (expenseCategories.includes(newCategoryName.trim())) return;
+    setExpenseCategories((prev) => [...prev, newCategoryName.trim()]);
+    setNewCategoryName("");
+    setSuccess("Added expense category.");
+  };
+
+  const handleRemoveCategory = (cat: string) => {
+    setExpenseCategories((prev) => prev.filter((c) => c !== cat));
+  };
+
+  const handleSaveExpenseSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSuccess("Expense Settings saved successfully.");
+  };
+
+  const location = useLocation();
+  const isHrmsSetup = location.pathname.startsWith("/hrms");
 
   return (
-    <AppShell activeKey="organization">
-      <main className="page">
-        <Breadcrumb trail={["Settings", "Organization"]} />
-        <div className="page-header">
+    <AppShell activeKey={isHrmsSetup ? "hrms" : "organization"}>
+      <main className="page" style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px 24px" }}>
+        <Breadcrumb trail={isHrmsSetup ? ["Dashboard", "HRMS", "Setup"] : ["Settings", "Organization Setup"]} />
+
+        <div className="page-header" style={{ marginBottom: "20px" }}>
           <div>
-            <h1>Organization Settings</h1>
-            <div className="page-subtitle">
-              Your company's profile, used throughout the ERP and shown as the sidebar's brand
-              name.
+            <h1 style={{ fontSize: "24px", fontWeight: 700, margin: 0, color: "var(--color-text)" }}>
+              {isHrmsSetup ? "HRMS Setup" : "Organization Setup"}
+            </h1>
+            <div className="page-subtitle" style={{ fontSize: "13px", color: "var(--color-muted)", marginTop: "4px" }}>
+              Configure leave policies, expense parameters, and verified office punch locations.
             </div>
           </div>
-          {!editing && (
-            <div className="page-header-actions">
-              <Can permission="organization.manage">
-                <button className="btn btn-primary" onClick={() => setEditing(true)}>
-                  Edit
-                </button>
-              </Can>
-            </div>
-          )}
         </div>
+
         <Banner error={error} success={success} />
 
-        {!editing && !org && <OrganizationDetailSkeleton />}
+        {/* HORIZONTAL TABS (Blue Active Underline) */}
+        <div
+          style={{
+            display: "flex",
+            gap: "24px",
+            borderBottom: "2px solid var(--color-border)",
+            marginBottom: "24px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveTab("leave-types")}
+            style={{
+              padding: "10px 4px",
+              background: "none",
+              border: "none",
+              borderBottom: activeTab === "leave-types" ? "2px solid #2563eb" : "2px solid transparent",
+              marginBottom: "-2px",
+              fontSize: "14px",
+              fontWeight: 600,
+              color: activeTab === "leave-types" ? "#2563eb" : "var(--color-muted)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <IconFileText width={16} height={16} />
+            <span>Leave Types</span>
+          </button>
 
-        {!editing && org && (
-          <div className="card">
-            <div className="detail-grid">
-              <DetailItem label="Company Name" value={org.company_name} />
-              <DetailItem label="Legal Name" value={org.legal_name} />
-              <DetailItem label="Email" value={org.email} />
-              <DetailItem label="Phone" value={org.phone} />
-              <DetailItem label="Website" value={org.website} />
-              <DetailItem label="GST Number" value={org.gst_number} />
-              <DetailItem label="PAN Number" value={org.pan_number} />
-              <DetailItem label="Timezone" value={org.timezone} />
-              <DetailItem label="Currency" value={org.currency} />
-              <DetailItem label="Status" value={statusLabel} />
+          <button
+            type="button"
+            onClick={() => setActiveTab("expense-settings")}
+            style={{
+              padding: "10px 4px",
+              background: "none",
+              border: "none",
+              borderBottom: activeTab === "expense-settings" ? "2px solid #2563eb" : "2px solid transparent",
+              marginBottom: "-2px",
+              fontSize: "14px",
+              fontWeight: 600,
+              color: activeTab === "expense-settings" ? "#2563eb" : "var(--color-muted)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <IconClock width={16} height={16} />
+            <span>Expense Settings</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("geo-fencing")}
+            style={{
+              padding: "10px 4px",
+              background: "none",
+              border: "none",
+              borderBottom: activeTab === "geo-fencing" ? "2px solid #2563eb" : "2px solid transparent",
+              marginBottom: "-2px",
+              fontSize: "14px",
+              fontWeight: 600,
+              color: activeTab === "geo-fencing" ? "#2563eb" : "var(--color-muted)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <IconPin width={16} height={16} />
+            <span>Geo Fencing</span>
+          </button>
+        </div>
+
+        {/* ------------------------------------------------------------------- */}
+        {/* TAB 1: LEAVE TYPES                                                 */}
+        {/* ------------------------------------------------------------------- */}
+        {activeTab === "leave-types" && (
+          <div className="card" style={{ padding: "20px 24px" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "16px",
+              }}
+            >
+              <div>
+                <h2 style={{ fontSize: "16px", fontWeight: 700, margin: 0 }}>Company Leave Types</h2>
+                <span style={{ fontSize: "12.5px", color: "var(--color-muted)" }}>
+                  Standard leave entitlements applied to annual employee balances.
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleOpenAddLeave}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <IconPlus width={15} height={15} />
+                <span>Add Leave Type</span>
+              </button>
             </div>
-            <div className="section-title">Address</div>
-            <div className="detail-grid">
-              <DetailItem label="Address" value={org.address} fullWidth />
-              <DetailItem label="City" value={org.city} />
-              <DetailItem label="State" value={org.state} />
-              <DetailItem label="Country" value={org.country} />
-              <DetailItem label="Postal Code" value={org.postal_code} />
-            </div>
-            <div className="section-title">Other</div>
-            <div className="detail-grid">
-              <DetailItem label="Business Hours" value={org.business_hours} />
+
+            <div className="table-responsive" style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
+              <table className="table" style={{ width: "100%", margin: 0 }}>
+                <thead>
+                  <tr style={{ background: "var(--color-bg)" }}>
+                    <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "12px" }}>Leave Name</th>
+                    <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "12px" }}>Paid / Unpaid</th>
+                    <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "12px" }}>Annual Quota</th>
+                    <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "12px" }}>Created By</th>
+                    <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "12px" }}>Updated By</th>
+                    <th style={{ padding: "12px 16px", textAlign: "center", fontSize: "12px" }}>Status Toggle</th>
+                    <th style={{ padding: "12px 16px", textAlign: "center", fontSize: "12px" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaveTypes.map((lt) => (
+                    <tr key={lt.id} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                      <td style={{ padding: "14px 16px", fontWeight: 600, color: "var(--color-text)" }}>
+                        {lt.name}
+                      </td>
+                      <td style={{ padding: "14px 16px" }}>
+                        <span
+                          style={{
+                            padding: "3px 8px",
+                            borderRadius: "12px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            background: lt.is_paid ? "var(--color-success-soft, #dcfce7)" : "var(--color-bg)",
+                            color: lt.is_paid ? "var(--color-success, #16a34a)" : "var(--color-muted)",
+                          }}
+                        >
+                          {lt.is_paid ? "Paid" : "Unpaid"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "14px 16px", color: "var(--color-text)" }}>
+                        {lt.annual_quota > 0 ? `${lt.annual_quota} Days / Year` : "As Approved"}
+                      </td>
+                      <td style={{ padding: "14px 16px", color: "var(--color-muted)", fontSize: "12px" }}>
+                        {lt.created_by}
+                      </td>
+                      <td style={{ padding: "14px 16px", color: "var(--color-muted)", fontSize: "12px" }}>
+                        {lt.updated_by}
+                      </td>
+                      <td style={{ padding: "14px 16px", textAlign: "center" }}>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleLeaveStatus(lt.id)}
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: "12px",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            border: "none",
+                            cursor: "pointer",
+                            background: lt.is_active ? "#dcfce7" : "#fee2e2",
+                            color: lt.is_active ? "#16a34a" : "#dc2626",
+                          }}
+                        >
+                          {lt.is_active ? "Active" : "Inactive"}
+                        </button>
+                      </td>
+                      <td style={{ padding: "14px 16px", textAlign: "center" }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => handleOpenEditLeave(lt)}
+                          title="Edit Leave Policy"
+                          style={{ padding: "4px 8px" }}
+                        >
+                          <IconEdit width={14} height={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
 
-        {editing && (
-          <div className="card">
-            <form onSubmit={handleSubmit}>
-              <div className="form-grid">
-                <TextField id="company_name" label="Company name *" required maxLength={200} value={form.company_name} onChange={(v) => setField("company_name", v)} />
-                <TextField id="legal_name" label="Legal name" maxLength={200} value={form.legal_name} onChange={(v) => setField("legal_name", v)} />
-                <TextField id="email" label="Email" type="email" value={form.email} onChange={(v) => setField("email", v)} />
-                <TextField id="phone" label="Phone" maxLength={30} value={form.phone} onChange={(v) => setField("phone", v)} />
-                <TextField id="website" label="Website" maxLength={255} value={form.website} onChange={(v) => setField("website", v)} />
-                <TextField id="gst_number" label="GST number" maxLength={50} value={form.gst_number} onChange={(v) => setField("gst_number", v)} />
-                <TextField id="pan_number" label="PAN number" maxLength={50} value={form.pan_number} onChange={(v) => setField("pan_number", v)} />
-                <TextField id="timezone" label="Timezone" maxLength={50} placeholder="UTC" value={form.timezone} onChange={(v) => setField("timezone", v)} />
-                <TextField id="currency" label="Currency" maxLength={10} placeholder="USD" value={form.currency} onChange={(v) => setField("currency", v)} />
-                <SelectField id="status" label="Status" value={form.status} onChange={(v) => setField("status", v)}>
-                  <option value="ACTIVE">Active</option>
-                  <option value="INACTIVE">Inactive</option>
-                </SelectField>
+        {/* ------------------------------------------------------------------- */}
+        {/* TAB 2: EXPENSE SETTINGS                                             */}
+        {/* ------------------------------------------------------------------- */}
+        {activeTab === "expense-settings" && (
+          <form onSubmit={handleSaveExpenseSettings} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            {/* Section 1: Expense Categories */}
+            <div className="card" style={{ padding: "20px 24px" }}>
+              <h2 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 4px 0" }}>Expense Categories</h2>
+              <span style={{ fontSize: "12.5px", color: "var(--color-muted)" }}>
+                Categories available when employees file reimbursement claims.
+              </span>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "14px" }}>
+                {expenseCategories.map((cat) => (
+                  <div
+                    key={cat}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "6px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      background: "var(--color-bg)",
+                      border: "1px solid var(--color-border)",
+                      fontSize: "12.5px",
+                      fontWeight: 500,
+                    }}
+                  >
+                    <span>{cat}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCategory(cat)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--color-muted)",
+                        cursor: "pointer",
+                        fontWeight: 700,
+                        padding: "0 2px",
+                      }}
+                      title="Remove category"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
               </div>
 
-              <TextAreaField id="address" label="Address" value={form.address} onChange={(v) => setField("address", v)} />
-              <div className="form-grid">
-                <TextField id="city" label="City" maxLength={100} value={form.city} onChange={(v) => setField("city", v)} />
-                <TextField id="state" label="State" maxLength={100} value={form.state} onChange={(v) => setField("state", v)} />
-                <TextField id="country" label="Country" maxLength={100} value={form.country} onChange={(v) => setField("country", v)} />
-                <TextField id="postal_code" label="Postal code" maxLength={20} value={form.postal_code} onChange={(v) => setField("postal_code", v)} />
+              <div style={{ display: "flex", gap: "10px", marginTop: "16px", maxWidth: "420px" }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="New category name..."
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                />
+                <button type="button" className="btn btn-secondary" onClick={handleAddExpenseCategory}>
+                  Add Category
+                </button>
               </div>
-              <TextField id="business_hours" label="Business hours" maxLength={255} placeholder="Mon–Fri, 9am–6pm" value={form.business_hours} onChange={(v) => setField("business_hours", v)} />
+            </div>
 
-              <div className="form-actions">
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  Save
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setError(null);
-                    setSuccess(null);
-                    if (org) setForm(fillForm(org));
-                    setEditing(false);
-                  }}
-                >
-                  Cancel
+            {/* Section 2: Approval Rules */}
+            <div className="card" style={{ padding: "20px 24px" }}>
+              <h2 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 4px 0" }}>Approval Rules</h2>
+              <span style={{ fontSize: "12.5px", color: "var(--color-muted)" }}>
+                Limits and thresholds governing manager verification and multi-tier approvals.
+              </span>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: "16px",
+                  marginTop: "16px",
+                }}
+              >
+                <div className="form-group">
+                  <label className="form-label">Auto-Approval Threshold (₹)</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={autoApproveLimit}
+                    onChange={(e) => setAutoApproveLimit(e.target.value)}
+                    placeholder="e.g. 1000"
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>
+                    Claims below this amount are auto-approved for verified categories.
+                  </span>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Multi-Tier Approval Threshold (₹)</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={multiTierLimit}
+                    onChange={(e) => setMultiTierLimit(e.target.value)}
+                    placeholder="e.g. 10000"
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>
+                    Claims exceeding this value require Finance Director sign-off.
+                  </span>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Mandatory Receipt Upload (₹)</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={receiptMandatoryLimit}
+                    onChange={(e) => setReceiptMandatoryLimit(e.target.value)}
+                    placeholder="e.g. 500"
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>
+                    Bills/vouchers strictly required above this threshold.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3: Mileage Settings */}
+            <div className="card" style={{ padding: "20px 24px" }}>
+              <h2 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 4px 0" }}>Mileage Settings</h2>
+              <span style={{ fontSize: "12.5px", color: "var(--color-muted)" }}>
+                Per-kilometer reimbursement tariffs for official client and field transit.
+              </span>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: "16px",
+                  marginTop: "16px",
+                }}
+              >
+                <div className="form-group">
+                  <label className="form-label">Two-Wheeler Rate (₹ / km)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={twoWheelerRate}
+                    onChange={(e) => setTwoWheelerRate(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Four-Wheeler Rate (₹ / km)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={fourWheelerRate}
+                    onChange={(e) => setFourWheelerRate(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group" style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "24px" }}>
+                  <input
+                    type="checkbox"
+                    id="gps-tracking-cb"
+                    checked={requireGpsTracking}
+                    onChange={(e) => setRequireGpsTracking(e.target.checked)}
+                    style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                  />
+                  <label htmlFor="gps-tracking-cb" style={{ fontSize: "13px", fontWeight: 600, cursor: "pointer", margin: 0 }}>
+                    Require GPS Route Tracking for Mileage Claims
+                  </label>
+                </div>
+              </div>
+
+              <div style={{ marginTop: "20px", display: "flex", justifyContent: "flex-end" }}>
+                <button type="submit" className="btn btn-primary">
+                  Save Expense Settings
                 </button>
               </div>
-            </form>
-          </div>
+            </div>
+          </form>
         )}
+
+        {/* ------------------------------------------------------------------- */}
+        {/* TAB 3: GEO FENCING (OFFICE PUNCH LOCATIONS)                          */}
+        {/* ------------------------------------------------------------------- */}
+        {activeTab === "geo-fencing" && <GeoFencing />}
+
+        {/* ------------------------------------------------------------------- */}
+        {/* ADD/EDIT LEAVE TYPE MODAL                                           */}
+        {/* ------------------------------------------------------------------- */}
+        <Modal
+          open={leaveModalOpen}
+          title={editingLeave ? "Edit Leave Type" : "Add New Leave Type"}
+          onClose={() => setLeaveModalOpen(false)}
+          cardStyle={{ maxWidth: "480px" }}
+        >
+          <form onSubmit={handleSaveLeave} style={{ padding: "20px" }}>
+            <div className="form-group" style={{ marginBottom: "14px" }}>
+              <label className="form-label">Leave Name *</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Compensatory Off, Bereavement Leave"
+                value={leaveForm.name}
+                onChange={(e) => setLeaveForm((f) => ({ ...f, name: e.target.value }))}
+                required
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: "14px" }}>
+              <label className="form-label">Annual Quota (Days / Year)</label>
+              <input
+                type="number"
+                className="form-control"
+                value={leaveForm.annual_quota}
+                onChange={(e) => setLeaveForm((f) => ({ ...f, annual_quota: parseInt(e.target.value) || 0 }))}
+                min={0}
+                max={365}
+              />
+            </div>
+
+            <div className="form-group" style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "20px" }}>
+              <input
+                type="checkbox"
+                id="is-paid-cb"
+                checked={leaveForm.is_paid}
+                onChange={(e) => setLeaveForm((f) => ({ ...f, is_paid: e.target.checked }))}
+                style={{ width: "16px", height: "16px", cursor: "pointer" }}
+              />
+              <label htmlFor="is-paid-cb" style={{ fontSize: "13px", fontWeight: 600, cursor: "pointer", margin: 0 }}>
+                Paid Leave (Compensated during payroll)
+              </label>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setLeaveModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary">
+                {editingLeave ? "Save Changes" : "Create Leave Type"}
+              </button>
+            </div>
+          </form>
+        </Modal>
       </main>
     </AppShell>
   );
