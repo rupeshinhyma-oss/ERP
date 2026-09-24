@@ -220,3 +220,169 @@ class AddressSuggestionResponse(BaseModel):
     country: str
     address: str
 
+
+# ---------------------------------------------------------------------------
+# Attendance, Regularization, and Approval Schemas
+# ---------------------------------------------------------------------------
+
+
+class RegularizationRequestCreate(BaseModel):
+    attendance_date: date
+    check_in: str
+    check_out: str
+    total_hours: str
+    reason: str
+
+
+class ApprovalActionPayload(BaseModel):
+    status: str = Field(..., description="APPROVED or REJECTED")
+    manager_remarks: Optional[str] = None
+
+
+class AdjustedLeaveActionPayload(BaseModel):
+    action: str = Field(..., description="APPROVE, REJECT, or ADJUST_LEAVE")
+    leave_type: Optional[str] = None
+    manager_remarks: Optional[str] = None
+
+
+class AttendanceSettingsUpdate(BaseModel):
+    shift_name: Optional[str] = None
+    shift_start: Optional[str] = None
+    shift_end: Optional[str] = None
+    grace_until: Optional[str] = None
+    late_starts_after: Optional[str] = None
+    direct_half_day_after: Optional[str] = None
+    late_marks_before_half_day: Optional[int] = None
+    payroll_cycle: Optional[str] = None
+    employment_type: Optional[str] = None
+    max_late_check_in: Optional[str] = None
+    max_early_check_out: Optional[str] = None
+    grace_period_mins: Optional[int] = None
+    late_attendance_rule: Optional[str] = None
+    recurring_cycle: Optional[str] = None
+    min_overtime_mins: Optional[int] = None
+    max_overtime_mins: Optional[int] = None
+    holiday_overtime: Optional[str] = None
+    weekend_overtime: Optional[str] = None
+    approval_required: Optional[bool] = None
+
+
+class AttendanceExemptionCreate(BaseModel):
+    user_id: str
+    exemption_type: str
+    effective_from: date
+
+
+# ---------------------------------------------------------------------------
+# Attendance Policy Engine Schemas
+# ---------------------------------------------------------------------------
+
+
+class AttendancePolicyBase(BaseModel):
+    name: str = Field(..., min_length=2, max_length=150)
+    shift_start: str = Field(default="10:30 AM")
+    shift_end: str = Field(default="07:00 PM")
+    grace_until: str = Field(default="10:45 AM")
+    late_starts_after: str = Field(default="10:45 AM")
+    direct_half_day_after: str = Field(default="11:30 AM")
+    late_marks_before_half_day: int = Field(default=3, ge=1, le=10)
+    payroll_cycle: str = Field(default="1st to 31st of Month")
+    employment_type: str = Field(default="Full Time Permanent")
+
+
+class AttendancePolicyCreate(BaseModel):
+    name: Optional[str] = None
+    policy_name: Optional[str] = None
+    shift_start: str = Field(default="10:30 AM")
+    shift_end: str = Field(default="07:00 PM")
+    grace_until: str = Field(default="10:45 AM")
+    late_starts_after: Optional[str] = None
+    late_after: Optional[str] = None
+    direct_half_day_after: str = Field(default="11:31 AM")
+    late_marks_before_half_day: Optional[int] = None
+    late_threshold: Optional[int] = None
+    payroll_cycle: str = Field(default="1st to 31st of Month")
+    employment_type: str = Field(default="Full Time Permanent")
+    is_active: bool = False
+    active: Optional[bool] = None
+
+    def resolved_name(self) -> str:
+        return self.policy_name or self.name or "Company Attendance Policy"
+
+    def resolved_late_after(self) -> str:
+        return self.late_after or self.late_starts_after or "10:46 AM"
+
+    def resolved_threshold(self) -> int:
+        return self.late_threshold or self.late_marks_before_half_day or 3
+
+    def resolved_active(self) -> bool:
+        if self.active is not None:
+            return self.active
+        return self.is_active
+
+
+class AttendancePolicyUpdate(BaseModel):
+    name: Optional[str] = None
+    policy_name: Optional[str] = None
+    shift_start: Optional[str] = None
+    shift_end: Optional[str] = None
+    grace_until: Optional[str] = None
+    late_starts_after: Optional[str] = None
+    late_after: Optional[str] = None
+    direct_half_day_after: Optional[str] = None
+    late_marks_before_half_day: Optional[int] = None
+    late_threshold: Optional[int] = None
+    payroll_cycle: Optional[str] = None
+    employment_type: Optional[str] = None
+    is_active: Optional[bool] = None
+    active: Optional[bool] = None
+    is_archived: Optional[bool] = None
+
+
+class AttendancePolicyResponse(AttendancePolicyBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    is_active: bool
+    is_archived: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Real Attendance Engine Schemas
+# ---------------------------------------------------------------------------
+
+
+class PunchInPayload(BaseModel):
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    office_id: Optional[str] = None
+
+
+class PunchOutPayload(BaseModel):
+    latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
+    longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
+
+
+class AttendanceRecordResponse(BaseModel):
+    id: str
+    user_id: str
+    attendance_date: str
+    check_in_time: Optional[datetime] = None
+    check_out_time: Optional[datetime] = None
+    office_id: Optional[str] = None
+    office_name: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    punch_type: Optional[str] = "CHECK_IN"
+    status: str = "OPEN"
+    final_status: Optional[str] = "Present"
+    total_work_minutes: Optional[int] = None
+    total_hours: Optional[str] = None
+    rule_triggered: Optional[str] = None
+    punch_in: Optional[str] = None
+    punch_out: Optional[str] = None
+    is_irregular: bool = False
+
+

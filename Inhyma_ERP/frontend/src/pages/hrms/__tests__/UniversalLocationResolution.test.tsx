@@ -60,6 +60,7 @@ describe("Inhyma ERP HRMS — Google Maps Platform Universal Location Search", (
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.scrollTo = vi.fn();
   });
 
   it("Step 1: Google Places Autocomplete displays suggestions while typing without showing 'Address not found'", async () => {
@@ -128,7 +129,7 @@ describe("Inhyma ERP HRMS — Google Maps Platform Universal Location Search", (
 
     // Suggestions appear while typing
     await waitFor(() => {
-      expect(searchSpy).toHaveBeenCalledWith("Lodha Supremus");
+      expect(searchSpy).toHaveBeenCalledWith("Lodha Supremus", expect.anything());
       expect(screen.getByTestId("address-suggestions-list")).toBeTruthy();
     });
 
@@ -142,7 +143,7 @@ describe("Inhyma ERP HRMS — Google Maps Platform Universal Location Search", (
 
     // Google Place Details API is called
     await waitFor(() => {
-      expect(detailsSpy).toHaveBeenCalledWith("ChIJ_lodha_supremus_thane");
+      expect(detailsSpy.mock.calls[0][0]).toBe("ChIJ_lodha_supremus_thane");
       expect(screen.getByText(/Selected Place:/i)).toBeTruthy();
       expect(screen.getByText(/#ChIJ_lodha_supremus_thane/i)).toBeTruthy();
     });
@@ -211,7 +212,7 @@ describe("Inhyma ERP HRMS — Google Maps Platform Universal Location Search", (
 
     // Automatically searches without requiring manual Enter or click
     await waitFor(() => {
-      expect(searchSpy).toHaveBeenCalledWith(fullPastedAddress);
+      expect(searchSpy).toHaveBeenCalledWith(fullPastedAddress, expect.anything());
       expect(screen.getByTestId("address-suggestions-list")).toBeTruthy();
     });
 
@@ -451,80 +452,96 @@ describe("Inhyma ERP HRMS — Google Maps Platform Universal Location Search", (
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
-  it("Step 2 Accuracy: Latitude and Longitude are editable in the telemetry cards and directly update map coords and saved data", async () => {
-    const mockConfirm = vi.fn();
-    const reverseSpy = vi.spyOn(googleMaps, "reverseGeocodeGoogle").mockResolvedValue({
-      place_id: "ChIJ_exact_high_precision_pin",
-      formatted_address: "Exact Pin Location, High Precision Street, Mumbai, Maharashtra 400001",
-      address_components: [
-        { long_name: "Exact Tower", short_name: "Exact Tower", types: ["premise"] },
-        { long_name: "High Precision Street", short_name: "High Precision St", types: ["route"] },
-        { long_name: "Fort", short_name: "Fort", types: ["sublocality_level_1"] },
-        { long_name: "Mumbai", short_name: "Mumbai", types: ["locality"] },
-        { long_name: "Maharashtra", short_name: "MH", types: ["administrative_area_level_1"] },
-        { long_name: "400001", short_name: "400001", types: ["postal_code"] },
-        { long_name: "India", short_name: "IN", types: ["country"] },
-      ],
-      geometry: { location: { lat: () => 18.932201, lng: () => 72.833501 } },
-    } as any);
+  it("Step 1: Displays friendly retry banner during transient search error without raw Google error text", async () => {
+    vi.spyOn(googleMaps, "searchGooglePlaces").mockImplementation(async (query, onRetry) => {
+      onRetry?.(true);
+      await new Promise((r) => setTimeout(r, 80));
+      return [
+        {
+          place_id: "ChIJ_retry_success",
+          description: "Lodha Supremus, Thane",
+          structured_formatting: { main_text: "Lodha Supremus", secondary_text: "Thane" },
+          types: ["premise"],
+        },
+      ];
+    });
 
     render(
       <AddressMapConfirmModal
         open={true}
         onClose={vi.fn()}
-        onConfirm={mockConfirm}
+        onConfirm={vi.fn()}
         mode="office"
-        initialData={{
-          name: "Mumbai High Precision HQ",
-          location_type: "OFFICE",
-          address: "Initial Address, Mumbai",
-          latitude: 19.0,
-          longitude: 72.8,
-          radius_meters: 100,
-          place_id: "ChIJ_initial_place",
-        }}
       />
     );
 
-    // Proceed to Step 2
-    const continueBtn = screen.getByRole("button", { name: /Continue to Map/i });
-    fireEvent.click(continueBtn);
+    const addressInput = screen.getByPlaceholderText(/Enter building number/i);
+    fireEvent.change(addressInput, { target: { value: "Lodha" } });
 
     await waitFor(() => {
-      expect(screen.getByTestId("input-latitude")).toBeTruthy();
-      expect(screen.getByTestId("input-longitude")).toBeTruthy();
+      expect(screen.getByTestId("places-retrying-notice")).toBeTruthy();
+      expect(
+        screen.getByText(/We couldn't retrieve location suggestions\. Retrying\.\.\./i)
+      ).toBeTruthy();
     });
 
-    const latInput = screen.getByTestId("input-latitude") as HTMLInputElement;
-    const lngInput = screen.getByTestId("input-longitude") as HTMLInputElement;
+    // Verify raw REQUEST_DENIED or technical jargon is NOT displayed
+    expect(screen.queryByText(/REQUEST_DENIED/i)).toBeNull();
+    expect(screen.queryByText(/Google Places request denied/i)).toBeNull();
+  });
 
-    expect(latInput.value).toBe("19.000000");
-    expect(lngInput.value).toBe("72.800000");
+  it("Step 3: Component mapping ensures City is never a Road Number and Road is never a Floor", () => {
+    // Erroneous/mixed raw response where road name appears in locality and floor is present
+    const problematicResult: any = {
+      place_id: "ChIJ_edge_case",
+      formatted_address: "5th Floor, Road No. 22, Thane, Maharashtra 400604",
+      address_components: [
+        { long_name: "5th Floor", short_name: "5", types: ["floor"] },
+        { long_name: "Road No. 22", short_name: "Road 22", types: ["locality"] }, // Bad tag from data
+        { long_name: "Thane", short_name: "Thane", types: ["administrative_area_level_2"] },
+        { long_name: "Maharashtra", short_name: "MH", types: ["administrative_area_level_1"] },
+        { long_name: "400604", short_name: "400604", types: ["postal_code"] },
+        { long_name: "India", short_name: "IN", types: ["country"] },
+      ],
+    };
 
-    // Directly edit latitude to 18.932201
-    fireEvent.change(latInput, { target: { value: "18.932201" } });
-    // Directly edit longitude to 72.833501
-    fireEvent.change(lngInput, { target: { value: "72.833501" } });
+    const parsed = googleMaps.parseGoogleAddressComponents(problematicResult);
 
-    // Triggers blur to invoke precision reverse geocode
-    fireEvent.blur(lngInput);
+    // City must NOT be "Road No. 22" — it must resolve to District / Admin Area 2 "Thane"
+    expect(parsed.city).toBe("Thane");
+    expect(parsed.city).not.toContain("Road");
 
-    await waitFor(() => {
-      expect(reverseSpy).toHaveBeenCalledWith(18.932201, 72.833501);
-      expect(screen.getByTestId("mock-map-lat").textContent).toBe("18.932201");
-      expect(screen.getByTestId("mock-map-lng").textContent).toBe("72.833501");
+    // Road must NOT be "5th Floor" — floor must go to unit_floor
+    expect(parsed.street).toBe("");
+    expect(parsed.unit_floor).toBe("5th Floor");
+  });
+
+  it("Google Places New API: fetchGooglePlaceDetails requests only displayName, formattedAddress, location, addressComponents", async () => {
+    const mockFetchFields = vi.fn().mockResolvedValue({
+      displayName: "Lodha Supremus",
+      formattedAddress: "Lodha Supremus, Road No. 22, Thane",
+      location: {
+        lat: () => 19.198251,
+        lng: () => 72.948232,
+      },
+      addressComponents: [
+        { longText: "Lodha Supremus", shortText: "Lodha Supremus", types: ["premise"] },
+        { longText: "Thane", shortText: "Thane", types: ["locality"] },
+      ],
     });
 
-    // Save and verify edited exact coordinates are persisted
-    const saveBtn = screen.getByRole("button", { name: /Confirm Location/i });
-    fireEvent.click(saveBtn);
+    const mockPlaceInstance = {
+      fetchFields: mockFetchFields,
+    };
 
-    expect(mockConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "Mumbai High Precision HQ",
-        latitude: 18.932201,
-        longitude: 72.833501,
-      })
-    );
+    const res = await googleMaps.fetchGooglePlaceDetails("ChIJ_new_place_123", mockPlaceInstance);
+
+    expect(mockFetchFields).toHaveBeenCalledWith({
+      fields: ["displayName", "formattedAddress", "location", "addressComponents"],
+    });
+    expect(res).toBeTruthy();
+    expect(res?.name).toBe("Lodha Supremus");
+    expect(res?.formatted_address).toBe("Lodha Supremus, Road No. 22, Thane");
   });
 });
+

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { BrowserRouter, MemoryRouter } from "react-router-dom";
-import { HrmsDashboardPage } from "../HrmsDashboardPage";
+import { HrmsAttendancePage } from "../HrmsAttendancePage";
+import { HrmsLandingDashboardPage } from "../HrmsLandingDashboardPage";
 import { NAV_SECTIONS } from "@/lib/nav";
 
 // Mock AppShell to focus test assertions on HRMS page content and active key binding
@@ -15,44 +16,6 @@ vi.mock("@/components/AppShell", () => ({
   }) => (
     <div data-testid="app-shell" data-active-key={activeKey}>
       {children}
-    </div>
-  ),
-}));
-
-// Mock LocationMapPicker to avoid Leaflet canvas/DOM dependencies in JSDOM
-vi.mock("@/components/hrms/LocationMapPicker", () => ({
-  LocationMapPicker: ({
-    latitude,
-    longitude,
-    radiusMeters,
-    onChange,
-    readOnly,
-  }: {
-    latitude: number;
-    longitude: number;
-    radiusMeters: number;
-    onChange?: (c: { latitude: number; longitude: number; address?: string }) => void;
-    readOnly?: boolean;
-  }) => (
-    <div data-testid="mock-location-map-picker">
-      <div data-testid="mock-map-lat">{latitude}</div>
-      <div data-testid="mock-map-lng">{longitude}</div>
-      <div data-testid="mock-map-radius">{radiusMeters}</div>
-      {!readOnly && (
-        <button
-          type="button"
-          data-testid="mock-drag-pin-btn"
-          onClick={() =>
-            onChange?.({
-              latitude: 19.080000,
-              longitude: 72.880000,
-              address: "Adjusted Pin Address, Mumbai",
-            })
-          }
-        >
-          Simulate Drag Pin
-        </button>
-      )}
     </div>
   ),
 }));
@@ -79,12 +42,13 @@ vi.mock("@/lib/hooks", async () => {
   };
 });
 
-describe("HrmsDashboardPage (OTU HR Plus Architecture)", () => {
+describe("Inhyma ERP HRMS — Navigation & Attendance Module", () => {
   afterEach(() => {
     cleanup();
   });
 
   beforeEach(() => {
+    window.scrollTo = vi.fn();
     vi.clearAllMocks();
     mockCurrentUser = {
       profile: {
@@ -100,262 +64,313 @@ describe("HrmsDashboardPage (OTU HR Plus Architecture)", () => {
     };
   });
 
-  it("verifies sidebar navigation contains exactly one HRMS entry and no separate location modules", () => {
+  it("verifies sidebar navigation contains single HRMS module with exactly two submenus (Attendance, Setup)", () => {
     const hrmsSection = NAV_SECTIONS.find((s) => s.label === "HRMS");
     expect(hrmsSection).toBeDefined();
     expect(hrmsSection?.items).toHaveLength(1);
-    expect(hrmsSection?.items[0].key).toBe("hrms");
-    expect(hrmsSection?.items[0].path).toBe("/hrms");
 
-    // Verify separate sidebar modules do not exist
-    const allNavKeys = NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.key));
-    expect(allNavKeys).not.toContain("hrms-locations");
-    expect(allNavKeys).not.toContain("hrms-employee-locations");
-    expect(allNavKeys).not.toContain("hrms-wfh");
+    const hrmsNav = hrmsSection?.items[0];
+    expect(hrmsNav?.key).toBe("hrms");
+    expect(hrmsNav?.path).toBe("/hrms/attendance");
+    expect(hrmsNav?.children).toBeDefined();
+    expect(hrmsNav?.children).toHaveLength(2);
+
+    const childKeys = hrmsNav?.children?.map((c) => c.key);
+    expect(childKeys).toEqual([
+      "hrms-attendance",
+      "hrms-setup",
+    ]);
+
+    // Setup requires admin permission in nav
+    const setupNav = hrmsNav?.children?.find((c) => c.key === "hrms-setup");
+    expect(setupNav?.permission).toBe("hrms.admin");
   });
 
-  it("renders with activeKey='hrms' in AppShell and renders all 4 internal tabs", () => {
+  it("renders HRMS Landing Dashboard (/hrms/dashboard) with welcome section, KPIs, quick actions, and holiday calendar", () => {
+    render(
+      <MemoryRouter>
+        <HrmsLandingDashboardPage />
+      </MemoryRouter>
+    );
+
+    const shell = screen.getByTestId("app-shell");
+    expect(shell.getAttribute("data-active-key")).toBe("hrms");
+
+    // Welcome section
+    expect(screen.getByTestId("welcome-section")).toBeTruthy();
+    expect(screen.getByText(/Rupesh Malla/i)).toBeTruthy();
+
+    // Summary KPIs
+    expect(screen.getByTestId("attendance-summary-section")).toBeTruthy();
+    expect(screen.getByText("Present Today")).toBeTruthy();
+    expect(screen.getByText("Working Hours Today")).toBeTruthy();
+    expect(screen.getByText("This Month Attendance")).toBeTruthy();
+    expect(screen.getByText("Leave Balance")).toBeTruthy();
+
+    // Quick actions & Holiday widget
+    expect(screen.getByTestId("quick-actions-section")).toBeTruthy();
+    expect(screen.getByTestId("holiday-calendar-section")).toBeTruthy();
+  });
+
+  it("renders Attendance Page with activeKey='hrms' and displays strictly 3 internal tabs (View, Approval, Settings)", () => {
     render(
       <BrowserRouter>
-        <HrmsDashboardPage />
+        <HrmsAttendancePage />
       </BrowserRouter>
     );
 
     const shell = screen.getByTestId("app-shell");
     expect(shell.getAttribute("data-active-key")).toBe("hrms");
 
-    expect(screen.getByTestId("tab-overview")).toBeTruthy();
-    expect(screen.getByTestId("tab-punch")).toBeTruthy();
-    expect(screen.getByTestId("tab-locations")).toBeTruthy();
-    expect(screen.getByTestId("tab-history")).toBeTruthy();
+    expect(screen.getByTestId("tab-view")).toBeTruthy();
+    expect(screen.getByTestId("tab-approval")).toBeTruthy();
+    expect(screen.getByTestId("tab-settings")).toBeTruthy();
   });
 
-  it("renders welcome header with time-based greeting and employee details", () => {
-    render(
-      <BrowserRouter>
-        <HrmsDashboardPage />
-      </BrowserRouter>
-    );
-
-    const welcome = screen.getByTestId("welcome-section");
-    expect(welcome).toBeTruthy();
-    expect(
-      screen.getByRole("heading", { name: /Good (Morning|Afternoon|Evening), Rupesh Malla!/i })
-    ).toBeTruthy();
-    expect(screen.getByText(/General Manager/i)).toBeTruthy();
-    expect(screen.getByText(/EMP-007/i)).toBeTruthy();
-  });
-
-  it("renders the 4 Attendance Summary cards in Overview tab", () => {
-    render(
-      <BrowserRouter>
-        <HrmsDashboardPage />
-      </BrowserRouter>
-    );
-
-    const section = screen.getByTestId("attendance-summary-section");
-    expect(section).toBeTruthy();
-
-    expect(screen.getByText("Present Today")).toBeTruthy();
-    expect(screen.getByText("Working Hours Today")).toBeTruthy();
-    expect(screen.getByText("This Month Attendance")).toBeTruthy();
-    expect(screen.getByText("Leave Balance")).toBeTruthy();
-    expect(screen.getByText("7h 45m")).toBeTruthy();
-    expect(screen.getByText("22 / 24 Days")).toBeTruthy();
-    expect(screen.getByText("14 Days")).toBeTruthy();
-  });
-
-  it("renders Holiday Calendar widget with month matrix and upcoming holidays", () => {
-    render(
-      <BrowserRouter>
-        <HrmsDashboardPage />
-      </BrowserRouter>
-    );
-
-    const holidaySection = screen.getByTestId("holiday-calendar-section");
-    expect(holidaySection).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /Holiday Calendar/i })).toBeTruthy();
-    expect(screen.getAllByText("Sun").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "‹" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "›" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Today" })).toBeTruthy();
-  });
-
-  it("switches to Punch tab and displays live ticking timer, assigned office selector, and punch toggle", () => {
-    render(
-      <MemoryRouter initialEntries={["/hrms?tab=punch"]}>
-        <HrmsDashboardPage />
-      </MemoryRouter>
-    );
-
-    // Live timer
-    const timerDisplay = screen.getByTestId("live-timer-display");
-    expect(timerDisplay).toBeTruthy();
-    expect(timerDisplay.textContent).toMatch(/\d{2}h \d{2}m \d{2}s/);
-
-    // Assigned Office Selector
-    const selector = screen.getByTestId("assigned-office-selector") as HTMLSelectElement;
-    expect(selector).toBeTruthy();
-    expect(selector.options.length).toBeGreaterThan(0);
-    expect(selector.options[0].text).toContain("[Primary]");
-
-    // Punch toggle button
-    const punchToggleBtn = screen.getByTestId("punch-toggle-btn");
-    expect(punchToggleBtn).toBeTruthy();
-    expect(punchToggleBtn.textContent).toContain("Punch Out");
-
-    // Click to punch out
-    fireEvent.click(punchToggleBtn);
-    expect(punchToggleBtn.textContent).toContain("Punch In");
-    expect(screen.getByText(/Punched out successfully/i)).toBeTruthy();
-
-    // Request WFH button in Punch tab
-    const requestWfhBtn = screen.getByTestId("punch-request-wfh-btn");
-    expect(requestWfhBtn).toBeTruthy();
-  });
-
-  it("renders Admin Locations management tab with table and employee assignments subtab", () => {
-    render(
-      <MemoryRouter initialEntries={["/hrms?tab=locations"]}>
-        <HrmsDashboardPage />
-      </MemoryRouter>
-    );
-
-    // Header & Add Location button
-    expect(screen.getByRole("heading", { name: /Manage Locations/i })).toBeTruthy();
-    const addLocBtn = screen.getByTestId("add-location-btn");
-    expect(addLocBtn).toBeTruthy();
-
-    // Locations table
-    const table = screen.getByTestId("locations-table");
-    expect(table).toBeTruthy();
-    expect(screen.getByText("Mumbai BKC Office")).toBeTruthy();
-
-    // Switch to Employee Assignments subtab
-    const assignmentsSubtabBtn = screen.getByTestId("subtab-assignments");
-    fireEvent.click(assignmentsSubtabBtn);
-
-    const assignTable = screen.getByTestId("employee-assignments-table");
-    expect(assignTable).toBeTruthy();
-    expect(screen.getByTestId("assign-btn-u-101")).toBeTruthy();
-  });
-
-  it("opens Add Location as an in-page modal without route navigation, without 'Not Found' error, and follows ERP layout", async () => {
-    render(
-      <MemoryRouter initialEntries={["/hrms?tab=locations"]}>
-        <HrmsDashboardPage />
-      </MemoryRouter>
-    );
-
-    // Ensure no "Not Found" message or red banner is present
-    expect(screen.queryByText(/The requested resource was not found/i)).toBeNull();
-    expect(screen.queryByText(/Not Found/i)).toBeNull();
-
-    // Click + Add Location button
-    const addLocBtn = screen.getByTestId("add-location-btn");
-    fireEvent.click(addLocBtn);
-
-    // Modal opens controlled by component state
-    const stepper = screen.getByTestId("modal-stepper");
-    expect(stepper).toBeTruthy();
-    expect(screen.getByText("Address & Details")).toBeTruthy();
-    expect(screen.getByText("Map Confirmation")).toBeTruthy();
-
-    // Step 1: Two-column fields + full-width address + radius chips
-    const nameInput = screen.getByPlaceholderText(/Mumbai BKC Office/i);
-    expect(nameInput).toBeTruthy();
-    const addressInput = screen.getByPlaceholderText(/Enter building number/i);
-    expect(addressInput).toBeTruthy();
-
-    // Radius chips
-    expect(screen.getAllByText("150m").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("200m").length).toBeGreaterThan(0);
-    expect(screen.getByText("500m")).toBeTruthy();
-
-    // Fill form and continue to map
-    fireEvent.change(nameInput, { target: { value: "Hyderabad Tech Hub" } });
-    fireEvent.change(addressInput, { target: { value: "HITEC City, Madhapur, Hyderabad, Telangana" } });
-
-    // Select a radius chip in modal
-    const chips200 = screen.getAllByText("200m");
-    fireEvent.click(chips200[chips200.length - 1]);
-
-    const continueBtn = screen.getByRole("button", { name: /Continue to Map/i });
-    fireEvent.click(continueBtn);
-
-    // Step 2: Map & telemetry (wait for geocode resolution)
-    await waitFor(() => {
-      expect(screen.getByText("LATITUDE")).toBeTruthy();
-    });
-    expect(screen.getByText("LONGITUDE")).toBeTruthy();
-    expect(screen.getByText("GEOFENCE RADIUS")).toBeTruthy();
-    expect(screen.getByTestId("mock-location-map-picker")).toBeTruthy();
-
-    // Confirm Location and Back buttons exist
-    expect(screen.getByRole("button", { name: /Confirm Location/i })).toBeTruthy();
-    const backBtn = screen.getByRole("button", { name: /Back/i });
-    expect(backBtn).toBeTruthy();
-
-    // Click Back returns to Step 1
-    fireEvent.click(backBtn);
-    expect(screen.getByPlaceholderText(/Mumbai BKC Office/i)).toBeTruthy();
-
-    // Still no "Not Found" anywhere
-    expect(screen.queryByText(/Not Found/i)).toBeNull();
-  });
-
-  it("renders regular employee (non-admin) Locations view with read-only primary and additional workplaces", () => {
+  it("hides Settings tab from non-admin employees on Attendance page", () => {
     mockCurrentUser = {
       profile: {
         id: "u-102",
-        full_name: "Staff Employee",
-        username: "staff",
-        employee_code: "EMP-099",
-        roles: ["Staff"],
-        role: "staff",
+        full_name: "Rahul Verma",
+        username: "rahul",
+        employee_code: "EMP-042",
+        roles: ["Software Engineer"],
+        role: "employee",
       },
       isSuperAdmin: false,
       hasPermission: () => false,
     };
 
     render(
-      <MemoryRouter initialEntries={["/hrms?tab=locations"]}>
-        <HrmsDashboardPage />
+      <MemoryRouter initialEntries={["/hrms/attendance?tab=settings"]}>
+        <HrmsAttendancePage />
       </MemoryRouter>
     );
 
-    // Non-admin heading
-    expect(screen.getByRole("heading", { name: /My Assigned Work Locations/i })).toBeTruthy();
-    expect(screen.getByText(/Read-only view:/i)).toBeTruthy();
+    // Regular employee sees only View and Approval
+    expect(screen.getByTestId("tab-view")).toBeTruthy();
+    expect(screen.getByTestId("tab-approval")).toBeTruthy();
+    expect(screen.queryByTestId("tab-settings")).toBeNull();
 
-    // Admin Add Location button should NOT exist
-    expect(screen.queryByTestId("add-location-btn")).toBeNull();
-
-    // Primary workplace card
-    expect(screen.getByTestId("employee-primary-location-card")).toBeTruthy();
-    expect(screen.getByText(/★ PRIMARY WORKPLACE/i)).toBeTruthy();
-
-    // Additional workplace card
-    expect(screen.getByTestId("employee-additional-locations-card")).toBeTruthy();
+    // Default redirected away from settings to view
+    expect(screen.getByTestId("attendance-view-container")).toBeTruthy();
   });
 
-  it("switches to History tab and renders Attendance Logs and WFH Requests table with manager approval queue", () => {
+  it("renders Attendance View with Punch Card, Live Working Timer, Assigned Office, and Location Status", () => {
     render(
-      <MemoryRouter initialEntries={["/hrms?tab=history"]}>
-        <HrmsDashboardPage />
+      <MemoryRouter initialEntries={["/hrms/attendance?tab=view"]}>
+        <HrmsAttendancePage />
       </MemoryRouter>
     );
 
-    // Attendance logs
-    expect(screen.getByTestId("attendance-logs-table")).toBeTruthy();
-    expect(screen.getByText("Attendance Logs & Punch Records")).toBeTruthy();
+    expect(screen.getByTestId("attendance-view-container")).toBeTruthy();
+    expect(screen.getByTestId("welcome-section")).toBeTruthy();
+    expect(screen.getByTestId("attendance-punch-card")).toBeTruthy();
+    expect(screen.getByTestId("punch-live-timer")).toBeTruthy();
+    expect(screen.getByTestId("location-status-badge")).toBeTruthy();
+    expect(screen.getAllByText("Inhyma Thane Office").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Mumbai BKC Office")).toBeNull();
 
-    // WFH Requests
-    expect(screen.getByTestId("my-wfh-requests-table")).toBeTruthy();
-    expect(screen.getByTestId("history-request-wfh-btn")).toBeTruthy();
+    // Dev GPS selector exists in header
+    expect(screen.getByTestId("dev-gps-select")).toBeTruthy();
+  });
 
-    // Manager queue (since admin)
-    expect(screen.getByTestId("pending-wfh-queue-table")).toBeTruthy();
-    expect(screen.getByText(/Manager Approval Queue/i)).toBeTruthy();
+  it("blocks punch in when employee is outside assigned office geofence and displays distance", () => {
+    render(
+      <MemoryRouter initialEntries={["/hrms/attendance?tab=view"]}>
+        <HrmsAttendancePage />
+      </MemoryRouter>
+    );
+
+    const punchToggle = screen.getByTestId("punch-toggle-btn");
+
+    // Simulate moving outside assigned office (e.g. Pune Office, 120km away)
+    const gpsSelect = screen.getByTestId("dev-gps-select");
+    fireEvent.change(gpsSelect, { target: { value: "loc-pune" } });
+
+    // Attempt to Punch In while outside geofence
+    fireEvent.click(punchToggle);
+
+    // Error banner blocks punch and displays current distance
+    expect(screen.getByText(/Punch Blocked/i)).toBeTruthy();
+    expect(screen.getByText(/120 km away/i)).toBeTruthy();
+  });
+
+  it("triggers 30-second geofence warning countdown when punched in and moving outside office, and returns safely", () => {
+    render(
+      <MemoryRouter initialEntries={["/hrms/attendance?tab=view"]}>
+        <HrmsAttendancePage />
+      </MemoryRouter>
+    );
+
+    // Punch in inside assigned office first
+    const punchToggle = screen.getByTestId("punch-toggle-btn");
+    fireEvent.click(punchToggle);
+
+    // Move outside geofence during active shift
+    const gpsSelect = screen.getByTestId("dev-gps-select");
+    fireEvent.change(gpsSelect, { target: { value: "loc-remote" } });
+
+    // Warning modal pops up immediately with 30-second warning
+    expect(screen.getByTestId("geofence-warning-modal")).toBeTruthy();
+    expect(screen.getByText(/You have moved outside your assigned punch location/i)).toBeTruthy();
+
+    // Click "Return Inside" button
+    const returnBtn = screen.getByTestId("return-inside-geofence-btn");
+    fireEvent.click(returnBtn);
+
+    // Warning modal dismissed and returned to normal shift
+    expect(screen.queryByTestId("geofence-warning-modal")).toBeNull();
+    expect(screen.getByText(/Returned inside assigned office geofence/i)).toBeTruthy();
+  });
+
+  it("clicking the edit icon on an irregular day opens the right-side Regularization Drawer with Work From Home option", async () => {
+    render(
+      <MemoryRouter initialEntries={["/hrms/attendance?tab=view"]}>
+        <HrmsAttendancePage
+          initialDaysForTesting={[
+            {
+              date: "2026-09-07",
+              dayNumber: 7,
+              weekday: "Mon",
+              status: "Late Punch",
+              punch_in: "09:00",
+              punch_out: "18:00",
+              total_hours: "9h 00m",
+              is_irregular: true,
+            },
+          ]}
+        />
+      </MemoryRouter>
+    );
+
+    // Irregular day (e.g. Sept 7 - Late Punch) has edit button
+    const editBtn = screen.getByTestId("edit-day-2026-09-07");
+    expect(editBtn).toBeTruthy();
+
+    fireEvent.click(editBtn);
+
+    // Right-side drawer opens with title "Regularize Request"
+    await waitFor(() => {
+      expect(screen.getByTestId("regularize-drawer")).toBeTruthy();
+    });
+
+    expect(screen.getByText("Regularize Request")).toBeTruthy();
+
+    // Pre-filled date & inputs
+    const dateInput = screen.getByTestId("reg-attendance-date") as HTMLInputElement;
+    expect(dateInput.value).toBe("2026-09-07");
+
+    const checkInInput = screen.getByTestId("reg-check-in") as HTMLInputElement;
+    const checkOutInput = screen.getByTestId("reg-check-out") as HTMLInputElement;
+    expect(checkInInput.value).toBe("09:00");
+    expect(checkOutInput.value).toBe("18:00");
+
+    // Auto-calculated total hours
+    const totalHoursDisplay = screen.getByTestId("reg-total-hours");
+    expect(totalHoursDisplay.textContent).toContain("9h 00m");
+
+    // Change checkout time to verify auto-calculation
+    fireEvent.change(checkOutInput, { target: { value: "19:30" } });
+    expect(totalHoursDisplay.textContent).toContain("10h 30m");
+
+    // Reason dropdown contains "Work From Home"
+    const reasonSelect = screen.getByTestId("reg-reason-select") as HTMLSelectElement;
+    expect(reasonSelect).toBeTruthy();
+    fireEvent.change(reasonSelect, { target: { value: "Work From Home" } });
+    expect(reasonSelect.value).toBe("Work From Home");
+
+    // Submit single regularization request
+    const sendBtn = screen.getByTestId("reg-send-btn");
+    fireEvent.click(sendBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/sent to manager for approval/i)).toBeTruthy();
+      expect(screen.queryByTestId("regularize-drawer")).toBeNull();
+    });
+  });
+
+  it("renders unified Approval page with requests, approve/reject actions, and adjust against employee leave", async () => {
+    render(
+      <MemoryRouter initialEntries={["/hrms/attendance?tab=approval"]}>
+        <HrmsAttendancePage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId("approval-page-container")).toBeTruthy();
+    expect(screen.getByTestId("approval-filter-row")).toBeTruthy();
+    expect(screen.getByTestId("approval-requests-list")).toBeTruthy();
+
+    // Requests and irregularities listed
+    expect(screen.getByText("Amit Verma")).toBeTruthy();
+    expect(screen.getByText("EMP-014")).toBeTruthy();
+    expect(screen.getByText("Sneha Patel")).toBeTruthy();
+
+    // Irregularity has "Adjust Against Leave" action
+    const adjustBtn = screen.getByTestId("adjust-leave-btn-app-1");
+    expect(adjustBtn).toBeTruthy();
+    fireEvent.click(adjustBtn);
+
+    // Modal opens for leave deduction
+    await waitFor(() => {
+      expect(screen.getByTestId("review-modal-form")).toBeTruthy();
+    });
+
+    const leaveSelect = screen.getByTestId("adjust-leave-type-select");
+    expect(leaveSelect).toBeTruthy();
+
+    const confirmBtn = screen.getByTestId("confirm-review-btn");
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Adjusted 0.5 Day/i)).toBeTruthy();
+    });
+  });
+
+  it("renders Settings page with 3 internal tabs and overtime empty & saved states", () => {
+    render(
+      <MemoryRouter initialEntries={["/hrms/attendance?tab=settings"]}>
+        <HrmsAttendancePage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId("settings-container")).toBeTruthy();
+
+    // Tab 1: Configure Attendance (no mandatory break, live summary card)
+    expect(screen.getByTestId("config-attendance-section")).toBeTruthy();
+    expect(screen.getByTestId("config-shift-select")).toBeTruthy();
+    expect(screen.getByTestId("config-summary-card")).toBeTruthy();
+    expect(screen.queryByText(/Mandatory Break/i)).toBeNull();
+
+    // Tab 2: Attendance Exemption
+    const tabExemption = screen.getByTestId("settings-subtab-exemption");
+    fireEvent.click(tabExemption);
+    expect(screen.getByTestId("exemptions-table")).toBeTruthy();
+    expect(screen.getByText("Flexible Hours")).toBeTruthy();
+    expect(screen.getByText("Skip Late Rule")).toBeTruthy();
+    expect(screen.getByText("Skip Geofence")).toBeTruthy();
+
+    // Tab 3: Configure Overtime
+    const tabOvertime = screen.getByTestId("settings-subtab-overtime");
+    fireEvent.click(tabOvertime);
+
+    expect(screen.getByTestId("config-overtime-section")).toBeTruthy();
+    expect(screen.getByTestId("ot-min-hours")).toBeTruthy();
+    expect(screen.getByTestId("ot-weekoff-cb")).toBeTruthy();
+    expect(screen.getByTestId("ot-holiday-cb")).toBeTruthy();
+    expect(screen.getByTestId("ot-workingday-cb")).toBeTruthy();
+    expect(screen.getByTestId("ot-approval-cb")).toBeTruthy();
+
+    // Initially displays empty state
+    expect(screen.getByTestId("ot-empty-state")).toBeTruthy();
+    expect(screen.getByText(/No overtime configured/i)).toBeTruthy();
+
+    // Save Overtime
+    const saveOtBtn = screen.getByTestId("ot-save-btn");
+    fireEvent.click(saveOtBtn);
+
+    // Displays configured summary card
+    expect(screen.getByTestId("ot-saved-summary")).toBeTruthy();
+    expect(screen.queryByTestId("ot-empty-state")).toBeNull();
   });
 });

@@ -1130,6 +1130,17 @@ textarea.form-control {
   color: var(--color-primary, #0061f2);
 }
 
+.erp-map-wrapper {
+  height: 360px;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .erp-map-wrapper {
+    height: 220px !important;
+  }
+}
+
 .erp-suggestions-panel {
   margin-top: 8px;
   border: 1px solid var(--color-border, #e2e8f0);

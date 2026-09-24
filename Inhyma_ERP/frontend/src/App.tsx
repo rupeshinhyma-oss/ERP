@@ -92,6 +92,8 @@ import { AddAdjustmentOrderPage } from "@/pages/AddAdjustmentOrderPage";
 import { StockTransferPage } from "@/pages/StockTransferPage";
 import { TransferOrderPdfPage } from "@/pages/TransferOrderPdfPage";
 import { AddTransferOrderPage } from "@/pages/AddTransferOrderPage";
+import { HrmsLandingDashboardPage } from "@/pages/hrms/HrmsLandingDashboardPage";
+import { HrmsAttendancePage } from "@/pages/hrms/HrmsAttendancePage";
 import { HrmsDashboardPage } from "@/pages/hrms/HrmsDashboardPage";
 
 export function App() {
@@ -289,12 +291,14 @@ export function App() {
           />
           <Route path="/marketing-tasks" element={<Navigate to="/marketing-task/list" replace />} />
 
-          {/* HRMS Module - Consolidated into Attendance Module with internal tabs */}
-          <Route path="/hrms" element={<HrmsDashboardPage />} />
-          <Route path="/hrms/dashboard" element={<Navigate to="/hrms" replace />} />
-          <Route path="/hrms/locations" element={<Navigate to="/hrms?tab=locations" replace />} />
-          <Route path="/hrms/employee-locations" element={<Navigate to="/hrms?tab=locations" replace />} />
-          <Route path="/hrms/wfh-requests" element={<Navigate to="/hrms?tab=history" replace />} />
+          {/* HRMS Module - Exactly 2 Submenus: Attendance, Setup */}
+          <Route path="/hrms" element={<Navigate to="/hrms/attendance" replace />} />
+          <Route path="/hrms/dashboard" element={<Navigate to="/hrms/attendance" replace />} />
+          <Route path="/hrms/attendance" element={<HrmsAttendancePage />} />
+          <Route path="/hrms/setup" element={<OrganizationPage />} />
+          <Route path="/hrms/locations" element={<Navigate to="/hrms/setup" replace />} />
+          <Route path="/hrms/employee-locations" element={<Navigate to="/hrms/setup" replace />} />
+          <Route path="/hrms/wfh-requests" element={<Navigate to="/hrms/attendance?tab=approval" replace />} />
 
           <Route path="/masters/company-list" element={<CompanyListPage />} />
           <Route path="/masters/countries" element={<CountriesPage />} />

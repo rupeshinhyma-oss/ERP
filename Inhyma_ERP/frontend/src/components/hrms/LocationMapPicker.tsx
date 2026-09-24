@@ -6,6 +6,7 @@
  * - Draggable marker with real-time centered blue geofence circle
  * - Changing the radius immediately updates the circle
  * - Reverse Geocoding API automatically resolves address components on drag end
+ * - Fullscreen, Satellite, Recenter, Click-to-Place, and Multi-Step fine-tuning
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -53,7 +54,7 @@ export function LocationMapPicker({
   radiusMeters,
   onChange,
   readOnly = false,
-  height = "320px",
+  height = "480px",
   zoom = 18,
 }: LocationMapPickerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -63,15 +64,23 @@ export function LocationMapPicker({
 
   const [isResolving, setIsResolving] = useState(false);
   const [activeCoords, setActiveCoords] = useState({ lat: latitude, lng: longitude });
-  const [latInput, setLatInput] = useState<string>(latitude ? latitude.toFixed(6) : "");
-  const [lngInput, setLngInput] = useState<string>(longitude ? longitude.toFixed(6) : "");
+  const [isExpanded, setIsExpanded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [stepMeters, setStepMeters] = useState<number>(5);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const currentHeight = isExpanded
+    ? (isMobile ? "360px" : "620px")
+    : (isMobile ? "240px" : (height === "480px" ? "380px" : (height || "380px")));
 
   // Sync coords from prop
   useEffect(() => {
     setActiveCoords({ lat: latitude, lng: longitude });
-    setLatInput(latitude ? latitude.toFixed(6) : "");
-    setLngInput(longitude ? longitude.toFixed(6) : "");
   }, [latitude, longitude]);
 
   // Subscribe to global Google Maps errors (auth failure, billing, network)
@@ -81,6 +90,56 @@ export function LocationMapPicker({
     });
     return unsub;
   }, []);
+
+  // Refresh Google Maps layout when expanded/collapsed
+  useEffect(() => {
+    if (mapInstanceRef.current && markerRef.current) {
+      const maps = (window as any).google?.maps;
+      if (maps?.event?.trigger) {
+        setTimeout(() => {
+          maps.event.trigger(mapInstanceRef.current, "resize");
+          const pos = markerRef.current?.getPosition();
+          if (pos) {
+            mapInstanceRef.current?.panTo(pos);
+          }
+        }, 50);
+      }
+    }
+  }, [isExpanded]);
+
+  // Helper to reverse geocode and trigger onChange
+  const updateCoordinatesAndReverseGeocode = async (newLat: number, newLng: number) => {
+    setActiveCoords({ lat: newLat, lng: newLng });
+    setIsResolving(true);
+    try {
+      const geocodeResult = await reverseGeocodeGoogle(newLat, newLng);
+      const parsed = parseGoogleAddressComponents(geocodeResult);
+      onChange?.({
+        latitude: newLat,
+        longitude: newLng,
+        address: parsed.formatted_address,
+        verification: {
+          place_id: parsed.place_id,
+          building: parsed.building,
+          unit_floor: parsed.unit_floor,
+          street: parsed.street,
+          locality: parsed.locality,
+          city: parsed.city,
+          state: parsed.state,
+          pin_code: parsed.pin_code,
+          country: parsed.country,
+          display_name: parsed.formatted_address,
+          address: parsed.formatted_address,
+          latitude: newLat,
+          longitude: newLng,
+        },
+      });
+    } catch {
+      onChange?.({ latitude: newLat, longitude: newLng });
+    } finally {
+      setIsResolving(false);
+    }
+  };
 
   // Initialize Google Maps JavaScript API Map, Marker, Circle
   useEffect(() => {
@@ -99,22 +158,36 @@ export function LocationMapPicker({
         const map = new maps.Map(containerRef.current, {
           center: centerPos,
           zoom,
-          mapTypeControl: false,
+          mapTypeControl: true,
+          mapTypeControlOptions: {
+            style: maps.MapTypeControlStyle ? maps.MapTypeControlStyle.HORIZONTAL_BAR : 1,
+            position: maps.ControlPosition ? maps.ControlPosition.TOP_LEFT : 1,
+          },
           streetViewControl: false,
-          fullscreenControl: false,
+          fullscreenControl: true,
+          fullscreenControlOptions: {
+            position: maps.ControlPosition ? maps.ControlPosition.RIGHT_TOP : 7,
+          },
           zoomControl: true,
-          gestureHandling: readOnly ? "none" : "auto",
+          gestureHandling: readOnly ? "none" : "greedy",
+          scrollwheel: true,
         });
 
         // 2. Draggable Marker
+        // optimized: false forces Google Maps to render marker as an individual DOM element
+        // with instant pointer events and smooth 60fps dragging
         const marker = new maps.Marker({
           position: centerPos,
           map,
           draggable: !readOnly,
-          title: "Geofence Center Pin (Drag to adjust)",
+          cursor: !readOnly ? "grab" : "default",
+          zIndex: 999999,
+          optimized: false,
+          title: "Geofence Center Pin (Click or drag anywhere to reposition)",
         });
 
         // 3. Blue Geofence Circle
+        // clickable: false prevents the circle from capturing mouse events and blocking clicks/drags in its radius
         const circle = new maps.Circle({
           map,
           center: centerPos,
@@ -124,6 +197,7 @@ export function LocationMapPicker({
           strokeColor: "#2563eb",
           strokeOpacity: 0.85,
           strokeWeight: 2,
+          clickable: false,
         });
 
         // Marker drag listener: real-time dynamic centering of the geofence circle
@@ -134,8 +208,6 @@ export function LocationMapPicker({
             const lat = Number(pos.lat().toFixed(6));
             const lng = Number(pos.lng().toFixed(6));
             setActiveCoords({ lat, lng });
-            setLatInput(lat.toFixed(6));
-            setLngInput(lng.toFixed(6));
           }
         });
 
@@ -149,39 +221,7 @@ export function LocationMapPicker({
 
           const newLat = Number(pos.lat().toFixed(6));
           const newLng = Number(pos.lng().toFixed(6));
-          setActiveCoords({ lat: newLat, lng: newLng });
-          setLatInput(newLat.toFixed(6));
-          setLngInput(newLng.toFixed(6));
-
-          setIsResolving(true);
-          try {
-            const geocodeResult = await reverseGeocodeGoogle(newLat, newLng);
-            const parsed = parseGoogleAddressComponents(geocodeResult);
-            onChange?.({
-              latitude: newLat,
-              longitude: newLng,
-              address: parsed.formatted_address,
-              verification: {
-                place_id: parsed.place_id,
-                building: parsed.building,
-                unit_floor: parsed.unit_floor,
-                street: parsed.street,
-                locality: parsed.locality,
-                city: parsed.city,
-                state: parsed.state,
-                pin_code: parsed.pin_code,
-                country: parsed.country,
-                display_name: parsed.formatted_address,
-                address: parsed.formatted_address,
-                latitude: newLat,
-                longitude: newLng,
-              },
-            });
-          } catch {
-            onChange?.({ latitude: newLat, longitude: newLng });
-          } finally {
-            setIsResolving(false);
-          }
+          await updateCoordinatesAndReverseGeocode(newLat, newLng);
         });
 
         // Map click listener: move marker & circle to clicked position
@@ -192,43 +232,26 @@ export function LocationMapPicker({
 
             marker.setPosition(pos);
             circle.setCenter(pos);
+            map.panTo(pos);
 
             const newLat = Number(pos.lat().toFixed(6));
             const newLng = Number(pos.lng().toFixed(6));
-            setActiveCoords({ lat: newLat, lng: newLng });
-            setLatInput(newLat.toFixed(6));
-            setLngInput(newLng.toFixed(6));
-
-            setIsResolving(true);
-            try {
-              const geocodeResult = await reverseGeocodeGoogle(newLat, newLng);
-              const parsed = parseGoogleAddressComponents(geocodeResult);
-              onChange?.({
-                latitude: newLat,
-                longitude: newLng,
-                address: parsed.formatted_address,
-                verification: {
-                  place_id: parsed.place_id,
-                  building: parsed.building,
-                  unit_floor: parsed.unit_floor,
-                  street: parsed.street,
-                  locality: parsed.locality,
-                  city: parsed.city,
-                  state: parsed.state,
-                  pin_code: parsed.pin_code,
-                  country: parsed.country,
-                  display_name: parsed.formatted_address,
-                  address: parsed.formatted_address,
-                  latitude: newLat,
-                  longitude: newLng,
-                },
-              });
-            } catch {
-              onChange?.({ latitude: newLat, longitude: newLng });
-            } finally {
-              setIsResolving(false);
-            }
+            await updateCoordinatesAndReverseGeocode(newLat, newLng);
           });
+
+          // Also allow clicking directly on circle in case clickable setting behaves differently
+          if (typeof (circle as any).addListener === "function") {
+            circle.addListener("click", async (e: any) => {
+              const pos = e.latLng;
+              if (!pos) return;
+              marker.setPosition(pos);
+              circle.setCenter(pos);
+              map.panTo(pos);
+              const newLat = Number(pos.lat().toFixed(6));
+              const newLng = Number(pos.lng().toFixed(6));
+              await updateCoordinatesAndReverseGeocode(newLat, newLng);
+            });
+          }
         }
 
         mapInstanceRef.current = map;
@@ -273,14 +296,44 @@ export function LocationMapPicker({
     }
   }, [latitude, longitude, radiusMeters, zoom]);
 
+  // Recenter map view to current pin
+  const handleRecenter = () => {
+    if (mapInstanceRef.current && markerRef.current) {
+      const pos = markerRef.current.getPosition();
+      if (pos) {
+        mapInstanceRef.current.panTo(pos);
+        mapInstanceRef.current.setZoom(zoom || 18);
+      }
+    }
+  };
+
   // Micro-adjustment step nudge handlers
-  const handleNudge = async (dLat: number, dLng: number) => {
+  const handleNudge = async (
+    dLatOrDirection: number | "N" | "S" | "E" | "W",
+    dLngArg: number = 0
+  ) => {
     if (readOnly) return;
+
+    let dLat = 0;
+    let dLng = 0;
+
+    if (typeof dLatOrDirection === "string") {
+      const latFactor = 0.000009 * stepMeters;
+      const cosLat = Math.cos((activeCoords.lat * Math.PI) / 180) || 1;
+      const lngFactor = (0.000009 * stepMeters) / cosLat;
+
+      if (dLatOrDirection === "N") dLat = latFactor;
+      if (dLatOrDirection === "S") dLat = -latFactor;
+      if (dLatOrDirection === "E") dLng = lngFactor;
+      if (dLatOrDirection === "W") dLng = -lngFactor;
+    } else {
+      dLat = dLatOrDirection;
+      dLng = dLngArg;
+    }
+
     const newLat = Number((activeCoords.lat + dLat).toFixed(6));
     const newLng = Number((activeCoords.lng + dLng).toFixed(6));
     setActiveCoords({ lat: newLat, lng: newLng });
-    setLatInput(newLat.toFixed(6));
-    setLngInput(newLng.toFixed(6));
 
     const newPos = { lat: newLat, lng: newLng };
     if (markerRef.current && circleRef.current && mapInstanceRef.current) {
@@ -320,101 +373,97 @@ export function LocationMapPicker({
     }
   };
 
-  // Direct manual coordinate editing handlers for increased accuracy
-  const handleDirectLatChange = (val: string) => {
-    setLatInput(val);
-    const parsedLat = parseFloat(val);
-    if (!isNaN(parsedLat) && parsedLat >= -90 && parsedLat <= 90) {
-      const newPos = { lat: parsedLat, lng: activeCoords.lng };
-      setActiveCoords(newPos);
-      if (markerRef.current && circleRef.current && mapInstanceRef.current) {
-        markerRef.current.setPosition(newPos);
-        circleRef.current.setCenter(newPos);
-        mapInstanceRef.current.panTo(newPos);
-      }
-      onChange?.({
-        latitude: parsedLat,
-        longitude: activeCoords.lng,
-      });
-    }
-  };
-
-  const handleDirectLngChange = (val: string) => {
-    setLngInput(val);
-    const parsedLng = parseFloat(val);
-    if (!isNaN(parsedLng) && parsedLng >= -180 && parsedLng <= 180) {
-      const newPos = { lat: activeCoords.lat, lng: parsedLng };
-      setActiveCoords(newPos);
-      if (markerRef.current && circleRef.current && mapInstanceRef.current) {
-        markerRef.current.setPosition(newPos);
-        circleRef.current.setCenter(newPos);
-        mapInstanceRef.current.panTo(newPos);
-      }
-      onChange?.({
-        latitude: activeCoords.lat,
-        longitude: parsedLng,
-      });
-    }
-  };
-
-  const handleDirectBlur = async () => {
-    const parsedLat = parseFloat(latInput);
-    const parsedLng = parseFloat(lngInput);
-    if (
-      !isNaN(parsedLat) &&
-      parsedLat >= -90 &&
-      parsedLat <= 90 &&
-      !isNaN(parsedLng) &&
-      parsedLng >= -180 &&
-      parsedLng <= 180
-    ) {
-      setLatInput(parsedLat.toFixed(6));
-      setLngInput(parsedLng.toFixed(6));
-      setIsResolving(true);
-      try {
-        const geocodeResult = await reverseGeocodeGoogle(parsedLat, parsedLng);
-        const parsed = parseGoogleAddressComponents(geocodeResult);
-        onChange?.({
-          latitude: parsedLat,
-          longitude: parsedLng,
-          address: parsed.formatted_address,
-          verification: {
-            place_id: parsed.place_id,
-            building: parsed.building,
-            unit_floor: parsed.unit_floor,
-            street: parsed.street,
-            locality: parsed.locality,
-            city: parsed.city,
-            state: parsed.state,
-            pin_code: parsed.pin_code,
-            country: parsed.country,
-            display_name: parsed.formatted_address,
-            address: parsed.formatted_address,
-            latitude: parsedLat,
-            longitude: parsedLng,
-          },
-        });
-      } catch {
-        onChange?.({ latitude: parsedLat, longitude: parsedLng });
-      } finally {
-        setIsResolving(false);
-      }
+  // Keyboard navigation for precision nudge
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (readOnly) return;
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+      e.preventDefault();
+      if (e.key === "ArrowUp") handleNudge("N");
+      if (e.key === "ArrowDown") handleNudge("S");
+      if (e.key === "ArrowLeft") handleNudge("W");
+      if (e.key === "ArrowRight") handleNudge("E");
     }
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
+      {/* Top Helper & Map Action Bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "8px",
+          padding: "8px 12px",
+          background: "var(--color-primary-soft, #eff6ff)",
+          border: "1px solid var(--color-primary, #3b82f6)",
+          borderRadius: "var(--radius-sm, 6px)",
+          fontSize: "12px",
+          color: "var(--color-primary, #1d4ed8)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span style={{ fontSize: "14px" }}>📍</span>
+          <span>
+            <strong>Drag the red pin</strong> or <strong>click anywhere on the map</strong> to set the geofence center.
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {!readOnly && (
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              onClick={handleRecenter}
+              title="Center view back to the pin"
+              style={{
+                padding: "3px 10px",
+                fontSize: "11.5px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                background: "var(--color-surface, #ffffff)",
+              }}
+            >
+              <span>🎯</span>
+              <span>Recenter Pin</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            onClick={() => setIsExpanded(!isExpanded)}
+            title={isExpanded ? "Collapse to standard size" : "Expand map size"}
+            style={{
+              padding: "3px 10px",
+              fontSize: "11.5px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              background: "var(--color-surface, #ffffff)",
+            }}
+          >
+            <span>⛶</span>
+            <span>{isExpanded ? "Standard Map (480px)" : "Enlarge Map (620px)"}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Google Maps display box */}
       <div
         style={{
           position: "relative",
           width: "100%",
-          height,
+          height: currentHeight,
           borderRadius: "var(--radius-sm, 6px)",
           border: "1px solid var(--color-border)",
           overflow: "hidden",
           background: "#e5e7eb",
+          transition: "height 0.2s ease-in-out",
         }}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        title="Map Area (Click anywhere to place pin, or use Arrow keys to nudge)"
       >
         <div
           ref={containerRef}
@@ -506,7 +555,7 @@ export function LocationMapPicker({
           justifyContent: "space-between",
           alignItems: "center",
           gap: "10px",
-          padding: "8px 12px",
+          padding: "10px 14px",
           background: "var(--color-surface-subtle, rgba(0,0,0,0.02))",
           border: "1px solid var(--color-border)",
           borderRadius: "var(--radius-sm, 6px)",
@@ -514,78 +563,63 @@ export function LocationMapPicker({
         }}
       >
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ color: "var(--color-muted)", fontSize: "12px", fontWeight: 600 }}>Latitude:</span>
-            {readOnly ? (
-              <strong style={{ color: "var(--color-text)", fontFamily: "monospace" }}>
-                {activeCoords.lat.toFixed(6)}
-              </strong>
-            ) : (
-              <input
-                type="number"
-                step="0.000001"
-                min="-90"
-                max="90"
-                aria-label="Latitude"
-                className="form-control"
-                value={latInput}
-                onChange={(e) => handleDirectLatChange(e.target.value)}
-                onBlur={handleDirectBlur}
-                style={{
-                  width: "115px",
-                  height: "26px",
-                  padding: "2px 6px",
-                  fontSize: "12px",
-                  fontFamily: "monospace",
-                  fontWeight: 700,
-                  color: "var(--color-text)",
-                  background: "var(--color-surface, #ffffff)",
-                }}
-              />
-            )}
+          <div>
+            <span style={{ color: "var(--color-muted)", fontSize: "11px", fontWeight: 600 }}>LATITUDE: </span>
+            <strong style={{ color: "var(--color-text)", fontFamily: "monospace", fontSize: "13px" }}>
+              {activeCoords.lat.toFixed(6)}
+            </strong>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ color: "var(--color-muted)", fontSize: "12px", fontWeight: 600 }}>Longitude:</span>
-            {readOnly ? (
-              <strong style={{ color: "var(--color-text)", fontFamily: "monospace" }}>
-                {activeCoords.lng.toFixed(6)}
-              </strong>
-            ) : (
-              <input
-                type="number"
-                step="0.000001"
-                min="-180"
-                max="180"
-                aria-label="Longitude"
-                className="form-control"
-                value={lngInput}
-                onChange={(e) => handleDirectLngChange(e.target.value)}
-                onBlur={handleDirectBlur}
-                style={{
-                  width: "115px",
-                  height: "26px",
-                  padding: "2px 6px",
-                  fontSize: "12px",
-                  fontFamily: "monospace",
-                  fontWeight: 700,
-                  color: "var(--color-text)",
-                  background: "var(--color-surface, #ffffff)",
-                }}
-              />
-            )}
+          <div>
+            <span style={{ color: "var(--color-muted)", fontSize: "11px", fontWeight: 600 }}>LONGITUDE: </span>
+            <strong style={{ color: "var(--color-text)", fontFamily: "monospace", fontSize: "13px" }}>
+              {activeCoords.lng.toFixed(6)}
+            </strong>
           </div>
         </div>
 
         {!readOnly && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ color: "var(--color-muted)", fontSize: "11px" }}>Fine-tune pin:</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            {/* Step size selector */}
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <span style={{ color: "var(--color-muted)", fontSize: "11px", fontWeight: 600 }}>Fine-tune:</span>
+              <div
+                style={{
+                  display: "inline-flex",
+                  borderRadius: "4px",
+                  overflow: "hidden",
+                  border: "1px solid var(--color-border)",
+                }}
+              >
+                {[1, 5, 20].map((stepVal) => (
+                  <button
+                    key={stepVal}
+                    type="button"
+                    onClick={() => setStepMeters(stepVal)}
+                    style={{
+                      padding: "2px 8px",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      border: "none",
+                      background:
+                        stepMeters === stepVal ? "var(--color-primary, #2563eb)" : "var(--color-surface, #ffffff)",
+                      color: stepMeters === stepVal ? "#ffffff" : "var(--color-text)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {stepVal}m
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* D-Pad Buttons */}
             <div style={{ display: "inline-flex", gap: "3px" }}>
               <button
                 type="button"
                 className="btn btn-sm"
                 title="Nudge North"
-                onClick={() => handleNudge(0.0001, 0)}
-                style={{ padding: "2px 8px", fontSize: "11px", minHeight: "24px" }}
+                onClick={() => handleNudge("N")}
+                style={{ padding: "2px 8px", fontSize: "11px", minHeight: "26px", fontWeight: 600 }}
               >
                 ↑ N
               </button>
@@ -593,8 +627,8 @@ export function LocationMapPicker({
                 type="button"
                 className="btn btn-sm"
                 title="Nudge South"
-                onClick={() => handleNudge(-0.0001, 0)}
-                style={{ padding: "2px 8px", fontSize: "11px", minHeight: "24px" }}
+                onClick={() => handleNudge("S")}
+                style={{ padding: "2px 8px", fontSize: "11px", minHeight: "26px", fontWeight: 600 }}
               >
                 ↓ S
               </button>
@@ -602,8 +636,8 @@ export function LocationMapPicker({
                 type="button"
                 className="btn btn-sm"
                 title="Nudge West"
-                onClick={() => handleNudge(0, -0.0001)}
-                style={{ padding: "2px 8px", fontSize: "11px", minHeight: "24px" }}
+                onClick={() => handleNudge("W")}
+                style={{ padding: "2px 8px", fontSize: "11px", minHeight: "26px", fontWeight: 600 }}
               >
                 ← W
               </button>
@@ -611,12 +645,15 @@ export function LocationMapPicker({
                 type="button"
                 className="btn btn-sm"
                 title="Nudge East"
-                onClick={() => handleNudge(0, 0.0001)}
-                style={{ padding: "2px 8px", fontSize: "11px", minHeight: "24px" }}
+                onClick={() => handleNudge("E")}
+                style={{ padding: "2px 8px", fontSize: "11px", minHeight: "26px", fontWeight: 600 }}
               >
                 → E
               </button>
             </div>
+            <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>
+              (or Arrow keys)
+            </span>
           </div>
         )}
       </div>
