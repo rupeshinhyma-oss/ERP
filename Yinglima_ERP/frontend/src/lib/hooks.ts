@@ -222,60 +222,130 @@ export function usePendingGuard<K extends string = string>(): {
   return { isPending, guard };
 }
 
+interface ModalRegistration {
+  id: number;
+  getOnClose: () => () => void;
+  pathname: string;
+}
+
+let nextModalRegistrationId = 1;
+const activeModalStack: ModalRegistration[] = [];
+let hasPushedDummyHistory = false;
+let pendingProgrammaticBackCount = 0;
+let syncScheduled = false;
+let lastKnownPathname = typeof window !== "undefined" ? window.location.pathname : "";
+
+function handleGlobalModalPopState() {
+  if (pendingProgrammaticBackCount > 0) {
+    pendingProgrammaticBackCount--;
+    return;
+  }
+  // The user clicked the browser's physical/UI back button
+  hasPushedDummyHistory = false;
+  const topModal = activeModalStack.pop();
+  if (topModal) {
+    const closeFn = topModal.getOnClose();
+    closeFn();
+    // If other modals are still open beneath it (e.g. nested modal), re-push dummy state
+    if (activeModalStack.length > 0) {
+      window.history.pushState({ modalHistorySync: true }, "");
+      hasPushedDummyHistory = true;
+    }
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", handleGlobalModalPopState);
+}
+
+function processModalHistorySync() {
+  syncScheduled = false;
+  if (typeof window === "undefined") return;
+
+  if (activeModalStack.length > 0) {
+    lastKnownPathname = window.location.pathname;
+    if (!hasPushedDummyHistory) {
+      window.history.pushState({ modalHistorySync: true }, "");
+      hasPushedDummyHistory = true;
+    }
+  } else {
+    if (hasPushedDummyHistory) {
+      hasPushedDummyHistory = false;
+      // Only pop dummy entry if still on the exact same page without navigation
+      if (window.location.pathname === lastKnownPathname) {
+        pendingProgrammaticBackCount++;
+        window.history.back();
+      }
+    }
+  }
+}
+
+function scheduleModalHistorySync() {
+  if (!syncScheduled) {
+    syncScheduled = true;
+    queueMicrotask(processModalHistorySync);
+  }
+}
+
 /**
- * Syncs browser back-button with a modal / drawer's open state.
+ * Syncs browser back-button with a modal / drawer's open state using a coordinated
+ * active modal stack.
  *
- * When `isOpen` becomes true a dummy history entry is pushed so that pressing
- * the browser's Back button (left arrow) smoothly closes the modal/form and keeps
- * the user on the current page's table list.
+ * When any modal/drawer opens, a dummy history entry is pushed so that pressing the
+ * browser's Back button smoothly closes the modal/form and keeps the user on the current
+ * page's table list.
  *
- * Route navigation safety: If the user clicks a sidebar link or navigates away to
- * another route, unmount cleanup detects the pathname change and skips history.back(),
- * ensuring instant 1-click navigation without cancelled routes.
+ * When transitioning from one modal to another (e.g. closing a Detail Drawer and opening
+ * an Edit Form in the same click), the dummy history entry is preserved seamlessly without
+ * race conditions or duplicate history pushes.
+ *
+ * Route navigation safety: If the user clicks a sidebar link or navigates away to another
+ * route, unmount cleanup detects the pathname change and skips history.back(), ensuring
+ * instant 1-click navigation without cancelled routes.
  */
 export function useModalHistorySync(isOpen: boolean, onClose: () => void): void {
-  const isPopStateRef = useRef(false);
-  const hasPushedRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const location = useLocation();
-  const currentPathRef = useRef(location.pathname);
-  currentPathRef.current = location.pathname;
+  const currentPath = location.pathname;
+  const idRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!isOpen) {
-      if (hasPushedRef.current && !isPopStateRef.current) {
-        hasPushedRef.current = false;
-        if (window.location.pathname === currentPathRef.current) {
-          window.history.back();
+    if (isOpen) {
+      if (idRef.current === null) {
+        idRef.current = nextModalRegistrationId++;
+      }
+      const myId = idRef.current;
+      const idx = activeModalStack.findIndex((m) => m.id === myId);
+      if (idx !== -1) {
+        activeModalStack.splice(idx, 1);
+      }
+      activeModalStack.push({
+        id: myId,
+        getOnClose: () => onCloseRef.current,
+        pathname: currentPath,
+      });
+      scheduleModalHistorySync();
+    } else {
+      if (idRef.current !== null) {
+        const myId = idRef.current;
+        const idx = activeModalStack.findIndex((m) => m.id === myId);
+        if (idx !== -1) {
+          activeModalStack.splice(idx, 1);
+          scheduleModalHistorySync();
         }
       }
-      isPopStateRef.current = false;
-      return;
     }
 
-    // Modal just opened: push dummy history state
-    window.history.pushState({ modalHistorySync: true }, "");
-    hasPushedRef.current = true;
-    isPopStateRef.current = false;
-
-    const handlePopState = () => {
-      isPopStateRef.current = true;
-      hasPushedRef.current = false;
-      onClose();
-    };
-
-    window.addEventListener("popstate", handlePopState);
-
     return () => {
-      window.removeEventListener("popstate", handlePopState);
-      // Clean up dummy entry ONLY if unmounting on the exact same page without popstate
-      if (hasPushedRef.current && !isPopStateRef.current) {
-        if (window.location.pathname === currentPathRef.current) {
-          window.history.back();
+      if (idRef.current !== null) {
+        const myId = idRef.current;
+        const idx = activeModalStack.findIndex((m) => m.id === myId);
+        if (idx !== -1) {
+          activeModalStack.splice(idx, 1);
+          scheduleModalHistorySync();
         }
-        hasPushedRef.current = false;
       }
-      isPopStateRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, currentPath]);
 }
