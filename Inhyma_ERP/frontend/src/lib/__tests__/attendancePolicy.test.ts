@@ -44,6 +44,11 @@ describe("Attendance Policy Engine", () => {
     expect(r5.lateMarkCount).toBe(3);
     expect(r5.isHalfDay).toBe(true);
 
+    // 11:30 -> Direct Half Day
+    const r6_30 = evaluatePunchTime("11:30 AM", DEFAULT_ATTENDANCE_POLICY, 0);
+    expect(r6_30.status).toBe("Half Day");
+    expect(r6_30.isHalfDay).toBe(true);
+
     // 11:31 -> Direct Half Day
     const r6 = evaluatePunchTime("11:31 AM", DEFAULT_ATTENDANCE_POLICY, 0);
     expect(r6.status).toBe("Half Day");

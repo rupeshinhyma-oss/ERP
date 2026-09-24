@@ -9,19 +9,14 @@
  */
 
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import {
   IconCalendar,
   IconClock,
-  IconBriefcase,
   IconCheckSquare,
-  IconPin,
   IconBuilding,
-  IconShield,
-  IconFileText,
-  IconDashboard,
 } from "@/components/icons";
 import { useAuth } from "@/lib/hooks";
 
@@ -171,7 +166,7 @@ export function HrmsLandingDashboardPage() {
               {greeting}, {profile?.full_name || "Employee"}!
             </h1>
             <div style={{ fontSize: "13px", color: "#94a3b8", marginTop: "4px" }}>
-              <span>{profile?.role || "General Staff"}</span>
+              <span>{(typeof profile?.role === "string" ? profile.role : (profile?.roles?.[0] || "General Staff"))}</span>
               <span style={{ margin: "0 8px" }}>•</span>
               <span>Employee Code: {profile?.employee_code || "EMP-007"}</span>
               <span style={{ margin: "0 8px" }}>•</span>

@@ -11,7 +11,6 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Banner, Modal } from "@/components/ui";
-import { IconCheckSquare, IconClock, IconFileText, IconShield } from "@/components/icons";
 import { apiGet, apiPost } from "@/lib/api";
 import { type AuditLogEntry } from "./RegularizeDrawer";
 
@@ -97,7 +96,7 @@ export function ApprovalPage({ directAuditLogs = [], submittedRequests = [] }: A
   const [actionModalOpen, setActionModalOpen] = useState(false);
 
   const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [error] = useState<unknown>(null);
 
   useEffect(() => {
     if (!success) return;
@@ -347,7 +346,13 @@ export function ApprovalPage({ directAuditLogs = [], submittedRequests = [] }: A
             </tr>
           </thead>
           <tbody>
-            {filteredRequests.length === 0 ? (
+            {loading && filteredRequests.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{ padding: "30px", textAlign: "center", color: "var(--color-muted)" }}>
+                  Loading approvals...
+                </td>
+              </tr>
+            ) : filteredRequests.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ padding: "30px", textAlign: "center", color: "var(--color-muted)" }}>
                   No regularization requests match the selected filters.

@@ -90,9 +90,7 @@ import { AddAdjustmentOrderPage } from "@/pages/AddAdjustmentOrderPage";
 import { StockTransferPage } from "@/pages/StockTransferPage";
 import { TransferOrderPdfPage } from "@/pages/TransferOrderPdfPage";
 import { AddTransferOrderPage } from "@/pages/AddTransferOrderPage";
-import { HrmsLandingDashboardPage } from "@/pages/hrms/HrmsLandingDashboardPage";
 import { HrmsAttendancePage } from "@/pages/hrms/HrmsAttendancePage";
-import { HrmsDashboardPage } from "@/pages/hrms/HrmsDashboardPage";
 
 export function App() {
   const navigate = useNavigate();

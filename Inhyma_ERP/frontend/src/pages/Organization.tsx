@@ -10,24 +10,19 @@
  * (Designations, Departments, Employment Types, and Branches have been removed from this page).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Modal } from "@/components/ui";
 import {
-  IconBuilding,
-  IconCheckSquare,
   IconClock,
   IconEdit,
   IconFileText,
-  IconMap,
   IconPin,
   IconPlus,
 } from "@/components/icons";
-import { AddressMapConfirmModal, type AddressMapConfirmData } from "@/components/hrms/AddressMapConfirmModal";
 import { GeoFencing } from "@/pages/hrms/GeoFencing";
-import { apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
 
 export interface LeaveTypeItem {
   id: string;
@@ -115,7 +110,7 @@ export function OrganizationPage() {
 
   // Notifications
   const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [error] = useState<unknown>(null);
 
   useEffect(() => {
     if (!success) return;

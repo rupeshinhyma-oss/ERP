@@ -1185,7 +1185,7 @@ class HrmsService:
                 shift_end="07:00 PM",
                 grace_until="10:45 AM",
                 late_starts_after="10:46 AM",
-                direct_half_day_after="11:31 AM",
+                direct_half_day_after="11:30 AM",
                 late_marks_before_half_day=3,
                 payroll_cycle="1st to 31st of Month",
                 employment_type="Full Time Permanent",
@@ -1203,17 +1203,17 @@ class HrmsService:
         """
         Evaluates punch in time against active policy rules.
         Shift: 10:30 AM - 07:00 PM
-        10:32 -> Present
-        10:46 -> Late Mark 1 (or 2)
+        10:32 (<= 10:45) -> Present
+        10:46-11:29 -> Late Mark 1 (or 2)
         3rd Late in Month -> Half Day
-        11:31 -> Immediate Half Day
+        >= 11:30 -> Immediate Half Day
         """
         ist_tz = timezone(timedelta(hours=5, minutes=30))
         now_local = check_in_dt.astimezone(ist_tz)
         punch_minutes = now_local.hour * 60 + now_local.minute
 
         grace_minutes = parse_time_str_to_minutes(policy.grace_until or "10:45 AM")
-        direct_half_day_minutes = parse_time_str_to_minutes(policy.direct_half_day_after or "11:31 AM")
+        direct_half_day_minutes = parse_time_str_to_minutes(policy.direct_half_day_after or "11:30 AM")
 
         if punch_minutes <= grace_minutes:
             return "Present", "On Time / Grace Period"
@@ -1244,7 +1244,7 @@ class HrmsService:
 
         threshold = policy.late_marks_before_half_day or 3
         if current_instance >= threshold:
-            return "Half Day", "3rd Late in Month (Half Day)"
+            return "Half Day", f"{current_instance}rd Late in Month (Half Day)"
         else:
             return "Late Punch", f"Late Mark {current_instance}"
 
@@ -1492,6 +1492,23 @@ class HrmsService:
             log.final_status = "Half Day"
             log.half_day = True
             log.is_irregular = True
+        elif log.final_status not in ["Half Day", "Late Punch"]:
+            # Evaluate early exit threshold against saved settings
+            settings_stmt = select(HrmsAttendanceSettings).limit(1)
+            s_res = await self.db.execute(settings_stmt)
+            att_settings = s_res.scalar_one_or_none()
+            shift_end_str = (att_settings.shift_end if att_settings and att_settings.shift_end else None) or "07:00 PM"
+            shift_end_mins = parse_time_str_to_minutes(shift_end_str)
+            early_mins_allowed = 15
+            if att_settings and att_settings.max_early_check_out:
+                try:
+                    early_mins_allowed = int(att_settings.max_early_check_out.split()[0])
+                except Exception:
+                    early_mins_allowed = 15
+            punch_out_mins = now_local.hour * 60 + now_local.minute
+            if punch_out_mins < (shift_end_mins - early_mins_allowed):
+                log.final_status = "Early Exit"
+                log.is_irregular = True
 
         await self.db.commit()
         await self.db.refresh(log)
@@ -1802,7 +1819,7 @@ class HrmsService:
         }
 
     async def update_attendance_settings(self, payload: AttendanceSettingsUpdate) -> Dict[str, Any]:
-        """Update 3-tab attendance settings."""
+        """Update 3-tab attendance settings and sync to active policy engine."""
         stmt = select(HrmsAttendanceSettings).limit(1)
         res = await self.db.execute(stmt)
         settings = res.scalar_one_or_none()
@@ -1813,6 +1830,39 @@ class HrmsService:
         for k, v in payload.model_dump(exclude_unset=True).items():
             if v is not None:
                 setattr(settings, k, v)
+
+        # Sync settings to active HrmsAttendancePolicy so policy engine uses saved admin settings!
+        policy_stmt = (
+            select(HrmsAttendancePolicy)
+            .where(HrmsAttendancePolicy.is_active.is_(True), HrmsAttendancePolicy.deleted_at.is_(None))
+            .limit(1)
+        )
+        p_res = await self.db.execute(policy_stmt)
+        active_p = p_res.scalar_one_or_none()
+        if not active_p:
+            active_p = HrmsAttendancePolicy(
+                name="General Office Policy",
+                is_active=True,
+                is_archived=False,
+            )
+            self.db.add(active_p)
+
+        if settings.shift_start:
+            active_p.shift_start = settings.shift_start
+        if settings.shift_end:
+            active_p.shift_end = settings.shift_end
+        if settings.grace_until:
+            active_p.grace_until = settings.grace_until
+        if settings.late_starts_after:
+            active_p.late_starts_after = settings.late_starts_after
+        if settings.direct_half_day_after:
+            active_p.direct_half_day_after = settings.direct_half_day_after
+        if settings.late_marks_before_half_day:
+            active_p.late_marks_before_half_day = settings.late_marks_before_half_day
+        if settings.payroll_cycle:
+            active_p.payroll_cycle = settings.payroll_cycle
+        if settings.employment_type:
+            active_p.employment_type = settings.employment_type
 
         await self.db.commit()
         await self.db.refresh(settings)

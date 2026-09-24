@@ -160,13 +160,13 @@ export function LocationMapPicker({
           zoom,
           mapTypeControl: true,
           mapTypeControlOptions: {
-            style: maps.MapTypeControlStyle ? maps.MapTypeControlStyle.HORIZONTAL_BAR : 1,
-            position: maps.ControlPosition ? maps.ControlPosition.TOP_LEFT : 1,
+            style: (maps.MapTypeControlStyle ? maps.MapTypeControlStyle.HORIZONTAL_BAR : 1) as any,
+            position: (maps.ControlPosition ? maps.ControlPosition.TOP_LEFT : 1) as any,
           },
           streetViewControl: false,
           fullscreenControl: true,
           fullscreenControlOptions: {
-            position: maps.ControlPosition ? maps.ControlPosition.RIGHT_TOP : 7,
+            position: (maps.ControlPosition ? maps.ControlPosition.RIGHT_TOP : 7) as any,
           },
           zoomControl: true,
           gestureHandling: readOnly ? "none" : "greedy",

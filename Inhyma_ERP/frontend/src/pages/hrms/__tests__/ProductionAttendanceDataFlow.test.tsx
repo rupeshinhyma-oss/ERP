@@ -131,8 +131,7 @@ describe("Production Fix — HRMS Attendance Data Flow (Scenarios 1 - 7)", () =>
   });
 
   it("Scenario 3: Punch Out stores today's In, Out, and Hours and freezes timer", async () => {
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const postSpy = vi.spyOn(api, "apiPost").mockImplementation((url: string) => {
+    vi.spyOn(api, "apiPost").mockImplementation((url: string) => {
       if (url.includes("/punch-in")) {
         return Promise.resolve({
           data: {
@@ -262,7 +261,7 @@ describe("Production Fix — HRMS Attendance Data Flow (Scenarios 1 - 7)", () =>
     expect(shouldShowRegularizeIcon(testDays[0], "Late Punch")).toBe(true);
     expect(shouldShowRegularizeIcon(testDays[1], "Missing Punch")).toBe(true);
 
-    const postSpy = vi.spyOn(api, "apiPost").mockResolvedValue({ data: { success: true } } as any);
+    vi.spyOn(api, "apiPost").mockResolvedValue({ data: { success: true } } as any);
 
     render(
       <MemoryRouter initialEntries={["/hrms/attendance?tab=view"]}>

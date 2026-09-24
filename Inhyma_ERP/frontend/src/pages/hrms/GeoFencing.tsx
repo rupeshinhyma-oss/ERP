@@ -12,7 +12,7 @@
  * - Never overlap text or clip cards
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Banner } from "@/components/ui";
 import { IconEdit, IconMap, IconPin, IconPlus, IconTrash } from "@/components/icons";
 import { AddressMapConfirmModal, type AddressMapConfirmData } from "@/components/hrms/AddressMapConfirmModal";

@@ -20,7 +20,7 @@ vi.mock("@/lib/api", () => ({
   apiPut: vi.fn(),
 }));
 
-import { apiGet, apiPost, apiPatch } from "@/lib/api";
+import { apiGet } from "@/lib/api";
 
 describe("OrganizationPage (Simplified 3-Tab Setup)", () => {
   beforeEach(() => {

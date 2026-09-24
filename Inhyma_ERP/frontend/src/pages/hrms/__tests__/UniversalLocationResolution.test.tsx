@@ -453,7 +453,7 @@ describe("Inhyma ERP HRMS — Google Maps Platform Universal Location Search", (
   });
 
   it("Step 1: Displays friendly retry banner during transient search error without raw Google error text", async () => {
-    vi.spyOn(googleMaps, "searchGooglePlaces").mockImplementation(async (query, onRetry) => {
+    vi.spyOn(googleMaps, "searchGooglePlaces").mockImplementation(async (_query, onRetry) => {
       onRetry?.(true);
       await new Promise((r) => setTimeout(r, 80));
       return [
@@ -534,7 +534,7 @@ describe("Inhyma ERP HRMS — Google Maps Platform Universal Location Search", (
       fetchFields: mockFetchFields,
     };
 
-    const res = await googleMaps.fetchGooglePlaceDetails("ChIJ_new_place_123", mockPlaceInstance);
+    const res = await googleMaps.fetchGooglePlaceDetails("ChIJ_new_place_123", () => mockPlaceInstance);
 
     expect(mockFetchFields).toHaveBeenCalledWith({
       fields: ["displayName", "formattedAddress", "location", "addressComponents"],

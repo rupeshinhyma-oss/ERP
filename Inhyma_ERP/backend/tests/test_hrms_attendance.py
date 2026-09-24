@@ -201,3 +201,36 @@ def test_attendance_repository_and_routes_import():
     assert AttendanceService is not None
     assert attendance_router is not None
 
+
+@pytest.mark.asyncio
+async def test_policy_evaluation_rules():
+    from app.hrms.service import HrmsService
+    from app.hrms.models import HrmsAttendancePolicy
+    import uuid
+
+    policy = HrmsAttendancePolicy(
+        name="General Office Policy",
+        shift_start="10:30 AM",
+        shift_end="07:00 PM",
+        grace_until="10:45 AM",
+        late_starts_after="10:46 AM",
+        direct_half_day_after="11:30 AM",
+        late_marks_before_half_day=3,
+        payroll_cycle="1st to 31st of Month",
+        is_active=True,
+    )
+
+    svc = HrmsService(None)  # type: ignore
+
+    # 10:40 AM IST is 05:10 AM UTC (<= 10:45 AM -> Present)
+    dt_present = datetime.datetime(2026, 9, 24, 5, 10, tzinfo=datetime.timezone.utc)
+    status, rule = await svc.evaluate_punch_in_status(uuid.uuid4(), dt_present, policy)
+    assert status == "Present"
+
+    # 11:30 AM IST is 06:00 AM UTC (>= 11:30 AM -> Immediate Half Day)
+    dt_half_day = datetime.datetime(2026, 9, 24, 6, 0, tzinfo=datetime.timezone.utc)
+    status, rule = await svc.evaluate_punch_in_status(uuid.uuid4(), dt_half_day, policy)
+    assert status == "Half Day"
+    assert "Immediate Half Day" in rule
+
+

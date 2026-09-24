@@ -81,14 +81,14 @@ export function evaluatePunchTime(
     };
   }
 
-  // 2. After Direct Half-Day Cutoff (e.g. 11:31 AM)
-  if (punchMinutes > directHalfDayMinutes) {
+  // 2. Direct Half-Day Cutoff (11:30 or later)
+  if (punchMinutes >= directHalfDayMinutes) {
     return {
       status: "Half Day",
       lateMarkCount: currentLateCount,
       isHalfDay: true,
       isLate: true,
-      ruleTriggered: `Arrived after ${policy.directHalfDayAfter} -> Direct Half Day`,
+      ruleTriggered: `Arrived at or after ${policy.directHalfDayAfter} -> Direct Half Day`,
     };
   }
 

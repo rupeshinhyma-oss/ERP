@@ -124,7 +124,7 @@ export function AddressMapConfirmModal({
   });
 
   // Google Places Autocomplete Suggestions State
-  const [predictions, setPredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
+  const [predictions, setPredictions] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(
     initialData?.place_id || null

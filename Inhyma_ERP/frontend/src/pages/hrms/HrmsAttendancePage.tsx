@@ -29,80 +29,71 @@ import { Banner, Modal } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
 import {
   IconCalendar,
-  IconClock,
   IconCheckSquare,
   IconPin,
-  IconBuilding,
   IconShield,
-  IconFileText,
-  IconEdit,
 } from "@/components/icons";
 import { useAuth } from "@/lib/hooks";
-import { RegularizeDrawer, type AttendanceRecordForRegularize, type AuditLogEntry } from "./RegularizeDrawer";
+import { RegularizeDrawer, type AttendanceRecordForRegularize, type AuditLogEntry } from "./components/RegularizeDrawer";
 import { AttendanceSettings } from "./AttendanceSettings";
 import { ApprovalPage, type ApprovalRequestItem } from "./ApprovalPage";
 
 import {
-  AttendanceStatus,
-  AttendanceDay,
-  AssignedOffice,
+  type AttendanceStatus,
+  type AttendanceDay,
+  type AssignedOffice,
+  type AttendanceTerminalState,
+  type DevGpsLocation,
   shouldShowRegularizeIcon,
   generateMonthDays,
-} from "./attendance";
-import { attendanceService } from "./attendanceService";
-import { AttendanceCalendar } from "./AttendanceCalendar";
+} from "@/lib/attendance";
+import { attendanceService } from "@/services/attendanceService";
+import { AttendanceCalendar } from "./components/AttendanceCalendar";
 
 export { shouldShowRegularizeIcon, generateMonthDays };
-export type { AttendanceStatus, AttendanceDay, AssignedOffice };
+export type { AttendanceStatus, AttendanceDay, AssignedOffice, AttendanceTerminalState, DevGpsLocation };
 
-// Development Simulated GPS Locations
-interface DevGpsLocation {
-  id: string;
-  name: string;
-  latitude: number;
-  longitude: number;
-  isInsideAssigned: boolean;
-  distanceKm: number;
+
+function getDevGpsLocations(office: AssignedOffice): DevGpsLocation[] {
+  return [
+    {
+      id: office.id || "loc-inhyma-thane-assigned",
+      name: "Assigned Office",
+      latitude: office.latitude,
+      longitude: office.longitude,
+      isInsideAssigned: true,
+      distanceKm: 0,
+    },
+    {
+      id: "loc-pune",
+      name: "Pune",
+      latitude: 18.5204,
+      longitude: 73.8567,
+      isInsideAssigned: false,
+      distanceKm: 120,
+    },
+    {
+      id: "loc-gujarat",
+      name: "Gujarat",
+      latitude: 23.0225,
+      longitude: 72.5714,
+      isInsideAssigned: false,
+      distanceKm: 450,
+    },
+    {
+      id: "loc-remote",
+      name: "Remote",
+      latitude: office.latitude + 0.13,
+      longitude: office.longitude + 0.13,
+      isInsideAssigned: false,
+      distanceKm: 15,
+    },
+  ];
 }
-
-const DEV_GPS_LOCATIONS: DevGpsLocation[] = [
-  {
-    id: "loc-inhyma-thane-assigned",
-    name: "Assigned Office",
-    latitude: 19.198300,
-    longitude: 72.948300,
-    isInsideAssigned: true,
-    distanceKm: 0,
-  },
-  {
-    id: "loc-pune",
-    name: "Pune",
-    latitude: 18.5204,
-    longitude: 73.8567,
-    isInsideAssigned: false,
-    distanceKm: 120,
-  },
-  {
-    id: "loc-gujarat",
-    name: "Gujarat",
-    latitude: 23.0225,
-    longitude: 72.5714,
-    isInsideAssigned: false,
-    distanceKm: 450,
-  },
-  {
-    id: "loc-remote",
-    name: "Remote",
-    latitude: 19.2183,
-    longitude: 72.9781,
-    isInsideAssigned: false,
-    distanceKm: 15,
-  },
-];
 
 const ASSIGNED_OFFICE_CACHE_KEY = "inhyma_assigned_office_cache";
 
-function getInitialAssignedOffice() {
+function getInitialAssignedOffice(): AssignedOffice {
   if (typeof window !== "undefined" && window.sessionStorage) {
     try {
       const cached = window.sessionStorage.getItem(ASSIGNED_OFFICE_CACHE_KEY);
@@ -249,7 +240,18 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
   // REAL DATABASE ATTENDANCE STATE & GEOFENCE ENGINE
   // ---------------------------------------------------------------------------
   const initialSavedSession = useMemo(() => getInitialPunchSession(), []);
-  const [currentGps, setCurrentGps] = useState<DevGpsLocation>(DEV_GPS_LOCATIONS[0]);
+  // Persistent Assigned Office fetched from DB / session cache
+  const [assignedOffice, setAssignedOffice] = useState<AssignedOffice>(getInitialAssignedOffice);
+  const devGpsLocations = useMemo(() => getDevGpsLocations(assignedOffice), [assignedOffice]);
+  const [currentGps, setCurrentGps] = useState<DevGpsLocation>(() => getDevGpsLocations(getInitialAssignedOffice())[0]);
+  const [isDevSelectOverride, setIsDevSelectOverride] = useState(false);
+
+  useEffect(() => {
+    if (!isDevSelectOverride) {
+      setCurrentGps(devGpsLocations[0]);
+    }
+  }, [devGpsLocations, isDevSelectOverride]);
+
   const [terminalState, setTerminalState] = useState<AttendanceTerminalState>(
     initialSavedSession ? "CHECKED_IN" : "NOT_PUNCHED"
   );
@@ -275,9 +277,6 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
   const [totalWorkingDuration, setTotalWorkingDuration] = useState<string | null>(null);
   const [todayRecord, setTodayRecord] = useState<any>(null);
 
-  // Persistent Assigned Office fetched from DB / session cache
-  const [assignedOffice, setAssignedOffice] = useState(getInitialAssignedOffice);
-
   // Calendar Month selection (YYYY-MM)
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
     const d = new Date();
@@ -286,49 +285,20 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
   const [calendarDays, setCalendarDays] = useState<AttendanceDay[]>(
     () => initialDaysForTesting || generateMonthDays(selectedMonth)
   );
-  const [isDevSelectOverride, setIsDevSelectOverride] = useState(false);
-
-  const formattedMonthTitle = useMemo(() => {
-    const [yr, mo] = selectedMonth.split("-").map(Number);
-    const d = new Date(yr, mo - 1, 1);
-    return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  }, [selectedMonth]);
-
-  const monthStartOffset = useMemo(() => {
-    const [yr, mo] = selectedMonth.split("-").map(Number);
-    return new Date(yr, mo - 1, 1).getDay();
-  }, [selectedMonth]);
-
-  const handleNavigateMonth = (delta: number) => {
-    const [yr, mo] = selectedMonth.split("-").map(Number);
-    const d = new Date(yr, mo - 1 + delta, 1);
-    const nextYr = d.getFullYear();
-    const nextMo = String(d.getMonth() + 1).padStart(2, "0");
-    const nextMonthStr = `${nextYr}-${nextMo}`;
-    setSelectedMonth(nextMonthStr);
-    setCalendarDays(generateMonthDays(nextMonthStr));
-  };
-
-  const handleSetCurrentMonth = () => {
-    const d = new Date();
-    const curMonthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    setSelectedMonth(curMonthStr);
-    setCalendarDays(generateMonthDays(curMonthStr));
-  };
 
   // Fetch assigned office from DB (GET /api/v1/hrms/locations/assigned)
   useEffect(() => {
     const fetchOffice = async () => {
       try {
-        const res = await apiGet<any>("/hrms/locations/assigned");
-        if (res?.data && res.data.name) {
-          const off = {
-            id: res.data.id || "loc-inhyma-thane-assigned",
-            name: res.data.name,
-            address: res.data.address || "Office No 421, 4th Floor, Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604",
-            latitude: res.data.latitude || 19.198300,
-            longitude: res.data.longitude || 72.948300,
-            radius_meters: res.data.radius_meters || 150.0,
+        const res = await attendanceService.getAssignedLocation();
+        if (res && res.name) {
+          const off: AssignedOffice = {
+            id: res.id || "loc-inhyma-thane-assigned",
+            name: res.name,
+            address: res.address || "Office No 421, 4th Floor, Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604",
+            latitude: res.latitude || 19.198300,
+            longitude: res.longitude || 72.948300,
+            radius_meters: res.radius_meters || 150.0,
           };
           setAssignedOffice(off);
           try {
@@ -355,7 +325,7 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
                       l.name?.toLowerCase().includes("mumbai")
                   ) || res.data[0];
                 if (matched) {
-                  const off = {
+                  const off: AssignedOffice = {
                     id: matched.id,
                     name: matched.name,
                     address: matched.address,
@@ -411,17 +381,42 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
     }
   }, [assignedOffice, isDevSelectOverride]);
 
+  // Load monthly calendar records from PostgreSQL
+  const loadMonthAttendance = useCallback(
+    async (monthStr: string, activeTodayRec?: any) => {
+      if (initialDaysForTesting && initialDaysForTesting.length > 0) {
+        return;
+      }
+      try {
+        const res = await attendanceService.getMonthAttendance(monthStr);
+        const recordByDate: Record<string, any> = {};
+        if (Array.isArray(res)) {
+          for (const r of res) {
+            if (r.attendance_date) {
+              recordByDate[r.attendance_date] = r;
+            }
+          }
+        }
+        const effectiveToday = activeTodayRec !== undefined ? activeTodayRec : todayRecord;
+        setCalendarDays(generateMonthDays(monthStr, recordByDate, effectiveToday, serverDate));
+      } catch {
+        // In tests, preserve initial days
+      }
+    },
+    [initialDaysForTesting, todayRecord, serverDate]
+  );
+
   // Load today's persistent attendance record from PostgreSQL
   const loadTodayAttendance = useCallback(async () => {
     try {
-      const res = await apiGet<any>("/hrms/attendance/today");
-      if (res && res.data) {
-        const d = res.data;
+      const res = await attendanceService.getTodayAttendance();
+      if (res) {
+        const d = res as any;
         if (d.greeting) setServerGreeting(d.greeting);
         if (d.current_shift) setServerShift(d.current_shift);
         if (d.current_date) setServerDate(d.current_date);
         if (d.assigned_office?.name) {
-          const off = {
+          const off: AssignedOffice = {
             id: d.assigned_office.id || "loc-inhyma-thane-assigned",
             name: d.assigned_office.name,
             address: d.assigned_office.address || "Office No 421, 4th Floor, Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604",
@@ -488,7 +483,7 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
           setTerminalState("CHECKED_OUT");
           setCheckInTime(inTime);
           setLastPunchTime(rec?.punch_in || d.punch_in || "10:30 AM");
-          setPunchOutTime(rec?.punch_out || d.punch_out || "07:00 PM");
+          setPunchOutTime(rec?.punch_out || d.punch_out || (outTime ? new Date(outTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "07:00 PM"));
           setTotalWorkingDuration(rec?.total_hours || d.total_hours || "08h 30m");
           clearActivePunchSession();
         } else {
@@ -500,32 +495,13 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
           setTotalWorkingDuration(null);
           clearActivePunchSession();
         }
+
+        loadMonthAttendance(selectedMonth, rec);
       }
     } catch {
       // In offline/test runner, keep initial state
     }
-  }, []);
-
-  // Load monthly calendar records from PostgreSQL
-  const loadMonthAttendance = useCallback(async (monthStr: string) => {
-    if (initialDaysForTesting && initialDaysForTesting.length > 0) {
-      return;
-    }
-    try {
-      const res = await apiGet<any[]>(`/hrms/attendance/month?month=${monthStr}`);
-      const recordByDate: Record<string, any> = {};
-      if (res?.data && Array.isArray(res.data)) {
-        for (const r of res.data) {
-          if (r.attendance_date) {
-            recordByDate[r.attendance_date] = r;
-          }
-        }
-      }
-      setCalendarDays(generateMonthDays(monthStr, recordByDate));
-    } catch {
-      // In tests, preserve initial days
-    }
-  }, []);
+  }, [loadMonthAttendance, selectedMonth]);
 
   useEffect(() => {
     loadTodayAttendance();
@@ -572,9 +548,9 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
   const [directAuditLogs, setDirectAuditLogs] = useState<AuditLogEntry[]>([]);
   const [submittedApprovalRequests, setSubmittedApprovalRequests] = useState<ApprovalRequestItem[]>([]);
 
-  const userName = profile?.full_name || profile?.display_name || profile?.first_name || "Rupesh Malla";
-  const userCode = profile?.employee_code || "EMP-001";
-  const userPosition = profile?.role || "Operations Manager";
+  const userName: string = (profile?.full_name || (typeof profile?.display_name === "string" ? profile.display_name : "") || profile?.first_name || "Rupesh Malla") as string;
+  const userCode: string = (typeof profile?.employee_code === "string" ? profile.employee_code : "EMP-001") as string;
+  const userPosition: string = (typeof profile?.role === "string" ? profile.role : (profile?.roles?.[0] || "Operations Manager")) as string;
 
   // Monitor location changes after Punch In
   useEffect(() => {
@@ -625,7 +601,7 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
   }, [geofenceWarningOpen, geofenceCountdown, currentGps, lastPunchTime]);
 
   const handleReturnInsideGeofence = () => {
-    setCurrentGps(DEV_GPS_LOCATIONS[0]);
+    setCurrentGps(devGpsLocations[0]);
     setIsDevSelectOverride(false);
     setGeofenceWarningOpen(false);
     setTerminalState(isPunchedIn ? "CHECKED_IN" : "NOT_PUNCHED");
@@ -657,14 +633,14 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
 
       clearActivePunchSession();
 
-      apiPost<any>("/hrms/attendance/punch-out", {})
+      attendanceService.punchOut()
         .then((res) => {
-          if (res?.data) {
-            const rec = res.data;
+          if (res) {
+            const rec = res as any;
             setTodayRecord(rec);
             if (rec.punch_out) setPunchOutTime(rec.punch_out);
             if (rec.total_hours) setTotalWorkingDuration(rec.total_hours);
-            loadMonthAttendance(selectedMonth);
+            loadMonthAttendance(selectedMonth, rec);
           }
         })
         .catch(() => {});
@@ -705,14 +681,10 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
         )
       );
 
-      apiPost<any>("/hrms/attendance/punch-in", {
-        latitude: currentGps.latitude,
-        longitude: currentGps.longitude,
-        office_id: assignedOffice.id,
-      })
+      attendanceService.punchIn(currentGps.latitude, currentGps.longitude, assignedOffice.id)
         .then((res) => {
-          if (res?.data && isPunchedInRef.current) {
-            const rec = res.data;
+          if (res && isPunchedInRef.current) {
+            const rec = res as any;
             setTodayRecord(rec);
             const inTime = rec.check_in_time || rec.punched_in || currentTimeIso;
             const inStr = rec.punch_in || nowStr;
@@ -724,7 +696,7 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
               check_in_time: inTime,
               punch_in: inStr,
             });
-            loadMonthAttendance(selectedMonth);
+            loadMonthAttendance(selectedMonth, rec);
           }
         })
         .catch((err: any) => {
@@ -777,11 +749,11 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
     remarks: string;
   }) => {
     try {
-      await apiPost("/hrms/regularization-requests", {
-        attendance_date: payload.date,
-        check_in: payload.checkIn,
-        check_out: payload.checkOut,
-        total_hours: payload.totalHours,
+      await attendanceService.submitRegularize({
+        date: payload.date,
+        checkIn: payload.checkIn,
+        checkOut: payload.checkOut,
+        totalHours: payload.totalHours,
         reason: `${payload.reason}${payload.remarks ? ` — ${payload.remarks}` : ""}`,
       });
     } catch (err) {
@@ -861,25 +833,6 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
     setSuccess(`Directly regularized ${payload.date} to Present. Audit record generated.`);
   };
 
-  // Calendar stats
-  const calendarStats = useMemo(() => {
-    let present = 0;
-    let late = 0;
-    let missing = 0;
-    let leave = 0;
-    let holidays = 0;
-
-    calendarDays.forEach((d) => {
-      if (d.status === "Present") present++;
-      else if (d.status === "Late Punch") late++;
-      else if (d.status === "Missing Punch") missing++;
-      else if (d.status === "Leave") leave++;
-      else if (d.status === "Holiday") holidays++;
-    });
-
-    return { present, late, missing, leave, holidays, totalWorking: 22 };
-  }, [calendarDays]);
-
   return (
     <AppShell activeKey="hrms">
       <main className="page" style={{ maxWidth: "1280px", margin: "0 auto", padding: "20px 24px" }}>
@@ -930,7 +883,7 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
                 data-testid="dev-gps-select"
                 value={currentGps.id}
                 onChange={(e) => {
-                  const found = DEV_GPS_LOCATIONS.find((l) => l.id === e.target.value);
+                  const found = devGpsLocations.find((l) => l.id === e.target.value);
                   if (found) {
                     setCurrentGps(found);
                     setIsDevSelectOverride(true);
@@ -946,7 +899,7 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
                 }}
                 title="Test geofence rules before punch and after punch without moving"
               >
-                {DEV_GPS_LOCATIONS.map((loc) => (
+                {devGpsLocations.map((loc) => (
                   <option key={loc.id} value={loc.id}>
                     {loc.name} {loc.isInsideAssigned ? "(Inside)" : `[${loc.distanceKm}km]`}
                   </option>
@@ -1233,252 +1186,19 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
               </div>
             </div>
 
-            {/* Attendance Monthly Calendar (Phase 9 Clean 7-Column Layout) */}
-            <div className="card" style={{ padding: "20px 24px" }}>
-              {/* Calendar Header with Month Navigation */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "14px",
-                  marginBottom: "16px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <h2 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "var(--color-text)" }}>
-                    {formattedMonthTitle} Monthly Calendar
-                  </h2>
-                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-secondary"
-                      style={{ padding: "2px 8px", fontSize: "12px" }}
-                      title="Previous Month"
-                      onClick={() => handleNavigateMonth(-1)}
-                    >
-                      &larr; Prev
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-secondary"
-                      style={{ padding: "2px 8px", fontSize: "12px" }}
-                      title="Current Month"
-                      onClick={() => handleSetCurrentMonth()}
-                    >
-                      Today
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-secondary"
-                      style={{ padding: "2px 8px", fontSize: "12px" }}
-                      title="Next Month"
-                      onClick={() => handleNavigateMonth(1)}
-                    >
-                      Next &rarr;
-                    </button>
-                  </div>
-                </div>
-
-                {/* Status Badges Legend */}
-                <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", fontSize: "12px" }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#22c55e" }} /> Present ({calendarStats.present})
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#eab308" }} /> Late ({calendarStats.late})
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#ef4444" }} /> Missing / Irregular ({calendarStats.missing})
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6" }} /> Leave ({calendarStats.leave})
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#9ca3af" }} /> Holiday ({calendarStats.holidays})
-                  </span>
-                </div>
-              </div>
-
-              {/* 7-Column Calendar Grid */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(7, 1fr)",
-                  gap: "8px",
-                }}
-              >
-                {/* Weekday headers */}
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dayName) => (
-                  <div
-                    key={dayName}
-                    style={{
-                      padding: "8px",
-                      textAlign: "center",
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      color: dayName === "Sun" ? "#dc2626" : "var(--color-muted)",
-                      background: "var(--color-bg)",
-                      borderRadius: "var(--radius-sm)",
-                    }}
-                  >
-                    {dayName}
-                  </div>
-                ))}
-
-                {/* Dynamically calculated start day offset cells */}
-                {Array.from({ length: monthStartOffset }).map((_, idx) => (
-                  <div key={`offset-${idx}`} style={{ minHeight: "100px" }} />
-                ))}
-
-                {/* Calendar Day Cards (Full Month Grid, Today Highlighted, In Progress status, Database records) */}
-                {calendarDays.map((d) => {
-                  const todayIso = serverDate || new Date().toISOString().slice(0, 10);
-                  const isToday = d.date === todayIso;
-                  const displayStatus =
-                    isToday && d.punch_in && !d.punch_out
-                      ? "In Progress"
-                      : d.status;
-                  const isActionRequired = shouldShowRegularizeIcon(d, displayStatus);
-
-                  return (
-                    <div
-                      key={d.date}
-                      data-testid={`cal-day-${d.dayNumber}`}
-                      style={{
-                        minHeight: "100px",
-                        padding: "8px 10px",
-                        border: isToday
-                          ? "2px solid #2563eb"
-                          : isActionRequired
-                          ? "1.5px solid #f59e0b"
-                          : "1px solid var(--color-border)",
-                        borderRadius: "var(--radius-sm, 6px)",
-                        background: isToday
-                          ? "rgba(37, 99, 235, 0.04)"
-                          : d.status === "Present" && !isActionRequired
-                          ? "var(--color-surface, #ffffff)"
-                          : d.status === "Holiday"
-                          ? "var(--color-bg)"
-                          : isActionRequired
-                          ? "#fffdf5"
-                          : "var(--color-surface, #ffffff)",
-                        boxShadow: isToday ? "0 0 0 1px rgba(37, 99, 235, 0.2)" : "none",
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "space-between",
-                        position: "relative",
-                      }}
-                    >
-                      {/* Top Row: Day Number, Today Badge & Irregular Day Edit Icon */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <span
-                            style={{
-                              fontSize: "13px",
-                              fontWeight: 700,
-                              color: isToday ? "#2563eb" : "var(--color-text)",
-                            }}
-                          >
-                            {d.dayNumber}
-                          </span>
-                          {isToday && (
-                            <span
-                              style={{
-                                fontSize: "9px",
-                                fontWeight: 700,
-                                background: "#2563eb",
-                                color: "#ffffff",
-                                padding: "1px 5px",
-                                borderRadius: "8px",
-                                textTransform: "uppercase",
-                                letterSpacing: "0.4px",
-                              }}
-                            >
-                              Today
-                            </span>
-                          )}
-                        </div>
-
-                        {isActionRequired && (
-                          <button
-                            type="button"
-                            data-testid={d.date === "2026-09-07" ? "edit-day-2026-09-07" : `edit-irregular-${d.dayNumber}`}
-                            aria-label={`Regularize ${d.date}`}
-                            onClick={() => handleOpenDrawer(d)}
-                            title={`Regularize irregular attendance for ${d.date}`}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              color: "#2563eb",
-                              cursor: "pointer",
-                              padding: "0 2px",
-                              fontSize: "13px",
-                              lineHeight: 1,
-                            }}
-                          >
-                            ✏️
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Status Badge: Render ONLY if non-empty */}
-                      <div style={{ marginTop: "4px", minHeight: "18px" }}>
-                        {displayStatus && displayStatus !== "" ? (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              padding: "2px 6px",
-                              borderRadius: "8px",
-                              fontSize: "10px",
-                              fontWeight: 700,
-                              background:
-                                displayStatus === "Present"
-                                  ? "#dcfce7"
-                                  : displayStatus === "In Progress"
-                                  ? "#e0e7ff"
-                                  : displayStatus === "Late Punch"
-                                  ? "#fef3c7"
-                                  : displayStatus === "Missing Punch" || displayStatus === "Early Exit"
-                                  ? "#fee2e2"
-                                  : displayStatus === "Outside Geofence" || displayStatus === "Work From Home"
-                                  ? "#ffedd5"
-                                  : displayStatus === "Leave"
-                                  ? "#eff6ff"
-                                  : "#f3f4f6",
-                              color:
-                                displayStatus === "Present"
-                                  ? "#16a34a"
-                                  : displayStatus === "In Progress"
-                                  ? "#4338ca"
-                                  : displayStatus === "Late Punch"
-                                  ? "#b45309"
-                                  : displayStatus === "Missing Punch" || displayStatus === "Early Exit"
-                                  ? "#dc2626"
-                                  : displayStatus === "Outside Geofence" || displayStatus === "Work From Home"
-                                  ? "#c2410c"
-                                  : displayStatus === "Leave"
-                                  ? "#2563eb"
-                                  : "#6b7280",
-                            }}
-                          >
-                            {displayStatus}
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {/* Clean Check In, Check Out & Hours */}
-                      <div style={{ marginTop: "4px", fontSize: "10.5px", color: "var(--color-muted)", lineHeight: 1.35 }}>
-                        <div>In: <strong style={{ color: d.punch_in ? "var(--color-text)" : "inherit" }}>{d.punch_in || "—"}</strong></div>
-                        <div>Out: <strong style={{ color: d.punch_out ? "var(--color-text)" : "inherit" }}>{d.punch_out || "—"}</strong></div>
-                        <div>Hours: <strong style={{ color: d.total_hours ? "#2563eb" : "inherit" }}>{d.total_hours || "—"}</strong></div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            {/* Attendance Monthly Calendar (Production Component) */}
+            <AttendanceCalendar
+              selectedMonth={selectedMonth}
+              onMonthChange={(m) => {
+                setSelectedMonth(m);
+                loadMonthAttendance(m);
+              }}
+              calendarDays={calendarDays}
+              serverDate={serverDate}
+              liveElapsedSeconds={punchSeconds}
+              isPunchedIn={isPunchedIn}
+              onOpenRegularize={handleOpenDrawer}
+            />
           </div>
         )}
 

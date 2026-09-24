@@ -21,7 +21,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Banner, Modal } from "@/components/ui";
-import { IconClock, IconShield, IconPlus, IconCheckSquare, IconEdit, IconTrash } from "@/components/icons";
+import { IconClock, IconShield, IconPlus, IconCheckSquare, IconEdit } from "@/components/icons";
 import {
   type AttendancePolicyConfig,
   DEFAULT_ATTENDANCE_POLICY,
@@ -75,7 +75,7 @@ export function AttendanceSettings() {
 
   // Notifications
   const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [error] = useState<unknown>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
