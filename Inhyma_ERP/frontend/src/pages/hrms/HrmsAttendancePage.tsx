@@ -506,6 +506,19 @@ export function HrmsAttendancePage({ initialDaysForTesting }: HrmsAttendancePage
   useEffect(() => {
     loadTodayAttendance();
     loadMonthAttendance(selectedMonth);
+
+    const handleFocusOrVisible = () => {
+      loadTodayAttendance();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleFocusOrVisible);
+      document.addEventListener("visibilitychange", handleFocusOrVisible);
+      return () => {
+        window.removeEventListener("focus", handleFocusOrVisible);
+        document.removeEventListener("visibilitychange", handleFocusOrVisible);
+      };
+    }
   }, [loadTodayAttendance, loadMonthAttendance, selectedMonth]);
 
   // Working Timer: Derived strictly from server check_in_time timestamp
