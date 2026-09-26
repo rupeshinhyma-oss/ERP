@@ -592,6 +592,11 @@ export function Memberships() {
                       </td>
                       <td>
                         <StatusBadge status={m.status} />
+                        {m.metadata_json?.sync_status && m.metadata_json.sync_status !== "SUCCESS" && (
+                          <div style={{ fontSize: "10px", color: m.metadata_json.sync_status === "PENDING_RETRY" ? "#d97706" : "#dc2626", marginTop: "3px", fontWeight: 600 }}>
+                            {m.metadata_json.sync_status} {m.metadata_json.retry_count ? `(#${m.metadata_json.retry_count})` : ""}
+                          </div>
+                        )}
                       </td>
                       <td>
                         {m.verified_at ? (
@@ -653,15 +658,35 @@ export function Memberships() {
                             <>
                               {/* Quick Lifecycle Actions for regular added users */}
                               {m.status === "PENDING" && (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline"
-                                  style={{ color: "var(--color-success)", borderColor: "#bbf7d0", fontSize: "11px", padding: "3px 8px" }}
-                                  onClick={() => setActionTarget({ membership: m, action: "verify" })}
-                                  title="Verify membership"
-                                >
-                                  Verify
-                                </button>
+                                <>
+                                  {m.metadata_json?.is_retryable && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline"
+                                      style={{ color: "#0284c7", borderColor: "#bae6fd", fontSize: "11px", padding: "3px 8px" }}
+                                      onClick={async () => {
+                                        try {
+                                          await apiPost(`/global/identity/provisioning/${m.id}/retry`, {});
+                                          window.location.reload();
+                                        } catch (e) {
+                                          setError(e);
+                                        }
+                                      }}
+                                      title="Retry Provisioning Sync"
+                                    >
+                                      Retry Sync
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline"
+                                    style={{ color: "var(--color-success)", borderColor: "#bbf7d0", fontSize: "11px", padding: "3px 8px" }}
+                                    onClick={() => setActionTarget({ membership: m, action: "verify" })}
+                                    title="Verify membership"
+                                  >
+                                    Verify
+                                  </button>
+                                </>
                               )}
                               {m.status === "ACTIVE" && (
                                 <button

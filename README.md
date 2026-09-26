@@ -107,3 +107,14 @@ cd Inhyma_ERP/backend && python server.py
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+---
+
+## 4. Documentation & Changelogs
+
+- **[SYSTEM_CHANGES_AND_FEATURES_DOCUMENTATION.md](docs/SYSTEM_CHANGES_AND_FEATURES_DOCUMENTATION.md)** — **Latest System Changes & Architecture Manual (September 26, 2026)** covering unified ERP Access Grants, true spoke deprovisioning, single-ERP direct routing, multi-ERP switcher resolution, and identity isolation.
+- **[MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md](docs/MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md)** — Master technical reference manual for the entire multi-ERP ecosystem.
+- **[UPDATED_CHANGELOG_AND_MERGE_REPORT.md](docs/UPDATED_CHANGELOG_AND_MERGE_REPORT.md)** — Ecosystem changelogs, git merge status, and component health.
+- **[DISASTER_RECOVERY_PLAN.md](docs/DISASTER_RECOVERY_PLAN.md)** — DR playbooks for operational incidents.
+- **[OPERATIONAL_RUNBOOKS.md](docs/OPERATIONAL_RUNBOOKS.md)** — Standard operating procedures and deployment runbooks.
+
+

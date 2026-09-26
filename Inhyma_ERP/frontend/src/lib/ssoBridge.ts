@@ -50,11 +50,15 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
 
   const currentSessionId = Auth.getSessionId() || getEcosystemCookie()?.session_id;
   const currentCookie = getEcosystemCookie();
+  const profile = Auth.getProfile();
+  const email = profile?.email || currentCookie?.email || "admin@example.com";
+  const user = profile?.username || profile?.first_name || currentCookie?.display_name || currentCookie?.email || email;
+  const role = profile?.roles?.includes("super_admin") ? "super_admin" : (currentCookie?.role || "global_user");
 
   const payload: SsoHandoverPayload = {
-    role: currentCookie?.role || "super_admin",
-    user: currentCookie?.email || "admin",
-    email: currentCookie?.email || "admin@example.com",
+    role,
+    user,
+    email,
     session_id: currentSessionId || undefined,
     allowed_erps: currentCookie?.allowed_erps || ["*"],
     ts: Date.now(),
@@ -168,29 +172,44 @@ export async function processIncomingSsoHandover(): Promise<
     allowedErps.includes("*") ||
     allowedErps.includes("inhyma");
 
-  if (!hasAccess && !Auth.isLoggedIn()) {
+  if (!hasAccess) {
     console.warn("User is not authorized for Inhyma ERP");
+    if (token) {
+      Auth.clear();
+    }
     return "not-logged-in";
   }
 
   // 3. Establish or hydrate local session if already logged in or via valid SSO credentials
   if (Auth.isLoggedIn()) {
-    // If already logged in locally, ensure session_id is saved. Nothing
-    // about the local session actually changed here, so this reports
-    // "already-logged-in" rather than "logged-in" -- a caller reloading
-    // the page on every truthy result would otherwise reload every time
-    // this runs while already logged in, forever.
-    if (targetSessionId && !Auth.getSessionId()) {
-      Auth.setSessionId(targetSessionId);
+    const currentLocalEmail = Auth.getProfile()?.email?.toLowerCase();
+    // If incoming SSO token specifies a different user, clear existing session to enforce User Isolation
+    if (token && targetEmail && currentLocalEmail && currentLocalEmail !== targetEmail.toLowerCase()) {
+      Auth.clear();
+    } else {
+      if (targetSessionId && !Auth.getSessionId()) {
+        Auth.setSessionId(targetSessionId);
+      }
+      return "already-logged-in";
     }
-    return "already-logged-in";
   }
 
   try {
-    const { data: tokens } = await apiPost<TokenPair>("/auth/login", {
-      identifier: "admin",
-      password: "ChangeMe!12345",
-    });
+    let tokens: TokenPair | null = null;
+    if (token) {
+      const res = await apiPost<TokenPair>("/auth/sso-handover", {
+        email: targetEmail,
+        sso_token: token,
+        target_erp: "inhyma",
+      });
+      tokens = res.data;
+    } else if (targetRole === "super_admin") {
+      const res = await apiPost<TokenPair>("/auth/login", {
+        identifier: "admin",
+        password: "ChangeMe!12345",
+      });
+      tokens = res.data;
+    }
 
     if (tokens?.access_token) {
       const finalSessionId = targetSessionId || `ihm-sess-${Date.now()}`;
@@ -199,8 +218,8 @@ export async function processIncomingSsoHandover(): Promise<
       // Sync cookie
       const sessionData: EcosystemSessionData = {
         session_id: finalSessionId,
-        email: targetEmail,
-        display_name: tokens.user?.username || "Admin",
+        email: tokens.user?.email || targetEmail,
+        display_name: tokens.user?.username || targetEmail.split("@")[0],
         role: targetRole,
         user_type: targetRole === "super_admin" ? "platform_admin" : "global_user",
         allowed_erps: allowedErps,

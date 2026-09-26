@@ -56,6 +56,7 @@ export interface ErpMembership {
   user_display_name?: string;
   erp_name?: string;
   erp_key?: string;
+  metadata_json?: Record<string, any> | null;
 }
 
 export interface PlatformRole {

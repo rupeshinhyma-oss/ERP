@@ -218,13 +218,30 @@ async def revoke_membership(
     principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.revoke")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
-    """Revoke a membership. Closes the GlobalUser<->ERP link only -- never deletes the local ERP user."""
+    """Revoke a membership and deprovision the local spoke user."""
     membership = await service.revoke(membership_id, actor=principal, reason=payload.reason)
     return build_success_response(
         ErpMembershipRead.model_validate(membership).model_dump(mode="json"),
         request_id=_request_id(request),
         message="Membership revoked.",
     )
+
+
+@membership_router.delete("/{membership_id}", summary="Delete an ERP Membership and deprovision spoke user")
+async def delete_membership(
+    request: Request,
+    membership_id: uuid.UUID,
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.revoke")),
+    service: ErpMembershipService = Depends(get_erp_membership_service),
+) -> dict:
+    """Delete a membership entirely and remove the local account from the spoke ERP."""
+    await service.delete(membership_id, actor=principal, reason="Removed from control plane")
+    return build_success_response(
+        {"deleted": True, "membership_id": str(membership_id)},
+        request_id=_request_id(request),
+        message="Membership deleted and spoke user deprovisioned.",
+    )
+
 
 
 @internal_router.get(
@@ -251,9 +268,37 @@ async def internal_lookup_membership(
     already exposes via `status`.
     """
     membership = await service.get_for_user_and_erp(global_user_id, credential.erp_instance_id)
+    global_user = await service.global_user_repository.get_by_id(global_user_id)
     response = InternalMembershipLookupResponse(
         global_user_id=membership.global_user_id,
         local_user_id=membership.local_user_id,
         status=membership.status,
+        global_user_status=global_user.status.value if global_user else None,
+    )
+    return build_success_response(response.model_dump(mode="json"), request_id=_request_id(request))
+
+
+@internal_router.get(
+    "/memberships/by-local-user/{local_user_id}",
+    summary="Resolve a local user's membership for the CALLING ERP (service-credential authenticated)",
+)
+async def internal_lookup_membership_by_local_user(
+    request: Request,
+    local_user_id: str,
+    credential: ErpServiceCredential = Depends(require_erp_service),
+    service: ErpMembershipService = Depends(get_erp_membership_service),
+) -> dict:
+    """
+    Resolve a local user's membership for the calling ERP only.
+
+    Enables spoke ERPs to verify central access status for a local account
+    during direct login and session validation.
+    """
+    membership, global_user = await service.get_for_local_user_and_erp(local_user_id, credential.erp_instance_id)
+    response = InternalMembershipLookupResponse(
+        global_user_id=membership.global_user_id,
+        local_user_id=membership.local_user_id,
+        status=membership.status,
+        global_user_status=global_user.status.value if global_user else None,
     )
     return build_success_response(response.model_dump(mode="json"), request_id=_request_id(request))

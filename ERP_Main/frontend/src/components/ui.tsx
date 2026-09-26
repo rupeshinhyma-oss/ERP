@@ -89,6 +89,8 @@ export interface ModalProps {
   variant?: "drawer" | "center";
   cardClassName?: string;
   cardStyle?: CSSProperties;
+  backdropStyle?: CSSProperties;
+  zIndex?: number;
   showHeader?: boolean;
   locked?: boolean;
 }
@@ -104,6 +106,8 @@ export function Modal({
   variant = "drawer",
   cardClassName = "",
   cardStyle,
+  backdropStyle,
+  zIndex,
   showHeader = true,
   locked = false,
 }: ModalProps) {
@@ -119,7 +123,11 @@ export function Modal({
   return (
     <div
       className={backdropClasses}
-      style={isCenter ? { display: "flex", justifyContent: "center", alignItems: "center", padding: "20px" } : undefined}
+      style={{
+        ...(isCenter ? { display: "flex", justifyContent: "center", alignItems: "center", padding: "20px" } : {}),
+        ...(zIndex ? { zIndex } : {}),
+        ...backdropStyle,
+      }}
       onClick={(e) => {
         if (!locked && e.target === e.currentTarget) {
           onClose();
@@ -188,7 +196,7 @@ export function ConfirmDialog({
   loading?: boolean;
 }) {
   return (
-    <Modal open={open} onClose={onCancel} variant="center" title={title} locked={loading} cardStyle={{ maxWidth: "440px" }}>
+    <Modal open={open} onClose={onCancel} variant="center" title={title} locked={loading} cardStyle={{ maxWidth: "440px" }} zIndex={3000}>
       <div style={{ marginBottom: "20px", color: "var(--color-text-secondary)", fontSize: "14px", lineHeight: 1.5 }}>
         {message}
       </div>

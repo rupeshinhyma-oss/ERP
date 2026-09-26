@@ -77,6 +77,8 @@ export class LiveClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionallyClosed = true;
   private isPageHidden = false;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly HEARTBEAT_INTERVAL_MS = 25000;
   /** Channels the caller wants active. Restored automatically after every (re)connect -- see `_flushSubscriptions`. */
   private desiredChannels = new Set<string>();
   /** Channels the SERVER has actually acknowledged for the CURRENT socket. Reset to empty on every new connection. */
@@ -105,6 +107,7 @@ export class LiveClient {
     // Mark isPageHidden so socket.onclose does NOT attempt to reconnect while the page
     // is frozen in bfcache, avoiding duplicate errors and runaway backoff loops.
     this.isPageHidden = true;
+    this.stopHeartbeat();
     this.clearReconnectTimer();
     if (this.socket) {
       try {
@@ -185,6 +188,7 @@ export class LiveClient {
     socket.onopen = () => {
       this.reconnectAttempt = 0;
       this.confirmedChannels.clear();
+      this.startHeartbeat();
       this._setStatus("connected");
       // Phase 2 brief section 17 (reconnect synchronization): restore
       // every channel the app still wants, since the server has no
@@ -207,6 +211,7 @@ export class LiveClient {
     };
 
     socket.onclose = (ev) => {
+      this.stopHeartbeat();
       this.socket = null;
       this.confirmedChannels.clear();
       if (
@@ -259,6 +264,7 @@ export class LiveClient {
    */
   disconnect(): void {
     this.intentionallyClosed = true;
+    this.stopHeartbeat();
     this.clearReconnectTimer();
     this.reconnectAttempt = 0;
     this.desiredChannels.clear();
@@ -320,6 +326,9 @@ export class LiveClient {
     }
     if (typeof parsed === "object" && parsed !== null && "type" in parsed) {
       const msg = parsed as Record<string, unknown>;
+      if (msg.type === "pong") {
+        return;
+      }
       if (msg.type === "FORCE_LOGOUT") {
         this.disconnect();
         handleSessionExpired(true);
@@ -358,6 +367,26 @@ export class LiveClient {
     const delay = computeBackoffDelay(this.reconnectAttempt);
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => this.connect(), delay);
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        try {
+          this.socket.send(JSON.stringify({ action: "ping", timestamp: Date.now() }));
+        } catch {
+          // ignore send error; socket closure will trigger reconnect
+        }
+      }
+    }, this.HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   private clearReconnectTimer(): void {

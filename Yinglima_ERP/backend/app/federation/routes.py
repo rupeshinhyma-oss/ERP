@@ -80,10 +80,11 @@ async def _establish_local_session_from_id_token(
     except MembershipLookupError as exc:
         raise ForbiddenException("You do not have an active membership for this ERP.") from exc
 
-    if membership.get("status") != "ACTIVE":
+    if membership.get("status") != "ACTIVE" or (
+        membership.get("global_user_status") and membership.get("global_user_status") != "ACTIVE"
+    ):
         # Deliberately the same rejection shape regardless of whether the
-        # membership is PENDING/SUSPENDED/REVOKED (Step 53: fail-closed,
-        # don't leak which specific state it's in).
+        # membership is PENDING/SUSPENDED/REVOKED or global user is SUSPENDED/DISABLED
         raise ForbiddenException("You do not have an active membership for this ERP.")
 
     try:
@@ -93,10 +94,9 @@ async def _establish_local_session_from_id_token(
 
     user = await UserRepository(db).get_by_id(local_user_id)
     if user is None:
-        # Local user status remains authoritative (Step 25/26) -- a
-        # membership pointing at a local account that no longer exists
-        # is exactly as invalid as one pointing at a disabled account.
         raise ForbiddenException("The local account for this membership no longer exists.")
+    if not user.can_login or not user.is_active:
+        raise ForbiddenException("The local account for this membership is not active.")
 
     access_token, refresh_token = await auth_service.issue_session_for_federated_user(user, context)
 
@@ -107,8 +107,8 @@ async def _establish_local_session_from_id_token(
         first_name=user.first_name,
         last_name=user.last_name,
         employee_code=user.employee_code,
-        username=user.username,
-        email=user.email,
+        username=user.username or "",
+        email=user.email or "",
         phone=user.phone,
         status=user.status.value,
         is_active=user.is_active,

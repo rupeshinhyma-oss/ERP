@@ -321,6 +321,14 @@ class Settings(BaseSettings):
         description="This ERP's own OIDC client_id, as issued by ERP_Main at federation-client registration "
         "time. The `aud` claim on every federation ID token this ERP accepts must exactly equal this value.",
     )
+    FEDERATION_CLIENT_SECRET: str = Field(
+        default="",
+        description="This ERP's own OIDC client_secret, as issued (once, plaintext) by ERP_Main at "
+        "federation-client registration time. Used ONLY server-to-server, by this backend, to call "
+        "ERP_Main's POST /federation/token when exchanging a browser-supplied authorization code for a "
+        "signed id_token. MUST NEVER be sent to or read by frontend code, and MUST be overridden via env "
+        "in every non-local environment.",
+    )
     FEDERATION_SERVICE_CREDENTIAL: str = Field(
         default="CHANGE-ME-IN-PRODUCTION-erp-main-service-credential",
         description="This ERP's own service credential (issued by ERP_Main's app.service_identity) for "
@@ -328,7 +336,33 @@ class Settings(BaseSettings):
         "non-local environment. Never confused with FEDERATION_CLIENT_ID/secret above, which authenticate "
         "the federation token EXCHANGE, not this separate internal API call.",
     )
+    # Phase 9: Incoming Service Credential from ERP_Main with Rotation Support
+    ERP_MAIN_SERVICE_CREDENTIAL: str = Field(
+        default="",
+        description="Service credential expected from ERP_Main for incoming provisioning requests.",
+    )
+    ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS: str | None = Field(
+        default=None,
+        description="Previous service credential from ERP_Main to support zero-downtime rotation.",
+    )
+
+    def get_expected_erp_main_credentials(self) -> list[str]:
+        """Return list of valid incoming credentials from ERP_Main (current and previous for rotation)."""
+        creds: list[str] = []
+        if self.ERP_MAIN_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.ERP_MAIN_SERVICE_CREDENTIAL:
+            creds.append(self.ERP_MAIN_SERVICE_CREDENTIAL)
+        if self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS and "CHANGE-ME" not in self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS:
+            creds.append(self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS)
+        # Fallback to FEDERATION_SERVICE_CREDENTIAL if ERP_MAIN_SERVICE_CREDENTIAL not set
+        if not creds and self.FEDERATION_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.FEDERATION_SERVICE_CREDENTIAL:
+            creds.append(self.FEDERATION_SERVICE_CREDENTIAL)
+        return creds
+
     FEDERATION_JWKS_CACHE_TTL_SECONDS: int = 300
+    ENFORCE_CENTRAL_MEMBERSHIP_ON_LOGIN: bool = Field(
+        default=False,
+        description="When True, POST /auth/login verifies with ERP_Main that the user holds an ACTIVE membership and GlobalUser is ACTIVE.",
+    )
 
     # Peer ERP Direct Integration Endpoints (Phase 8E - Direct runtime ERP-to-ERP delivery)
     PEER_ERP_ENDPOINTS: str = Field(
@@ -420,6 +454,11 @@ class Settings(BaseSettings):
         if self.is_production and ("*" in self.cors_allowed_origins_list or not self.CORS_ALLOWED_ORIGINS):
             raise RuntimeError(
                 "CORS_ALLOWED_ORIGINS cannot be wildcard '*' or empty in production when credentials are enabled."
+            )
+        if self.is_production and not self.get_expected_erp_main_credentials():
+            raise RuntimeError(
+                "Missing or placeholder ERP_MAIN_SERVICE_CREDENTIAL in production environment. "
+                "Set ERP_MAIN_SERVICE_CREDENTIAL via the environment."
             )
         if self.is_production and "sqlite" in str(self.DATABASE_URL).lower():
             raise RuntimeError(

@@ -91,3 +91,9 @@ class ErpMembershipRepository:
         await self.db.flush()
         await self.db.refresh(membership)
         return membership
+
+    async def delete(self, membership: ErpMembership) -> None:
+        """Delete a membership row from the database."""
+        await self.db.delete(membership)
+        await self.db.flush()
+

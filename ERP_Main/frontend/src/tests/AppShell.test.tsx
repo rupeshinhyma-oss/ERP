@@ -45,7 +45,8 @@ describe("AppShell Component", () => {
     expect(screen.getAllByText("ERP Dashboard").length).toBeGreaterThan(0);
     expect(document.getElementById("header-erp-switcher-btn")?.textContent).toContain("ERP Dashboard");
     expect(screen.getByText("User & Access")).toBeDefined();
-    expect(screen.getByText("Sync Policies")).toBeDefined();
-    expect(screen.getByText("System Health")).toBeDefined();
+    expect(screen.queryByText("Sync Policies")).toBeNull();
+    expect(screen.getByText("Global Audit Logs")).toBeDefined();
+    expect(screen.queryByText("System Health")).toBeNull();
   });
 });

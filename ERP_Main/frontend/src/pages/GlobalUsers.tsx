@@ -11,8 +11,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
-import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
 import { SectionNavTabs } from "@/components/SectionNavTabs";
@@ -28,40 +28,44 @@ import {
 } from "@/components/ui";
 import { ICONS } from "@/components/icons";
 import type {
-  EffectivePermissions,
   ErpInstance,
   ErpMembership,
   GlobalUser,
-  GlobalUserStatus,
-  PlatformRole,
   PlatformRoleAssignment,
 } from "@/types";
 
 const STATUS_FILTERS = [
   { value: "ALL", label: "All Statuses" },
   { value: "ACTIVE", label: "Active" },
-  { value: "SUSPENDED", label: "Suspended" },
   { value: "DISABLED", label: "Disabled" },
 ];
 
 export function GlobalUsers() {
   const toast = useToast();
-  const { isSuperAdmin } = useAuth();
+  const { id: routeUserId } = useParams<{ id?: string }>();
+  const navigate = useNavigate();
 
   const [users, setUsers] = useState<GlobalUser[]>([]);
   const [erps, setErps] = useState<ErpInstance[]>([]);
+  const [allMemberships, setAllMemberships] = useState<ErpMembership[]>([]);
+  const [activeConflicts, setActiveConflicts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
   // Filters & Search
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [erpFilter, setErpFilter] = useState("ALL");
 
   // Create User Modal
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createDisplayName, setCreateDisplayName] = useState("");
   const [createEmail, setCreateEmail] = useState("");
-  const [createExternalId, setCreateExternalId] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
+  const [createRole, setCreateRole] = useState("PLATFORM_ADMIN");
+  const [createGrantYinglima, setCreateGrantYinglima] = useState(false);
+  const [createGrantInhyma, setCreateGrantInhyma] = useState(false);
   const [creating, setCreating] = useState(false);
 
   // Edit User Modal
@@ -69,40 +73,22 @@ export function GlobalUsers() {
   const [editingUser, setEditingUser] = useState<GlobalUser | null>(null);
   const [editDisplayName, setEditDisplayName] = useState("");
   const [editEmail, setEditEmail] = useState("");
-  const [editExternalId, setEditExternalId] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [editRole, setEditRole] = useState("PLATFORM_ADMIN");
+  const [editGrantYinglima, setEditGrantYinglima] = useState(false);
+  const [editGrantInhyma, setEditGrantInhyma] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Status Change Dialog
-  const [statusModalOpen, setStatusModalOpen] = useState(false);
-  const [targetStatusUser, setTargetStatusUser] = useState<GlobalUser | null>(null);
-  const [newStatus, setNewStatus] = useState<GlobalUserStatus>("ACTIVE");
-  const [updatingStatus, setUpdatingStatus] = useState(false);
+  // Drawer Password Visibility
+  const [showDrawerPassword, setShowDrawerPassword] = useState(false);
 
-  // Flow A ERP Provisioning Modal
-  const [provisionModalOpen, setProvisionModalOpen] = useState(false);
-  const [targetProvisionUser, setTargetProvisionUser] = useState<GlobalUser | null>(null);
-  const [selectedErpId, setSelectedErpId] = useState("");
-  const [provisioning, setProvisioning] = useState(false);
 
   // User Detail Drawer / Modal
   const [detailUser, setDetailUser] = useState<GlobalUser | null>(null);
-  const [detailTab, setDetailTab] = useState<"overview" | "memberships" | "roles" | "access">("overview");
   const [userMemberships, setUserMemberships] = useState<ErpMembership[]>([]);
   const [userRoles, setUserRoles] = useState<PlatformRoleAssignment[]>([]);
-  const [effectivePerms, setEffectivePerms] = useState<EffectivePermissions | null>(null);
   const [loadingDetailSubdata, setLoadingDetailSubdata] = useState(false);
-
-  // Assign Role Modal (inside User Detail)
-  const [assignRoleModalOpen, setAssignRoleModalOpen] = useState(false);
-  const [availableRoles, setAvailableRoles] = useState<PlatformRole[]>([]);
-  const [assignRoleKey, setAssignRoleKey] = useState("");
-  const [assignScope, setAssignScope] = useState<"GLOBAL" | "ERP">("GLOBAL");
-  const [assignErpId, setAssignErpId] = useState("");
-  const [assigningRole, setAssigningRole] = useState(false);
-
-  // Revoke Role Confirmation
-  const [revokeAssignmentId, setRevokeAssignmentId] = useState<string | null>(null);
-  const [revokingRole, setRevokingRole] = useState(false);
 
   // Quick Disable Confirmation for regular users
   const [confirmDisableUser, setConfirmDisableUser] = useState<GlobalUser | null>(null);
@@ -114,14 +100,20 @@ export function GlobalUsers() {
     }
     setError(null);
     try {
-      const [usersRes, erpsRes] = await Promise.all([
+      const [usersRes, erpsRes, memsRes, conflictsRes] = await Promise.all([
         apiGet<GlobalUser[]>("/global/users?limit=250&offset=0"),
         apiGet<ErpInstance[]>("/global/erps").catch(() => []),
+        apiGet<ErpMembership[]>("/global/memberships?limit=1000&offset=0").catch(() => []),
+        apiGet<any[]>("/global/identity/conflicts?status=PENDING_REVIEW").catch(() => []),
       ]);
       const usersList = Array.isArray(usersRes) ? usersRes : ((usersRes as any)?.data || []);
       const erpsList = Array.isArray(erpsRes) ? erpsRes : ((erpsRes as any)?.data || []);
+      const memsList = Array.isArray(memsRes) ? memsRes : ((memsRes as any)?.data || []);
+      const conflictsList = Array.isArray(conflictsRes) ? conflictsRes : ((conflictsRes as any)?.data || []);
       setUsers(usersList);
       setErps(erpsList.filter((e: ErpInstance) => e.status !== "DECOMMISSIONED"));
+      setAllMemberships(memsList);
+      setActiveConflicts(conflictsList);
     } catch (err) {
       setError(err);
     } finally {
@@ -147,18 +139,15 @@ export function GlobalUsers() {
   const loadUserDetailData = useCallback(async (userId: string) => {
     setLoadingDetailSubdata(true);
     try {
-      const [memsRes, rolesRes, permsRes] = await Promise.all([
+      const [memsRes, rolesRes] = await Promise.all([
         apiGet<ErpMembership[]>(`/global/users/${userId}/memberships`).catch(() => []),
         apiGet<PlatformRoleAssignment[]>(`/global/authz/users/${userId}/roles`).catch(() => []),
-        apiGet<EffectivePermissions>(`/global/authz/users/${userId}/effective-permissions`).catch(() => null),
       ]);
       const rawMems = (memsRes as any)?.data ?? memsRes;
       const rawRoles = (rolesRes as any)?.data ?? rolesRes;
-      const rawPerms = (permsRes as any)?.data ?? permsRes;
 
       setUserMemberships(Array.isArray(rawMems) ? rawMems : []);
       setUserRoles(Array.isArray(rawRoles) ? rawRoles : []);
-      setEffectivePerms(rawPerms || null);
     } catch {
       // Non-blocking
     } finally {
@@ -168,9 +157,72 @@ export function GlobalUsers() {
 
   const handleOpenDetail = (user: GlobalUser) => {
     setDetailUser(user);
-    setDetailTab("overview");
     loadUserDetailData(user.id);
   };
+
+  const handleCloseDetail = () => {
+    setDetailUser(null);
+    if (routeUserId) {
+      navigate("/access/users", { replace: true });
+    }
+  };
+
+  useEffect(() => {
+    if (routeUserId && users.length > 0) {
+      const found = users.find((u) => u.id === routeUserId);
+      if (found) {
+        setDetailUser(found);
+        loadUserDetailData(found.id);
+      }
+    }
+  }, [routeUserId, users, loadUserDetailData]);
+
+  // Spoke ERP Resolution
+  const yinglimaErp = useMemo(
+    () => erps.find((e) => (e.erp_key || e.key || "").toLowerCase().includes("yinglima")),
+    [erps]
+  );
+  const inhymaErp = useMemo(
+    () => erps.find((e) => (e.erp_key || e.key || "").toLowerCase().includes("inhyma")),
+    [erps]
+  );
+
+  const spokeErps = useMemo(() => {
+    const list: ErpInstance[] = [];
+    if (yinglimaErp) list.push(yinglimaErp);
+    if (inhymaErp && inhymaErp.id !== yinglimaErp?.id) list.push(inhymaErp);
+    for (const e of erps) {
+      if (!list.some((x) => x.id === e.id)) {
+        list.push(e);
+      }
+    }
+    return list;
+  }, [erps, yinglimaErp, inhymaErp]);
+
+  const getUserMembershipForErp = useCallback(
+    (userId: string, erpInstance?: ErpInstance | null) => {
+      if (!erpInstance) return undefined;
+      return allMemberships.find(
+        (m) =>
+          m.global_user_id === userId &&
+          (m.erp_instance_id === erpInstance.id ||
+            (m.erp_key || "").toLowerCase() === (erpInstance.erp_key || erpInstance.key || "").toLowerCase())
+      );
+    },
+    [allMemberships]
+  );
+
+  const userHasConflictForErp = useCallback(
+    (userId: string, erpInstance?: ErpInstance | null) => {
+      if (!erpInstance) return false;
+      return activeConflicts.some(
+        (c) =>
+          (c.global_user_id === userId || c.globalUserId === userId) &&
+          (c.erp_instance_id === erpInstance.id || c.erpInstanceId === erpInstance.id)
+      );
+    },
+    [activeConflicts]
+  );
 
   // Check if a given user is Admin / Super Admin (who has complete platform access)
   const isRowUserAdmin = useCallback((u?: GlobalUser | null) => {
@@ -185,6 +237,175 @@ export function GlobalUsers() {
       name === "administrator"
     );
   }, []);
+
+  const renderErpAccessBadge = (userId: string, erp?: ErpInstance | null, userObj?: GlobalUser | null) => {
+    if (!erp) return <span style={{ color: "#94a3b8", fontSize: "12px" }}>—</span>;
+    if (userObj && isRowUserAdmin(userObj)) {
+      return (
+        <span
+          className="badge badge-active"
+          style={{
+            backgroundColor: "#ecfdf5",
+            color: "#065f46",
+            border: "1px solid #a7f3d0",
+            fontSize: "11px",
+            fontWeight: 600,
+          }}
+          title="Super Admin has full platform access"
+        >
+          Active
+        </span>
+      );
+    }
+    const hasConflict = userHasConflictForErp(userId, erp);
+    if (hasConflict) {
+      return (
+        <span
+          className="badge"
+          style={{
+            backgroundColor: "#fef2f2",
+            color: "#b91c1c",
+            border: "1px solid #f87171",
+            fontSize: "11px",
+            fontWeight: 600,
+          }}
+          title="Identity conflict requires administrative resolution"
+        >
+          ⚠️ Conflict
+        </span>
+      );
+    }
+    const m = getUserMembershipForErp(userId, erp);
+    if (!m || m.status === "REVOKED") {
+      return (
+        <span
+          className="badge"
+          style={{
+            backgroundColor: "#f1f5f9",
+            color: "#64748b",
+            border: "1px solid #e2e8f0",
+            fontSize: "11px",
+          }}
+          title="No access to this ERP"
+        >
+          None
+        </span>
+      );
+    }
+    if (m.status === "ACTIVE") {
+      return (
+        <span
+          className="badge badge-active"
+          style={{
+            backgroundColor: "#ecfdf5",
+            color: "#065f46",
+            border: "1px solid #a7f3d0",
+            fontSize: "11px",
+            fontWeight: 600,
+          }}
+          title="Active access granted"
+        >
+          Active
+        </span>
+      );
+    }
+    if (m.status === "PENDING") {
+      const isRetryable = m.metadata_json?.is_retryable || m.metadata_json?.sync_status === "FAILED";
+      return (
+        <span
+          className="badge"
+          style={{
+            backgroundColor: isRetryable ? "#fef2f2" : "#fffbeb",
+            color: isRetryable ? "#b91c1c" : "#92400e",
+            border: `1px solid ${isRetryable ? "#fecaca" : "#fde68a"}`,
+            fontSize: "11px",
+          }}
+          title={m.metadata_json?.sync_error ? `Sync error: ${m.metadata_json.sync_error}` : "Provisioning pending"}
+        >
+          {isRetryable ? "Pending (Retry)" : "Pending"}
+        </span>
+      );
+    }
+    if (m.status === "SUSPENDED") {
+      return (
+        <span
+          className="badge"
+          style={{
+            backgroundColor: "#fff7ed",
+            color: "#c2410c",
+            border: "1px solid #fed7aa",
+            fontSize: "11px",
+          }}
+          title="Access suspended"
+        >
+          Suspended
+        </span>
+      );
+    }
+    return <StatusBadge status={m.status} />;
+  };
+
+  const renderUserErpAccessCell = (u: GlobalUser) => {
+    if (spokeErps.length === 0) {
+      return <span style={{ color: "#94a3b8", fontSize: "12px" }}>No ERPs registered</span>;
+    }
+
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+        {spokeErps.map((erp) => {
+          const erpFullName = erp.name || erp.display_name || erp.erp_key;
+          const erpLabel = erpFullName.replace(/\s+ERP$/i, "");
+          const isAdmin = isRowUserAdmin(u);
+          const hasConflict = userHasConflictForErp(u.id, erp);
+          const membership = getUserMembershipForErp(u.id, erp);
+          const isActive = isAdmin || (membership?.status === "ACTIVE");
+
+          let chipBg = "#f8fafc";
+          let chipBorder = "#e2e8f0";
+          let labelColor = "#475569";
+
+          if (hasConflict) {
+            chipBg = "#fef2f2";
+            chipBorder = "#fca5a5";
+            labelColor = "#991b1b";
+          } else if (isActive) {
+            chipBg = "#f0fdf4";
+            chipBorder = "#bbf7d0";
+            labelColor = "#166534";
+          } else if (membership?.status === "PENDING") {
+            chipBg = "#fffbeb";
+            chipBorder = "#fde68a";
+            labelColor = "#92400e";
+          } else if (membership?.status === "SUSPENDED") {
+            chipBg = "#fff7ed";
+            chipBorder = "#fed7aa";
+            labelColor = "#9a3412";
+          }
+
+          return (
+            <div
+              key={erp.id}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "2px 7px",
+                borderRadius: "6px",
+                backgroundColor: chipBg,
+                border: `1px solid ${chipBorder}`,
+                fontSize: "11px",
+              }}
+              title={`${erpFullName}: ${hasConflict ? "Conflict" : isActive ? "Active" : membership?.status || "No Access"}`}
+            >
+              <span style={{ fontWeight: 600, color: labelColor }}>{erpLabel}:</span>
+              {renderErpAccessBadge(u.id, erp, u)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
 
   // Check if detailUser is an Admin / Super Admin with full permanent platform access
   const isDetailUserAdmin = useMemo(() => {
@@ -203,38 +424,122 @@ export function GlobalUsers() {
   // Filtered Users
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
-      const matchesStatus = statusFilter === "ALL" || u.status === statusFilter;
+      const matchesStatus =
+        statusFilter === "ALL"
+          ? true
+          : statusFilter === "ACTIVE"
+          ? u.status === "ACTIVE"
+          : u.status === "DISABLED" || u.status === "SUSPENDED";
       const query = search.trim().toLowerCase();
       const email = (u.primary_email || u.email || "").toLowerCase();
       const name = (u.display_name || "").toLowerCase();
-      const ext = (u.external_identity_id || "").toLowerCase();
-      const matchesSearch = !query || name.includes(query) || email.includes(query) || ext.includes(query);
-      return matchesStatus && matchesSearch;
-    });
-  }, [users, statusFilter, search]);
+      const userRole = ((u as any).metadata?.role || "").toLowerCase();
+      const matchesSearch = !query || name.includes(query) || email.includes(query) || userRole.includes(query);
 
-  // Create User
+      let matchesErp = true;
+      if (erpFilter === "NONE") {
+        if (isRowUserAdmin(u)) {
+          matchesErp = false;
+        } else {
+          const hasAnyErpAccess =
+            spokeErps.some((erp) => {
+              const m = getUserMembershipForErp(u.id, erp);
+              return !!m && m.status !== "REVOKED";
+            }) ||
+            allMemberships.some(
+              (m) => m.global_user_id === u.id && m.status !== "REVOKED"
+            );
+          matchesErp = !hasAnyErpAccess;
+        }
+      } else if (erpFilter !== "ALL") {
+        if (isRowUserAdmin(u)) {
+          matchesErp = true;
+        } else {
+          const selectedErp = erps.find((e) => e.id === erpFilter);
+          const m = getUserMembershipForErp(u.id, selectedErp);
+          matchesErp = !!m && m.status !== "REVOKED";
+        }
+      }
+
+      return matchesStatus && matchesSearch && matchesErp;
+    });
+  }, [users, statusFilter, erpFilter, search, isRowUserAdmin, erps, spokeErps, allMemberships, getUserMembershipForErp]);
+
+  // Create User with optional initial ERP access grants
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!createEmail.trim() || !createDisplayName.trim()) return;
     setCreating(true);
+    let createdUser: GlobalUser | null = null;
     try {
-      await apiPost("/global/users", {
+      const res = await apiPost<GlobalUser>("/global/users", {
         primary_email: createEmail.trim().toLowerCase(),
         display_name: createDisplayName.trim(),
-        external_identity_id: createExternalId.trim() || null,
+        external_identity_id: null,
       });
+      createdUser = (res as any)?.data ?? res;
       toast("Global user created successfully.", "success");
-      setCreateModalOpen(false);
-      setCreateDisplayName("");
-      setCreateEmail("");
-      setCreateExternalId("");
-      await fetchUsers();
     } catch (err) {
       toast("Failed to create user: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
       setCreating(false);
+      return;
     }
+
+    if (createdUser && createdUser.id) {
+      // Save password and role metadata
+      if (createPassword.trim() || createRole) {
+        try {
+          await apiPatch(`/global/users/${createdUser.id}`, {
+            metadata: {
+              ...(createPassword.trim() ? { default_password: createPassword.trim() } : {}),
+              role: createRole,
+            },
+          });
+        } catch {
+          // Non-blocking metadata save
+        }
+      }
+
+      // Assign platform role in authz
+      if (createRole) {
+        try {
+          await apiPost(`/global/authz/users/${createdUser.id}/roles`, {
+            role_key: createRole,
+            scope: "GLOBAL",
+          });
+        } catch {
+          // Non-blocking
+        }
+      }
+
+      if (createGrantYinglima && yinglimaErp) {
+        try {
+          await apiPost(`/global/users/${createdUser.id}/provision`, { erp_instance_id: yinglimaErp.id });
+          toast("Provisioned into Yinglima ERP.", "success");
+        } catch (pErr) {
+          toast(`Yinglima provisioning warning: ${pErr instanceof Error ? pErr.message : String(pErr)}`, "warning");
+        }
+      }
+      if (createGrantInhyma && inhymaErp) {
+        try {
+          await apiPost(`/global/users/${createdUser.id}/provision`, { erp_instance_id: inhymaErp.id });
+          toast("Provisioned into Inhyma ERP.", "success");
+        } catch (pErr) {
+          toast(`Inhyma provisioning warning: ${pErr instanceof Error ? pErr.message : String(pErr)}`, "warning");
+        }
+      }
+    }
+
+    setCreateModalOpen(false);
+    setCreateDisplayName("");
+    setCreateEmail("");
+    setCreatePassword("");
+    setShowCreatePassword(false);
+    setCreateRole("PLATFORM_ADMIN");
+    setCreateGrantYinglima(false);
+    setCreateGrantInhyma(false);
+    setCreating(false);
+    await fetchUsers(true);
   };
 
   // Edit User
@@ -242,7 +547,22 @@ export function GlobalUsers() {
     setEditingUser(user);
     setEditDisplayName(user.display_name || "");
     setEditEmail(user.primary_email || user.email || "");
-    setEditExternalId(user.external_identity_id || "");
+    const userMeta = (user as any).metadata || (user as any).metadata_json || {};
+    const isAdmin = isRowUserAdmin(user);
+    setEditPassword(userMeta.default_password || userMeta.password || (isAdmin ? "ChangeMe!12345" : ""));
+    setShowEditPassword(false);
+    setEditRole(userMeta.role || (isAdmin ? "PLATFORM_SUPER_ADMIN" : "PLATFORM_ADMIN"));
+
+    if (isAdmin) {
+      setEditGrantYinglima(true);
+      setEditGrantInhyma(true);
+    } else {
+      const yinglimaMem = getUserMembershipForErp(user.id, yinglimaErp);
+      const inhymaMem = getUserMembershipForErp(user.id, inhymaErp);
+      setEditGrantYinglima(!!yinglimaMem && yinglimaMem.status !== "REVOKED");
+      setEditGrantInhyma(!!inhymaMem && inhymaMem.status !== "REVOKED");
+    }
+
     setEditModalOpen(true);
   };
 
@@ -251,50 +571,93 @@ export function GlobalUsers() {
     if (!editingUser) return;
     setSavingEdit(true);
     try {
+      const existingMeta = (editingUser as any).metadata || (editingUser as any).metadata_json || {};
+      const updatedMeta = {
+        ...existingMeta,
+        default_password: editPassword.trim(),
+        role: editRole,
+      };
+
       await apiPatch(`/global/users/${editingUser.id}`, {
         display_name: editDisplayName.trim() || undefined,
-        primary_email: editEmail.trim().toLowerCase() || undefined,
-        external_identity_id: editExternalId.trim() || null,
+        primary_email: !isRowUserAdmin(editingUser) ? (editEmail.trim().toLowerCase() || undefined) : undefined,
+        metadata: updatedMeta,
       });
+
+      if (editRole) {
+        try {
+          await apiPost(`/global/authz/users/${editingUser.id}/roles`, {
+            role_key: editRole,
+            scope: "GLOBAL",
+          });
+        } catch {
+          // Non-blocking
+        }
+      }
+
+      // Handle ERP Access Grants changes
+      if (!isRowUserAdmin(editingUser)) {
+        const yinglimaMem = getUserMembershipForErp(editingUser.id, yinglimaErp);
+        if (editGrantYinglima && (!yinglimaMem || yinglimaMem.status === "REVOKED") && yinglimaErp) {
+          try {
+            await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: yinglimaErp.id });
+          } catch (err) {
+            toast(`Yinglima provisioning warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
+          }
+        } else if (!editGrantYinglima && yinglimaMem) {
+          try {
+            await apiDelete(`/global/memberships/${yinglimaMem.id}`);
+          } catch (delErr) {
+            console.error("Failed to delete Yinglima membership:", delErr);
+            // Fallback: try revoking if delete endpoint fails
+            try {
+              await apiPost(`/global/memberships/${yinglimaMem.id}/revoke`, { reason: "Access removed" });
+            } catch {
+              // Ignore fallback error
+            }
+          }
+        }
+
+        const inhymaMem = getUserMembershipForErp(editingUser.id, inhymaErp);
+        if (editGrantInhyma && (!inhymaMem || inhymaMem.status === "REVOKED") && inhymaErp) {
+          try {
+            await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: inhymaErp.id });
+          } catch (err) {
+            toast(`Inhyma provisioning warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
+          }
+        } else if (!editGrantInhyma && inhymaMem) {
+          try {
+            await apiDelete(`/global/memberships/${inhymaMem.id}`);
+          } catch (delErr) {
+            console.error("Failed to delete Inhyma membership:", delErr);
+            // Fallback: try revoking if delete endpoint fails
+            try {
+              await apiPost(`/global/memberships/${inhymaMem.id}/revoke`, { reason: "Access removed" });
+            } catch {
+              // Ignore fallback error
+            }
+          }
+        }
+      }
+
       toast("Global user updated successfully.", "success");
       setEditModalOpen(false);
       setEditingUser(null);
-      await fetchUsers();
+      await fetchUsers(true);
       if (detailUser && detailUser.id === editingUser.id) {
-        setDetailUser((prev) => (prev ? { ...prev, display_name: editDisplayName, primary_email: editEmail } : null));
+        setDetailUser((prev) => (prev ? { 
+          ...prev, 
+          display_name: editDisplayName,
+          primary_email: !isRowUserAdmin(editingUser) ? editEmail.trim().toLowerCase() : prev.primary_email,
+          metadata: updatedMeta,
+          metadata_json: updatedMeta,
+        } : null));
+        await loadUserDetailData(editingUser.id);
       }
     } catch (err) {
       toast("Failed to update user: " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
       setSavingEdit(false);
-    }
-  };
-
-  // Change Status
-  const handleOpenStatus = (user: GlobalUser) => {
-    setTargetStatusUser(user);
-    setNewStatus(user.status);
-    setStatusModalOpen(true);
-  };
-
-  const handleUpdateStatus = async () => {
-    if (!targetStatusUser) return;
-    setUpdatingStatus(true);
-    try {
-      await apiPatch(`/global/users/${targetStatusUser.id}/status`, {
-        status: newStatus,
-      });
-      toast(`User status changed to ${newStatus}.`, "success");
-      setStatusModalOpen(false);
-      setTargetStatusUser(null);
-      await fetchUsers();
-      if (detailUser && detailUser.id === targetStatusUser.id) {
-        setDetailUser((prev) => (prev ? { ...prev, status: newStatus } : null));
-      }
-    } catch (err) {
-      toast("Failed to change user status: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setUpdatingStatus(false);
     }
   };
 
@@ -331,118 +694,6 @@ export function GlobalUsers() {
       }
     } catch (err) {
       toast("Failed to enable user: " + (err instanceof Error ? err.message : String(err)), "error");
-    }
-  };
-
-  // Flow A ERP Provisioning
-  const handleOpenProvision = (user: GlobalUser) => {
-    setTargetProvisionUser(user);
-    setSelectedErpId(erps[0]?.id || "");
-    setProvisionModalOpen(true);
-  };
-
-  const handleExecuteProvision = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!targetProvisionUser || !selectedErpId) return;
-    setProvisioning(true);
-    try {
-      await apiPost(`/global/users/${targetProvisionUser.id}/provision`, {
-        erp_instance_id: selectedErpId,
-      });
-      toast("User provisioned into ERP successfully (Flow A).", "success");
-      setProvisionModalOpen(false);
-      setTargetProvisionUser(null);
-      if (detailUser && detailUser.id === targetProvisionUser.id) {
-        loadUserDetailData(detailUser.id);
-      }
-    } catch (err) {
-      toast("Provisioning failed: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setProvisioning(false);
-    }
-  };
-
-  // Membership Actions inside User Detail
-  const handleMembershipAction = async (membershipId: string, action: "verify" | "suspend" | "restore" | "revoke" | "unlink") => {
-    if (isDetailUserAdmin && (action === "suspend" || action === "revoke" || action === "unlink")) {
-      toast("Admin users have complete permanent system access and cannot be suspended, revoked, or unlinked.", "warning");
-      return;
-    }
-    try {
-      if (action === "verify") {
-        await apiPost(`/global/memberships/${membershipId}/verify`, {});
-        toast("Membership verified and activated.", "success");
-      } else if (action === "suspend") {
-        await apiPost(`/global/memberships/${membershipId}/suspend`, { reason: "Suspended by admin" });
-        toast("Membership suspended.", "info");
-      } else if (action === "restore") {
-        await apiPost(`/global/memberships/${membershipId}/restore`, { reason: "Restored by admin" });
-        toast("Membership restored to active.", "success");
-      } else if (action === "revoke") {
-        await apiPost(`/global/memberships/${membershipId}/revoke`, { reason: "Revoked by admin" });
-        toast("Membership revoked.", "info");
-      } else if (action === "unlink") {
-        await apiDelete(`/global/identity/memberships/${membershipId}/link`);
-        toast("Identity safely unlinked. Local ERP user untouched.", "info");
-      }
-      if (detailUser) {
-        await loadUserDetailData(detailUser.id);
-      }
-    } catch (err) {
-      toast("Action failed: " + (err instanceof Error ? err.message : String(err)), "error");
-    }
-  };
-
-  // Open Assign Role Modal
-  const handleOpenAssignRole = async () => {
-    try {
-      const rolesRes = await apiGet<PlatformRole[]>("/global/authz/roles");
-      const rawRoles = (rolesRes as any)?.data ?? rolesRes;
-      const list = Array.isArray(rawRoles) ? rawRoles : [];
-      setAvailableRoles(list.filter((r) => r.is_active));
-      setAssignRoleKey(list[0]?.role_key || "");
-      setAssignScope("GLOBAL");
-      setAssignErpId(erps[0]?.id || "");
-      setAssignRoleModalOpen(true);
-    } catch (err) {
-      toast("Failed to load platform roles: " + (err instanceof Error ? err.message : String(err)), "error");
-    }
-  };
-
-  const handleExecuteAssignRole = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!detailUser || !assignRoleKey) return;
-    setAssigningRole(true);
-    try {
-      await apiPost(`/global/authz/users/${detailUser.id}/roles`, {
-        role_key: assignRoleKey,
-        scope: assignScope,
-        erp_instance_id: assignScope === "ERP" ? assignErpId : undefined,
-      });
-      toast(`Platform role ${assignRoleKey} assigned successfully.`, "success");
-      setAssignRoleModalOpen(false);
-      await loadUserDetailData(detailUser.id);
-    } catch (err) {
-      toast("Role assignment failed: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setAssigningRole(false);
-    }
-  };
-
-  const handleRevokeRole = async () => {
-    if (!revokeAssignmentId) return;
-    setRevokingRole(true);
-    try {
-      await apiPost(`/global/authz/assignments/${revokeAssignmentId}/revoke`, {});
-      toast("Platform role assignment revoked.", "info");
-      setRevokeAssignmentId(null);
-      if (detailUser) {
-        await loadUserDetailData(detailUser.id);
-      }
-    } catch (err) {
-      toast("Failed to revoke role assignment: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setRevokingRole(false);
     }
   };
 
@@ -568,6 +819,35 @@ export function GlobalUsers() {
                 </option>
               ))}
             </select>
+
+            <select
+              id="select-erp-filter"
+              value={erpFilter}
+              onChange={(e) => setErpFilter(e.target.value)}
+              title="Filter by ERP"
+              style={{
+                width: "150px",
+                height: "36px",
+                fontSize: "13px",
+                color: "#334155",
+                background: "#ffffff",
+                border: "1px solid #cbd5e1",
+                borderRadius: "6px",
+                paddingLeft: "10px",
+                paddingRight: "25px",
+                cursor: "pointer",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            >
+              <option value="ALL">All ERP's</option>
+              {spokeErps.map((erp) => (
+                <option key={erp.id} value={erp.id}>
+                  {erp.name || erp.display_name || erp.erp_key}
+                </option>
+              ))}
+              <option value="NONE">None</option>
+            </select>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -580,14 +860,14 @@ export function GlobalUsers() {
         {/* Users Table */}
         {loading ? (
           <div style={{ padding: "20px" }}>
-            <SkeletonTable rows={8} cols={5} />
+            <SkeletonTable rows={8} cols={6} />
           </div>
         ) : filteredUsers.length === 0 ? (
           <div style={{ padding: "40px 20px" }}>
             <EmptyState
               title="No Global Users Found"
               description={
-                search || statusFilter !== "ALL"
+                search || statusFilter !== "ALL" || erpFilter !== "ALL"
                   ? "No global users matched your filter criteria."
                   : "No global platform identities exist yet. Create your first Global User to get started."
               }
@@ -607,11 +887,12 @@ export function GlobalUsers() {
             <table className="table" style={{ margin: 0 }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={{ width: "28%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Global Identity</th>
-                  <th style={{ width: "24%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Primary Email</th>
-                  <th style={{ width: "12%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</th>
-                  <th style={{ width: "14%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Created</th>
-                  <th style={{ width: "22%", padding: "12px 20px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>Actions</th>
+                  <th style={{ width: "22%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Global Identity</th>
+                  <th style={{ width: "18%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Primary Email</th>
+                  <th style={{ width: "10%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</th>
+                  <th style={{ width: "26%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>ERP's Access</th>
+                  <th style={{ width: "10%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated</th>
+                  <th style={{ width: "14%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -634,7 +915,7 @@ export function GlobalUsers() {
                       onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                     >
-                      <td style={{ padding: "12px 20px" }}>
+                      <td style={{ padding: "12px 16px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                           <div
                             style={{
@@ -666,21 +947,34 @@ export function GlobalUsers() {
                             >
                               {u.display_name}
                             </div>
-                            {u.external_identity_id && (
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  color: "var(--color-muted)",
-                                  fontFamily: "monospace",
-                                }}
-                              >
-                                ext: {u.external_identity_id}
-                              </span>
-                            )}
+                            {(() => {
+                              const isAdmin = isRowUserAdmin(u);
+                              const userRole = (u as any).metadata?.role || (isAdmin ? "PLATFORM_SUPER_ADMIN" : "PLATFORM_ADMIN");
+                              const roleBadgeLabel = isAdmin || userRole === "PLATFORM_SUPER_ADMIN"
+                                ? "👑 Super Admin"
+                                : userRole === "PLATFORM_ADMIN"
+                                ? "🛡️ Platform Admin"
+                                : userRole === "PLATFORM_OPERATOR"
+                                ? "⚡ Operator"
+                                : "👁️ Viewer";
+                              return (
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    fontSize: "11px",
+                                    fontWeight: 600,
+                                    color: isAdmin ? "#4f46e5" : "#64748b",
+                                    marginTop: "1px",
+                                  }}
+                                >
+                                  {roleBadgeLabel}
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
                       </td>
-                      <td style={{ padding: "12px 20px" }}>
+                      <td style={{ padding: "12px 16px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                           <span style={{ fontFamily: "monospace", fontSize: "13px", color: "var(--color-text)" }}>{email}</span>
                           <button
@@ -703,11 +997,20 @@ export function GlobalUsers() {
                           </button>
                         </div>
                       </td>
-                      <td style={{ padding: "12px 20px" }}>
+                      <td style={{ padding: "12px 16px" }}>
                         <StatusBadge status={u.status} />
                       </td>
-                      <td style={{ fontSize: "13px", color: "var(--color-muted)", padding: "12px 20px" }}>
-                        {u.created_at
+                      <td style={{ padding: "12px 16px" }}>
+                        {renderUserErpAccessCell(u)}
+                      </td>
+                      <td style={{ fontSize: "12px", color: "var(--color-muted)", padding: "12px 16px" }}>
+                        {u.updated_at
+                          ? new Date(u.updated_at).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })
+                          : u.created_at
                           ? new Date(u.created_at).toLocaleDateString("en-US", {
                               month: "short",
                               day: "numeric",
@@ -715,19 +1018,28 @@ export function GlobalUsers() {
                             })
                           : "—"}
                       </td>
-                      <td style={{ textAlign: "right", padding: "12px 20px" }}>
+                      <td style={{ textAlign: "right", padding: "12px 16px" }}>
                         <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleOpenDetail(u)}
                             title="View User Details & Ecosystem Access"
-                            style={{ fontSize: "12px", padding: "4px 12px", borderRadius: "5px", fontWeight: 500 }}
+                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
                           >
                             View
                           </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleOpenEdit(u)}
+                            title="Edit user profile"
+                            style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "5px", fontWeight: 500 }}
+                          >
+                            Edit
+                          </button>
                           {!isRowUserAdmin(u) && (
-                            u.status === "DISABLED" ? (
+                            u.status === "DISABLED" || u.status === "SUSPENDED" ? (
                               <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
@@ -822,19 +1134,95 @@ export function GlobalUsers() {
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="create-ext-id">
-                External Identity ID (Optional)
+              <label className="form-label" htmlFor="create-password">
+                Password
               </label>
-              <input
-                type="text"
-                id="create-ext-id"
-                className="form-control"
-                placeholder="e.g. auth0|usr_123 or okta_987"
-                value={createExternalId}
-                onChange={(e) => setCreateExternalId(e.target.value)}
-              />
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <input
+                  type={showCreatePassword ? "text" : "password"}
+                  id="create-password"
+                  className="form-control"
+                  placeholder="Enter initial password"
+                  value={createPassword}
+                  onChange={(e) => setCreatePassword(e.target.value)}
+                  style={{ paddingRight: "40px", fontFamily: showCreatePassword ? "inherit" : "monospace" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCreatePassword(!showCreatePassword)}
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "transparent",
+                    border: "none",
+                    color: "#64748b",
+                    cursor: "pointer",
+                    padding: "4px",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                  title={showCreatePassword ? "Hide password" : "Show password"}
+                >
+                  {showCreatePassword ? <ICONS.eyeOff width={16} height={16} /> : <ICONS.eye width={16} height={16} />}
+                </button>
+              </div>
               <span className="form-helper">
-                Optional single sign-on or directory service identifier.
+                Initial password assigned to this user for platform and single sign-on access.
+              </span>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="create-role">
+                Platform Role <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+              </label>
+              <select
+                id="create-role"
+                className="form-control"
+                value={createRole}
+                onChange={(e) => setCreateRole(e.target.value)}
+              >
+                <option value="PLATFORM_SUPER_ADMIN">👑 Platform Super Admin (Full Root System Access)</option>
+                <option value="PLATFORM_ADMIN">🛡️ Platform Admin (Manage Users & Configuration)</option>
+                <option value="PLATFORM_OPERATOR">⚡ Platform Operator (Monitor & Manage Sync/ERPs)</option>
+                <option value="PLATFORM_VIEWER">👁️ Platform Viewer (Read-only System Auditing)</option>
+              </select>
+              <span className="form-helper">
+                Central role governing access level across the ERP_Main control plane.
+              </span>
+            </div>
+
+            <div className="form-group" style={{ marginTop: "16px", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+              <label className="form-label" style={{ marginBottom: "8px", fontWeight: 600 }}>
+                ERP Access Grants
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    id="create-grant-yinglima"
+                    checked={createGrantYinglima}
+                    onChange={(e) => setCreateGrantYinglima(e.target.checked)}
+                    disabled={!yinglimaErp}
+                  />
+                  <span>
+                    Grant <strong>Yinglima ERP</strong> Access {yinglimaErp ? `(${yinglimaErp.erp_key || yinglimaErp.key})` : "(Not registered)"}
+                  </span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    id="create-grant-inhyma"
+                    checked={createGrantInhyma}
+                    onChange={(e) => setCreateGrantInhyma(e.target.checked)}
+                    disabled={!inhymaErp}
+                  />
+                  <span>
+                    Grant <strong>Inhyma ERP</strong> Access {inhymaErp ? `(${inhymaErp.erp_key || inhymaErp.key})` : "(Not registered)"}
+                  </span>
+                </label>
+              </div>
+              <span className="form-helper" style={{ marginTop: "6px" }}>
+                Select which ERP systems this user is granted access to. Unselected ERPs will not be accessible to this user.
               </span>
             </div>
           </div>
@@ -866,6 +1254,7 @@ export function GlobalUsers() {
         title="Edit Global User Metadata"
         variant="drawer"
         cardStyle={{ maxWidth: "540px" }}
+        zIndex={2300}
       >
         <form onSubmit={handleSaveEdit}>
           <div className="modal-form-content">
@@ -884,36 +1273,203 @@ export function GlobalUsers() {
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="edit-email">
-                Primary Email <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+              {isRowUserAdmin(editingUser) ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+                    <label className="form-label" htmlFor="edit-email" style={{ margin: 0 }}>
+                      Primary Email <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+                    </label>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        color: "#64748b",
+                        backgroundColor: "#f1f5f9",
+                        padding: "2px 6px",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      <ICONS.lock width={11} height={11} color="#64748b" />
+                      Locked (Super Admin)
+                    </span>
+                  </div>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="email"
+                      id="edit-email"
+                      readOnly
+                      disabled
+                      className="form-control"
+                      value={editEmail}
+                      style={{
+                        backgroundColor: "#f8fafc",
+                        borderColor: "#e2e8f0",
+                        color: "#475569",
+                        cursor: "not-allowed",
+                        paddingRight: "36px",
+                        fontWeight: 500,
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: "10px",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        color: "#94a3b8",
+                        display: "flex",
+                        alignItems: "center",
+                      }}
+                      title="Super Admin email is locked for ecosystem identity integrity"
+                    >
+                      <ICONS.lock width={14} height={14} />
+                    </div>
+                  </div>
+                  <span className="form-helper">
+                    Super Admin primary identity email is permanently protected to guarantee platform access.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <label className="form-label" htmlFor="edit-email">
+                    Primary Email <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+                  </label>
+                  <input
+                    type="email"
+                    id="edit-email"
+                    required
+                    className="form-control"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    placeholder="e.g. user@company.com"
+                  />
+                  <span className="form-helper">
+                    Primary identity email used for ecosystem SSO and authentication.
+                  </span>
+                </>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-password">
+                Password
               </label>
-              <input
-                type="email"
-                id="edit-email"
-                required
-                className="form-control"
-                value={editEmail}
-                onChange={(e) => setEditEmail(e.target.value)}
-              />
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <input
+                  type={showEditPassword ? "text" : "password"}
+                  id="edit-password"
+                  className="form-control"
+                  placeholder="Enter user password"
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                  style={{ paddingRight: "76px", fontFamily: showEditPassword ? "inherit" : "monospace" }}
+                />
+                <div style={{ position: "absolute", right: "6px", display: "flex", alignItems: "center", gap: "2px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPassword(!showEditPassword)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#64748b",
+                      cursor: "pointer",
+                      padding: "5px",
+                      display: "flex",
+                      alignItems: "center",
+                      borderRadius: "4px",
+                    }}
+                    title={showEditPassword ? "Hide password" : "Show password"}
+                  >
+                    {showEditPassword ? <ICONS.eyeOff width={16} height={16} /> : <ICONS.eye width={16} height={16} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (editPassword) {
+                        navigator.clipboard.writeText(editPassword);
+                        toast("Password copied to clipboard.", "info");
+                      }
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#64748b",
+                      cursor: "pointer",
+                      padding: "5px",
+                      display: "flex",
+                      alignItems: "center",
+                      borderRadius: "4px",
+                    }}
+                    title="Copy password"
+                  >
+                    <ICONS.copy width={14} height={14} />
+                  </button>
+                </div>
+              </div>
               <span className="form-helper">
-                Primary identity email used for ecosystem SSO and authentication.
+                User authentication password for ecosystem logins and single sign-on access.
               </span>
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="edit-ext-id">
-                External Identity ID
+              <label className="form-label" htmlFor="edit-role">
+                Platform Role <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
               </label>
-              <input
-                type="text"
-                id="edit-ext-id"
+              <select
+                id="edit-role"
                 className="form-control"
-                placeholder="e.g. auth0|usr_123 or okta_987"
-                value={editExternalId}
-                onChange={(e) => setEditExternalId(e.target.value)}
-              />
+                value={editRole}
+                onChange={(e) => setEditRole(e.target.value)}
+              >
+                <option value="PLATFORM_SUPER_ADMIN">👑 Platform Super Admin (Full Root System Access)</option>
+                <option value="PLATFORM_ADMIN">🛡️ Platform Admin (Manage Users & Configuration)</option>
+                <option value="PLATFORM_OPERATOR">⚡ Platform Operator (Monitor & Manage Sync/ERPs)</option>
+                <option value="PLATFORM_VIEWER">👁️ Platform Viewer (Read-only System Auditing)</option>
+              </select>
               <span className="form-helper">
-                Optional IdP / external directory identifier.
+                Central role governing authorization level across ERP_Main control plane.
+              </span>
+            </div>
+
+            <div className="form-group" style={{ marginTop: "16px", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+              <label className="form-label" style={{ marginBottom: "8px", fontWeight: 600 }}>
+                ERP Access Grants
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: isRowUserAdmin(editingUser) ? "default" : "pointer" }}>
+                  <input
+                    type="checkbox"
+                    id="edit-grant-yinglima"
+                    checked={editGrantYinglima}
+                    onChange={(e) => setEditGrantYinglima(e.target.checked)}
+                    disabled={!yinglimaErp || isRowUserAdmin(editingUser)}
+                  />
+                  <span>
+                    Grant <strong>Yinglima ERP</strong> Access {yinglimaErp ? `(${yinglimaErp.erp_key || yinglimaErp.key})` : "(Not registered)"}
+                    {isRowUserAdmin(editingUser) && " — Full Root Access"}
+                  </span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: isRowUserAdmin(editingUser) ? "default" : "pointer" }}>
+                  <input
+                    type="checkbox"
+                    id="edit-grant-inhyma"
+                    checked={editGrantInhyma}
+                    onChange={(e) => setEditGrantInhyma(e.target.checked)}
+                    disabled={!inhymaErp || isRowUserAdmin(editingUser)}
+                  />
+                  <span>
+                    Grant <strong>Inhyma ERP</strong> Access {inhymaErp ? `(${inhymaErp.erp_key || inhymaErp.key})` : "(Not registered)"}
+                    {isRowUserAdmin(editingUser) && " — Full Root Access"}
+                  </span>
+                </label>
+              </div>
+              <span className="form-helper" style={{ marginTop: "6px" }}>
+                {isRowUserAdmin(editingUser)
+                  ? "Platform Super Admin possesses global root authority across all connected ERPs."
+                  : "Select which ERP systems this user is granted access to. Removing access completely deprovisions and removes the user from that ERP."}
               </span>
             </div>
           </div>
@@ -938,229 +1494,45 @@ export function GlobalUsers() {
         </form>
       </Modal>
 
-      {/* STATUS CHANGE MODAL */}
-      <Modal
-        open={statusModalOpen}
-        onClose={() => setStatusModalOpen(false)}
-        title="Change Global User Status"
-        variant="drawer"
-        cardStyle={{ maxWidth: "500px" }}
-      >
-        {targetStatusUser && (
-          <div>
-            <div className="modal-form-content">
-              <p style={{ fontSize: "14px", color: "var(--color-text)", margin: "0 0 16px 0", lineHeight: 1.5 }}>
-                Update lifecycle status for <strong>{targetStatusUser.display_name}</strong>{" "}
-                (<span style={{ fontFamily: "monospace", color: "var(--color-primary, #0061f2)" }}>{targetStatusUser.primary_email || targetStatusUser.email}</span>):
-              </p>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {(["ACTIVE", "SUSPENDED", "DISABLED"] as GlobalUserStatus[]).map((st) => (
-                  <label
-                    key={st}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      padding: "12px 14px",
-                      borderRadius: "6px",
-                      border: newStatus === st ? "1.5px solid var(--color-primary, #0061f2)" : "1px solid #e2e8f0",
-                      background: newStatus === st ? "#eff6ff" : "#ffffff",
-                      cursor: "pointer",
-                      transition: "all 0.15s ease",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="user-status"
-                      value={st}
-                      checked={newStatus === st}
-                      onChange={() => setNewStatus(st)}
-                    />
-                    <div>
-                      <strong style={{ fontSize: "13px", color: newStatus === st ? "var(--color-primary, #0061f2)" : "inherit" }}>{st}</strong>
-                      <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "2px" }}>
-                        {st === "ACTIVE" && "Full platform privileges and single sign-on access."}
-                        {st === "SUSPENDED" && "Temporarily blocked from SSO and control plane operations."}
-                        {st === "DISABLED" && "Deactivated platform identity. Local ERP accounts remain intact."}
-                      </div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="modal-footer form-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setStatusModalOpen(false)}
-                disabled={updatingStatus}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleUpdateStatus}
-                disabled={updatingStatus}
-              >
-                {updatingStatus ? "Updating..." : "Confirm Status"}
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* FLOW A PROVISION TO ERP MODAL */}
-      <Modal
-        open={provisionModalOpen}
-        onClose={() => setProvisionModalOpen(false)}
-        title="Provision User to ERP (Flow A)"
-        variant="drawer"
-        cardStyle={{ maxWidth: "540px" }}
-      >
-        {targetProvisionUser && (
-          <form onSubmit={handleExecuteProvision}>
-            <div className="modal-form-content">
-              <p style={{ fontSize: "14px", color: "var(--color-text)", margin: "0 0 16px 0", lineHeight: 1.5 }}>
-                Provision <strong>{targetProvisionUser.display_name}</strong> into a registered business ERP.
-                A minimal local account will be created and bound via an active ERP Membership.
-              </p>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="provision-select-erp">
-                  Target Business ERP <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
-                </label>
-                <select
-                  id="provision-select-erp"
-                  required
-                  className="form-control"
-                  value={selectedErpId}
-                  onChange={(e) => setSelectedErpId(e.target.value)}
-                >
-                  {erps.map((erp) => (
-                    <option key={erp.id} value={erp.id}>
-                      {erp.name || erp.display_name} ({erp.key || erp.erp_key || "ERP"}){erp.version ? ` — v${erp.version}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div
-                style={{
-                  backgroundColor: "#f8fafc",
-                  padding: "12px 14px",
-                  borderRadius: "6px",
-                  border: "1px solid #e2e8f0",
-                  fontSize: "12px",
-                  color: "var(--color-muted)",
-                  lineHeight: 1.5,
-                }}
-              >
-                <strong>Architectural Note:</strong> Global provisioning uses the target ERP adapter API.
-                Local organizational roles and business permissions remain strictly authoritative within that ERP.
-              </div>
-            </div>
-
-            <div className="modal-footer form-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setProvisionModalOpen(false)}
-                disabled={provisioning}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={provisioning || !selectedErpId}
-              >
-                {provisioning ? "Provisioning..." : "Provision to ERP"}
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
-
       {/* USER DETAIL MODAL / DRAWER (VIEW ONLY WITH EDIT) */}
       {detailUser && (
         <Modal
           open={Boolean(detailUser)}
-          onClose={() => setDetailUser(null)}
+          onClose={handleCloseDetail}
           title={`Global User: ${detailUser.display_name}`}
           subtitle="Platform Identity & Unified Access Control"
           headerAction={
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => handleOpenEdit(detailUser)}
-              style={{
-                fontSize: "12px",
-                padding: "5px 12px",
-                borderRadius: "6px",
-                fontWeight: 600,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                backgroundColor: "#ffffff",
-                border: "1px solid #cbd5e1",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-                cursor: "pointer",
-              }}
-              title="Edit this user profile"
-            >
-              <ICONS.edit width={13} height={13} />
-              Edit
-            </button>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleOpenEdit(detailUser)}
+                style={{
+                  fontSize: "12px",
+                  padding: "5px 12px",
+                  borderRadius: "6px",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #cbd5e1",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                  cursor: "pointer",
+                }}
+                title="Edit this user profile"
+              >
+                <ICONS.edit width={13} height={13} />
+                Edit Profile
+              </button>
+            </div>
           }
         >
           <div>
-            {/* Header / Tabs */}
-            <div
-              style={{
-                display: "flex",
-                borderBottom: "1px solid #e2e8f0",
-                marginBottom: "20px",
-                gap: "8px",
-              }}
-            >
-              {[
-                { key: "overview", label: "Overview & Identity" },
-                { key: "memberships", label: `Memberships (${userMemberships.length})` },
-                { key: "roles", label: `Platform Roles (${userRoles.filter((r) => r.is_active).length})` },
-                { key: "access", label: "Access Summary" },
-              ].map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  id={`tab-${t.key}`}
-                  onClick={() => setDetailTab(t.key as any)}
-                  style={{
-                    padding: "8px 16px",
-                    background: "none",
-                    border: "none",
-                    borderBottom: detailTab === t.key ? "2px solid #0061f2" : "2px solid transparent",
-                    fontWeight: detailTab === t.key ? 700 : 500,
-                    color: detailTab === t.key ? "#0061f2" : "var(--color-muted)",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
             {loadingDetailSubdata ? (
               <LoadingSpinner text="Loading user details..." />
             ) : (
-
-              <>
-                {/* TAB 1: OVERVIEW */}
-                {detailTab === "overview" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                     {/* Hero Identity Card */}
                     <div
                       style={{
@@ -1342,18 +1714,71 @@ export function GlobalUsers() {
 
                         <div>
                           <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                            Identity Provider (SSO)
+                            Password
                           </span>
-                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 500 }}>
-                            {detailUser.external_identity_id ? (
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                                <ICONS.link width={12} height={12} color="#0061f2" />
-                                {detailUser.external_identity_id}
+                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontFamily: "monospace", fontSize: "13px", letterSpacing: showDrawerPassword ? "0.02em" : "0.15em", color: "#334155" }}>
+                              {showDrawerPassword
+                                ? ((detailUser as any)?.metadata?.default_password || (isRowUserAdmin(detailUser) ? "ChangeMe!12345" : "—"))
+                                : "••••••••••••"}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowDrawerPassword(!showDrawerPassword)}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#64748b",
+                                cursor: "pointer",
+                                padding: "2px 4px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                borderRadius: "4px",
+                              }}
+                              title={showDrawerPassword ? "Hide password" : "Show password"}
+                            >
+                              {showDrawerPassword ? <ICONS.eyeOff width={13} height={13} /> : <ICONS.eye width={13} height={13} />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const pwd = (detailUser as any)?.metadata?.default_password || (isRowUserAdmin(detailUser) ? "ChangeMe!12345" : "");
+                                if (pwd) {
+                                  navigator.clipboard.writeText(pwd);
+                                  toast("Password copied to clipboard.", "info");
+                                } else {
+                                  toast("No password configured for this user.", "warning");
+                                }
+                              }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#64748b",
+                                cursor: "pointer",
+                                padding: "2px 4px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                borderRadius: "4px",
+                              }}
+                              title="Copy password"
+                            >
+                              <ICONS.copy width={12} height={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                            Platform Role
+                          </span>
+                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
+                            {isDetailUserAdmin ? (
+                              <span style={{ color: "#4f46e5", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                👑 Super Admin
                               </span>
                             ) : (
-                              <span style={{ color: "#64748b", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                                <ICONS.key width={12} height={12} color="#94a3b8" />
-                                Native Platform Identity (Local)
+                              <span style={{ color: "#0369a1", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                🛡️ {((detailUser as any)?.metadata?.role || "PLATFORM_ADMIN").replace("PLATFORM_", "")}
                               </span>
                             )}
                           </div>
@@ -1399,57 +1824,43 @@ export function GlobalUsers() {
                         </div>
 
                         {!isDetailUserAdmin ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          detailUser.status === "DISABLED" || detailUser.status === "SUSPENDED" ? (
                             <button
                               type="button"
                               className="btn btn-secondary btn-sm"
-                              onClick={() => handleOpenStatus(detailUser)}
+                              onClick={() => handleEnableUser(detailUser)}
                               style={{
-                                fontSize: "11px",
-                                padding: "3px 10px",
-                                borderRadius: "4px",
-                                fontWeight: 500,
+                                fontSize: "12px",
+                                padding: "4px 12px",
+                                borderRadius: "5px",
+                                fontWeight: 600,
+                                color: "#059669",
+                                borderColor: "#a7f3d0",
+                                backgroundColor: "#ecfdf5",
+                                cursor: "pointer",
                               }}
-                              title="Change lifecycle status (Active / Suspended / Disabled)"
                             >
-                              Change Status
+                              Enable Account
                             </button>
-                            {detailUser.status === "DISABLED" ? (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => handleEnableUser(detailUser)}
-                                style={{
-                                  fontSize: "11px",
-                                  padding: "3px 10px",
-                                  borderRadius: "4px",
-                                  fontWeight: 600,
-                                  color: "#059669",
-                                  borderColor: "#a7f3d0",
-                                  backgroundColor: "#ecfdf5",
-                                }}
-                              >
-                                Enable Account
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => setConfirmDisableUser(detailUser)}
-                                style={{
-                                  fontSize: "11px",
-                                  padding: "3px 10px",
-                                  borderRadius: "4px",
-                                  fontWeight: 600,
-                                  color: "#dc2626",
-                                  borderColor: "#fecaca",
-                                  backgroundColor: "#fef2f2",
-                                }}
-                              >
-                                Disable Account
-                              </button>
-                            )}
-                          </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setConfirmDisableUser(detailUser)}
+                              style={{
+                                fontSize: "12px",
+                                padding: "4px 12px",
+                                borderRadius: "5px",
+                                fontWeight: 600,
+                                color: "#dc2626",
+                                borderColor: "#fecaca",
+                                backgroundColor: "#fef2f2",
+                                cursor: "pointer",
+                              }}
+                            >
+                              Disable Account
+                            </button>
+                          )
                         ) : (
                           <span style={{ fontSize: "12px", color: "#059669", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "5px" }}>
                             <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
@@ -1495,22 +1906,9 @@ export function GlobalUsers() {
                           }}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>Linked ERPs</span>
-                            <button
-                              type="button"
-                              onClick={() => setDetailTab("memberships")}
-                              style={{
-                                background: "none",
-                                border: "none",
-                                color: "#0061f2",
-                                fontSize: "11.5px",
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                padding: 0,
-                              }}
-                            >
-                              View all ({userMemberships.length}) →
-                            </button>
+                            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>
+                              Linked ERPs ({userMemberships.length})
+                            </span>
                           </div>
                           {userMemberships.length === 0 ? (
                             <div style={{ fontSize: "12px", color: "#94a3b8" }}>No ERP memberships linked yet.</div>
@@ -1552,22 +1950,9 @@ export function GlobalUsers() {
                           }}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>Platform Roles</span>
-                            <button
-                              type="button"
-                              onClick={() => setDetailTab("roles")}
-                              style={{
-                                background: "none",
-                                border: "none",
-                                color: "#0061f2",
-                                fontSize: "11.5px",
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                padding: 0,
-                              }}
-                            >
-                              View all ({userRoles.filter((r) => r.is_active).length}) →
-                            </button>
+                            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>
+                              Platform Roles ({userRoles.filter((r) => r.is_active).length})
+                            </span>
                           </div>
                           {userRoles.filter((r) => r.is_active).length === 0 ? (
                             <div style={{ fontSize: "12px", color: "#94a3b8" }}>Standard baseline permissions.</div>
@@ -1594,481 +1979,11 @@ export function GlobalUsers() {
                         </div>
                       </div>
                     </div>
-
-                    {detailUser.metadata && Object.keys(detailUser.metadata).length > 0 && (
-                      <div
-                        style={{
-                          background: "#ffffff",
-                          border: "1px solid #e2e8f0",
-                          borderRadius: "10px",
-                          padding: "16px 20px",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "8px",
-                        }}
-                      >
-                        <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                          Metadata Payload
-                        </span>
-                        <pre
-                          style={{
-                            background: "#f8fafc",
-                            padding: "10px 12px",
-                            borderRadius: "6px",
-                            border: "1px solid #e2e8f0",
-                            fontSize: "11px",
-                            overflow: "auto",
-                            maxHeight: "150px",
-                            margin: 0,
-                          }}
-                        >
-                          {JSON.stringify(detailUser.metadata, null, 2)}
-                        </pre>
-                      </div>
-                    )}
                   </div>
-                )}
-
-                {/* TAB 2: MEMBERSHIPS */}
-                {detailTab === "memberships" && (
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                      <span style={{ fontSize: "13px", color: "var(--color-muted)" }}>
-                        Linked ERP environments for this Global User
-                      </span>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handleOpenProvision(detailUser)}
-                      >
-                        + Provision to New ERP
-                      </button>
-                    </div>
-
-                    {userMemberships.length === 0 ? (
-                      <div style={{ textAlign: "center", padding: "24px", color: "var(--color-muted)", fontSize: "13px" }}>
-                        No ERP memberships linked yet. Use "Provision to New ERP" or add via Memberships Hub.
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        {userMemberships.map((m) => {
-                          const erp = erps.find((e) => e.id === m.erp_instance_id);
-                          return (
-                            <div
-                              key={m.id}
-                              style={{
-                                border: "1px solid #e2e8f0",
-                                borderRadius: "6px",
-                                padding: "12px 16px",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                backgroundColor: "#ffffff",
-                              }}
-                            >
-                              <div>
-                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                  <strong style={{ fontSize: "14px" }}>{erp?.name || m.erp_name || "Business ERP"}</strong>
-                                  <span style={{ fontSize: "11px", fontFamily: "monospace", color: "var(--color-muted)" }}>
-                                    {erp?.erp_key || m.erp_key}
-                                  </span>
-                                  <StatusBadge status={m.status} />
-                                </div>
-                                <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "4px" }}>
-                                  Local User ID: <code style={{ color: "#0061f2" }}>{m.local_user_id}</code>
-                                  {m.verified_at && ` • Verified: ${new Date(m.verified_at).toLocaleDateString()}`}
-                                </div>
-                              </div>
-
-                              {isDetailUserAdmin ? (
-                                <span
-                                  className="badge badge-active"
-                                  style={{
-                                    fontSize: "11px",
-                                    fontWeight: 600,
-                                    padding: "4px 10px",
-                                    backgroundColor: "#ecfdf5",
-                                    color: "#065f46",
-                                    border: "1px solid #a7f3d0",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "5px",
-                                  }}
-                                  title="Admin maintains complete system access across all ERP environments"
-                                >
-                                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
-                                  Full System Access
-                                </span>
-                              ) : (
-                                <div style={{ display: "flex", gap: "6px" }}>
-                                  {m.status === "PENDING" && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      onClick={() => handleMembershipAction(m.id, "verify")}
-                                    >
-                                      Verify
-                                    </button>
-                                  )}
-                                  {m.status === "ACTIVE" && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      onClick={() => handleMembershipAction(m.id, "suspend")}
-                                    >
-                                      Suspend
-                                    </button>
-                                  )}
-                                  {m.status === "SUSPENDED" && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      onClick={() => handleMembershipAction(m.id, "restore")}
-                                    >
-                                      Restore
-                                    </button>
-                                  )}
-                                  {m.status !== "REVOKED" && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      onClick={() => handleMembershipAction(m.id, "revoke")}
-                                    >
-                                      Revoke
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    style={{ color: "#dc2626" }}
-                                    onClick={() => handleMembershipAction(m.id, "unlink")}
-                                    title="Safe unlinking (local user preserved)"
-                                  >
-                                    Unlink
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* TAB 3: PLATFORM ROLES */}
-                {detailTab === "roles" && (
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                      <span style={{ fontSize: "13px", color: "var(--color-muted)" }}>
-                        Platform authorization roles assigned to this identity
-                      </span>
-                      {isSuperAdmin && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={handleOpenAssignRole}
-                        >
-                          + Assign Platform Role
-                        </button>
-                      )}
-                    </div>
-
-                    {userRoles.length === 0 ? (
-                      <div style={{ textAlign: "center", padding: "24px", color: "var(--color-muted)", fontSize: "13px" }}>
-                        No platform roles assigned. User has standard baseline permissions.
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        {userRoles.map((r) => {
-                          const erp = r.erp_instance_id ? erps.find((e) => e.id === r.erp_instance_id) : null;
-                          return (
-                            <div
-                              key={r.id}
-                              style={{
-                                border: "1px solid #e2e8f0",
-                                borderRadius: "6px",
-                                padding: "12px 16px",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                backgroundColor: r.is_active ? "#ffffff" : "#f8fafc",
-                                opacity: r.is_active ? 1 : 0.7,
-                              }}
-                            >
-                              <div>
-                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                  <strong style={{ fontSize: "14px" }}>{r.role_key}</strong>
-                                  <span
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "2px 6px",
-                                      borderRadius: "4px",
-                                      background: r.scope === "GLOBAL" ? "#e0e7ff" : "#fef3c7",
-                                      color: r.scope === "GLOBAL" ? "#3730a3" : "#92400e",
-                                      fontWeight: 600,
-                                    }}
-                                  >
-                                    Scope: {r.scope} {erp ? `(${erp.name})` : ""}
-                                  </span>
-                                  <StatusBadge status={r.is_active ? "ACTIVE" : "INACTIVE"} />
-                                </div>
-                                <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "4px" }}>
-                                  Assigned: {r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}
-                                  {r.revoked_at && ` • Revoked: ${new Date(r.revoked_at).toLocaleDateString()}`}
-                                </div>
-                              </div>
-
-                              {r.is_active && isSuperAdmin && (
-                                isDetailUserAdmin ? (
-                                  <span
-                                    className="badge badge-active"
-                                    style={{
-                                      fontSize: "11px",
-                                      fontWeight: 600,
-                                      padding: "3px 8px",
-                                      backgroundColor: "#ecfdf5",
-                                      color: "#065f46",
-                                      border: "1px solid #a7f3d0",
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: "4px",
-                                    }}
-                                  >
-                                    <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: "#10b981" }} />
-                                    Permanent Role
-                                  </span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    style={{ color: "#dc2626" }}
-                                    onClick={() => setRevokeAssignmentId(r.id)}
-                                  >
-                                    Revoke
-                                  </button>
-                                )
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* TAB 4: ACCESS SUMMARY */}
-                {detailTab === "access" && (
-                  <div>
-                    <div
-                      style={{
-                        backgroundColor: "#f8fafc",
-                        padding: "16px",
-                        borderRadius: "8px",
-                        marginBottom: "16px",
-                      }}
-                    >
-                      <h4 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: 700 }}>
-                        Live Access Summary
-                      </h4>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                        <div>
-                          <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Active Platform Roles</span>
-                          <div style={{ fontWeight: 700, fontSize: "16px" }}>
-                            {userRoles.filter((r) => r.is_active).length}
-                          </div>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>Authorized ERP Workspaces</span>
-                          <div style={{ fontWeight: 700, fontSize: "16px" }}>
-                            {userMemberships.filter((m) => m.status === "ACTIVE").length} of {erps.length}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Global Effective Permissions */}
-                    <div style={{ marginBottom: "16px" }}>
-                      <strong style={{ fontSize: "13px", display: "block", marginBottom: "8px" }}>
-                        Global Platform Permissions ({effectivePerms?.global_permissions.length || 0})
-                      </strong>
-                      {!effectivePerms || effectivePerms.global_permissions.length === 0 ? (
-                        <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>
-                          No global platform administrative permissions granted.
-                        </span>
-                      ) : (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                          {effectivePerms.global_permissions.map((p) => (
-                            <span
-                              key={p}
-                              style={{
-                                fontSize: "12px",
-                                fontFamily: "monospace",
-                                padding: "2px 8px",
-                                borderRadius: "4px",
-                                background: "#eff6ff",
-                                color: "#1d4ed8",
-                                border: "1px solid #bfdbfe",
-                              }}
-                            >
-                              {p}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* ERP-Scoped Effective Permissions */}
-                    {effectivePerms?.erp_permissions && Object.keys(effectivePerms.erp_permissions).length > 0 && (
-                      <div>
-                        <strong style={{ fontSize: "13px", display: "block", marginBottom: "8px" }}>
-                          ERP-Scoped Platform Permissions
-                        </strong>
-                        {Object.entries(effectivePerms.erp_permissions).map(([erpId, perms]) => {
-                          const erp = erps.find((e) => e.id === erpId);
-                          return (
-                            <div key={erpId} style={{ marginBottom: "8px" }}>
-                              <span style={{ fontSize: "12px", fontWeight: 600 }}>
-                                {erp?.name || erpId}:
-                              </span>
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
-                                {perms.map((p) => (
-                                  <span
-                                    key={p}
-                                    style={{
-                                      fontSize: "11px",
-                                      fontFamily: "monospace",
-                                      padding: "2px 6px",
-                                      borderRadius: "4px",
-                                      background: "#fef3c7",
-                                      color: "#92400e",
-                                    }}
-                                  >
-                                    {p}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
             )}
           </div>
         </Modal>
       )}
-
-      {/* ASSIGN ROLE MODAL */}
-      <Modal
-        open={assignRoleModalOpen}
-        onClose={() => setAssignRoleModalOpen(false)}
-        title="Assign Platform Role"
-        variant="drawer"
-        cardStyle={{ maxWidth: "540px" }}
-      >
-        <form onSubmit={handleExecuteAssignRole}>
-          <div className="modal-form-content">
-            <div className="form-group">
-              <label className="form-label" htmlFor="select-role-key">
-                Platform Role <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
-              </label>
-              <select
-                id="select-role-key"
-                required
-                className="form-control"
-                value={assignRoleKey}
-                onChange={(e) => setAssignRoleKey(e.target.value)}
-              >
-                {availableRoles.map((r) => (
-                  <option key={r.id} value={r.role_key}>
-                    {r.display_name} ({r.role_key})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Scope</label>
-              <div style={{ display: "flex", gap: "16px" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13.5px" }}>
-                  <input
-                    type="radio"
-                    name="assign-scope"
-                    value="GLOBAL"
-                    checked={assignScope === "GLOBAL"}
-                    onChange={() => setAssignScope("GLOBAL")}
-                  />
-                  <span>GLOBAL (Platform Wide)</span>
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13.5px" }}>
-                  <input
-                    type="radio"
-                    name="assign-scope"
-                    value="ERP"
-                    checked={assignScope === "ERP"}
-                    onChange={() => setAssignScope("ERP")}
-                  />
-                  <span>ERP-Scoped</span>
-                </label>
-              </div>
-            </div>
-
-            {assignScope === "ERP" && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="select-assign-erp">
-                  Target ERP Instance <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
-                </label>
-                <select
-                  id="select-assign-erp"
-                  required
-                  className="form-control"
-                  value={assignErpId}
-                  onChange={(e) => setAssignErpId(e.target.value)}
-                >
-                  {erps.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name || e.display_name} ({e.key || e.erp_key || "ERP"})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <div className="modal-footer form-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setAssignRoleModalOpen(false)}
-              disabled={assigningRole}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={assigningRole || !assignRoleKey}
-            >
-              {assigningRole ? "Assigning..." : "Assign Role"}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* REVOKE ROLE CONFIRMATION */}
-      <ConfirmDialog
-        open={Boolean(revokeAssignmentId)}
-        title="Revoke Platform Role Assignment?"
-        message="This will immediately remove this platform role grant from the user. Their underlying global identity and local ERP accounts will remain intact."
-        confirmLabel="Revoke Role"
-        danger
-        loading={revokingRole}
-        onConfirm={handleRevokeRole}
-        onCancel={() => setRevokeAssignmentId(null)}
-      />
 
       {/* CONFIRM DISABLE USER MODAL */}
       <ConfirmDialog
@@ -2085,6 +2000,7 @@ export function GlobalUsers() {
         onConfirm={handleExecuteDisable}
         onCancel={() => setConfirmDisableUser(null)}
       />
+
 
     </AppShell>
   );

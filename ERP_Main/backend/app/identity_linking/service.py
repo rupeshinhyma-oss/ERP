@@ -7,16 +7,20 @@ ErpMemberships, and local ERP user accounts.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import uuid
-from datetime import datetime, timezone
-from typing import Sequence
+from datetime import datetime, timedelta, timezone
+from typing import Any, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.erp_memberships.models import ErpMembership, ErpMembershipStatus
+
 from app.erp_memberships.repository import ErpMembershipRepository
 from app.erp_registry.models import ErpInstance, ErpStatus
 from app.erp_registry.repository import ErpInstanceRepository
@@ -25,8 +29,27 @@ from app.global_audit.service import GlobalAuditService
 from app.global_users.models import GlobalUser, GlobalUserStatus
 from app.global_users.repository import GlobalUserRepository
 from app.identity_linking.adapters.registry import ErpAdapterRegistry, get_adapter_registry
-from app.identity_linking.models import ConflictStatus, ConflictType, IdentityConflict
+from app.identity_linking.exceptions import (
+    ErpAuthError,
+    ErpConflictError,
+    ErpNotFoundError,
+    ErpProvisioningError,
+    ErpRateLimitError,
+    ErpServerError,
+    ErpTimeoutError,
+    ErpUnreachableError,
+    IdentityConflictDetectedError,
+)
+from app.identity_linking.models import (
+    ConflictStatus,
+    ConflictType,
+    IdentityConflict,
+    ProvisioningReconciliationTask,
+    ProvisioningTaskStatus,
+)
+from app.identity_linking.reconciliation_repository import ProvisioningReconciliationRepository
 from app.identity_linking.repository import IdentityConflictRepository
+
 from app.identity_linking.schemas import (
     ConflictResolutionAction,
     IdentityMatchingState,
@@ -302,6 +325,44 @@ class IdentityLinkingService:
         return created
 
     # -------------------------------------------------------------------------
+    # Actor & Retry Helpers
+    # -------------------------------------------------------------------------
+    def _extract_actor(self, actor: Any) -> tuple[AuditActorType, uuid.UUID | None, str | None]:
+        """Extract standardized audit actor fields from diverse caller principal types."""
+        if actor is None:
+            return AuditActorType.SYSTEM, None, "system"
+        if hasattr(actor, "is_platform_admin") and actor.is_platform_admin:
+            if getattr(actor, "platform_admin", None):
+                return AuditActorType.HUMAN_ADMIN, actor.platform_admin.id, actor.platform_admin.email
+            return AuditActorType.HUMAN_ADMIN, getattr(actor, "id", None), getattr(actor, "email", "platform_admin")
+        if hasattr(actor, "global_user") and actor.global_user:
+            return AuditActorType.HUMAN_ADMIN, actor.global_user.id, actor.global_user.primary_email
+        if hasattr(actor, "id") and hasattr(actor, "email"):
+            return AuditActorType.HUMAN_ADMIN, actor.id, actor.email
+        return AuditActorType.SYSTEM, None, str(actor)
+
+    async def _retry_transient(
+        self,
+        operation: Any,
+        max_retries: int = 3,
+        base_delay: float = 0.05,
+        max_delay: float = 0.5,
+    ) -> Any:
+        """Execute an async operation with bounded retries and exponential backoff + jitter for transient failures."""
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                return await operation()
+            except ErpProvisioningError as exc:
+                last_exc = exc
+                if not exc.is_transient or attempt == max_retries - 1:
+                    raise
+                delay = min(max_delay, base_delay * (2**attempt)) + random.uniform(0, 0.02)
+                await asyncio.sleep(delay)
+        if last_exc:
+            raise last_exc
+
+    # -------------------------------------------------------------------------
     # FLOW A: Global -> ERP (Provisioning from Control Plane)
     # -------------------------------------------------------------------------
     async def provision_global_user_to_erp(
@@ -311,12 +372,21 @@ class IdentityLinkingService:
         erp_instance_id: uuid.UUID,
         target_organization_id: uuid.UUID | None = None,
         notes: str | None = None,
-        actor: PlatformAdmin,
+        actor: PlatformAdmin | Any = None,
+        max_retries: int = 3,
+        base_delay: float = 0.05,
     ) -> ErpMembership:
         """
-        Provision a GlobalUser into an ERP instance using the adapter pattern.
+        Reliably provision or link a GlobalUser into an ERP instance (Phase 5).
 
-        Idempotent: if the membership or local user already exists, reuses it safely.
+        Guarantees:
+        1. ERP_Main is authoritative for GlobalUser lifecycle and ERP membership.
+        2. Spoke ERP remains authoritative for local User, local RBAC, and local permissions.
+        3. Idempotent: repeated calls for the same GlobalUser + ERP do not duplicate users or memberships.
+        4. Safe failure: transient errors mark membership PENDING_RETRY without corrupting GlobalUser.
+        5. Recovery: retries recover from PENDING -> ACTIVE if remote sync succeeds or lost response is detected.
+        6. Conflicts: conflicting identities create an IdentityConflict and leave membership in PENDING/error state.
+        7. Audit: records all provisioning lifecycle events with zero credential leakage.
         """
         global_user = await self.global_user_repo.get_by_id(global_user_id)
         if global_user is None:
@@ -327,67 +397,513 @@ class IdentityLinkingService:
         erp_instance = await self.erp_repo.get_by_id(erp_instance_id)
         if erp_instance is None:
             raise NotFoundException(f"ERP instance {erp_instance_id} not found.")
+        if erp_instance.status == ErpStatus.DECOMMISSIONED:
+            raise ForbiddenException("This ERP instance is decommissioned and cannot accept new memberships.")
         if erp_instance.status != ErpStatus.ACTIVE:
             raise ForbiddenException(f"ERP instance {erp_instance.key!r} is not ACTIVE (status={erp_instance.status.value}).")
 
-        # Check existing membership (Idempotency: return existing relationship)
+        actor_type, actor_id, actor_label = self._extract_actor(actor)
+
+        # Audit: Provisioning Requested
+        await self.audit.record(
+            event_type=AuditEventType.PROVISIONING_REQUESTED,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            actor_label=actor_label,
+            target_type="global_user",
+            target_id=global_user.id,
+            details={
+                "erp_instance_id": str(erp_instance_id),
+                "erp_key": erp_instance.key,
+                "primary_email": global_user.primary_email,
+            },
+        )
+
+        # Check existing membership (Idempotency check)
         existing_membership = await self.membership_repo.get_by_user_and_erp(global_user_id, erp_instance_id)
         if existing_membership is not None:
-            logger.info("GlobalUser %s already has membership %s in ERP %s; returning existing.", global_user_id, existing_membership.id, erp_instance.key)
-            return existing_membership
-
-        # Resolve ERP adapter
-        adapter = self.adapter_registry.get_adapter(erp_instance)
-
-        # Check if local user already exists in target ERP
-        local_user_id: str | None = None
-        existing_local = await adapter.check_local_user(erp_instance, global_user.primary_email)
-        if existing_local and "local_user_id" in existing_local:
-            local_user_id = str(existing_local["local_user_id"])
+            if existing_membership.status == ErpMembershipStatus.ACTIVE:
+                logger.info(
+                    "GlobalUser %s already has active membership %s in ERP %s; returning existing.",
+                    global_user_id,
+                    existing_membership.id,
+                    erp_instance.key,
+                )
+                return existing_membership
+            # Existing membership is PENDING/error; proceed with recovery/retry
+            membership = existing_membership
         else:
-            # Provision minimal user in the ERP
-            provision_res = await adapter.provision_local_user(
-                erp_instance,
-                email=global_user.primary_email,
-                display_name=global_user.display_name,
-                target_organization_id=str(target_organization_id) if target_organization_id else None,
-            )
-            local_user_id = str(provision_res["local_user_id"])
+            membership = None
 
-        # Check if this local_user_id is already claimed by a different GlobalUser
+        adapter = self.adapter_registry.get_adapter(erp_instance)
+        local_user_id: str | None = None
+        created_new: bool = False
+        now = datetime.now(timezone.utc)
+
+        try:
+            # Step 1: Idempotent check for existing local user
+            existing_local = await self._retry_transient(
+                lambda: adapter.check_local_user(erp_instance, global_user.primary_email),
+                max_retries=max_retries,
+                base_delay=base_delay,
+            )
+
+            pwd = (global_user.metadata_json or {}).get("default_password") or (global_user.metadata_json or {}).get("password")
+            extra_kwargs: dict[str, Any] = {}
+            if pwd:
+                import inspect
+                try:
+                    sig = inspect.signature(adapter.provision_local_user)
+                    if "password" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                        extra_kwargs["password"] = pwd
+                except Exception:
+                    pass
+
+            if existing_local and "local_user_id" in existing_local:
+                local_user_id = str(existing_local["local_user_id"])
+                created_new = False
+                if "password" in extra_kwargs:
+                    try:
+                        await adapter.provision_local_user(
+                            erp_instance,
+                            email=global_user.primary_email,
+                            display_name=global_user.display_name,
+                            **extra_kwargs,
+                        )
+                    except Exception:
+                        pass
+            else:
+                # Step 2: Provision minimal local user
+                provision_res = await self._retry_transient(
+                    lambda: adapter.provision_local_user(
+                        erp_instance,
+                        email=global_user.primary_email,
+                        display_name=global_user.display_name,
+                        target_organization_id=str(target_organization_id) if target_organization_id else None,
+                        **extra_kwargs,
+                    ),
+                    max_retries=max_retries,
+                    base_delay=base_delay,
+                )
+                local_user_id = str(provision_res["local_user_id"])
+                created_new = provision_res.get("created", True)
+
+        except ErpProvisioningError as exc:
+            # Handle specific failure modes without corrupting GlobalUser
+            if exc.is_transient:
+                # Transient error: record PENDING membership so operation completes safely and can retry later
+                temp_local_id = (
+                    membership.local_user_id
+                    if membership and not membership.local_user_id.startswith("pending:")
+                    else f"pending:{global_user_id}"
+                )
+                retry_count = ((membership.metadata_json or {}).get("retry_count", 0) + 1) if membership else 1
+                delay = min(
+                    getattr(settings, "PROVISIONING_MAX_BACKOFF_SECONDS", 300.0),
+                    getattr(settings, "PROVISIONING_BASE_BACKOFF_SECONDS", 5.0) * (2 ** retry_count),
+                ) + random.uniform(0.1, 1.0)
+                next_retry_at = now + timedelta(seconds=delay)
+                meta = {
+                    "sync_status": "PENDING_RETRY",
+                    "sync_error": exc.message,
+                    "error_type": exc.error_type,
+                    "is_retryable": True,
+                    "retry_count": retry_count,
+                    "next_retry_at": next_retry_at.isoformat(),
+                    "last_attempt_at": now.isoformat(),
+                    "target_organization_id": str(target_organization_id) if target_organization_id else None,
+                    "notes": notes,
+                }
+                if membership is None:
+                    membership = ErpMembership(
+                        global_user_id=global_user_id,
+                        erp_instance_id=erp_instance_id,
+                        local_user_id=temp_local_id,
+                        status=ErpMembershipStatus.PENDING,
+                        linked_at=now,
+                        verified_at=None,
+                        metadata_json=meta,
+                    )
+                    membership = await self.membership_repo.create(membership)
+                else:
+                    membership.status = ErpMembershipStatus.PENDING
+                    membership.metadata_json = {**(membership.metadata_json or {}), **meta}
+                    await self.membership_repo.create(membership)
+
+                # Persist durable reconciliation task for background recovery (Phase 8)
+                recon_repo = ProvisioningReconciliationRepository(self.db)
+                await recon_repo.create_or_update_task(
+                    membership_id=membership.id,
+                    global_user_id=global_user_id,
+                    erp_instance_id=erp_instance_id,
+                    status=ProvisioningTaskStatus.PENDING_RETRY,
+                    retry_count=retry_count,
+                    max_retries=getattr(settings, "PROVISIONING_MAX_RETRIES", 10),
+                    next_retry_at=next_retry_at,
+                    last_error_type=exc.error_type,
+                    last_error_message=exc.message,
+                )
+
+                await self.audit.record(
+                    event_type=AuditEventType.PROVISIONING_RETRY_SCHEDULED,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    actor_label=actor_label,
+                    target_type="erp_membership",
+                    target_id=membership.id,
+                    details={"erp_key": erp_instance.key, "error_type": exc.error_type, "retry_count": retry_count},
+                )
+                await self.audit.record(
+                    event_type=AuditEventType.PROVISIONING_FAILED,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    actor_label=actor_label,
+                    target_type="erp_membership",
+                    target_id=membership.id,
+                    details={"erp_key": erp_instance.key, "error": exc.message, "is_transient": True},
+                )
+                return membership
+
+
+            elif isinstance(exc, ErpConflictError):
+                # Remote ERP reported conflict
+                conflict = await self._record_conflict(
+                    erp_instance_id=erp_instance_id,
+                    local_user_id=f"conflict:{global_user_id}",
+                    normalized_email=global_user.primary_email,
+                    conflict_type=ConflictType.CONFLICT,
+                    candidate_ids=[str(global_user_id)],
+                    details={"reason": f"Remote ERP {erp_instance.key} reported 409 Conflict: {exc.message}"},
+                )
+                meta = {
+                    "sync_status": "CONFLICT",
+                    "conflict_id": str(conflict.id),
+                    "sync_error": exc.message,
+                    "error_type": "REMOTE_CONFLICT",
+                    "is_retryable": False,
+                    "last_attempt_at": now.isoformat(),
+                }
+                if membership is None:
+                    membership = ErpMembership(
+                        global_user_id=global_user_id,
+                        erp_instance_id=erp_instance_id,
+                        local_user_id=f"conflict:{conflict.id}",
+                        status=ErpMembershipStatus.PENDING,
+                        linked_at=now,
+                        verified_at=None,
+                        metadata_json=meta,
+                    )
+                    membership = await self.membership_repo.create(membership)
+                else:
+                    membership.status = ErpMembershipStatus.PENDING
+                    membership.metadata_json = {**(membership.metadata_json or {}), **meta}
+                    await self.membership_repo.create(membership)
+
+                await self.audit.record(
+                    event_type=AuditEventType.IDENTITY_CONFLICT_CREATED,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    actor_label=actor_label,
+                    target_type="identity_conflict",
+                    target_id=conflict.id,
+                    details={"erp_key": erp_instance.key, "reason": exc.message},
+                )
+                await self.audit.record(
+                    event_type=AuditEventType.PROVISIONING_FAILED,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    actor_label=actor_label,
+                    target_type="erp_membership",
+                    target_id=membership.id,
+                    details={"erp_key": erp_instance.key, "error": exc.message, "is_transient": False},
+                )
+                await self.db.commit()
+                raise ConflictException(f"Identity conflict in ERP {erp_instance.key!r}: {exc.message}")
+
+            else:
+                # Permanent failure (401/403, 404, Malformed)
+                meta = {
+                    "sync_status": "FAILED",
+                    "sync_error": exc.message,
+                    "error_type": exc.error_type,
+                    "is_retryable": False,
+                    "last_attempt_at": now.isoformat(),
+                }
+                if membership is None:
+                    membership = ErpMembership(
+                        global_user_id=global_user_id,
+                        erp_instance_id=erp_instance_id,
+                        local_user_id=f"failed:{global_user_id}",
+                        status=ErpMembershipStatus.PENDING,
+                        linked_at=now,
+                        verified_at=None,
+                        metadata_json=meta,
+                    )
+                    membership = await self.membership_repo.create(membership)
+                else:
+                    membership.status = ErpMembershipStatus.PENDING
+                    membership.metadata_json = {**(membership.metadata_json or {}), **meta}
+                    await self.membership_repo.create(membership)
+
+                await self.audit.record(
+                    event_type=AuditEventType.PROVISIONING_FAILED,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    actor_label=actor_label,
+                    target_type="erp_membership",
+                    target_id=membership.id,
+                    details={"erp_key": erp_instance.key, "error": exc.message, "is_transient": False},
+                )
+                await self.db.commit()
+                if isinstance(exc, ErpAuthError):
+                    raise ForbiddenException(f"ERP {erp_instance.key!r} provisioning failed: {exc.message}")
+                elif isinstance(exc, ErpNotFoundError):
+                    raise NotFoundException(f"ERP {erp_instance.key!r} provisioning endpoint not found: {exc.message}")
+                else:
+                    raise BadRequestException(f"ERP {erp_instance.key!r} provisioning failed: {exc.message}")
+
+        # Step 3: Check for local identity collision in central ERP_Main
         existing_by_local = await self.membership_repo.get_by_erp_and_local_user(erp_instance_id, local_user_id)
         if existing_by_local is not None and existing_by_local.global_user_id != global_user_id:
+            conflict = await self._record_conflict(
+                erp_instance_id=erp_instance_id,
+                local_user_id=local_user_id,
+                normalized_email=global_user.primary_email,
+                conflict_type=ConflictType.CONFLICT,
+                candidate_ids=[str(existing_by_local.global_user_id), str(global_user_id)],
+                details={
+                    "reason": (
+                        f"Local user {local_user_id} in ERP {erp_instance.key} is already linked to "
+                        f"GlobalUser {existing_by_local.global_user_id}"
+                    )
+                },
+            )
+            meta = {
+                "sync_status": "CONFLICT",
+                "conflict_id": str(conflict.id),
+                "sync_error": f"Local user '{local_user_id}' already linked to another GlobalUser",
+                "is_retryable": False,
+                "last_attempt_at": now.isoformat(),
+            }
+            if membership is None:
+                membership = ErpMembership(
+                    global_user_id=global_user_id,
+                    erp_instance_id=erp_instance_id,
+                    local_user_id=f"conflict:{conflict.id}",
+                    status=ErpMembershipStatus.PENDING,
+                    linked_at=now,
+                    verified_at=None,
+                    metadata_json=meta,
+                )
+                membership = await self.membership_repo.create(membership)
+            else:
+                membership.status = ErpMembershipStatus.PENDING
+                membership.metadata_json = {**(membership.metadata_json or {}), **meta}
+                await self.membership_repo.create(membership)
+
+            await self.audit.record(
+                event_type=AuditEventType.IDENTITY_CONFLICT_CREATED,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                actor_label=actor_label,
+                target_type="identity_conflict",
+                target_id=conflict.id,
+                details={"erp_key": erp_instance.key, "local_user_id": local_user_id},
+            )
+            await self.audit.record(
+                event_type=AuditEventType.PROVISIONING_FAILED,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                actor_label=actor_label,
+                target_type="erp_membership",
+                target_id=membership.id,
+                details={"erp_key": erp_instance.key, "error": "Identity conflict detected"},
+            )
+            await self.db.commit()
             raise ConflictException(
                 f"Local user {local_user_id!r} in ERP {erp_instance.key!r} is already linked to another GlobalUser."
             )
 
-        now = datetime.now(timezone.utc)
-        membership = ErpMembership(
-            global_user_id=global_user_id,
-            erp_instance_id=erp_instance_id,
-            local_user_id=local_user_id,
-            status=ErpMembershipStatus.ACTIVE,
-            linked_at=now,
-            verified_at=now,
-            metadata_json={"notes": notes, "provisioned_by": str(actor.id)},
-        )
-        created = await self.membership_repo.create(membership)
+        # Step 4: No collision; successfully activate membership!
+        was_pending = membership is not None and membership.status == ErpMembershipStatus.PENDING
+        provision_method = "created_new" if created_new else "linked_existing"
+        meta = {
+            "sync_status": "SUCCESS",
+            "provision_method": provision_method,
+            "recovered": was_pending,
+            "notes": notes,
+            "provisioned_by": str(actor_id) if actor_id else None,
+            "last_synced_at": now.isoformat(),
+        }
+
+        if membership is None:
+            membership = ErpMembership(
+                global_user_id=global_user_id,
+                erp_instance_id=erp_instance_id,
+                local_user_id=local_user_id,
+                status=ErpMembershipStatus.ACTIVE,
+                linked_at=now,
+                verified_at=now,
+                metadata_json=meta,
+            )
+            membership = await self.membership_repo.create(membership)
+        else:
+            membership.local_user_id = local_user_id
+            membership.status = ErpMembershipStatus.ACTIVE
+            membership.verified_at = now
+            membership.metadata_json = {**(membership.metadata_json or {}), **meta}
+            await self.membership_repo.create(membership)
+
+        # Mark reconciliation task SUCCEEDED if one exists (Phase 8)
+        recon_repo = ProvisioningReconciliationRepository(self.db)
+        task = await recon_repo.get_by_membership_id(membership.id)
+        if task is not None:
+            await recon_repo.release_claim(task.id, ProvisioningTaskStatus.SUCCEEDED)
+
+
+        # Audit events
+        if created_new:
+            await self.audit.record(
+                event_type=AuditEventType.LOCAL_USER_PROVISIONED,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                actor_label=actor_label,
+                target_type="erp_membership",
+                target_id=membership.id,
+                details={
+                    "global_user_id": str(global_user_id),
+                    "erp_key": erp_instance.key,
+                    "local_user_id": local_user_id,
+                },
+            )
+        else:
+            await self.audit.record(
+                event_type=AuditEventType.GLOBAL_USER_LINKED,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                actor_label=actor_label,
+                target_type="erp_membership",
+                target_id=membership.id,
+                details={
+                    "global_user_id": str(global_user_id),
+                    "erp_key": erp_instance.key,
+                    "local_user_id": local_user_id,
+                    "match_state": "EXISTING_LOCAL_LINKED",
+                },
+            )
+
+        if was_pending:
+            await self.audit.record(
+                event_type=AuditEventType.PROVISIONING_RECOVERED,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                actor_label=actor_label,
+                target_type="erp_membership",
+                target_id=membership.id,
+                details={
+                    "global_user_id": str(global_user_id),
+                    "erp_key": erp_instance.key,
+                    "local_user_id": local_user_id,
+                    "recovered_from": "PENDING",
+                },
+            )
 
         await self.audit.record(
-            event_type=AuditEventType.LOCAL_USER_PROVISIONED,
-            actor_type=AuditActorType.HUMAN_ADMIN,
-            actor_id=actor.id,
-            actor_label=actor.email,
+            event_type=AuditEventType.PROVISIONING_SUCCEEDED,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            actor_label=actor_label,
             target_type="erp_membership",
-            target_id=created.id,
+            target_id=membership.id,
             details={
                 "global_user_id": str(global_user_id),
                 "erp_key": erp_instance.key,
                 "local_user_id": local_user_id,
+                "method": provision_method,
             },
         )
 
-        return created
+        return membership
+
+    async def retry_membership_provisioning(
+        self,
+        membership_id: uuid.UUID,
+        *,
+        actor: PlatformAdmin | Any = None,
+    ) -> ErpMembership:
+        """
+        Retry a pending or failed provisioning operation for an existing membership.
+        Recovers from PENDING -> ACTIVE if remote sync succeeds.
+
+        Coordinates with the background reconciliation worker: prevents duplicate
+        concurrent runs if a worker actively holds a lease, and claims the task
+        for the manual administrator.
+        """
+        membership = await self.membership_repo.get_by_id(membership_id)
+        if membership is None:
+            raise NotFoundException(f"ErpMembership {membership_id} not found.")
+
+        if membership.status == ErpMembershipStatus.ACTIVE:
+            return membership
+
+        # Concurrency & Lease coordination with background worker (Phase 8)
+        recon_repo = ProvisioningReconciliationRepository(self.db)
+        task = await recon_repo.get_by_membership_id(membership_id)
+        now = datetime.now(timezone.utc)
+
+        if task is not None and task.status == ProvisioningTaskStatus.PROCESSING:
+            lease_exp = task.lease_expires_at
+            if lease_exp is not None and lease_exp.tzinfo is None:
+                lease_exp = lease_exp.replace(tzinfo=timezone.utc)
+            if lease_exp and lease_exp > now:
+                raise ConflictException(
+                    "Provisioning for this membership is currently being processed by the background reconciler. "
+                    "Please wait for completion."
+                )
+
+
+        actor_type, actor_id, actor_label = self._extract_actor(actor)
+        if task is not None:
+            await recon_repo.claim_task(
+                task.id,
+                f"manual:{actor_label or actor_id or 'admin'}",
+                now,
+                lease_duration_seconds=getattr(settings, "PROVISIONING_LEASE_DURATION_SECONDS", 60),
+            )
+
+        notes = (membership.metadata_json or {}).get("notes")
+        target_org_id_str = (membership.metadata_json or {}).get("target_organization_id")
+        target_org_id = uuid.UUID(target_org_id_str) if target_org_id_str else None
+
+        try:
+            result = await self.provision_global_user_to_erp(
+                global_user_id=membership.global_user_id,
+                erp_instance_id=membership.erp_instance_id,
+                target_organization_id=target_org_id,
+                notes=notes,
+                actor=actor,
+            )
+            if task is not None and result.status == ErpMembershipStatus.ACTIVE:
+                await recon_repo.release_claim(task.id, ProvisioningTaskStatus.SUCCEEDED)
+            return result
+        except Exception as exc:
+            if task is not None:
+                if isinstance(exc, (ErpConflictError, IdentityConflictDetectedError, ConflictException)):
+                    await recon_repo.release_claim(
+                        task.id,
+                        ProvisioningTaskStatus.FAILED,
+                        last_error_type="IDENTITY_CONFLICT",
+                        last_error_message=str(exc),
+                    )
+                else:
+                    await recon_repo.release_claim(
+                        task.id,
+                        ProvisioningTaskStatus.FAILED,
+                        last_error_type="ERROR",
+                        last_error_message=str(exc),
+                    )
+            raise
+
 
     # -------------------------------------------------------------------------
     # CONFLICT RESOLUTION

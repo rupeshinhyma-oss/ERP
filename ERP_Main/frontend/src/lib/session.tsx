@@ -24,8 +24,14 @@ import type {
   TokenPair,
 } from "@/types";
 
+export interface LoginResult {
+  userType: PrincipalType;
+  profile: CurrentUser | null;
+  activeMemberships: ErpMembership[];
+}
+
 interface GlobalSessionContextType extends SessionState {
-  login: (identifier: string, password: string) => Promise<void>;
+  login: (identifier: string, password: string) => Promise<LoginResult | void>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
   dismissExpiredModal: () => void;
@@ -41,14 +47,16 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
   const [loading, setLoading] = useState<boolean>(true);
   const [sessionExpired, setSessionExpired] = useState<boolean>(false);
 
-  const fetchMemberships = useCallback(async (userId: string) => {
+  const fetchMemberships = useCallback(async (userId: string): Promise<ErpMembership[]> => {
     try {
       const res = await apiGet<ErpMembership[]>(`/global/users/${userId}/memberships`);
       const list = Array.isArray(res) ? res : Array.isArray((res as { data?: unknown })?.data) ? (res as { data: ErpMembership[] }).data : [];
       setMemberships(list);
+      return list;
     } catch {
       // Non-blocking: memberships may be restricted or user may be admin
       setMemberships([]);
+      return [];
     }
   }, []);
 
@@ -146,12 +154,17 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
           setUserType("global_user");
           setSessionExpired(false);
 
+          let userMems: ErpMembership[] = [];
           if (profile?.id) {
-            await fetchMemberships(profile.id);
+            userMems = await fetchMemberships(profile.id);
           }
 
           globalUserLoginSuccess = true;
-          return;
+          return {
+            userType: "global_user" as const,
+            profile,
+            activeMemberships: userMems.filter((m) => m.status === "ACTIVE"),
+          };
         }
       } catch (err: unknown) {
         // If it's a 401 or 403 or 404, we check whether this is a Platform Administrator
@@ -188,7 +201,11 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
             setCurrentUser(adminProfile);
             setUserType("platform_admin");
             setSessionExpired(false);
-            return;
+            return {
+              userType: "platform_admin" as const,
+              profile: adminProfile,
+              activeMemberships: [],
+            };
           }
         } catch (adminErr: unknown) {
           // If platform admin login also fails, throw unified invalid credentials error
@@ -341,10 +358,24 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
   );
 }
 
-export function useGlobalSession() {
+export function useGlobalSession(): GlobalSessionContextType {
   const context = useContext(GlobalSessionContext);
   if (!context) {
-    throw new Error("useGlobalSession must be used within a GlobalSessionProvider");
+    const profile = Auth.getProfile();
+    const principalType = Auth.getPrincipalType();
+    return {
+      currentUser: profile,
+      userType: principalType,
+      isAuthenticated: Boolean(profile),
+      isSuperAdmin: Auth.isSuperAdmin(),
+      memberships: [],
+      loading: false,
+      sessionExpired: false,
+      login: async () => {},
+      logout: async () => {},
+      refreshSession: async () => {},
+      dismissExpiredModal: () => {},
+    };
   }
   return context;
 }

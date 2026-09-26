@@ -55,9 +55,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
+    worker = None
+    if getattr(settings, "PROVISIONING_RECONCILIATION_ENABLED", True) and settings.ENVIRONMENT.value != "test":
+        try:
+            from app.identity_linking.reconciliation_worker import get_reconciliation_worker
+            worker = get_reconciliation_worker()
+            await worker.start()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("Failed to start background reconciliation worker: %s", exc)
+
     yield
 
+    if worker is not None and worker.is_running:
+        try:
+            await worker.stop()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("Error stopping background reconciliation worker: %s", exc)
+
     await dispose_engine()
+
 
 
 def create_application() -> FastAPI:

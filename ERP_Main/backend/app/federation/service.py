@@ -46,6 +46,8 @@ from app.federation.schemas import (
 from app.federation.security import create_id_token, verify_pkce
 from app.global_audit.models import AuditActorType, AuditEventType
 from app.global_audit.service import GlobalAuditService
+from app.global_users.models import GlobalUserStatus
+from app.global_users.repository import GlobalUserRepository
 from app.platform_auth.models import PlatformAdmin
 from app.platform_auth.security import hash_password as _hash_secret
 from app.platform_auth.security import verify_password as _verify_secret
@@ -77,6 +79,7 @@ class FederationService:
         authorization_repository: AuthorizationRequestRepository,
         key_manager: SigningKeyManager,
         audit: GlobalAuditService,
+        user_repository: GlobalUserRepository | None = None,
     ) -> None:
         """Wire the service to its repositories, the signing key manager, and the global audit service."""
         self.client_repository = client_repository
@@ -85,6 +88,7 @@ class FederationService:
         self.authorization_repository = authorization_repository
         self.key_manager = key_manager
         self.audit = audit
+        self.user_repository = user_repository
 
     async def register_client(
         self, erp_instance_id: uuid.UUID, payload: FederationClientCreate, *, actor: PlatformAdmin
@@ -216,6 +220,17 @@ class FederationService:
 
     async def _reverify_membership(self, auth_request: AuthorizationRequest) -> ErpMembership:
         """Re-verify the membership is still ACTIVE at token-exchange time (see exchange_token comment)."""
+        if self.user_repository is not None:
+            user = await self.user_repository.get_by_id(auth_request.global_user_id)
+            if user is None or user.status != GlobalUserStatus.ACTIVE:
+                await self.audit.record(
+                    event_type=AuditEventType.FEDERATION_FAILURE,
+                    actor_type=AuditActorType.SYSTEM,
+                    actor_id=auth_request.global_user_id,
+                    details={"reason": "global_user_not_active_at_exchange"},
+                )
+                raise ForbiddenException("Global user account is suspended or disabled.")
+
         client = await self.client_repository.get_by_id(auth_request.federation_client_id)
         membership = await self.membership_repository.get_by_user_and_erp(
             auth_request.global_user_id, client.erp_instance_id

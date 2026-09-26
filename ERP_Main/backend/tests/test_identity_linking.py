@@ -37,6 +37,9 @@ class InMemoryTestProvisioningAdapter(BaseErpProvisioningAdapter):
 
     def __init__(self) -> None:
         self.users: dict[str, dict[str, Any]] = {}
+        # local_user_id -> can_login, populated by provision and mutated by
+        # set_local_user_access, so tests can assert on it directly.
+        self.access_by_local_user_id: dict[str, bool] = {}
 
     async def check_local_user(self, erp: ErpInstance, email_or_username: str) -> dict[str, Any] | None:
         norm = email_or_username.strip().lower()
@@ -54,6 +57,8 @@ class InMemoryTestProvisioningAdapter(BaseErpProvisioningAdapter):
         first_name: str | None = None,
         last_name: str | None = None,
         target_organization_id: str | None = None,
+        password: str | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         norm = email.strip().lower()
         if norm in self.users:
@@ -67,7 +72,14 @@ class InMemoryTestProvisioningAdapter(BaseErpProvisioningAdapter):
             "display_name": display_name,
         }
         self.users[norm] = record
+        self.access_by_local_user_id[local_id] = True
         return {"local_user_id": local_id, "created": True}
+
+    async def set_local_user_access(
+        self, erp: ErpInstance, local_user_id: str, *, allow_login: bool, reason: str | None = None
+    ) -> dict[str, Any] | None:
+        self.access_by_local_user_id[local_user_id] = allow_login
+        return {"local_user_id": local_user_id, "can_login": allow_login}
 
 
 @pytest.fixture(autouse=True)

@@ -22,8 +22,9 @@ import {
   NAV_SECTIONS,
   PAGE_TITLES,
 } from "@/lib/nav";
-import { processIncomingSsoHandover } from "@/lib/ssoBridge";
+import { processIncomingSsoHandover, resolveSingleErpDirectUrl } from "@/lib/ssoBridge";
 import { globalEcosystemLogout } from "@/lib/ecosystemSession";
+import { useGlobalSession } from "@/lib/session";
 import { Breadcrumb } from "./Breadcrumb";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { ICONS } from "./icons";
@@ -55,6 +56,28 @@ export function AppShell({
       : rawDisplayName;
   const location = useLocation();
   const navigate = useNavigate();
+
+  const { userType, memberships, loading: sessionLoading } = useGlobalSession();
+  const activeMemberships = (memberships || []).filter((m) => m.status === "ACTIVE");
+
+  useEffect(() => {
+    if (!sessionLoading && isLoggedIn && userType === "global_user" && activeMemberships.length === 1) {
+      const singleMem = activeMemberships[0];
+      const assignedKey = (singleMem.erp_key || singleMem.erp_name || "yinglima").toLowerCase();
+      const cleanKey = assignedKey.includes("yinglima") ? "yinglima" : assignedKey.includes("inhyma") ? "inhyma" : assignedKey;
+
+      const directUrl = resolveSingleErpDirectUrl(singleMem, {
+        email: userEmail,
+        display_name: userDisplayName,
+        role: userRole,
+        session_id: Auth.getSessionId() || undefined,
+        allowed_erps: [cleanKey],
+      });
+      if (directUrl) {
+        window.location.assign(directUrl);
+      }
+    }
+  }, [sessionLoading, isLoggedIn, userType, activeMemberships, userEmail, userDisplayName, userRole]);
 
   // Mobile drawer state
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -152,6 +175,19 @@ export function AppShell({
       );
     }
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+  }
+
+  // Single ERP Access Enforcement:
+  // If user only has access to 1 ERP, redirect directly to that ERP instead of showing ERP Dashboard
+  if (isLoggedIn && !sessionLoading && userType === "global_user" && activeMemberships.length === 1) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 36, height: 36, margin: "0 auto 16px", border: "3px solid #e2e8f0", borderTopColor: "#0061f2", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Redirecting directly to your authorized ERP application...</div>
+        </div>
+      </div>
+    );
   }
 
   return (

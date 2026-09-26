@@ -8,6 +8,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createSsoHandoverUrl, ECOSYSTEM_ERPS } from "@/lib/ssoBridge";
 import { getCachedBrandName, subscribeBrandName } from "@/lib/brand";
+import { establishCentralEcosystemSession, getEcosystemCookie } from "@/lib/ecosystemSession";
+import { Auth } from "@/lib/auth";
 
 interface EcosystemSwitcherProps {
   currentKey?: string;
@@ -18,12 +20,46 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [brandName, setBrandName] = useState(() => getCachedBrandName());
+  const [cookie, setCookie] = useState(() => getEcosystemCookie());
 
   useEffect(() => {
     return subscribeBrandName((newName) => {
       setBrandName(newName);
     });
   }, []);
+
+  useEffect(() => {
+    setCookie(getEcosystemCookie());
+  }, [open]);
+
+  // Proactively fetch or refresh ecosystem session from central control plane
+  useEffect(() => {
+    const profile = Auth.getProfile();
+    const sessionId = Auth.getSessionId() || getEcosystemCookie()?.session_id;
+    const email = profile?.email || getEcosystemCookie()?.email;
+
+    if (email) {
+      establishCentralEcosystemSession({
+        email,
+        source_erp: currentKey,
+        existing_session_id: sessionId && !sessionId.startsWith("ihm-sess-") ? sessionId : undefined,
+      }).then((freshSession) => {
+        if (freshSession) {
+          setCookie(freshSession);
+        }
+      });
+    }
+  }, [currentKey]);
+
+  const isSuperAdmin = cookie?.role === "super_admin" || cookie?.user_type === "platform_admin";
+  const allowedErps = cookie?.allowed_erps || [];
+  const hasWildcard = allowedErps.includes("*");
+  const distinctErps = allowedErps.filter((k) => k && k !== "*" && k !== "control-plane");
+
+  // Only users with MORE THAN 1 ERP permission (or Super Admin) get the switch option
+  if (!isSuperAdmin && !hasWildcard && distinctErps.length <= 1) {
+    return null;
+  }
 
   const currentErp = ECOSYSTEM_ERPS.find((erp) => erp.key === currentKey);
   const displayName =
@@ -150,7 +186,11 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
             Connected Fleet Applications
           </div>
 
-          {ECOSYSTEM_ERPS.map((erp) => {
+          {ECOSYSTEM_ERPS.filter((erp) => {
+            if (isSuperAdmin || hasWildcard) return true;
+            if (erp.key === "control-plane") return true;
+            return allowedErps.map((k) => k.toLowerCase()).includes(erp.key.toLowerCase());
+          }).map((erp) => {
             const isCurrent = erp.key === currentKey;
             return (
               <button

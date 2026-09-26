@@ -87,10 +87,30 @@ async def establish_ecosystem_session(
     expires_at = now + timedelta(hours=settings.GLOBAL_SESSION_MAX_LIFETIME_HOURS)
 
     # 1. If an existing valid session is supplied, check if it's active in cache
+    email_clean = (email or "").strip().lower()
     if payload.existing_session_id and payload.existing_session_id in _ECOSYSTEM_SESSION_STORE:
         existing = _ECOSYSTEM_SESSION_STORE[payload.existing_session_id]
         if not existing.get("revoked_at"):
-            return build_success_response(existing, request_id=_request_id(request))
+            existing_email = (existing.get("email") or "").strip().lower()
+            if not email_clean or existing_email == email_clean:
+                # If password was not passed (just a refresh/check), sync fresh allowed_erps from DB
+                if not password and existing.get("user_type") == "global_user":
+                    user_stmt = select(GlobalUser).where(func.lower(GlobalUser.primary_email) == existing_email)
+                    found_user = await db.scalar(user_stmt)
+                    if found_user and found_user.status == GlobalUserStatus.ACTIVE:
+                        mem_stmt = (
+                            select(ErpMembership, ErpInstance.key)
+                            .join(ErpInstance, ErpMembership.erp_instance_id == ErpInstance.id)
+                            .where(
+                                ErpMembership.global_user_id == found_user.id,
+                                ErpMembership.status == ErpMembershipStatus.ACTIVE,
+                            )
+                        )
+                        fresh_mems = (await db.execute(mem_stmt)).all()
+                        allowed_keys = [k.lower() for _, k in fresh_mems if k]
+                        allowed_keys.append("control-plane")
+                        existing["allowed_erps"] = allowed_keys
+                return build_success_response(existing, request_id=_request_id(request))
 
     is_super_admin = False
     display_name = "User"
@@ -100,7 +120,8 @@ async def establish_ecosystem_session(
     global_user_id: Optional[uuid.UUID] = None
 
     # 2. Check PlatformAdmin first (Super Admin)
-    admin_stmt = select(PlatformAdmin).where(PlatformAdmin.email == email)
+    from sqlalchemy import func
+    admin_stmt = select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == email_clean)
     admin = await db.scalar(admin_stmt)
 
     if admin and admin.is_active and (not password or verify_platform_password(password, admin.password_hash)):
@@ -111,12 +132,12 @@ async def establish_ecosystem_session(
         allowed_erps = ["*"]  # Super admin has unrestricted access to all ERPs
     else:
         # Check GlobalUser
-        user_stmt = select(GlobalUser).where(GlobalUser.primary_email == email)
+        user_stmt = select(GlobalUser).where(func.lower(GlobalUser.primary_email) == email_clean)
         user = await db.scalar(user_stmt)
 
         if not user or user.status != GlobalUserStatus.ACTIVE:
             # Fallback check for default local admin credentials
-            if (email in ("admin", "admin@example.com")) and (password in ("ChangeMe!12345", "")):
+            if (email_clean in ("admin", "admin@example.com")) and (password in ("ChangeMe!12345", "")):
                 is_super_admin = True
                 user_type = "platform_admin"
                 role = "super_admin"
@@ -131,20 +152,34 @@ async def establish_ecosystem_session(
             if password:
                 cred_stmt = select(GlobalUserCredential).where(GlobalUserCredential.global_user_id == user.id)
                 cred = await db.scalar(cred_stmt)
-                if not cred or not verify_password(password, cred.password_hash):
+                stored_pwd = (
+                    cred.password_hash
+                    if cred
+                    else ((user.metadata_json or {}).get("default_password") or (user.metadata_json or {}).get("password"))
+                )
+                if not stored_pwd or not verify_password(password, stored_pwd):
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Invalid email or password.",
                     )
+                if not cred and stored_pwd:
+                    new_cred = GlobalUserCredential(
+                        global_user_id=user.id,
+                        password_hash=stored_pwd,
+                        must_change_password=False,
+                    )
+                    db.add(new_cred)
+                    await db.flush()
 
             global_user_id = user.id
             display_name = user.display_name or user.primary_email
             user_type = "global_user"
-            role = "global_user"
+            meta_role = (user.metadata_json or {}).get("role")
+            role = meta_role.lower() if meta_role else "global_user"
 
             # Query active memberships for this Global User
             mem_stmt = (
-                select(ErpMembership, ErpInstance.erp_key)
+                select(ErpMembership, ErpInstance.key)
                 .join(ErpInstance, ErpMembership.erp_instance_id == ErpInstance.id)
                 .where(
                     ErpMembership.global_user_id == user.id,
@@ -152,7 +187,7 @@ async def establish_ecosystem_session(
                 )
             )
             memberships = (await db.execute(mem_stmt)).all()
-            allowed_erps = [row.erp_key.lower() for row in memberships if row.erp_key]
+            allowed_erps = [key.lower() for _, key in memberships if key]
             # Control plane switcher is always accessible to logged in global users
             allowed_erps.append("control-plane")
 
@@ -245,6 +280,20 @@ async def get_ecosystem_session(
             email = user.primary_email if user else "admin@example.com"
             display_name = user.display_name if user else "Platform User"
 
+            allowed_erps = ["*"]
+            if email != "admin@example.com" and user:
+                mem_stmt = (
+                    select(ErpMembership, ErpInstance.key)
+                    .join(ErpInstance, ErpMembership.erp_instance_id == ErpInstance.id)
+                    .where(
+                        ErpMembership.global_user_id == user.id,
+                        ErpMembership.status == ErpMembershipStatus.ACTIVE,
+                    )
+                )
+                mems = (await db.execute(mem_stmt)).all()
+                allowed_erps = [k.lower() for _, k in mems if k]
+                allowed_erps.append("control-plane")
+
             sess_data = {
                 "active": True,
                 "session_id": session_id,
@@ -252,7 +301,7 @@ async def get_ecosystem_session(
                 "display_name": display_name,
                 "role": "super_admin" if email == "admin@example.com" else "global_user",
                 "user_type": "platform_admin" if email == "admin@example.com" else "global_user",
-                "allowed_erps": ["*"] if email == "admin@example.com" else ["control-plane"],
+                "allowed_erps": allowed_erps,
                 "created_at": db_sess.created_at.isoformat() if hasattr(db_sess, "created_at") and db_sess.created_at else datetime.now(timezone.utc).isoformat(),
                 "expires_at": db_sess.expires_at.isoformat(),
                 "revoked_at": None,

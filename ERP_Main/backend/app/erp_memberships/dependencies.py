@@ -12,6 +12,7 @@ from app.erp_registry.repository import ErpInstanceRepository
 from app.global_audit.dependencies import get_global_audit_service
 from app.global_audit.service import GlobalAuditService
 from app.global_users.repository import GlobalUserRepository
+from app.identity_linking.adapters.registry import get_adapter_registry
 
 
 def get_erp_membership_service(
@@ -24,4 +25,5 @@ def get_erp_membership_service(
         global_user_repository=GlobalUserRepository(db),
         erp_instance_repository=ErpInstanceRepository(db),
         audit=audit,
+        adapter_registry=get_adapter_registry(),
     )

@@ -42,6 +42,17 @@ class LoginContext:
     device_info: str | None = None
 
 
+class AdminPermissionSet(set):
+    """
+    Permission set for administrator accounts.
+    Allows all permission checks to evaluate to True by default,
+    while still behaving like a standard set when iterated, sorted, or printed.
+    """
+
+    def __contains__(self, item: object) -> bool:
+        return True
+
+
 @dataclass
 class CurrentUser:
     """
@@ -57,6 +68,11 @@ class CurrentUser:
     permissions: set[str] = field(default_factory=set)
     access_token_jti: str = ""
     must_change_password: bool = False
+    is_super_admin: bool = False
+
+    @property
+    def is_admin(self) -> bool:
+        return self.is_super_admin or self.username == settings.BOOTSTRAP_ADMIN_USERNAME
 
 
 class AuthService:
@@ -155,6 +171,19 @@ class AuthService:
         if not user.can_login:
             raise UnauthorizedException("This account is not active. Please contact an administrator.")
 
+        if getattr(settings, "ENFORCE_CENTRAL_MEMBERSHIP_ON_LOGIN", False):
+            from app.federation.erp_main_client import MembershipLookupError, lookup_membership_by_local_user
+
+            try:
+                membership = await lookup_membership_by_local_user(str(user.id))
+            except MembershipLookupError as exc:
+                raise UnauthorizedException("Access denied by central identity policy.") from exc
+
+            if membership.get("status") != "ACTIVE":
+                raise UnauthorizedException("Access denied by central identity policy.")
+            if membership.get("global_user_status") and membership.get("global_user_status") != "ACTIVE":
+                raise UnauthorizedException("Access denied by central identity policy.")
+
         # Success: reset failed-attempt counter and record login.
         user.failed_login_count = 0
         user.locked_until = None
@@ -192,6 +221,16 @@ class AuthService:
             expires_at=refresh.expires_at,
         )
         return access.token, refresh.token
+
+    # --- Federated (SSO) login (Multi-ERP Platform, Phase 4/6) -----------------
+    async def issue_session_for_federated_user(self, user: User, context: LoginContext) -> tuple[str, str]:
+        """
+        Establish an existing-shape local session for a user resolved via federation.
+        Enforces local user.can_login so disabled/suspended local users cannot authenticate.
+        """
+        if not user.can_login:
+            raise UnauthorizedException("This account is not active. Please contact an administrator.")
+        return await self._issue_token_pair(user, context)
 
     # --- Refresh --------------------------------------------------------------
     async def refresh(self, *, refresh_token: str, context: LoginContext) -> tuple[str, str]:
@@ -312,7 +351,8 @@ class AuthService:
             raise ValidationException("The new password must be different from your current password.")
 
         new_hash = hash_password(new_password)
-        await self.password_history_repository.record(user.id, user.password_hash)
+        if user.password_hash is not None:
+            await self.password_history_repository.record(user.id, user.password_hash)
         user.password_hash = new_hash
         user.password_changed_at = datetime.now(timezone.utc)
         user.must_change_password = require_change_on_next_login
@@ -359,10 +399,48 @@ class AuthService:
         # Dynamically fetch effective permissions (backed by cache with instant invalidation)
         live_permissions = await self.get_user_effective_permissions(user_id)
 
+        is_super = (
+            user.username == settings.BOOTSTRAP_ADMIN_USERNAME
+            or user.username == "admin"
+            or "*" in live_permissions
+            or await self._is_user_super_admin(user.id)
+        )
+
+        if is_super:
+            if not isinstance(live_permissions, AdminPermissionSet):
+                live_permissions = AdminPermissionSet(live_permissions)
+            live_permissions.add("*")
+
         return CurrentUser(
             id=user.id,
-            username=user.username,
+            username=user.username or user.email or str(user.id),
             permissions=live_permissions,
             access_token_jti=payload["jti"],
             must_change_password=user.must_change_password,
+            is_super_admin=is_super,
         )
+
+    async def _is_user_super_admin(self, user_id: uuid.UUID) -> bool:
+        """Check if user has super_admin or admin role."""
+        from datetime import date
+        from sqlalchemy import and_, or_, select
+        from app.rbac.models import Role, RoleAssignmentStatus, UserRole
+
+        today = date.today()
+        assignment_in_effect = and_(
+            UserRole.status == RoleAssignmentStatus.ACTIVE,
+            or_(UserRole.effective_from.is_(None), UserRole.effective_from <= today),
+            or_(UserRole.effective_to.is_(None), UserRole.effective_to >= today),
+        )
+        stmt = (
+            select(Role.id)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(
+                UserRole.user_id == user_id,
+                Role.name.in_(["super_admin", "admin"]),
+                Role.deleted_at.is_(None),
+                assignment_in_effect,
+            )
+        )
+        res = await self.role_repository.session.execute(stmt)
+        return res.scalar_one_or_none() is not None

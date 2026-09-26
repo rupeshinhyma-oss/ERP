@@ -86,40 +86,64 @@ export async function evictCachedRecord(entity: string, entityId: string): Promi
 }
 
 /**
- * Section 10's worked example, made concrete: given what's currently
- * cached for an entity (or `undefined` if nothing is cached yet) and an
- * incoming version number, decide whether the incoming data is actually
- * newer and should replace the cache.
+ * Given what's currently cached for an entity and an incoming version / timestamp,
+ * decide whether the incoming data is strictly newer.
  *
- * Entities with no version column (`incomingVersion === null`) always
- * "win" -- there is nothing to compare, so the newest write by cachedAt
- * order is trusted, matching how the rest of this ERP already treats
- * unversioned records elsewhere.
+ * Handles:
+ * - Numeric versions (numbers or numeric strings)
+ * - Timestamps fallback if versions are absent
+ * - Equal or stale versions (returns false)
+ * - Malformed version inputs (returns false)
  */
-export function isNewerVersion(cached: CachedRecord | undefined, incomingVersion: number | null): boolean {
+export function isNewerVersion(
+  cached: CachedRecord | undefined,
+  incomingVersion?: number | string | null,
+  incomingTimestamp?: string | null
+): boolean {
   if (!cached) return true;
-  if (incomingVersion === null || cached.version === null) return true;
-  return incomingVersion > cached.version;
+
+  const numIncoming =
+    incomingVersion !== null && incomingVersion !== undefined ? Number(incomingVersion) : null;
+  const numCached =
+    cached.version !== null && cached.version !== undefined ? Number(cached.version) : null;
+
+  const hasNumIncoming = numIncoming !== null && !Number.isNaN(numIncoming);
+  const hasNumCached = numCached !== null && !Number.isNaN(numCached);
+
+  if (hasNumIncoming && hasNumCached) {
+    return numIncoming > numCached;
+  }
+
+  // If timestamp comparison is available when versions are absent
+  if (incomingTimestamp && cached.updatedAt) {
+    const incomingTime = new Date(incomingTimestamp).getTime();
+    const cachedTime = new Date(cached.updatedAt).getTime();
+    if (!Number.isNaN(incomingTime) && !Number.isNaN(cachedTime)) {
+      return incomingTime > cachedTime;
+    }
+  }
+
+  // If incoming has a valid numeric version and cached has none, allow
+  if (hasNumIncoming && !hasNumCached) return true;
+
+  // If cached has a valid numeric version and incoming has none, reject overwrite
+  if (!hasNumIncoming && hasNumCached) return false;
+
+  return false;
 }
 
 /**
- * The Section 10 seam for a future live-event integration: given a
- * `LiveEvent`-shaped object (imported by the CALLER from
- * `lib/live/liveEvent.ts` in a later phase -- this module takes a
- * structurally-compatible shape rather than importing that type
- * directly, so `lib/dataLayer` has no dependency on `lib/live`) and
- * what's currently cached, decide whether applying it would move the
- * cache forward.
- *
- * Deliberately does not itself CALL `cacheRecord` -- this only answers
- * "should I", leaving "how to turn this event into the entity's full
- * shape" to the future integration, since a live event's `changes`
- * payload is a partial diff, not necessarily the complete record this
- * cache stores.
+ * Given an incoming event shape and what's currently cached, decide
+ * whether applying it would move the cache forward.
  */
 export function shouldApplyLiveEvent(
   cached: CachedRecord | undefined,
-  incoming: { entity: string; entityId: string; version: number | null }
+  incoming: {
+    entity: string;
+    entityId: string;
+    version?: number | string | null;
+    timestamp?: string | null;
+  }
 ): boolean {
   if (!cached) return true;
   if (cached.entity !== incoming.entity || cached.entityId !== incoming.entityId) {
@@ -127,5 +151,6 @@ export function shouldApplyLiveEvent(
       `shouldApplyLiveEvent called with mismatched entity: cached=${cached.entity}:${cached.entityId}, incoming=${incoming.entity}:${incoming.entityId}`
     );
   }
-  return isNewerVersion(cached, incoming.version);
+  return isNewerVersion(cached, incoming.version, incoming.timestamp);
 }
+

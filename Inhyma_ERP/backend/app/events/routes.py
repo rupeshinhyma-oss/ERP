@@ -158,9 +158,15 @@ async def _handle_client_message(websocket: WebSocket, raw: str, current_user: C
     action = message.get("action")
     channel = message.get("channel")
 
+    if action == "ping":
+        await connection_manager.send_to_websocket(
+            websocket, {"type": "pong", "timestamp": message.get("timestamp")}
+        )
+        return
+
     if action not in ("subscribe", "unsubscribe"):
         await connection_manager.send_to_websocket(
-            websocket, {"type": "error", "message": f"Unknown action: {action!r}. Expected 'subscribe' or 'unsubscribe'."}
+            websocket, {"type": "error", "message": f"Unknown action: {action!r}. Expected 'subscribe', 'unsubscribe', or 'ping'."}
         )
         return
 

@@ -35,7 +35,6 @@ def anyio_backend() -> str:
 @pytest_asyncio.fixture(autouse=True)
 async def reset_peer_health_states() -> AsyncGenerator[None, None]:
     """Ensure circuit breaker peer_health_states table does not contaminate test runs."""
-    yield
     try:
         from sqlalchemy import update
         from app.database.engine import get_sessionmaker
@@ -47,3 +46,4 @@ async def reset_peer_health_states() -> AsyncGenerator[None, None]:
             await session.commit()
     except Exception:
         pass
+    yield
