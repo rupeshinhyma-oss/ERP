@@ -7,6 +7,7 @@ import { ToastProvider } from "./lib/toast";
 import "./styles/style.css";
 import "./styles/pages.css";
 import "./styles/tasks.css";
+import "./styles/hrms.css";
 import { initDataLayer } from "./lib/dataLayer";
 
 // Initialize Inhyma Browser Data Layer (Phase 8C)

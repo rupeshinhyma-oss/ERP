@@ -44,6 +44,12 @@ import { ImportPurchasePdfPage } from "@/pages/ImportPurchasePdfPage";
 import { PlanningPage } from "@/pages/Planning";
 import { TasksPage } from "@/pages/tasks/TasksPage";
 import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
+import { AttendancePage } from "@/pages/hrms/AttendancePage";
+import { LeavePage } from "@/pages/hrms/LeavePage";
+import { ExpensesPage } from "@/pages/hrms/ExpensesPage";
+import { SiteVisitPage } from "@/pages/hrms/SiteVisitPage";
+import { PayrollPage } from "@/pages/hrms/PayrollPage";
+import { SetupPage } from "@/pages/hrms/SetupPage";
 
 import { CountriesPage } from "@/pages/masters/Countries";
 import { StatesPage } from "@/pages/masters/States";
@@ -284,6 +290,15 @@ export function App() {
             }
           />
           <Route path="/marketing-tasks" element={<Navigate to="/marketing-task/list" replace />} />
+
+          {/* HRMS routes */}
+          <Route path="/hrms" element={<Navigate to="/hrms/attendance" replace />} />
+          <Route path="/hrms/attendance" element={<AttendancePage />} />
+          <Route path="/hrms/leave" element={<LeavePage />} />
+          <Route path="/hrms/expenses" element={<ExpensesPage />} />
+          <Route path="/hrms/site-visit" element={<SiteVisitPage />} />
+          <Route path="/hrms/payroll" element={<PayrollPage />} />
+          <Route path="/hrms/setup" element={<SetupPage />} />
 
           <Route path="/masters/company-list" element={<CompanyListPage />} />
           <Route path="/masters/countries" element={<CountriesPage />} />
