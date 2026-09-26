@@ -92,3 +92,29 @@ All local modifications for **Yinglima_ERP** were staged, committed as `6e6123a`
 | **Yinglima Backend** | Healthy | Running on port `8001` (PID 15732). Health check `HTTP 200 OK`. |
 | **Yinglima Frontend** | Built | `npm run build` completed with exit code 0 (0 TypeScript errors). |
 | **Code Push State** | Safeguarded | **No git push** executed. All changes remain local. |
+
+---
+
+## 5. September 26, 2026: Multi-ERP Identity, Access Control & Navigation Enhancements
+
+Detailed technical documentation available in [SYSTEM_CHANGES_AND_FEATURES_DOCUMENTATION.md](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/docs/SYSTEM_CHANGES_AND_FEATURES_DOCUMENTATION.md).
+
+### Summary of Major Changes:
+1. **Unified ERP Access Grants:**
+   - Retired separate "ERP Memberships" UI tab (`/access/memberships`). Navigation reduced to 3 clean tabs: `Global Users`, `Roles`, `Permissions`.
+   - ERP provisioning is now directly controlled via the **ERP Access Grants** checkboxes in Create and Edit Global User modals.
+   - User table badges display **`None`** (e.g., `Inhyma: • None`) instead of confusing `Revoked` statuses.
+2. **True Spoke Deprovisioning & User Removal:**
+   - Unchecking an ERP grant in the control plane now triggers an internal API call (`POST /api/v1/internal/users/{id}/deprovision`) on the target spoke ERP.
+   - Spoke ERP revokes active sessions and soft-deletes the user (`deleted_at = now()`, `is_active = False`).
+   - Spoke user directory (`/users`) filters `deleted_at.is_(None)`, ensuring removed users no longer appear.
+3. **Single ERP Direct Login & Multi-ERP Switching:**
+   - Users with only 1 assigned ERP are automatically redirected to their designated ERP upon login and do not see the switcher dropdown or central dashboard.
+   - Users with access to multiple ERPs (e.g., Alice Wonder) are granted access to the central ERP Dashboard and given the topbar **Ecosystem Switcher** dropdown in all authorized ERP applications.
+   - Unassigned users remain on the central ERP Dashboard without spoke access.
+4. **Ecosystem Switcher & Session Resolution Bugfix:**
+   - Fixed `AttributeError` in `ERP_Main` (`ErpInstance.erp_key` $\rightarrow$ `ErpInstance.key`) that broke ecosystem session generation for Global Users.
+   - Added proactive session synchronization on mount in `EcosystemSwitcher.tsx` for both `Yinglima_ERP` and `Inhyma_ERP`.
+   - Updated SSO token handover generation to preserve authenticated user identities (`alice@example.com`) rather than defaulting to `admin`.
+5. **Spoke User Actions Cleanup:**
+   - Removed redundant password reset and forced logout actions from spoke ERP user tables, centralizing credential and status governance in `ERP_Main`.

@@ -8,7 +8,7 @@ mirroring :mod:`app.suppliers.routes`.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
@@ -37,6 +37,8 @@ from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
+from app.durable_events.models import DurableEvent
+from app.durable_events.repository import DurableEventRepository
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
 from app.integration.jobs import enqueue_dispatch
@@ -233,7 +235,22 @@ async def create_buyer(
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
-    """Create a new buyer (client) profile."""
+    """Create a new buyer (client) profile with Idempotency-Key support."""
+    idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get("idempotency-key")
+    if idempotency_key:
+        existing_event = await DurableEventRepository(db).get_by_idempotency_key(idempotency_key)
+        if existing_event and existing_event.entity_id:
+            try:
+                existing_buyer = await service.get_by_id_or_raise(uuid.UUID(existing_event.entity_id))
+                existing_data = await _to_buyer_read(service, existing_buyer)
+                return build_success_response(
+                    data=existing_data,
+                    request_id=request.state.request_id,
+                    message="Resource already created (idempotent replay).",
+                )
+            except Exception:
+                pass
+
     buyer = await service.create(**payload.model_dump())
     data = await _to_buyer_read(service, buyer)
     await _record_action(
@@ -245,6 +262,22 @@ async def create_buyer(
         description=f"Created buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
     )
+    if idempotency_key:
+        durable_event = DurableEvent(
+            event_type="buyer.created",
+            source="yinglima",
+            entity="buyer",
+            entity_id=str(buyer.id),
+            entity_version=getattr(buyer, "version", 1),
+            payload="{}",
+            event_metadata="{}",
+            idempotency_key=idempotency_key,
+            correlation_id=uuid.uuid4(),
+            user_id=str(current_user.id),
+            occurred_at=datetime.now(timezone.utc),
+        )
+        db.add(durable_event)
+
     country = await CountryRepository(db).get_by_id(buyer.country_id)
     await _publish_buyer_integration_event(
         db=db,

@@ -40,6 +40,7 @@ class ErpMembershipRead(BaseModel):
     linked_at: datetime
     verified_at: datetime | None
     last_seen_at: datetime | None
+    metadata_json: dict | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -75,3 +76,4 @@ class InternalMembershipLookupResponse(BaseModel):
     global_user_id: uuid.UUID
     local_user_id: str
     status: ErpMembershipStatus
+    global_user_status: str | None = None

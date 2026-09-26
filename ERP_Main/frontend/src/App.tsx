@@ -37,21 +37,13 @@ import { ErpModules } from "./pages/ErpModules";
 
 // Users & Access Section
 import { GlobalUsers } from "./pages/GlobalUsers";
-import { Memberships } from "./pages/Memberships";
 import { IdentityConflicts } from "./pages/IdentityConflicts";
 import { PlatformAuthz } from "./pages/PlatformAuthz";
 
-// Organizations Section
-import { Organizations } from "./pages/Organizations";
 
-// Integrations Section
-import { IntegrationEvents } from "./pages/IntegrationEvents";
 
-// Synchronization Section
-import { SynchronizationHub } from "./pages/SynchronizationHub";
 
 // Monitoring & Audit Section
-import { MonitoringHub } from "./pages/MonitoringHub";
 import { GlobalAudit } from "./pages/GlobalAudit";
 import { Health } from "./pages/Health";
 import { Reporting } from "./pages/Reporting";
@@ -108,60 +100,42 @@ export function App() {
           {/* Section 3: Users & Access */}
           <Route path="/access" element={<Navigate to="/access/users" replace />} />
           <Route path="/access/users" element={<GlobalUsers />} />
+          <Route path="/access/users/:id" element={<GlobalUsers />} />
           <Route path="/users" element={<GlobalUsers />} />
+          <Route path="/users/:id" element={<GlobalUsers />} />
           <Route path="/access/roles" element={<PlatformAuthz defaultTab="roles" />} />
           <Route path="/access/permissions" element={<PlatformAuthz defaultTab="permissions" />} />
-          <Route path="/access/memberships" element={<Memberships />} />
-          <Route path="/memberships" element={<Memberships />} />
+          <Route path="/access/memberships" element={<Navigate to="/access/users" replace />} />
+          <Route path="/memberships" element={<Navigate to="/access/users" replace />} />
           <Route path="/access/policies" element={<PlatformAuthz defaultTab="matrix" />} />
           <Route path="/authz" element={<PlatformAuthz />} />
           <Route path="/conflicts" element={<IdentityConflicts />} />
 
-          {/* Section 4: Organizations */}
-          <Route path="/organizations" element={<Organizations />} />
-          <Route path="/organizations/companies" element={<Organizations />} />
-          <Route path="/organizations/departments" element={<Organizations />} />
-          <Route path="/organizations/business-units" element={<Organizations />} />
+          {/* Section 4: Organizations (removed - redirect to dashboard) */}
+          <Route path="/organizations" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/organizations/*" element={<Navigate to="/dashboard" replace />} />
 
-          {/* Section 5: Integrations */}
-          <Route path="/integrations" element={<IntegrationEvents />} />
-          <Route path="/integration" element={<IntegrationEvents />} />
-          <Route path="/integrations/subscriptions" element={<IntegrationEvents />} />
-          <Route path="/integrations/events" element={<IntegrationEvents />} />
-          <Route path="/integrations/deliveries" element={<IntegrationEvents />} />
-          <Route path="/integrations/failed" element={<IntegrationEvents />} />
-          <Route path="/integrations/dlq" element={<IntegrationEvents />} />
+          {/* Section 5: Integrations (removed from UI - redirect to dashboard) */}
+          <Route path="/integrations" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/integration" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/integrations/*" element={<Navigate to="/dashboard" replace />} />
 
-          {/* Section 6: Synchronization */}
-          <Route path="/sync" element={<SynchronizationHub />} />
-          <Route path="/sync/policies" element={<SynchronizationHub />} />
-          <Route path="/sync/ownership" element={<SynchronizationHub />} />
-          <Route path="/sync/mappings" element={<SynchronizationHub />} />
-          <Route path="/sync/reconciliation" element={<SynchronizationHub />} />
-          <Route path="/sync/conflicts" element={<SynchronizationHub />} />
-          <Route path="/sync/repair" element={<SynchronizationHub />} />
-          <Route path="/sync/snapshots" element={<SynchronizationHub />} />
+          {/* Section 6: Synchronization (removed from UI - redirect to dashboard) */}
+          <Route path="/sync" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/sync/*" element={<Navigate to="/dashboard" replace />} />
 
-          {/* Section 7: Monitoring & Audit */}
-          <Route path="/monitoring" element={<MonitoringHub />} />
-          <Route path="/monitoring/system" element={<MonitoringHub />} />
-          <Route path="/monitoring/erps" element={<MonitoringHub />} />
-          <Route path="/monitoring/queue" element={<MonitoringHub />} />
-          <Route path="/monitoring/realtime" element={<MonitoringHub />} />
-          <Route path="/monitoring/workers" element={<MonitoringHub />} />
-          <Route path="/monitoring/alerts" element={<MonitoringHub />} />
+          {/* Section 7: Monitoring & Audit (Audit Logs Only) */}
+          <Route path="/monitoring" element={<Navigate to="/monitoring/audit" replace />} />
           <Route path="/monitoring/audit" element={<GlobalAudit />} />
-          <Route path="/monitoring/security" element={<MonitoringHub />} />
           <Route path="/audit" element={<GlobalAudit />} />
+          <Route path="/monitoring/*" element={<Navigate to="/monitoring/audit" replace />} />
           <Route path="/health" element={<Health />} />
           <Route path="/reporting" element={<Reporting />} />
 
-          {/* Section 8: Settings */}
+          {/* Section 8: Settings (ERP_Main Settings Only) */}
           <Route path="/settings" element={<SettingsHub />} />
           <Route path="/settings/general" element={<SettingsHub />} />
-          <Route path="/settings/security" element={<SettingsHub />} />
-          <Route path="/settings/sessions" element={<SettingsHub />} />
-          <Route path="/settings/notifications" element={<SettingsHub />} />
+          <Route path="/settings/*" element={<Navigate to="/settings" replace />} />
 
           {/* Utilities & Fallbacks */}
           <Route path="/search" element={<Search />} />

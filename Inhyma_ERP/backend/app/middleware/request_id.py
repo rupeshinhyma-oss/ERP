@@ -17,6 +17,7 @@ Assigns a unique correlation ID to every incoming HTTP request. This ID is:
 
 from __future__ import annotations
 
+import re
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -26,6 +27,15 @@ from starlette.responses import Response
 from app.core.logging import request_id_ctx_var
 
 REQUEST_ID_HEADER = "X-Request-ID"
+CORRELATION_ID_HEADER = "X-Correlation-ID"
+
+
+def _sanitize_correlation_id(raw_id: str | None) -> str:
+    """Sanitize incoming correlation ID to safe alphanumeric, dash, and underscore."""
+    if not raw_id:
+        return str(uuid.uuid4())
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "", raw_id)[:64]
+    return cleaned if len(cleaned) >= 4 else str(uuid.uuid4())
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
@@ -33,15 +43,17 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Generate/propagate the request ID, store it, and echo it back."""
-        incoming_id = request.headers.get(REQUEST_ID_HEADER)
-        request_id = incoming_id or str(uuid.uuid4())
+        raw_id = request.headers.get(CORRELATION_ID_HEADER) or request.headers.get(REQUEST_ID_HEADER)
+        request_id = _sanitize_correlation_id(raw_id)
 
         token = request_id_ctx_var.set(request_id)
         request.state.request_id = request_id
+        request.state.correlation_id = request_id
         try:
             response = await call_next(request)
         finally:
             request_id_ctx_var.reset(token)
 
         response.headers[REQUEST_ID_HEADER] = request_id
+        response.headers[CORRELATION_ID_HEADER] = request_id
         return response

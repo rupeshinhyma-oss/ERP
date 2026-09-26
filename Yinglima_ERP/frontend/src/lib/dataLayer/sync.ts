@@ -24,6 +24,7 @@
  */
 
 import { apiCall } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { connectivityManager } from "./connectivity";
 import { withCrossTabLock } from "./tabLock";
 import { classifyError } from "./errors";
@@ -32,12 +33,14 @@ import { recordIdempotencyResolved } from "./idempotency";
 import { getCurrentDbName } from "./context";
 import { dbPut, dbGet } from "./db";
 import { STORES } from "./schema";
+import { cacheRecord, evictCachedRecord } from "./localCache";
 import {
   getSyncableOperations,
   markCompleted,
   markProcessing,
   markRetrying,
   moveToFailed,
+  reclaimStaleProcessingOperations,
   type QueuedOperation,
 } from "./queue";
 
@@ -110,6 +113,10 @@ class SyncManager {
   }
 
   private async drainQueue(): Promise<void> {
+    // 1. Recover any operations stranded in PROCESSING by a tab crash or closed browser
+    await reclaimStaleProcessingOperations();
+
+    // 2. Fetch syncable operations
     const operations = await getSyncableOperations();
     const now = Date.now();
     let attemptedAny = false;
@@ -130,6 +137,13 @@ class SyncManager {
   }
 
   private async attemptOperation(operation: QueuedOperation): Promise<string | null> {
+    // Security check: ensure operation belongs to the currently-authenticated user
+    const currentUserId = Auth.getProfile()?.id ?? null;
+    if (operation.userId && operation.userId !== currentUserId) {
+      // Never dispatch User A's pending mutation under User B's authentication!
+      return "USER_CONTEXT_MISMATCH";
+    }
+
     await markProcessing(operation.operationId);
 
     try {
@@ -139,7 +153,7 @@ class SyncManager {
       // queue-level retry/backoff below, layering two independent retry
       // loops on the same request. The queue is the single source of
       // retry truth for anything that went through it.
-      await apiCall(operation.path, {
+      const response = await apiCall(operation.path, {
         method: operation.method,
         body: operation.payload !== undefined ? JSON.stringify(operation.payload) : undefined,
         headers: {
@@ -155,6 +169,30 @@ class SyncManager {
         clearTimeout(timer);
         this.scheduledRetries.delete(operation.operationId);
       }
+
+      // Reconcile cache if server returned authoritative data
+      if (response && typeof response === "object" && "data" in response) {
+        const serverData = (response as { data: unknown }).data;
+        if (serverData && typeof serverData === "object" && "id" in serverData) {
+          const recordId = String((serverData as { id: unknown }).id);
+          const serverVersion = (serverData as { version?: number | null }).version ?? 1;
+
+          // If this was an optimistic creation with a temp ID, evict the temp record
+          if (operation.entityId && operation.entityId.startsWith("temp_")) {
+            await evictCachedRecord(operation.entityType, operation.entityId);
+          }
+
+          // Write authoritative server record to local cache
+          await cacheRecord({
+            entity: operation.entityType,
+            entityId: recordId,
+            version: serverVersion,
+            data: serverData,
+            source: "SERVER_FETCH",
+          });
+        }
+      }
+
       return null;
     } catch (err) {
       const classified = classifyError(err);

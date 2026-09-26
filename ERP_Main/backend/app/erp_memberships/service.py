@@ -16,9 +16,19 @@ Steps 16-18, 38, 46-48):
   the local account out-of-band. This is deliberately conservative: Step
   16 says "do not pretend unverified local user IDs are confirmed
   identities."
-- `suspend`/`restore`/`revoke` are separate, explicit actions (Step 12),
-  and NONE of them ever call out to the local ERP or touch its User
-  table (Step 48: revoking a membership is not deleting a local user).
+- `suspend`/`restore`/`revoke` are separate, explicit actions (Step 12).
+  `suspend`/`restore` now also call out to the local ERP (via the
+  existing adapter registry -- see Phase 3 Global User Status & ERP
+  Access Synchronization) to block/restore local authentication,
+  reusing each ERP's own existing internal access endpoint and its
+  own `User.can_login`/session-revocation logic rather than a new
+  parallel mechanism. This call is best-effort: an unreachable ERP
+  never blocks the membership status change itself (ERP_Main's own
+  record is always the source of truth), but the outcome is recorded
+  in that same audit entry so a missed sync is never silently lost.
+  `revoke` is unchanged and still never calls out to the local ERP --
+  see Step 48 and `IdentityLinkingService.unlink_membership`, which
+  intentionally only closes the GlobalUser<->ERP association.
 """
 
 from __future__ import annotations
@@ -34,7 +44,9 @@ from app.erp_registry.models import ErpStatus
 from app.erp_registry.repository import ErpInstanceRepository
 from app.global_audit.models import AuditActorType, AuditEventType
 from app.global_audit.service import GlobalAuditService
+from app.global_users.models import GlobalUser
 from app.global_users.repository import GlobalUserRepository
+from app.identity_linking.adapters.registry import ErpAdapterRegistry, get_adapter_registry
 from app.platform_auth.models import PlatformAdmin
 
 
@@ -47,12 +59,14 @@ class ErpMembershipService:
         global_user_repository: GlobalUserRepository,
         erp_instance_repository: ErpInstanceRepository,
         audit: GlobalAuditService,
+        adapter_registry: ErpAdapterRegistry | None = None,
     ) -> None:
         """Wire the service to its repositories and the global audit service."""
         self.membership_repository = membership_repository
         self.global_user_repository = global_user_repository
         self.erp_instance_repository = erp_instance_repository
         self.audit = audit
+        self.adapter_registry = adapter_registry or get_adapter_registry()
 
     async def create(
         self, global_user_id: uuid.UUID, erp_instance_id: uuid.UUID, payload: ErpMembershipCreate, *, actor: PlatformAdmin
@@ -155,6 +169,19 @@ class ErpMembershipService:
             raise NotFoundException("No membership found for this Global User with the calling ERP.")
         return membership
 
+    async def get_for_local_user_and_erp(
+        self, local_user_id: str, erp_instance_id: uuid.UUID
+    ) -> tuple[ErpMembership, GlobalUser | None]:
+        """
+        Fetch the membership (and associated GlobalUser) linking a local ERP user
+        to this ERP instance, or raise 404. Used by spoke ERPs for central access checks.
+        """
+        membership = await self.membership_repository.get_by_erp_and_local_user(erp_instance_id, local_user_id)
+        if membership is None:
+            raise NotFoundException("No membership found for this local user with the calling ERP.")
+        global_user = await self.global_user_repository.get_by_id(membership.global_user_id)
+        return membership, global_user
+
     async def verify(self, membership_id: uuid.UUID, *, actor: PlatformAdmin) -> ErpMembership:
         """
         Mark a PENDING membership as verified and ACTIVE.
@@ -181,19 +208,25 @@ class ErpMembershipService:
         return updated
 
     async def suspend(self, membership_id: uuid.UUID, *, actor: PlatformAdmin, reason: str | None = None) -> ErpMembership:
-        """Suspend a membership. Reversible via `restore`. Never touches the local ERP account (Step 48)."""
+        """Suspend a membership. Reversible via `restore`. Also best-effort blocks local login -- see module docstring."""
         return await self._transition(
             membership_id,
             ErpMembershipStatus.SUSPENDED,
             AuditEventType.MEMBERSHIP_SUSPENDED,
             actor=actor,
             reason=reason,
+            sync_local_access=False,
         )
 
     async def restore(self, membership_id: uuid.UUID, *, actor: PlatformAdmin, reason: str | None = None) -> ErpMembership:
-        """Restore a suspended membership back to ACTIVE."""
+        """Restore a suspended membership back to ACTIVE. Also best-effort restores local login -- see module docstring."""
         return await self._transition(
-            membership_id, ErpMembershipStatus.ACTIVE, AuditEventType.MEMBERSHIP_RESTORED, actor=actor, reason=reason
+            membership_id,
+            ErpMembershipStatus.ACTIVE,
+            AuditEventType.MEMBERSHIP_RESTORED,
+            actor=actor,
+            reason=reason,
+            sync_local_access=True,
         )
 
     async def revoke(self, membership_id: uuid.UUID, *, actor: PlatformAdmin, reason: str | None = None) -> ErpMembership:
@@ -202,10 +235,21 @@ class ErpMembershipService:
 
         This closes the GlobalUser<->ERP association only. It does NOT
         call, and never has called, any local ERP's user-deletion
-        endpoint -- see module docstring and Phase 3 Step 48.
+        endpoint -- see module docstring and Phase 3 Step 48. Unlike
+        suspend/restore, this deliberately does NOT sync local login
+        access either: a revoked membership is a closed *association*,
+        not a per-ERP access decision like suspend/restore are (a
+        GlobalUser can freely have another, unrelated membership to the
+        same local account created later; blocking the local account here
+        would conflate the two).
         """
         return await self._transition(
-            membership_id, ErpMembershipStatus.REVOKED, AuditEventType.MEMBERSHIP_REVOKED, actor=actor, reason=reason
+            membership_id,
+            ErpMembershipStatus.REVOKED,
+            AuditEventType.MEMBERSHIP_REVOKED,
+            actor=actor,
+            reason=reason,
+            sync_local_access=False,
         )
 
     async def _transition(
@@ -216,12 +260,37 @@ class ErpMembershipService:
         *,
         actor: PlatformAdmin,
         reason: str | None,
+        sync_local_access: bool | None,
     ) -> ErpMembership:
-        """Shared status-transition logic for suspend/restore/revoke."""
+        """
+        Shared status-transition logic for suspend/restore/revoke.
+
+        `sync_local_access`: True to call the adapter with
+        `allow_login=True` (restore), False for `allow_login=False`
+        (suspend), or None to skip the local call entirely (revoke).
+        """
         membership = await self.get(membership_id)
         old_status = membership.status
         membership.status = new_status
         updated = await self.membership_repository.create(membership)  # flush + refresh
+
+        sync_outcome: str | None = None
+        if sync_local_access is not None:
+            erp = await self.erp_instance_repository.get_by_id(updated.erp_instance_id)
+            if erp is not None:
+                adapter = self.adapter_registry.get_adapter(erp)
+                result = await adapter.set_local_user_access(
+                    erp, updated.local_user_id, allow_login=sync_local_access, reason=reason
+                )
+                if new_status == ErpMembershipStatus.REVOKED:
+                    try:
+                        await adapter.deprovision_local_user(erp, updated.local_user_id, reason=reason)
+                    except Exception:
+                        pass
+                sync_outcome = "synced" if result is not None else "unreachable_or_skipped"
+            else:
+                sync_outcome = "erp_not_found"
+
         await self.audit.record(
             event_type=event_type,
             actor_type=AuditActorType.HUMAN_ADMIN,
@@ -229,6 +298,37 @@ class ErpMembershipService:
             actor_label=actor.email,
             target_type="erp_membership",
             target_id=updated.id,
-            details={"old_status": old_status.value, "new_status": new_status.value, "reason": reason},
+            details={
+                "old_status": old_status.value,
+                "new_status": new_status.value,
+                "reason": reason,
+                "local_access_sync": sync_outcome,
+            },
         )
         return updated
+
+    async def delete(self, membership_id: uuid.UUID, *, actor: PlatformAdmin, reason: str | None = None) -> None:
+        """Permanently delete an ERP Membership and deprovision/remove the local user from the spoke ERP."""
+        membership = await self.get(membership_id)
+        erp = await self.erp_instance_repository.get_by_id(membership.erp_instance_id)
+        if erp is not None:
+            adapter = self.adapter_registry.get_adapter(erp)
+            try:
+                await adapter.deprovision_local_user(erp, membership.local_user_id, reason=reason)
+            except Exception as exc:
+                logger.warning("Spoke user deprovisioning failed during membership deletion: %s", exc)
+
+        await self.membership_repository.delete(membership)
+        await self.audit.record(
+            event_type=AuditEventType.GLOBAL_USER_UNLINKED,
+            actor_type=AuditActorType.HUMAN_ADMIN,
+            actor_id=actor.id,
+            actor_label=actor.email,
+            target_type="erp_membership",
+            target_id=membership_id,
+            details={
+                "global_user_id": str(membership.global_user_id),
+                "local_user_id": membership.local_user_id,
+                "reason": reason,
+            },
+        )

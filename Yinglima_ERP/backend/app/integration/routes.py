@@ -52,16 +52,27 @@ def require_service_auth(
             detail="Missing service credential.",
         )
 
-    expected = settings.FEDERATION_SERVICE_CREDENTIAL
-    token = credentials.credentials
+    valid_credentials = settings.get_expected_erp_main_credentials()
+    if not valid_credentials:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Service authentication is not configured on this server.",
+        )
 
-    if not hmac.compare_digest(token.encode("utf-8"), expected.encode("utf-8")):
-        fallback = getattr(settings, "SECRET_KEY", "")
-        if not fallback or not hmac.compare_digest(token.encode("utf-8"), fallback.encode("utf-8")):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid service credential.",
-            )
+    token = credentials.credentials
+    token_bytes = token.encode("utf-8")
+
+    matched = False
+    for expected in valid_credentials:
+        if hmac.compare_digest(token_bytes, expected.encode("utf-8")):
+            matched = True
+            break
+
+    if not matched:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid service credential.",
+        )
 
 
 # -----------------------------------------------------------------------------

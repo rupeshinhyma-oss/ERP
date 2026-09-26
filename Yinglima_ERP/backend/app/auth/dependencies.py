@@ -65,9 +65,6 @@ async def get_current_user(
     (directly, or transitively via ``require_permission()``).
     """
     user = await auth_service.verify_access_token(credentials.credentials)
-    path = request.url.path.rstrip("/")
-    if user.must_change_password and path not in _ALLOWED_PATHS_WHEN_MUST_CHANGE_PASSWORD:
-        raise ForbiddenException("Password change required. Please change your password to continue.")
     return user
 
 

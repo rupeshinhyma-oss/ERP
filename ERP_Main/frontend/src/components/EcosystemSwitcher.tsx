@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createSsoHandoverUrl, ECOSYSTEM_ERPS } from "@/lib/ssoBridge";
+import { useGlobalSession } from "@/lib/session";
 
 interface EcosystemSwitcherProps {
   currentKey?: string;
@@ -14,6 +15,7 @@ interface EcosystemSwitcherProps {
 }
 
 export function EcosystemSwitcher({ currentKey = "control-plane", organizationName }: EcosystemSwitcherProps) {
+  const { userType, memberships } = useGlobalSession();
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -43,6 +45,14 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
     const target = createSsoHandoverUrl(hostUrl);
     window.location.href = target;
   };
+
+  const isSuperAdmin = userType === "platform_admin";
+  const activeMemberships = (memberships || []).filter((m) => m.status === "ACTIVE");
+
+  // Switch ERP is shown only when the user has more than one ACTIVE ERP membership (or is super admin)
+  if (!isSuperAdmin && activeMemberships.length <= 1) {
+    return null;
+  }
 
   return (
     <div style={{ position: "relative" }} ref={dropdownRef}>

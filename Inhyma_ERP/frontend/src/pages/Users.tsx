@@ -12,7 +12,7 @@ import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
-import { Banner, Can, Modal, TableMessageRow } from "@/components/ui";
+import { Banner, Modal, TableMessageRow } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
@@ -39,7 +39,6 @@ const STATUS_OPTIONS: [string, string][] = [
   ["INACTIVE", "Inactive"],
   ["SUSPENDED", "Suspended"],
   ["LOCKED", "Locked"],
-  ["PASSWORD_CHANGE_REQUIRED", "Password Change Required"],
 ];
 
 /**
@@ -122,7 +121,7 @@ function StatusBadge({ status, isActive }: { status?: string; isActive?: boolean
   if (s === "SUSPENDED") return <span className="badge badge-suspended">Suspended</span>;
   if (s === "LOCKED") return <span className="badge badge-locked">Locked</span>;
   if (s === "PASSWORD_CHANGE_REQUIRED")
-    return <span className="badge badge-pwd-req">Pass Change Req</span>;
+    return <span className="badge badge-active">Active</span>;
   return isActive ? (
     <span className="badge badge-active">Active</span>
   ) : (
@@ -347,7 +346,6 @@ export function UsersPage() {
   const [editAddRoleId, setEditAddRoleId] = useState<string>("");
   const [editAddRoleSubmitting, setEditAddRoleSubmitting] = useState(false);
   const [removingRoleId, setRemovingRoleId] = useState<string | null>(null);
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
 
   /* Per-user permission overrides modal (checkbox grid, opened from the row
      action menu) -- same bulk-diff pattern as Rbac.tsx's Individual User
@@ -470,36 +468,7 @@ export function UsersPage() {
     }
   }
 
-  async function handleForceLogout(userId: string, username: string) {
-    if (!confirm(`Force logout user '${username}'? This will immediately terminate all their active sessions and disconnect them.`)) return;
-    await guardRowAction(`force-logout:${userId}`, async () => {
-      try {
-        const { data } = await apiPost<{ revoked_sessions?: number }>(
-          `/users/${userId}/force-logout`
-        );
-        showToast(`User '${username}' has been forced to log out. (${data?.revoked_sessions || 0} session(s) revoked)`, "success");
-      } catch (err) {
-        setError(err);
-      }
-    });
-  }
 
-  async function handleResetPassword(userId: string, username: string) {
-    if (
-      !confirm(`Reset password for user '${username}'? This will generate a new temporary password.`)
-    )
-      return;
-    await guardRowAction(`reset-password:${userId}`, async () => {
-      try {
-        const { data } = await apiPost<{ temporary_password: string }>(
-          `/users/${userId}/reset-password`
-        );
-        setTempPassword(data.temporary_password);
-      } catch (err) {
-        setError(err);
-      }
-    });
-  }
 
   const [bulkDeactivateLoading, setBulkDeactivateLoading] = useState(false);
 
@@ -742,7 +711,6 @@ export function UsersPage() {
         setRows((prev) => [data, ...prev]);
         setAllUsers((prev) => [data, ...prev]);
         setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
-        if (data.temporary_password) setTempPassword(data.temporary_password);
       } else {
         reload();
       }
@@ -993,44 +961,48 @@ export function UsersPage() {
           <div>
             <h1>User Accounts &amp; Passwords</h1>
             <div className="page-subtitle">
-              Manage employee login credentials, assign roles, enforce account status, and manage
-              sessions.
+              Viewing users provisioned for Inhyma ERP. User accounts, access provisioning, and active/disabled status are governed centrally from the ERP_Main Global Control Panel.
             </div>
           </div>
           <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            {selectedIds.size > 0 && canManage && (
-              <button
-                type="button"
-                className="btn"
-                onClick={handleBulkDeactivate}
-                disabled={bulkDeactivateLoading}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  background: "#d97706",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "6px",
-                  padding: "8px 16px",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: bulkDeactivateLoading ? "not-allowed" : "pointer",
-                  boxShadow: "0 1px 3px rgba(217, 119, 6, 0.3)",
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="6" y="4" width="4" height="16"></rect>
-                  <rect x="14" y="4" width="4" height="16"></rect>
-                </svg>
-                {bulkDeactivateLoading ? "Deactivating..." : `Deactivate Selected (${selectedIds.size})`}
-              </button>
-            )}
-            <Can permission="user.create">
-              <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-                + Create User Account
-              </button>
-            </Can>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                background: "#f1f5f9",
+                color: "#475569",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: 500,
+                border: "1px solid #e2e8f0",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+              <span>User accounts &amp; status managed centrally via <strong>ERP_Main</strong></span>
+            </span>
+            <a
+              href="http://localhost:5170/access/users"
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-secondary"
+              style={{
+                fontSize: "12px",
+                padding: "7px 12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                textDecoration: "none",
+              }}
+              title="Open Global Control Panel to add, enable, or disable users"
+            >
+              <span>Open Central Dashboard ↗</span>
+            </a>
           </div>
         </div>
         <Banner error={error} />
@@ -1160,12 +1132,7 @@ export function UsersPage() {
                           label: "✏️ Edit Profile",
                           onClick: () => openEditUser(u),
                         });
-                        const resettingPassword = isRowActionPending(`reset-password:${u.id}`);
-                        actions.push({
-                          key: "reset-password",
-                          label: resettingPassword ? "🔑 Resetting..." : "🔑 Reset Password",
-                          onClick: () => handleResetPassword(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
-                        });
+
                         const changingAdminRole = isRowActionPending(`admin-role:${u.id}`);
                         if (hasAdminRole && !isTargetSuperAdmin) {
                           actions.push({
@@ -1181,54 +1148,14 @@ export function UsersPage() {
                           onClick: () => openUserOverridesModal(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
                         });
 
-                        actions.push("divider");
-                        if (statusUpper !== "INACTIVE") {
-                          actions.push({
-                            key: "deactivate",
-                            label: "⏸️ Deactivate User",
-                            danger: true,
-                            onClick: () =>
-                              runAction(
-                                `/users/${u.id}/deactivate`,
-                                `Are you sure you want to deactivate user '${u.username ?? u.full_name ?? u.display_name ?? "this user"}'?\n\nThis will immediately prevent them from logging in and terminate all active sessions.`
-                              ),
-                          });
-                        } else {
-                          actions.push({
-                            key: "activate",
-                            label: "▶️ Activate User",
-                            onClick: () =>
-                              runAction(
-                                `/users/${u.id}/activate`,
-                                `Activate user '${u.username ?? u.full_name ?? u.display_name ?? "this user"}'? This will restore their ability to log in.`
-                              ),
-                          });
-                        }
-                        if (statusUpper === "SUSPENDED") {
-                          actions.push({
-                            key: "unsuspend",
-                            label: "⚡ Unsuspend Account",
-                            onClick: () =>
-                              runAction(
-                                `/users/${u.id}/unsuspend`,
-                                `Unsuspend account for user '${u.username}'? This will restore active login status.`
-                              ),
-                          });
-                        }
                         if (statusUpper === "LOCKED") {
+                          actions.push("divider");
                           actions.push({
                             key: "unlock",
                             label: "🔓 Unlock Account",
                             onClick: () => runAction(`/users/${u.id}/unlock`),
                           });
                         }
-                        actions.push({
-                          key: "force-logout",
-                          label: isRowActionPending(`force-logout:${u.id}`)
-                            ? "🚪 Logging out..."
-                            : "🚪 Force Logout",
-                          onClick: () => handleForceLogout(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
-                        });
                       }
                     }
 
@@ -2568,35 +2495,7 @@ export function UsersPage() {
         )}
       </Modal>
 
-      {/* Generated password */}
-      <Modal
-        open={Boolean(tempPassword)}
-        title="🔑 Password Generated"
-        onClose={() => setTempPassword(null)}
-        cardStyle={{ maxWidth: "500px", textAlign: "center" }}
-      >
-        <p>A new temporary login password has been created for this account:</p>
-        <div className="pass-display">{tempPassword}</div>
-        <p className="muted" style={{ marginTop: "12px", fontSize: "13px" }}>
-          Please copy and share this password with the employee. They will be prompted to change
-          it on their first login.
-        </p>
-        <div className="form-actions" style={{ justifyContent: "center", marginTop: "20px" }}>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => {
-              if (tempPassword) navigator.clipboard.writeText(tempPassword);
-              alert("Password copied to clipboard!");
-            }}
-          >
-            Copy Password
-          </button>
-          <button type="button" className="btn" onClick={() => setTempPassword(null)}>
-            Close
-          </button>
-        </div>
-      </Modal>
+
     </AppShell>
   );
 }

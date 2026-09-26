@@ -21,7 +21,7 @@ from app.auth.dependencies import get_auth_service, get_current_user
 from app.auth.schemas import SessionRead
 from app.auth.service import AuthService, CurrentUser
 from app.common.pagination import PageMeta, PageParams
-from app.core.exceptions import BadRequestException
+from app.core.exceptions import BadRequestException, ForbiddenException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.integration.jobs import enqueue_dispatch
@@ -194,65 +194,12 @@ async def _publish_user_integration_event(
 async def create_user(
     payload: UserCreate,
     request: Request,
-    user_service: UserService = Depends(get_user_service),
-    rbac_service: RBACService = Depends(get_rbac_service),
-    db: AsyncSession = Depends(get_db_session),
     current_user: CurrentUser = Depends(require_permission("user.create")),
-    audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Create a new user account with profile information and initial credentials/roles."""
-    user, temporary_password = await user_service.create_user(
-        first_name=payload.first_name,
-        middle_name=payload.middle_name,
-        last_name=payload.last_name,
-        display_name=payload.display_name,
-        has_login=payload.has_login,
-        employee_code=payload.employee_code,
-        username=payload.username,
-        email=payload.email,
-        phone=payload.phone,
-        manager_id=payload.manager_id,
-        date_of_birth=payload.date_of_birth,
-        gender=payload.gender,
-        date_of_joining=payload.date_of_joining,
-        employment_type=payload.employment_type,
-        employment_status=payload.employment_status,
-        address=payload.address,
-        city=payload.city,
-        state=payload.state,
-        country=payload.country,
-        postal_code=payload.postal_code,
-        emergency_contact=payload.emergency_contact,
-        notes=payload.notes,
-        role_ids=payload.role_ids,
-        password=payload.password,
-        individual_permission_ids=payload.individual_permission_ids,
-        position_id=payload.position_id,
-        created_by=current_user.id,
+    """Direct user creation is disabled. Users are provisioned centrally via ERP_Main."""
+    raise ForbiddenException(
+        "Direct user creation is disabled. User provisioning must be performed centrally via the ERP_Main Control Panel."
     )
-    user_data = await _user_with_roles(user, rbac_service, db=db)
-    await _record_user_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.CREATE,
-        actor=current_user,
-        target_user_id=user.id,
-        description=f"Created {'user' if payload.has_login else 'employee'} {user.full_name!r}.",
-        new_values={
-            "username": payload.username,
-            "email": payload.email,
-            "employee_code": payload.employee_code,
-            "phone": payload.phone,
-            "role_ids": [str(rid) for rid in (payload.role_ids or [])],
-        },
-    )
-    await _publish_user_integration_event(
-        db=db,
-        user=user,
-        actor_id=current_user.id,
-    )
-    data = {**user_data.model_dump(mode="json"), "temporary_password": temporary_password}
-    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.get("", summary="List users (admin)")
@@ -530,19 +477,10 @@ async def activate_user(
     current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Activate a pending or inactive user account."""
-    user = await user_service.activate_user(user_id, updated_by=current_user.id)
-    await _record_user_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.USER_ACTIVATED,
-        actor=current_user,
-        target_user_id=user_id,
-        description=f"Activated {user.full_name!r}.",
-        new_values={"status": user.status.value, "is_active": True},
+    """Direct local activation is disabled. Managed centrally via ERP_Main."""
+    raise ForbiddenException(
+        "User status is managed centrally. Please enable or activate this user from the ERP_Main Control Panel."
     )
-    data = UserRead.model_validate(user).model_dump(mode="json")
-    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.post("/{user_id}/deactivate", summary="Deactivate a user")
@@ -553,19 +491,10 @@ async def deactivate_user(
     current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Deactivate a user account and force-logout all of their active sessions."""
-    user = await user_service.deactivate_user(user_id, updated_by=current_user.id)
-    await _record_user_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.USER_DEACTIVATED,
-        actor=current_user,
-        target_user_id=user_id,
-        description=f"Deactivated {user.full_name!r}; all sessions revoked.",
-        new_values={"status": user.status.value, "is_active": False},
+    """Direct local deactivation is disabled. Managed centrally via ERP_Main."""
+    raise ForbiddenException(
+        "User status is managed centrally. Please disable or deactivate this user from the ERP_Main Control Panel."
     )
-    data = UserRead.model_validate(user).model_dump(mode="json")
-    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.post("/{user_id}/suspend", summary="Suspend a user")
@@ -576,19 +505,10 @@ async def suspend_user(
     current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Suspend a user account and force-logout all of their active sessions."""
-    user = await user_service.suspend_user(user_id, updated_by=current_user.id)
-    await _record_user_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.STATUS_CHANGED,
-        actor=current_user,
-        target_user_id=user_id,
-        description=f"Suspended {user.full_name!r}; all sessions revoked.",
-        new_values={"status": user.status.value, "is_active": False},
+    """Direct local suspension is disabled. Managed centrally via ERP_Main."""
+    raise ForbiddenException(
+        "User status is managed centrally. Please suspend this user from the ERP_Main Control Panel."
     )
-    data = UserRead.model_validate(user).model_dump(mode="json")
-    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.post("/{user_id}/unsuspend", summary="Unsuspend a user")
@@ -599,19 +519,10 @@ async def unsuspend_user(
     current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Unsuspend a suspended user account and restore Active status."""
-    user = await user_service.activate_user(user_id, updated_by=current_user.id)
-    await _record_user_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.USER_ACTIVATED,
-        actor=current_user,
-        target_user_id=user_id,
-        description=f"Unsuspended {user.full_name!r}; account restored to active.",
-        new_values={"status": user.status.value, "is_active": True},
+    """Direct local unsuspension is disabled. Managed centrally via ERP_Main."""
+    raise ForbiddenException(
+        "User status is managed centrally. Please restore or unsuspend this user from the ERP_Main Control Panel."
     )
-    data = UserRead.model_validate(user).model_dump(mode="json")
-    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.post("/{user_id}/unlock", summary="Unlock a locked-out user")

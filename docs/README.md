@@ -10,6 +10,7 @@ All documentation files are organized within this directory (`ERP/docs/`):
 
 | Document | Description | Target Audience |
 |---|---|---|
+| **[SYSTEM_CHANGES_AND_FEATURES_DOCUMENTATION.md](SYSTEM_CHANGES_AND_FEATURES_DOCUMENTATION.md)** | **Recent System Changes & Features Manual.** In-depth guide to unified ERP access grants, true spoke user deprovisioning, single-ERP direct login routing, multi-ERP switcher resolution, and identity isolation. | All Developers, Administrators, QA |
 | **[MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md](MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md)** | **The Complete Technical Reference Manual.** Exhaustive coverage of architecture, boundaries, Supabase PostgreSQL database setup, all features and modules across ERP_Main, Yinglima, and Inhyma, cross-system workflows, CI/CD, and disaster recovery. | All Developers, Architects, SREs |
 | **[DISASTER_RECOVERY_PLAN.md](DISASTER_RECOVERY_PLAN.md)** | **Disaster Recovery & Business Continuity.** Playbooks for Scenarios A through F (ERP_Main down, partner down, database cloud outage, failed deployments, corrupted projections) with RTO < 15 min and RPO < 1 min. | SREs, Incident Commanders |
 | **[OPERATIONAL_RUNBOOKS.md](OPERATIONAL_RUNBOOKS.md)** | **Standard Operating Procedures.** Runbooks RB-01 to RB-07 covering production deployment, safe migrations, zero-downtime rollback, PITR drills, DLQ replay, key rotation, and worker incident recovery. | On-Call Engineers, Operations |

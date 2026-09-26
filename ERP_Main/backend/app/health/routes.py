@@ -45,7 +45,11 @@ async def readiness(
     try:
         await session.execute(text("SELECT 1"))
         return build_success_response(
-            {"status": "ok", "service": "erp_main", "database": "healthy"},
+            {
+                "status": "ok",
+                "service": "erp_main",
+                "database": "healthy",
+            },
             request_id=request_id,
         )
     except Exception as exc:
@@ -54,3 +58,39 @@ async def readiness(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "degraded", "database": "unhealthy", "error": "Database connectivity failed"},
         )
+
+
+@router.get("/dependencies", summary="Federation & Subsystem Dependency Health")
+async def dependency_health(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """
+    Report safe diagnostic status for federation credentials, DB, and background workers.
+    Does NOT expose secrets, credentials, or private tokens.
+    """
+    from app.core.config import settings
+
+    request_id = getattr(request.state, "request_id", "")
+    db_healthy = False
+    try:
+        await session.execute(text("SELECT 1"))
+        db_healthy = True
+    except Exception as exc:
+        logger.warning("Database connectivity check failed during dependency health check: %s", exc)
+
+    yinglima_cred_configured = bool(settings.get_service_credential_for_erp("yinglima"))
+    inhyma_cred_configured = bool(settings.get_service_credential_for_erp("inhyma"))
+    reconciliation_enabled = bool(getattr(settings, "PROVISIONING_RECONCILIATION_ENABLED", True))
+
+    data = {
+        "status": "healthy" if db_healthy else "degraded",
+        "service": "erp_main",
+        "database": "healthy" if db_healthy else "unhealthy",
+        "federation_credentials": {
+            "yinglima": "configured" if yinglima_cred_configured else "not_configured",
+            "inhyma": "configured" if inhyma_cred_configured else "not_configured",
+        },
+        "background_reconciliation": "enabled" if reconciliation_enabled else "disabled",
+    }
+    return build_success_response(data, request_id=request_id)

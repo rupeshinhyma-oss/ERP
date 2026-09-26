@@ -110,6 +110,36 @@ export async function enqueueOperation(options: EnqueueOptions): Promise<QueuedO
   return operation;
 }
 
+/**
+ * Reclaims operations stuck in PROCESSING (e.g. from an ungraceful tab crash or reload).
+ * If an operation has been PROCESSING longer than `leaseMs`, resets it to RETRYING or PENDING.
+ */
+export async function reclaimStaleProcessingOperations(leaseMs: number = 30_000): Promise<number> {
+  const dbName = getCurrentDbName();
+  const processingOps = await dbGetAllByIndex<QueuedOperation>(dbName, STORES.PENDING_OPERATIONS, "status", "PROCESSING");
+  const now = Date.now();
+  let reclaimed = 0;
+
+  for (const op of processingOps) {
+    const updatedAt = new Date(op.updatedAt).getTime();
+    if (Number.isNaN(updatedAt) || now - updatedAt >= leaseMs) {
+      const nextStatus: OperationStatus = op.retryCount > 0 ? "RETRYING" : "PENDING";
+      await dbUpdate<QueuedOperation>(dbName, STORES.PENDING_OPERATIONS, op.operationId, (current) => {
+        if (!current) return op;
+        return {
+          ...current,
+          status: nextStatus,
+          lastError: current.lastError || "Recovered from interrupted processing state.",
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      reclaimed++;
+    }
+  }
+
+  return reclaimed;
+}
+
 /** Fetch every operation currently in PENDING or RETRYING state, ready for the Sync Manager to consider. */
 export async function getSyncableOperations(): Promise<QueuedOperation[]> {
   const dbName = getCurrentDbName();

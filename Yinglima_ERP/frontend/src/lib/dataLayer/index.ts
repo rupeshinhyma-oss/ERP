@@ -1,20 +1,17 @@
 /**
- * Data Layer Public Entry Point (Phase 2).
+ * Data Layer Public Entry Point (Phase 2 / Phase 8C / Phase 9).
  *
- * The intended import surface for application code: `import { ... }
- * from "@/lib/dataLayer"` rather than reaching into individual files.
- *
- * `initDataLayer` is the ONE function a host app calls at startup.
- * Section 19 says this phase does NOT yet require any existing module
- * to call it -- it is provided and tested now so a later phase's
- * per-module integration has a single, already-verified entry point.
+ * Public interface for application code: `import { ... } from "@/lib/dataLayer"`.
  */
 
 import { configureDataLayer } from "./context";
 import { connectivityManager } from "./connectivity";
 import { syncManager } from "./sync";
+import { startLiveIntegration, stopLiveIntegration } from "./liveIntegration";
+import { closeDatabase } from "./schema";
 
 export { configureDataLayer, getCurrentDbName, onContextChange, wipeAllStores } from "./context";
+export { closeDatabase } from "./schema";
 export { connectivityManager, type ConnectivityState } from "./connectivity";
 export { syncManager, getSyncMetadata, type SyncStatus } from "./sync";
 export {
@@ -23,6 +20,7 @@ export {
   getFailedOperations,
   getPendingCount,
   getSyncableOperations,
+  reclaimStaleProcessingOperations,
   type QueuedOperation,
   type OperationStatus,
   type OperationType,
@@ -52,23 +50,37 @@ export {
   type IdempotencyRecord,
   type IdempotencyOutcome,
 } from "./idempotency";
+export {
+  handleLiveEventForCache,
+  onLiveReconnect,
+  startLiveIntegration,
+  stopLiveIntegration,
+  type CacheAction,
+  type LiveCacheIntegrationResult,
+} from "./liveIntegration";
+export {
+  getBuyerWithCache,
+  createBuyerOfflineCapable,
+  updateBuyerOfflineCapable,
+  type BuyerEntity,
+} from "./buyerPilot";
 
 /**
  * Initialize the data layer for this tab: configure the ERP namespace,
- * start connectivity monitoring, and start the Sync Manager.
- *
- * Call once, as early as practical in app startup -- safe to call
- * before a user is logged in (see `getDatabaseName`'s "anonymous"
- * fallback in `schema.ts`), and safe to call multiple times.
+ * start connectivity monitoring, start the Sync Manager, and wire the
+ * realtime liveClient bridge.
  */
-export function initDataLayer(erpKey: string): void {
+export function initDataLayer(erpKey: string = "yinglima"): void {
   configureDataLayer(erpKey);
   connectivityManager.start();
   syncManager.start();
+  startLiveIntegration();
 }
 
-/** Tear down background activity. Mainly for tests; a real app tab never needs to call this. */
+/** Tear down background activity (primarily for test cleanup). */
 export function shutdownDataLayer(): void {
+  stopLiveIntegration();
   syncManager.stop();
   connectivityManager.stop();
+  closeDatabase();
 }

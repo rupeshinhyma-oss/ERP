@@ -22,7 +22,7 @@ from app.global_audit.service import GlobalAuditService
 from app.global_auth.repository import GlobalSessionRepository, GlobalUserCredentialRepository
 from app.global_auth.security import InvalidGlobalTokenError, decode_global_access_token
 from app.global_auth.service import GlobalAuthService
-from app.global_users.models import GlobalUser
+from app.global_users.models import GlobalUser, GlobalUserStatus
 from app.global_users.repository import GlobalUserRepository
 
 _bearer_scheme = HTTPBearer(auto_error=True, description="Global User session access token issued by POST /auth/login")
@@ -79,4 +79,6 @@ async def require_global_user(
     user = await GlobalUserRepository(db).get_by_id(global_user_id)
     if user is None:
         raise UnauthorizedException("This Global User account no longer exists.")
+    if user.status != GlobalUserStatus.ACTIVE:
+        raise UnauthorizedException("This Global User account is suspended or disabled.")
     return user, session_id

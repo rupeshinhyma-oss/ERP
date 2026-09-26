@@ -323,7 +323,33 @@ class Settings(BaseSettings):
         "non-local environment. Never confused with FEDERATION_CLIENT_ID/secret above, which authenticate "
         "the federation token EXCHANGE, not this separate internal API call.",
     )
+    # Phase 9: Incoming Service Credential from ERP_Main with Rotation Support
+    ERP_MAIN_SERVICE_CREDENTIAL: str = Field(
+        default="",
+        description="Service credential expected from ERP_Main for incoming provisioning requests.",
+    )
+    ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS: str | None = Field(
+        default=None,
+        description="Previous service credential from ERP_Main to support zero-downtime rotation.",
+    )
+
+    def get_expected_erp_main_credentials(self) -> list[str]:
+        """Return list of valid incoming credentials from ERP_Main (current and previous for rotation)."""
+        creds: list[str] = []
+        if self.ERP_MAIN_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.ERP_MAIN_SERVICE_CREDENTIAL:
+            creds.append(self.ERP_MAIN_SERVICE_CREDENTIAL)
+        if self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS and "CHANGE-ME" not in self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS:
+            creds.append(self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS)
+        # Fallback to FEDERATION_SERVICE_CREDENTIAL if ERP_MAIN_SERVICE_CREDENTIAL not set
+        if not creds and self.FEDERATION_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.FEDERATION_SERVICE_CREDENTIAL:
+            creds.append(self.FEDERATION_SERVICE_CREDENTIAL)
+        return creds
+
     FEDERATION_JWKS_CACHE_TTL_SECONDS: int = 300
+    ENFORCE_CENTRAL_MEMBERSHIP_ON_LOGIN: bool = Field(
+        default=False,
+        description="When True, POST /auth/login verifies with ERP_Main that the user holds an ACTIVE membership and GlobalUser is ACTIVE.",
+    )
 
     # Peer ERP Direct Integration Endpoints (Phase 8E - Direct runtime ERP-to-ERP delivery)
     PEER_ERP_ENDPOINTS: str = Field(
@@ -411,6 +437,11 @@ class Settings(BaseSettings):
                 "MEMBER_PASSWORD_ENCRYPTION_KEY is still set to its placeholder value in a "
                 "production environment. Set a strong, random MEMBER_PASSWORD_ENCRYPTION_KEY "
                 "via the environment."
+            )
+        if self.is_production and not self.get_expected_erp_main_credentials():
+            raise RuntimeError(
+                "Missing or placeholder ERP_MAIN_SERVICE_CREDENTIAL in production environment. "
+                "Set ERP_MAIN_SERVICE_CREDENTIAL via the environment."
             )
 
     @property
