@@ -224,19 +224,19 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
 
       // Tab 1: Leave Types (Default)
       expect(screen.getByText("Leave Types & Entitlements")).toBeDefined();
-      expect(screen.getByText("Leave Types Configuration")).toBeDefined();
+      expect(screen.getByRole("button", { name: /\+ Add Leave Type/i })).toBeDefined();
 
       // Switch to Tab 2: Expense Settings
       const expenseTabBtn = screen.getByRole("button", { name: /expense settings/i });
       fireEvent.click(expenseTabBtn);
-      expect(screen.getByText("Expense Settings & Categories")).toBeDefined();
-      expect(screen.getByText("Expense Policy Configuration")).toBeDefined();
+      expect(screen.getByText("Approval Workflow")).toBeDefined();
+      expect(screen.getByRole("button", { name: /\+ Add Category/i })).toBeDefined();
 
       // Switch to Tab 3: Geo Fencing
       const geoFencingTabBtn = screen.getByRole("button", { name: /geo fencing/i });
       fireEvent.click(geoFencingTabBtn);
       expect(screen.getByText("Geo Fencing Parameters")).toBeDefined();
-      expect(screen.getByText("Geofencing & Boundary Setup")).toBeDefined();
+      expect(screen.getByRole("button", { name: /\+ Add Office/i })).toBeDefined();
     });
   });
 });

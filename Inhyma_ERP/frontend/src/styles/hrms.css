@@ -186,3 +186,323 @@
   color: var(--color-muted, #64748b);
   margin-top: 2px;
 }
+
+/* ==========================================================================
+   HRMS Setup Tables & Badges
+   ========================================================================== */
+
+.hrms-table-container {
+  overflow-x: auto;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius, 10px);
+  margin-top: 12px;
+}
+
+.hrms-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.hrms-table th {
+  background: var(--color-bg, #f8fafc);
+  color: var(--color-muted, #64748b);
+  font-weight: 600;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+  white-space: nowrap;
+}
+
+.hrms-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+  color: var(--color-text, #0f172a);
+  vertical-align: middle;
+}
+
+.hrms-table tr:last-child td {
+  border-bottom: none;
+}
+
+.hrms-table tr:hover td {
+  background: #f8fafc;
+}
+
+.hrms-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hrms-badge-success {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.hrms-badge-danger {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.hrms-badge-info {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.hrms-badge-neutral {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.hrms-btn-action {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 5px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text-secondary, #334155);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hrms-btn-action:hover {
+  background: var(--color-bg, #f8fafc);
+  color: var(--color-primary, #0061f2);
+  border-color: #cbd5e1;
+}
+
+.hrms-btn-action.btn-danger {
+  color: #ef4444;
+}
+
+.hrms-btn-action.btn-danger:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+/* ==========================================================================
+   HRMS Modals & Forms
+   ========================================================================== */
+
+.hrms-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.hrms-modal-card {
+  background: var(--color-surface, #ffffff);
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  width: 100%;
+  max-width: 680px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border, #e2e8f0);
+}
+
+.hrms-modal-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-bg, #f8fafc);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.hrms-modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-text, #0f172a);
+}
+
+.hrms-modal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--color-muted, #64748b);
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.hrms-modal-close-btn:hover {
+  background: #e2e8f0;
+  color: var(--color-text, #0f172a);
+}
+
+.hrms-modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hrms-modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-bg, #f8fafc);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Form Controls */
+.hrms-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hrms-form-group label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #334155);
+}
+
+.hrms-form-group input[type="text"],
+.hrms-form-group input[type="number"],
+.hrms-form-group select,
+.hrms-form-group textarea {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  border: 1px solid var(--color-border-strong, #cbd5e1);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--color-text, #0f172a);
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hrms-form-group input:focus,
+.hrms-form-group select:focus,
+.hrms-form-group textarea:focus {
+  border-color: var(--color-primary, #0061f2);
+  box-shadow: 0 0 0 3px rgba(0, 97, 242, 0.15);
+}
+
+.hrms-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+/* Radius Buttons */
+.hrms-radius-buttons-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.hrms-radius-btn {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-bg, #f8fafc);
+  color: var(--color-muted, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.hrms-radius-btn:hover {
+  background: #e2e8f0;
+  color: var(--color-text, #0f172a);
+}
+
+.hrms-radius-btn.active {
+  background: var(--color-primary, #0061f2);
+  color: #ffffff;
+  border-color: var(--color-primary, #0061f2);
+}
+
+/* Map Container */
+.hrms-map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 250px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: #e2e8f0;
+}
+
+.hrms-map-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* Autocomplete suggestions dropdown */
+.hrms-autocomplete-container {
+  position: relative;
+  width: 100%;
+}
+
+.hrms-suggestions-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 6px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  margin-top: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 1100;
+}
+
+.hrms-suggestion-item {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--color-text, #0f172a);
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.12s ease;
+}
+
+.hrms-suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.hrms-suggestion-item:hover {
+  background: #eff6ff;
+  color: var(--color-primary, #0061f2);
+}
+
