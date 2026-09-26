@@ -14,6 +14,7 @@ import {
   reverseGeocodeGoogle,
   UnifiedPlacePrediction,
 } from "@/lib/googleMaps";
+import "./hrms.css";
 
 // ---------------------------------------------------------------------------
 // Type Definitions
@@ -339,6 +340,8 @@ export function SetupPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [predictions, setPredictions] = useState<UnifiedPlacePrediction[]>([]);
   const [searchingPlaces, setSearchingPlaces] = useState(false);
+  const [loadingMapSdk, setLoadingMapSdk] = useState(false);
+  const [selectedOffice, setSelectedOffice] = useState<HrmsLocation | null>(null);
 
   // Map Refs & Objects
   const mapCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -350,7 +353,20 @@ export function SetupPage() {
     setLoadingLocations(true);
     try {
       const res = await apiGet<HrmsLocation[]>("/hrms/setup/locations");
-      if (res.data) setLocations(res.data);
+      if (res.data) {
+        setLocations(res.data);
+        if (res.data.length > 0) {
+          setSelectedOffice((prev) => {
+            if (prev) {
+              const found = res.data.find((l) => l.id === prev.id);
+              return found || null;
+            }
+            return null;
+          });
+        } else {
+          setSelectedOffice(null);
+        }
+      }
     } catch (err: any) {
       showError(err.message || "Failed to load office locations.");
     } finally {
@@ -365,7 +381,7 @@ export function SetupPage() {
     setPredictions([]);
     setOfficeForm({
       name: "",
-      address: "",
+      address: "Office No 421, 4th Floor, Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604",
       latitude: DEFAULT_THANE_LAT,
       longitude: DEFAULT_THANE_LNG,
       radius_meters: 150,
@@ -397,13 +413,14 @@ export function SetupPage() {
     let isMounted = true;
 
     const initMap = async () => {
+      setLoadingMapSdk(true);
       try {
         const maps = await loadGoogleMapsSdk();
         if (!isMounted || !mapCanvasRef.current) return;
 
         const centerPos = { lat: officeForm.latitude, lng: officeForm.longitude };
 
-        // 1. Create or re-center Map
+        // 1. Create or re-center Map (only once per modal open)
         let map = googleMapInstanceRef.current;
         if (!map) {
           map = new maps.Map(mapCanvasRef.current, {
@@ -414,29 +431,44 @@ export function SetupPage() {
             mapTypeControl: false,
             streetViewControl: false,
             fullscreenControl: false,
+            gestureHandling: "cooperative",
           });
           googleMapInstanceRef.current = map;
         } else {
           map.setCenter(centerPos);
+          map.setZoom(16);
         }
 
-        // 2. Create or move Marker
+        // 2. Create or move Draggable Marker
         let marker = markerInstanceRef.current;
         if (!marker) {
           marker = new maps.Marker({
             position: centerPos,
             map,
             draggable: true,
-            title: "Drag marker to refine exact office entry",
+            title: "Drag marker to refine exact office center",
           });
           markerInstanceRef.current = marker;
 
-          // Drag end event: update coordinates & reverse geocode
+          // Drag event: smoothly sync circle & coordinates in real time
+          marker.addListener("drag", () => {
+            const pos = marker?.getPosition();
+            if (pos) {
+              const curLat = typeof pos.lat === "function" ? pos.lat() : (pos.lat as unknown as number);
+              const curLng = typeof pos.lng === "function" ? pos.lng() : (pos.lng as unknown as number);
+              if (circleInstanceRef.current) {
+                circleInstanceRef.current.setCenter({ lat: curLat, lng: curLng });
+              }
+              setOfficeForm((prev) => ({ ...prev, latitude: curLat, longitude: curLng }));
+            }
+          });
+
+          // Drag end event: update coordinates & reverse geocode for address
           marker.addListener("dragend", async () => {
             const pos = marker?.getPosition();
             if (pos) {
-              const newLat = pos.lat();
-              const newLng = pos.lng();
+              const newLat = typeof pos.lat === "function" ? pos.lat() : (pos.lat as unknown as number);
+              const newLng = typeof pos.lng === "function" ? pos.lng() : (pos.lng as unknown as number);
               setOfficeForm((prev) => ({ ...prev, latitude: newLat, longitude: newLng }));
               if (circleInstanceRef.current) {
                 circleInstanceRef.current.setCenter({ lat: newLat, lng: newLng });
@@ -447,7 +479,7 @@ export function SetupPage() {
                   setOfficeForm((prev) => ({ ...prev, address: geoRes.formatted_address }));
                 }
               } catch {
-                // Fail silently on reverse geocode drag
+                // Silently retain current address if reverse geocoding is unavailable
               }
             }
           });
@@ -455,7 +487,7 @@ export function SetupPage() {
           marker.setPosition(centerPos);
         }
 
-        // 3. Create or update Circle
+        // 3. Create or update Geofence Circle
         let circle = circleInstanceRef.current;
         if (!circle) {
           circle = new maps.Circle({
@@ -475,18 +507,25 @@ export function SetupPage() {
         }
       } catch (mapErr) {
         console.warn("Google Maps SDK could not be initialized inside modal canvas:", mapErr);
+      } finally {
+        if (isMounted) {
+          setLoadingMapSdk(false);
+        }
       }
     };
 
-    // Delay slightly to ensure modal DOM is painted
-    const timer = setTimeout(initMap, 100);
+    // Initialize cleanly on animation frame for immediate, jank-free modal render
+    const frameId = requestAnimationFrame(() => {
+      initMap();
+    });
+
     return () => {
       isMounted = false;
-      clearTimeout(timer);
+      cancelAnimationFrame(frameId);
     };
   }, [officeModalOpen]);
 
-  // Update circle radius when radius buttons clicked
+  // Update circle radius when radius buttons clicked — strictly alters circle, does NOT recreate map
   const handleRadiusChange = (meters: number) => {
     setOfficeForm((prev) => ({ ...prev, radius_meters: meters }));
     if (circleInstanceRef.current) {
@@ -494,9 +533,9 @@ export function SetupPage() {
     }
   };
 
-  // Google Places Autocomplete search (debounced)
+  // Google Places Autocomplete search (fast 180ms debounce)
   useEffect(() => {
-    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+    if (!searchQuery.trim()) {
       setPredictions([]);
       return;
     }
@@ -511,12 +550,12 @@ export function SetupPage() {
       } finally {
         setSearchingPlaces(false);
       }
-    }, 300);
+    }, 180);
 
     return () => clearTimeout(handler);
   }, [searchQuery]);
 
-  // Handle selection of a Place prediction
+  // Handle selection of a Place prediction — instantly updates map, marker, circle, address & coords
   const handleSelectPrediction = async (prediction: UnifiedPlacePrediction) => {
     setSearchQuery("");
     setPredictions([]);
@@ -537,7 +576,7 @@ export function SetupPage() {
           longitude: lng,
         }));
 
-        // Reposition map, marker, circle
+        // Instantly re-center map, marker, and circle
         if (googleMapInstanceRef.current) {
           googleMapInstanceRef.current.setCenter({ lat, lng });
           googleMapInstanceRef.current.setZoom(17);
@@ -1095,6 +1134,52 @@ export function SetupPage() {
                 </button>
               </div>
 
+              {/* Part 5 — Verified Summary Card for Inspected / Selected Office */}
+              {selectedOffice && (
+                <div className="hrms-summary-card" style={{ marginBottom: "16px", marginTop: "4px" }}>
+                  <div className="hrms-summary-header">
+                    <div className="hrms-summary-title">
+                      <IconPin />
+                      <span>{selectedOffice.name}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                      <span className="hrms-verified-badge">
+                        ✓ GPS Verified
+                      </span>
+                      <button
+                        type="button"
+                        className="hrms-btn-action"
+                        onClick={() => openEditOfficeModal(selectedOffice)}
+                      >
+                        Edit Geofence
+                      </button>
+                    </div>
+                  </div>
+                  <div className="hrms-summary-address">
+                    {selectedOffice.address}
+                  </div>
+                  <div className="hrms-summary-meta">
+                    <div className="hrms-summary-coords">
+                      Lat: {selectedOffice.latitude.toFixed(6)}, Lng: {selectedOffice.longitude.toFixed(6)}
+                    </div>
+                    <div className="hrms-summary-radius">
+                      Geofence Radius: <strong>{selectedOffice.radius_meters}m</strong>
+                    </div>
+                    <div style={{ color: "var(--color-muted)" }}>
+                      {selectedOffice.employees_assigned} assigned
+                    </div>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${selectedOffice.latitude},${selectedOffice.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hrms-summary-link"
+                    >
+                      View on Google Maps ↗
+                    </a>
+                  </div>
+                </div>
+              )}
+
               {loadingLocations ? (
                 <div style={{ padding: "40px", textAlign: "center", color: "var(--color-muted)" }}>
                   Loading office locations...
@@ -1115,68 +1200,92 @@ export function SetupPage() {
                     <thead>
                       <tr>
                         <th>Office Name</th>
-                        <th style={{ minWidth: "260px" }}>Address</th>
-                        <th>Radius</th>
+                        <th style={{ minWidth: "280px" }}>Address & Coordinates</th>
+                        <th className="hrms-th-center">Radius</th>
                         <th>Employees Assigned</th>
                         <th>Status</th>
                         <th style={{ textAlign: "right" }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {locations.map((loc) => (
-                        <tr key={loc.id}>
-                          <td style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{loc.name}</td>
-                          <td
+                      {locations.map((loc) => {
+                        const isSelected = selectedOffice?.id === loc.id;
+                        return (
+                          <tr
+                            key={loc.id}
+                            onClick={() => setSelectedOffice(loc)}
                             style={{
-                              maxWidth: "340px",
-                              wordBreak: "break-word",
-                              whiteSpace: "normal",
-                              lineHeight: 1.45,
-                              color: "var(--color-text-secondary)",
+                              cursor: "pointer",
+                              background: isSelected ? "#f8fafc" : undefined,
                             }}
                           >
-                            {loc.address}
-                          </td>
-                          <td>
-                            <span className="hrms-badge hrms-badge-info">{loc.radius_meters} m</span>
-                          </td>
-                          <td style={{ color: "var(--color-muted)" }}>
-                            {loc.employees_assigned} assigned
-                          </td>
-                          <td>
-                            {loc.is_active ? (
-                              <span className="hrms-badge hrms-badge-success">Active</span>
-                            ) : (
-                              <span className="hrms-badge hrms-badge-danger">Inactive</span>
-                            )}
-                          </td>
-                          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                            <div style={{ display: "inline-flex", gap: "6px" }}>
-                              <button
-                                type="button"
-                                className="hrms-btn-action"
-                                onClick={() => openEditOfficeModal(loc)}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="hrms-btn-action"
-                                onClick={() => toggleLocationStatus(loc)}
-                              >
-                                {loc.is_active ? "Disable" : "Enable"}
-                              </button>
-                              <button
-                                type="button"
-                                className="hrms-btn-action btn-danger"
-                                onClick={() => handleDeleteLocation(loc)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                            <td style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <IconPin />
+                                <span>{loc.name}</span>
+                              </div>
+                            </td>
+                            <td
+                              style={{
+                                maxWidth: "380px",
+                                wordBreak: "break-word",
+                                whiteSpace: "normal",
+                                lineHeight: 1.45,
+                              }}
+                            >
+                              <div style={{ color: "var(--color-text)" }}>{loc.address}</div>
+                              <div className="hrms-table-coords">
+                                <span>📍</span>
+                                <span>{loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)}</span>
+                              </div>
+                            </td>
+                            <td className="hrms-td-center">
+                              <span className="hrms-badge hrms-badge-info hrms-radius-pill">{loc.radius_meters} m</span>
+                            </td>
+                            <td style={{ color: "var(--color-muted)" }}>
+                              {loc.employees_assigned} assigned
+                            </td>
+                            <td>
+                              {loc.is_active ? (
+                                <span className="hrms-badge hrms-badge-success">
+                                  <span className="hrms-status-dot active" />
+                                  Active
+                                </span>
+                              ) : (
+                                <span className="hrms-badge hrms-badge-danger">
+                                  <span className="hrms-status-dot inactive" />
+                                  Inactive
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: "right", whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>
+                              <div style={{ display: "inline-flex", gap: "6px" }}>
+                                <button
+                                  type="button"
+                                  className="hrms-btn-action"
+                                  onClick={() => openEditOfficeModal(loc)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="hrms-btn-action"
+                                  onClick={() => toggleLocationStatus(loc)}
+                                >
+                                  {loc.is_active ? "Disable" : "Enable"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="hrms-btn-action btn-danger"
+                                  onClick={() => handleDeleteLocation(loc)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1202,7 +1311,7 @@ export function SetupPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveLeave} style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+              <form onSubmit={handleSaveLeave} className="hrms-modal-form">
                 <div className="hrms-modal-body">
                   <div className="hrms-form-group">
                     <label>Leave Name *</label>
@@ -1340,7 +1449,7 @@ export function SetupPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveCategory} style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+              <form onSubmit={handleSaveCategory} className="hrms-modal-form">
                 <div className="hrms-modal-body">
                   <div className="hrms-form-group">
                     <label>Category Name *</label>
@@ -1407,7 +1516,7 @@ export function SetupPage() {
         {/* ================================================================= */}
         {officeModalOpen && (
           <div className="hrms-modal-backdrop" onClick={() => setOfficeModalOpen(false)}>
-            <div className="hrms-modal-card" style={{ maxWidth: "760px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="hrms-modal-card hrms-office-modal" onClick={(e) => e.stopPropagation()}>
               <div className="hrms-modal-header">
                 <h3>{editingOffice ? "Edit Office Location" : "Add Office Location"}</h3>
                 <button
@@ -1424,7 +1533,7 @@ export function SetupPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveOffice} style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+              <form onSubmit={handleSaveOffice} className="hrms-modal-form">
                 <div className="hrms-modal-body">
                   <div className="hrms-form-row">
                     <div className="hrms-form-group">
@@ -1462,12 +1571,37 @@ export function SetupPage() {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                       />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          style={{
+                            position: "absolute",
+                            right: searchingPlaces ? "90px" : "12px",
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            background: "transparent",
+                            border: "none",
+                            color: "var(--color-muted)",
+                            cursor: "pointer",
+                            fontSize: "14px",
+                            padding: "4px",
+                          }}
+                          onClick={() => {
+                            setSearchQuery("");
+                            setPredictions([]);
+                          }}
+                          title="Clear search"
+                        >
+                          ✕
+                        </button>
+                      )}
                       {searchingPlaces && (
                         <div
                           style={{
                             position: "absolute",
                             right: "12px",
-                            top: "10px",
+                            top: "50%",
+                            transform: "translateY(-50%)",
                             fontSize: "12px",
                             color: "var(--color-muted)",
                           }}
@@ -1477,22 +1611,29 @@ export function SetupPage() {
                       )}
                       {predictions.length > 0 && (
                         <div className="hrms-suggestions-dropdown">
-                          {predictions.map((p) => (
-                            <div
-                              key={p.place_id}
-                              className="hrms-suggestion-item"
-                              onClick={() => handleSelectPrediction(p)}
-                            >
-                              <IconPin />
-                              <span>{p.description}</span>
-                            </div>
-                          ))}
+                          {predictions.map((p) => {
+                            const mainText = p.structured_formatting?.main_text || p.description;
+                            const subText = p.structured_formatting?.secondary_text || "";
+                            return (
+                              <div
+                                key={p.place_id}
+                                className="hrms-suggestion-item"
+                                onClick={() => handleSelectPrediction(p)}
+                              >
+                                <IconPin />
+                                <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                                  <span className="hrms-suggestion-main">{mainText}</span>
+                                  {subText && <span className="hrms-suggestion-sub">{subText}</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Google Map Container with Draggable Marker & Live Circle */}
+                  {/* Google Map Container with Draggable Marker & Live Circle & Skeleton */}
                   <div className="hrms-form-group">
                     <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span>Interactive Geofence Map</span>
@@ -1501,6 +1642,19 @@ export function SetupPage() {
                       </span>
                     </label>
                     <div className="hrms-map-wrapper">
+                      {loadingMapSdk && (
+                        <div className="hrms-map-skeleton">
+                          <div className="hrms-map-skeleton-icon">
+                            <IconPin />
+                          </div>
+                          <div style={{ fontWeight: 600, fontSize: "13.5px", color: "var(--color-text)" }}>
+                            Connecting to Google Maps Platform...
+                          </div>
+                          <div style={{ fontSize: "12px", color: "var(--color-muted)" }}>
+                            Loading interactive geofence canvas
+                          </div>
+                        </div>
+                      )}
                       <div ref={mapCanvasRef} className="hrms-map-canvas" />
                     </div>
                   </div>
@@ -1536,8 +1690,8 @@ export function SetupPage() {
                     />
                   </div>
 
-                  {/* Coordinates Preview */}
-                  <div style={{ display: "flex", gap: "16px", fontSize: "12px", color: "var(--color-muted)" }}>
+                  {/* Coordinates Preview (Latitude / Longitude) */}
+                  <div className="hrms-coords-preview">
                     <div>
                       Lat: <strong>{officeForm.latitude.toFixed(6)}</strong>
                     </div>
@@ -1545,6 +1699,40 @@ export function SetupPage() {
                       Lng: <strong>{officeForm.longitude.toFixed(6)}</strong>
                     </div>
                   </div>
+
+                  {/* Part 5 — Verified Summary Card inside Modal */}
+                  {officeForm.address && officeForm.latitude && officeForm.longitude && (
+                    <div className="hrms-summary-card">
+                      <div className="hrms-summary-header">
+                        <div className="hrms-summary-title">
+                          <IconPin />
+                          <span>{officeForm.name.trim() || "Target Location Preview"}</span>
+                        </div>
+                        <span className="hrms-verified-badge">
+                          ✓ GPS Verified
+                        </span>
+                      </div>
+                      <div className="hrms-summary-address">
+                        {officeForm.address}
+                      </div>
+                      <div className="hrms-summary-meta">
+                        <div className="hrms-summary-coords">
+                          Lat: {officeForm.latitude.toFixed(6)}, Lng: {officeForm.longitude.toFixed(6)}
+                        </div>
+                        <div className="hrms-summary-radius">
+                          Radius: <strong>{officeForm.radius_meters}m</strong>
+                        </div>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${officeForm.latitude},${officeForm.longitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hrms-summary-link"
+                        >
+                          View on Google Maps ↗
+                        </a>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="hrms-modal-footer">

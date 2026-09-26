@@ -292,7 +292,7 @@ export function App() {
           <Route path="/marketing-tasks" element={<Navigate to="/marketing-task/list" replace />} />
 
           {/* HRMS routes */}
-          <Route path="/hrms" element={<Navigate to="/hrms/attendance" replace />} />
+          <Route path="/hrms" element={<AttendancePage />} />
           <Route path="/hrms/attendance" element={<AttendancePage />} />
           <Route path="/hrms/leave" element={<LeavePage />} />
           <Route path="/hrms/expenses" element={<ExpensesPage />} />
