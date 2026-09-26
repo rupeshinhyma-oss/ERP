@@ -123,7 +123,11 @@ export function useBodyScrollLock(active: boolean): void {
       body.style.top = "";
       body.style.left = "";
       body.style.right = "";
-      window.scrollTo(0, scrollY);
+      try {
+        window.scrollTo(0, scrollY);
+      } catch {
+        // Safe fallback in environments like jsdom without full scrollTo implementation
+      }
     };
   }, [active]);
 }

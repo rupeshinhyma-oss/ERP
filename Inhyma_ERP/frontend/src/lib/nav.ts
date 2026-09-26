@@ -98,12 +98,6 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: "HRMS",
-    items: [
-      { key: "hrms", label: "HRMS", path: "/hrms", icon: "hrms" },
-    ],
-  },
-  {
     label: "USER MANAGEMENT",
     items: [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
@@ -181,7 +175,6 @@ export const PAGE_TITLES: Record<string, string> = {
   inventory: "Inventory & Stock",
   manufacturing: "Manufacturing",
   finance: "Finance & Accounts",
-  hrms: "HRMS",
   organization: "Organization Settings",
   users: "Users",
   employees: "Employees",
@@ -330,8 +323,6 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/technical-tasks.html": "/technical-task/list",
   "/marketing-tasks": "/marketing-task/list",
   "/marketing-tasks.html": "/marketing-task/list",
-  "/hrms.html": "/hrms",
-  "/hrms/dashboard": "/hrms",
   // Both of these were already redirect-only stubs in the original.
   "/employee-detail.html": "/users",
   "/employee-form.html": "/users",
