@@ -104,7 +104,6 @@ class ProvisioningReconciliationRepository:
                 claimed_at=now,
                 lease_expires_at=lease_expires_at,
                 last_attempt_at=now,
-                updated_at=now,
             )
             .execution_options(synchronize_session=False)
         )

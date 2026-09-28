@@ -157,6 +157,27 @@ class PlatformAuthzService:
         """List every defined platform role."""
         return await self.role_repository.list_all()
 
+    async def delete_role(self, role_id: uuid.UUID, *, actor_id: uuid.UUID, actor_label: str) -> None:
+        """
+        Delete a flexible platform role.
+
+        Fixed system roles (PLATFORM_SUPER_ADMIN and PLATFORM_ADMIN) are protected and cannot be deleted.
+        """
+        role = await self.get_role(role_id)
+        normalized_key = (role.role_key or "").upper()
+        if normalized_key in ("PLATFORM_SUPER_ADMIN", "PLATFORM_ADMIN", "SUPER_ADMIN", "ADMIN"):
+            raise ConflictException(f"Platform role '{role.role_key}' is a fixed system role and cannot be deleted.")
+        await self.role_repository.delete(role)
+        await self.audit.record(
+            event_type=AuditEventType.PLATFORM_ROLE_UPDATED,
+            actor_type=AuditActorType.HUMAN_ADMIN,
+            actor_id=actor_id,
+            actor_label=actor_label,
+            target_type="platform_role",
+            target_id=role_id,
+            details={"action": "deleted", "role_key": role.role_key},
+        )
+
     async def grant_permission_to_role(
         self, role_id: uuid.UUID, permission_key: str, *, actor_id: uuid.UUID, actor_label: str
     ) -> RolePermission:

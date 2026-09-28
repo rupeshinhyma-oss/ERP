@@ -66,6 +66,11 @@ class PlatformRoleRepository:
         await self.db.refresh(role)
         return role
 
+    async def delete(self, role: PlatformRole) -> None:
+        """Delete a platform role and flush."""
+        await self.db.delete(role)
+        await self.db.flush()
+
     async def get_role_permission_link(self, role_id: uuid.UUID, permission_id: uuid.UUID) -> RolePermission | None:
         """Fetch a specific RolePermission link, or None if the role doesn't already have that permission."""
         result = await self.db.execute(

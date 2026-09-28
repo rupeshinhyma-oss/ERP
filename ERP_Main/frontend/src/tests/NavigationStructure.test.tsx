@@ -59,9 +59,9 @@ describe("8 Primary Navigation Sections Specification", () => {
   });
 
   it("verifies Users & Access section tabs and paths", () => {
-    expect(ACCESS_SECTION_TABS).toHaveLength(3);
+    expect(ACCESS_SECTION_TABS).toHaveLength(2);
     const keys = ACCESS_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual(["users", "roles", "permissions"]);
+    expect(keys).toEqual(["users", "roles"]);
   });
 
   it("verifies Organizations section is removed from sidebar tabs", () => {
@@ -97,7 +97,7 @@ describe("8 Primary Navigation Sections Specification", () => {
 
     expect(screen.getByText("Global Users")).toBeDefined();
     expect(screen.getByText("Roles")).toBeDefined();
-    expect(screen.getByText("Permissions")).toBeDefined();
+    expect(screen.queryByText("Permissions")).toBeNull();
     expect(screen.queryByText("ERP Memberships")).toBeNull();
 
     const rolesLink = screen.getByRole("link", { name: /Roles/i });

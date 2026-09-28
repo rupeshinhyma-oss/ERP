@@ -50,7 +50,7 @@ async def provision_user_to_erp(
     user_id: uuid.UUID,
     payload: GlobalUserProvisionRequest,
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.membership.create")
+        require_platform_permission("platform.user.update")
     ),
     service: IdentityLinkingService = Depends(get_identity_linking_service),
 ) -> dict:
@@ -86,7 +86,7 @@ async def retry_provisioning(
     request: Request,
     membership_id: uuid.UUID,
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.membership.create")
+        require_platform_permission("platform.user.update")
     ),
     service: IdentityLinkingService = Depends(get_identity_linking_service),
 ) -> dict:
@@ -110,7 +110,7 @@ async def link_identity(
     request: Request,
     payload: DirectIdentityLinkRequest,
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.membership.create")
+        require_platform_permission("platform.user.update")
     ),
     service: IdentityLinkingService = Depends(get_identity_linking_service),
 ) -> dict:
@@ -145,7 +145,7 @@ async def unlink_identity(
     membership_id: uuid.UUID,
     reason: str | None = Query(default=None),
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.membership.revoke")
+        require_platform_permission("platform.user.update")
     ),
     service: IdentityLinkingService = Depends(get_identity_linking_service),
 ) -> dict:
@@ -166,7 +166,7 @@ async def list_user_identities(
     request: Request,
     user_id: uuid.UUID,
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.global_user.read")
+        require_platform_permission("platform.user.read")
     ),
     service: IdentityLinkingService = Depends(get_identity_linking_service),
 ) -> dict:
@@ -185,19 +185,29 @@ async def list_user_identities(
 async def list_conflicts(
     request: Request,
     erp_id: uuid.UUID | None = Query(default=None),
-    status: ConflictStatus | None = Query(default=None),
+    status: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.global_user.read")
+        require_platform_permission("platform.user.read")
     ),
     service: IdentityLinkingService = Depends(get_identity_linking_service),
 ) -> dict:
     """List ambiguous or conflicting identity matches."""
+    parsed_status: ConflictStatus | None = None
+    if status:
+        normalized = status.strip().upper()
+        if normalized in ("PENDING", "PENDING_REVIEW"):
+            parsed_status = ConflictStatus.PENDING
+        elif normalized == "RESOLVED":
+            parsed_status = ConflictStatus.RESOLVED
+        elif normalized == "REJECTED":
+            parsed_status = ConflictStatus.REJECTED
+
     conflicts = await service.conflict_repo.list_conflicts(
-        erp_instance_id=erp_id, status=status, limit=limit, offset=offset
+        erp_instance_id=erp_id, status=parsed_status, limit=limit, offset=offset
     )
-    total = await service.conflict_repo.count_conflicts(erp_instance_id=erp_id, status=status)
+    total = await service.conflict_repo.count_conflicts(erp_instance_id=erp_id, status=parsed_status)
     return build_success_response(
         [IdentityConflictRead.model_validate(c).model_dump(mode="json") for c in conflicts],
         request_id=_request_id(request),
@@ -209,7 +219,7 @@ async def get_conflict(
     request: Request,
     conflict_id: uuid.UUID,
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.global_user.read")
+        require_platform_permission("platform.user.read")
     ),
     service: IdentityLinkingService = Depends(get_identity_linking_service),
 ) -> dict:
@@ -234,7 +244,7 @@ async def resolve_conflict(
     conflict_id: uuid.UUID,
     payload: IdentityConflictResolveRequest,
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.membership.create")
+        require_platform_permission("platform.user.update")
     ),
     service: IdentityLinkingService = Depends(get_identity_linking_service),
 ) -> dict:

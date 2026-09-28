@@ -354,7 +354,7 @@ class SearchService:
     ) -> list[uuid.UUID]:
         """Resolve which ERPs a GlobalUser may see."""
         global_permissions, _erp_permissions = await self.authz_service.compute_effective_permissions(global_user_id)
-        if "platform.search.read" in global_permissions or "platform.dashboard.read" in global_permissions:
+        if "platform.search.read" in global_permissions:
             return all_erp_ids
 
         memberships = await self.membership_repository.list_for_user(global_user_id)

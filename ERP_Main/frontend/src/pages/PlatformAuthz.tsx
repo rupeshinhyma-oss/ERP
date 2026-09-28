@@ -14,59 +14,29 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, ApiError, errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
 import { SectionNavTabs } from "@/components/SectionNavTabs";
 import { ACCESS_SECTION_TABS } from "@/lib/nav";
 import {
   Banner,
-  ConfirmDialog,
-  LoadingSpinner,
   SkeletonTable,
   Modal,
   StatusBadge,
+  ConfirmDialog,
 } from "@/components/ui";
 import { ICONS } from "@/components/icons";
 import type {
-  AuthorizationScope,
-  EffectivePermissions,
-  ErpInstance,
-  GlobalUser,
   PlatformPermission,
   PlatformRole,
-  PlatformRoleAssignment,
 } from "@/types";
 
-type ActiveTab = "roles" | "permissions" | "assignments" | "matrix";
-
-interface PlatformAuthzProps {
-  defaultTab?: ActiveTab;
-}
-
-export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
+export function PlatformAuthz() {
   const toast = useToast();
-  const location = useLocation();
-
-  const resolveInitialTab = useCallback((): ActiveTab => {
-    if (defaultTab) return defaultTab;
-    if (location.pathname.includes("/permissions")) return "permissions";
-    if (location.pathname.includes("/policies")) return "matrix";
-    if (location.pathname.includes("/roles")) return "roles";
-    return "roles";
-  }, [defaultTab, location.pathname]);
-
-  const [activeTab, setActiveTab] = useState<ActiveTab>(resolveInitialTab);
-
-  useEffect(() => {
-    setActiveTab(resolveInitialTab());
-  }, [resolveInitialTab]);
 
   const [roles, setRoles] = useState<PlatformRole[]>([]);
   const [permissions, setPermissions] = useState<PlatformPermission[]>([]);
-  const [users, setUsers] = useState<GlobalUser[]>([]);
-  const [erps, setErps] = useState<ErpInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
@@ -74,46 +44,25 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
   const [createRoleModalOpen, setCreateRoleModalOpen] = useState(false);
   const [newRoleKey, setNewRoleKey] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
-  const [newRoleDescription, setNewRoleDescription] = useState("");
   const [creatingRole, setCreatingRole] = useState(false);
 
   const [editRoleModalOpen, setEditRoleModalOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<PlatformRole | null>(null);
   const [editRoleName, setEditRoleName] = useState("");
-  const [editRoleDescription, setEditRoleDescription] = useState("");
   const [editRoleActive, setEditRoleActive] = useState(true);
   const [updatingRole, setUpdatingRole] = useState(false);
+
+  // Role deletion state
+  const [deletingRoleTarget, setDeletingRoleTarget] = useState<PlatformRole | null>(null);
+  const [deletingRoleLoading, setDeletingRoleLoading] = useState(false);
 
   // Role Access Policy Modal State
   const [managePolicyRole, setManagePolicyRole] = useState<PlatformRole | null>(null);
   const [policySearch, setPolicySearch] = useState("");
   const [policyDomainFilter, setPolicyDomainFilter] = useState("ALL");
 
-  // --- TAB 2: Permissions State ---
-  const [permissionDomainFilter, setPermissionDomainFilter] = useState("ALL");
-  const [permissionSearch, setPermissionSearch] = useState("");
-  const [createPermModalOpen, setCreatePermModalOpen] = useState(false);
-  const [newPermKey, setNewPermKey] = useState("");
-  const [newPermDescription, setNewPermDescription] = useState("");
-  const [creatingPerm, setCreatingPerm] = useState(false);
-
-  // --- TAB 3: User Role Assignments State ---
-  const [selectedAssignmentUserId, setSelectedAssignmentUserId] = useState("");
-  const [userAssignments, setUserAssignments] = useState<PlatformRoleAssignment[]>([]);
-  const [effectivePerms, setEffectivePerms] = useState<EffectivePermissions | null>(null);
-  const [loadingUserAuthz, setLoadingUserAuthz] = useState(false);
-
-  const [assignModalOpen, setAssignModalOpen] = useState(false);
-  const [assignRoleKey, setAssignRoleKey] = useState("");
-  const [assignScope, setAssignScope] = useState<AuthorizationScope>("GLOBAL");
-  const [assignErpId, setAssignErpId] = useState("");
-  const [assigningRole, setAssigningRole] = useState(false);
-
-  const [revokeTarget, setRevokeTarget] = useState<PlatformRoleAssignment | null>(null);
-  const [revokingAssignment, setRevokingAssignment] = useState(false);
-
-  // --- TAB 4: Role-Permission Matrix State ---
-  const [matrixToggling, setMatrixToggling] = useState<string | null>(null); // "roleId:permKey"
+  const [permissionToggling, setPermissionToggling] = useState<string | null>(null); // "roleId:permKey"
+  const [roleSearch, setRoleSearch] = useState("");
 
   // Fetch all base data
   const fetchData = useCallback(async (silent = false) => {
@@ -122,27 +71,16 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
     }
     setError(null);
     try {
-      const [rolesRes, permsRes, usersRes, erpsRes] = await Promise.all([
+      const [rolesRes, permsRes] = await Promise.all([
         apiGet<PlatformRole[]>("/global/authz/roles").catch(() => []),
         apiGet<PlatformPermission[]>("/global/authz/permissions").catch(() => []),
-        apiGet<GlobalUser[]>("/global/users?limit=500&offset=0").catch(() => []),
-        apiGet<ErpInstance[]>("/global/erps").catch(() => []),
       ]);
 
       const roleList = Array.isArray(rolesRes) ? rolesRes : ((rolesRes as any)?.data || []);
       const permList = Array.isArray(permsRes) ? permsRes : ((permsRes as any)?.data || []);
-      const userList = Array.isArray(usersRes) ? usersRes : ((usersRes as any)?.data || []);
-      const erpList = Array.isArray(erpsRes) ? erpsRes : ((erpsRes as any)?.data || []);
 
       setRoles(roleList);
       setPermissions(permList);
-      setUsers(userList);
-      setErps(erpList.filter((e: ErpInstance) => e.status !== "DECOMMISSIONED"));
-
-      // Set initial user for assignments if none selected
-      if (!selectedAssignmentUserId && userList.length > 0) {
-        setSelectedAssignmentUserId(userList[0].id);
-      }
     } catch (err) {
       setError(err);
     } finally {
@@ -150,7 +88,7 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
         setLoading(false);
       }
     }
-  }, [selectedAssignmentUserId]);
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -164,33 +102,12 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
     return () => window.removeEventListener("focus", handleFocus);
   }, [fetchData]);
 
-  // Fetch specific user authorization details when selectedAssignmentUserId changes
-  const fetchUserAuthzDetails = useCallback(async (userId: string) => {
-    if (!userId) return;
-    setLoadingUserAuthz(true);
-    try {
-      const [assignmentsRes, effectiveRes] = await Promise.all([
-        apiGet<PlatformRoleAssignment[]>(`/global/authz/users/${userId}/roles`).catch(() => []),
-        apiGet<EffectivePermissions>(`/global/authz/users/${userId}/effective-permissions`).catch(() => null),
-      ]);
-
-      const aList = Array.isArray(assignmentsRes) ? assignmentsRes : ((assignmentsRes as any)?.data || []);
-      const ePerms = (effectiveRes as any)?.data ?? effectiveRes;
-
-      setUserAssignments(aList);
-      setEffectivePerms(ePerms || null);
-    } catch (err) {
-      toast("Failed to load user role details: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setLoadingUserAuthz(false);
-    }
-  }, [toast]);
-
-  useEffect(() => {
-    if (selectedAssignmentUserId) {
-      fetchUserAuthzDetails(selectedAssignmentUserId);
-    }
-  }, [selectedAssignmentUserId, fetchUserAuthzDetails]);
+  // Helper to identify fixed system roles (Admin is the fixed platform administrative role)
+  const isFixedRole = (role: PlatformRole | null) => {
+    if (!role) return false;
+    const k = (role.role_key || "").toUpperCase();
+    return k === "PLATFORM_ADMIN" || k === "ADMIN";
+  };
 
   // --- TAB 1 Actions: Create & Edit Roles ---
   const handleCreateRole = async (e: React.FormEvent) => {
@@ -200,21 +117,44 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
       toast("Role Key and Display Name are required.", "warning");
       return;
     }
+    if (
+      cleanKey === "PLATFORM_SUPER_ADMIN" ||
+      cleanKey === "SUPER_ADMIN" ||
+      cleanKey === "PLATFORM_ADMIN" ||
+      cleanKey === "ADMIN"
+    ) {
+      toast("Admin and Super Admin are reserved platform administrative identities and cannot be created as custom RBAC roles.", "warning");
+      return;
+    }
     setCreatingRole(true);
     try {
       await apiPost("/global/authz/roles", {
         role_key: cleanKey,
         display_name: newRoleName.trim(),
-        description: newRoleDescription.trim() || null,
       });
       toast(`Role ${cleanKey} created successfully.`, "success");
       setCreateRoleModalOpen(false);
       setNewRoleKey("");
       setNewRoleName("");
-      setNewRoleDescription("");
       await fetchData();
     } catch (err) {
-      toast("Failed to create role: " + (err instanceof Error ? err.message : String(err)), "error");
+      // Surface the real cause plainly: which HTTP status came back
+      // (409 = this role_key already exists, 403 = missing permission,
+      // 401 = session expired, anything else = unexpected/network) so
+      // "nothing happened" is never the only signal the user gets.
+      const status = err instanceof ApiError ? err.status : undefined;
+      const detail = errorMessage(err, "An unexpected error occurred.");
+      const prefix =
+        status === 409
+          ? `A role with key "${cleanKey}" already exists.`
+          : status === 403
+            ? "You don't have permission to create platform roles."
+            : status === 401
+              ? "Your session has expired. Please sign in again."
+              : "Failed to create role.";
+      toast(`${prefix} (${detail})`, "error", 6000);
+      // eslint-disable-next-line no-console
+      console.error("Create Role failed:", { status, cleanKey, err });
     } finally {
       setCreatingRole(false);
     }
@@ -223,7 +163,6 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
   const handleOpenEditRole = (role: PlatformRole) => {
     setEditingRole(role);
     setEditRoleName(role.display_name);
-    setEditRoleDescription(role.description || "");
     setEditRoleActive(role.is_active);
     setEditRoleModalOpen(true);
   };
@@ -235,8 +174,7 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
     try {
       await apiPatch(`/global/authz/roles/${editingRole.id}`, {
         display_name: editRoleName.trim(),
-        description: editRoleDescription.trim() || null,
-        is_active: editRoleActive,
+        is_active: isFixedRole(editingRole) ? true : editRoleActive,
       });
       toast(`Role ${editingRole.role_key} updated.`, "success");
       setEditRoleModalOpen(false);
@@ -249,75 +187,55 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
     }
   };
 
-  // --- TAB 2 Actions: Define Permission ---
-  const handleCreatePermission = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanKey = newPermKey.trim().toLowerCase();
-    if (!cleanKey) {
-      toast("Permission Key is required.", "warning");
-      return;
-    }
-    setCreatingPerm(true);
+  const handleDeleteRole = async () => {
+    if (!deletingRoleTarget || isFixedRole(deletingRoleTarget)) return;
+    setDeletingRoleLoading(true);
     try {
-      await apiPost("/global/authz/permissions", {
-        permission_key: cleanKey,
-        description: newPermDescription.trim() || null,
-      });
-      toast(`Permission ${cleanKey} defined successfully.`, "success");
-      setCreatePermModalOpen(false);
-      setNewPermKey("");
-      setNewPermDescription("");
-      await fetchData();
+      await apiDelete(`/global/authz/roles/${deletingRoleTarget.id}`);
+      toast(`Role ${deletingRoleTarget.display_name} (${deletingRoleTarget.role_key}) deleted successfully.`, "info");
+      setDeletingRoleTarget(null);
+      await fetchData(true);
     } catch (err) {
-      toast("Failed to define permission: " + (err instanceof Error ? err.message : String(err)), "error");
+      toast("Failed to delete role: " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
-      setCreatingPerm(false);
+      setDeletingRoleLoading(false);
     }
   };
 
   // Domain categorization helper
+  // Domain categorization helper
   const getPermissionDomain = (key: string): string => {
+    const k = key.toLowerCase();
+    if (k.startsWith("platform.audit")) return "Audit & Security";
+    if (k.startsWith("platform.user")) return "Global Users & Identity";
     const parts = key.split(".");
     if (parts.length >= 2) {
-      const sub = parts[1];
-      switch (sub) {
-        case "erp":
-          return "ERP Registry";
-        case "users":
-        case "identity":
-          return "Identity & Users";
-        case "conflicts":
-          return "Identity Conflicts";
-        case "system":
-        case "authz":
-          return "Platform Governance";
-        case "audit":
-          return "Global Audit";
-        case "integration":
-          return "Integration Outbox";
-        case "reporting":
-          return "Cross-ERP Reports";
-        default:
-          return sub.toUpperCase();
-      }
+      const sub = parts[1].toLowerCase();
+      return sub.charAt(0).toUpperCase() + sub.slice(1);
     }
-    return "Core";
+    return "Core Platform";
   };
+
+  // Only permissions for active dashboard modules are exposed for platform role assignment
+  const activePermissions = useMemo(() => {
+    return permissions.filter((p) => {
+      const k = (p.permission_key || "").toLowerCase();
+      return k.startsWith("platform.audit.") || k.startsWith("platform.user.");
+    });
+  }, [permissions]);
 
   const domains = useMemo(() => {
     const set = new Set<string>();
-    permissions.forEach((p) => set.add(getPermissionDomain(p.permission_key)));
+    activePermissions.forEach((p) => set.add(getPermissionDomain(p.permission_key)));
     return Array.from(set).sort();
-  }, [permissions]);
+  }, [activePermissions]);
 
-  const filteredPermissions = useMemo(() => {
-    return permissions.filter((p) => {
+  const groupedPolicyPermissions = useMemo(() => {
+    const q = policySearch.trim().toLowerCase();
+    const filtered = activePermissions.filter((p) => {
       const domain = getPermissionDomain(p.permission_key);
-      if (permissionDomainFilter !== "ALL" && domain !== permissionDomainFilter) {
-        return false;
-      }
-      if (permissionSearch.trim()) {
-        const q = permissionSearch.toLowerCase();
+      if (policyDomainFilter !== "ALL" && domain !== policyDomainFilter) return false;
+      if (q) {
         return (
           p.permission_key.toLowerCase().includes(q) ||
           (p.description || "").toLowerCase().includes(q) ||
@@ -326,62 +244,34 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
       }
       return true;
     });
-  }, [permissions, permissionDomainFilter, permissionSearch]);
 
-  // --- TAB 3 Actions: Assign & Revoke Roles ---
-  const handleAssignRole = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAssignmentUserId || !assignRoleKey) {
-      toast("Please select a role.", "warning");
-      return;
-    }
-    if (assignScope === "ERP" && !assignErpId) {
-      toast("Please select a target ERP instance for ERP-scoped role.", "warning");
-      return;
-    }
-
-    setAssigningRole(true);
-    try {
-      await apiPost(`/global/authz/users/${selectedAssignmentUserId}/roles`, {
-        role_key: assignRoleKey,
-        scope: assignScope,
-        erp_instance_id: assignScope === "ERP" ? assignErpId : null,
-      });
-      toast("Platform role assigned successfully.", "success");
-      setAssignModalOpen(false);
-      setAssignRoleKey("");
-      setAssignScope("GLOBAL");
-      setAssignErpId("");
-      await fetchUserAuthzDetails(selectedAssignmentUserId);
-    } catch (err) {
-      toast("Failed to assign role: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setAssigningRole(false);
-    }
-  };
-
-  const handleRevokeAssignment = async () => {
-    if (!revokeTarget) return;
-    setRevokingAssignment(true);
-    try {
-      await apiPost(`/global/authz/assignments/${revokeTarget.id}/revoke`);
-      toast(`Assignment for ${revokeTarget.role_key} revoked.`, "info");
-      setRevokeTarget(null);
-      if (selectedAssignmentUserId) {
-        await fetchUserAuthzDetails(selectedAssignmentUserId);
+    const groups: Record<string, PlatformPermission[]> = {};
+    const domainOrder: string[] = [];
+    filtered.forEach((p) => {
+      const d = getPermissionDomain(p.permission_key);
+      if (!groups[d]) {
+        groups[d] = [];
+        domainOrder.push(d);
       }
-    } catch (err) {
-      toast("Failed to revoke assignment: " + (err instanceof Error ? err.message : String(err)), "error");
-    } finally {
-      setRevokingAssignment(false);
-    }
-  };
+      groups[d].push(p);
+    });
 
-  // --- TAB 4 Actions: Matrix Grant / Revoke ---
-  const handleToggleMatrixPermission = async (role: PlatformRole, permKey: string) => {
+    return domainOrder.map((d) => [d, groups[d]] as [string, PlatformPermission[]]);
+  }, [activePermissions, policySearch, policyDomainFilter]);
+
+  const activeGrantedKeys = useMemo(() => {
+    if (!managePolicyRole) return [];
+    return (managePolicyRole.permission_keys || []).filter((k) =>
+      activePermissions.some((p) => p.permission_key === k)
+    );
+  }, [managePolicyRole, activePermissions]);
+
+
+
+  const handleToggleRolePermission = async (role: PlatformRole, permKey: string) => {
     const hasPerm = (role.permission_keys || []).includes(permKey);
     const keyId = `${role.id}:${permKey}`;
-    setMatrixToggling(keyId);
+    setPermissionToggling(keyId);
 
     try {
       if (hasPerm) {
@@ -409,261 +299,39 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
       toast("Failed to update role permission: " + (err instanceof Error ? err.message : String(err)), "error");
       await fetchData();
     } finally {
-      setMatrixToggling(null);
+      setPermissionToggling(null);
     }
   };
 
-  const selectedUser = useMemo(() => {
-    return users.find((u) => u.id === selectedAssignmentUserId);
-  }, [users, selectedAssignmentUserId]);
 
-  const getErpName = (id?: string | null) => {
-    if (!id) return "N/A";
-    const found = erps.find((e) => e.id === id);
-    return found ? found.name : id;
-  };
+  // Exclude Super Admin and Admin from customizable RBAC roles (Super Admin and Admin are built-in platform administrative users, not customizable RBAC roles)
+  const baseRoles = useMemo(() => {
+    return roles.filter((r) => {
+      const k = (r.role_key || "").toUpperCase();
+      return (
+        k !== "PLATFORM_SUPER_ADMIN" &&
+        k !== "SUPER_ADMIN" &&
+        k !== "PLATFORM_ADMIN" &&
+        k !== "ADMIN"
+      );
+    });
+  }, [roles]);
+
+  const filteredRoles = useMemo(() => {
+    if (!roleSearch.trim()) return baseRoles;
+    const q = roleSearch.toLowerCase();
+    return baseRoles.filter(
+      (r) =>
+        r.display_name.toLowerCase().includes(q) ||
+        r.role_key.toLowerCase().includes(q)
+    );
+  }, [baseRoles, roleSearch]);
 
   const sectionActiveKey = useMemo(() => {
-    if (activeTab === "permissions") return "permissions";
     return "roles";
-  }, [activeTab]);
+  }, []);
 
-  const pageTitle = useMemo(() => {
-    if (activeTab === "permissions") return "Platform Permissions";
-    if (activeTab === "matrix") return "Role-Permission Matrix";
-    if (activeTab === "assignments") return "User Role Assignments";
-    return "Roles & Access Policies";
-  }, [activeTab]);
-
-  const renderUserAssignmentsContent = () => (
-    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      {/* User Selection Card */}
-      <div className="card" style={{ padding: "18px 22px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: "260px" }}>
-            <label className="form-label" htmlFor="authz-user-select" style={{ marginBottom: "6px" }}>
-              Select Global User Identity to Inspect & Assign Platform Roles:
-            </label>
-            <select
-              id="authz-user-select"
-              className="form-select"
-              value={selectedAssignmentUserId}
-              onChange={(e) => setSelectedAssignmentUserId(e.target.value)}
-            >
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.display_name} &mdash; {u.primary_email || u.email} ({u.status})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedUser && (
-            <div style={{ display: "flex", gap: "10px", alignItems: "center", paddingTop: "18px" }}>
-              <StatusBadge status={selectedUser.status} />
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => setAssignModalOpen(true)}
-                style={{ display: "flex", alignItems: "center", gap: "6px" }}
-              >
-                <ICONS.plus width={14} height={14} />
-                Assign Role
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {loadingUserAuthz ? (
-        <LoadingSpinner text="Loading role assignments and effective permissions..." />
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "20px" }}>
-          {/* Active & Revoked Role Assignments */}
-          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--color-border)" }}>
-              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: "var(--color-text)" }}>
-                Assigned Platform Roles for {selectedUser?.display_name}
-              </h3>
-              <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "2px" }}>
-                Roles can be scoped globally (all platform services) or restricted to a specific ERP instance.
-              </div>
-            </div>
-
-            {userAssignments.length === 0 ? (
-              <div style={{ padding: "32px", textAlign: "center", color: "var(--color-muted)" }}>
-                No platform roles assigned to this user.
-              </div>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Role Key</th>
-                      <th>Scope</th>
-                      <th>Target ERP</th>
-                      <th>Status</th>
-                      <th>Assigned Date</th>
-                      <th style={{ textAlign: "right" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {userAssignments.map((a) => (
-                      <tr key={a.id}>
-                        <td>
-                          <span
-                            className="badge"
-                            style={{
-                              backgroundColor: "#e0f2fe",
-                              color: "#0369a1",
-                              fontFamily: "monospace",
-                              fontSize: "12px",
-                            }}
-                          >
-                            {a.role_key}
-                          </span>
-                        </td>
-                        <td>
-                          <span
-                            className="badge"
-                            style={{
-                              backgroundColor: a.scope === "GLOBAL" ? "#fef3c7" : "#f1f5f9",
-                              color: a.scope === "GLOBAL" ? "#b45309" : "var(--color-text)",
-                              fontSize: "11px",
-                            }}
-                          >
-                            {a.scope}
-                          </span>
-                        </td>
-                        <td>
-                          {a.erp_instance_id ? (
-                            <span style={{ fontWeight: 600, color: "var(--color-text)" }}>
-                              {getErpName(a.erp_instance_id)}
-                            </span>
-                          ) : (
-                            <span style={{ color: "var(--color-muted)" }}>All ERPs (Global)</span>
-                          )}
-                        </td>
-                        <td>
-                          <StatusBadge
-                            status={a.is_active ? "ACTIVE" : "REVOKED"}
-                            isActive={a.is_active}
-                          />
-                        </td>
-                        <td style={{ fontSize: "12px", color: "var(--color-muted)" }}>
-                          {new Date(a.created_at).toLocaleDateString()}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {a.is_active && (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline"
-                              style={{ color: "var(--color-danger)", borderColor: "#fecaca" }}
-                              onClick={() => setRevokeTarget(a)}
-                            >
-                              Revoke
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Computed Effective Platform Permissions */}
-          <div className="card" style={{ padding: "20px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-              <ICONS.shield width={18} height={18} style={{ color: "var(--color-success)" }} />
-              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: "var(--color-text)" }}>
-                Live Computed Effective Permissions
-              </h3>
-            </div>
-            <p style={{ margin: "0 0 16px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
-              Aggregated union of all active role grants held by this identity across the control plane.
-            </p>
-
-            {/* Global Scope */}
-            <div style={{ marginBottom: "16px" }}>
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--color-text)", marginBottom: "8px" }}>
-                Global Permissions (Platform-wide):
-              </div>
-              {(effectivePerms?.global_permissions || []).length === 0 ? (
-                <div style={{ fontSize: "12px", color: "var(--color-muted)", fontStyle: "italic" }}>
-                  No global permissions held.
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                  {effectivePerms?.global_permissions.map((p) => (
-                    <code
-                      key={p}
-                      style={{
-                        fontFamily: "monospace",
-                        fontSize: "11px",
-                        backgroundColor: "#f0fdf4",
-                        color: "#15803d",
-                        border: "1px solid #bbf7d0",
-                        padding: "3px 8px",
-                        borderRadius: "4px",
-                      }}
-                    >
-                      {p}
-                    </code>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* ERP-Scoped */}
-            {effectivePerms?.erp_permissions && Object.keys(effectivePerms.erp_permissions).length > 0 && (
-              <div>
-                <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--color-text)", marginBottom: "8px" }}>
-                  ERP-Scoped Permissions:
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  {Object.entries(effectivePerms.erp_permissions).map(([erpId, permList]) => (
-                    <div
-                      key={erpId}
-                      style={{
-                        padding: "10px 14px",
-                        backgroundColor: "#f8fafc",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "6px",
-                      }}
-                    >
-                      <div style={{ fontWeight: 600, fontSize: "12px", color: "var(--color-primary)", marginBottom: "6px" }}>
-                        {getErpName(erpId)}:
-                      </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                        {permList.map((p) => (
-                          <code
-                            key={p}
-                            style={{
-                              fontFamily: "monospace",
-                              fontSize: "11px",
-                              backgroundColor: "#ffffff",
-                              color: "var(--color-text)",
-                              border: "1px solid #cbd5e1",
-                              padding: "2px 6px",
-                              borderRadius: "4px",
-                            }}
-                          >
-                            {p}
-                          </code>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  const pageTitle = "Roles & Access Policies";
 
   return (
     <AppShell
@@ -672,57 +340,15 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
       breadcrumbs={["Users & Access", pageTitle]}
       actions={
         <div style={{ display: "flex", gap: "8px" }}>
-          {activeTab === "roles" && (
-            <>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => setCreateRoleModalOpen(true)}
-                style={{ display: "flex", alignItems: "center", gap: "6px" }}
-              >
-                <ICONS.plus width={14} height={14} />
-                Create Role
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => {
-                  setAssignRoleKey("");
-                  setAssignScope("GLOBAL");
-                  setAssignErpId("");
-                  setAssignModalOpen(true);
-                }}
-                disabled={!selectedAssignmentUserId}
-                style={{ display: "flex", alignItems: "center", gap: "6px" }}
-              >
-                <ICONS.plus width={14} height={14} />
-                Assign Role
-              </button>
-            </>
-          )}
-          {activeTab === "permissions" && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setCreatePermModalOpen(true)}
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <ICONS.plus width={14} height={14} />
-              Define Permission
-            </button>
-          )}
-          {activeTab === "assignments" && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setAssignModalOpen(true)}
-              disabled={!selectedAssignmentUserId}
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <ICONS.plus width={14} height={14} />
-              Assign Role
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setCreateRoleModalOpen(true)}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            <ICONS.plus width={14} height={14} />
+            Create Role
+          </button>
         </div>
       }
     >
@@ -730,572 +356,268 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
 
       <Banner error={error} />
 
-      {/* Architectural Callout */}
-      <div
-        className="card"
-        style={{
-          marginBottom: "20px",
-          padding: "16px 20px",
-          background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
-          border: "1px solid var(--color-border)",
-          borderLeft: "4px solid var(--color-primary)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "14px" }}>
-          <div
-            style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "8px",
-              backgroundColor: "rgba(14, 116, 144, 0.12)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--color-primary)",
-              flexShrink: 0,
-            }}
-          >
-            <ICONS.shield width={20} height={20} />
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--color-text)", marginBottom: "4px" }}>
-              Control Plane Authorization (Platform RBAC) vs. ERP Local RBAC
-            </div>
-            <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", lineHeight: 1.55 }}>
-              Platform Roles and Permissions govern operations inside <strong>ERP_Main</strong> (e.g. ERP registry,
-              global user lifecycle, cross-ERP routing, audit logs, and conflict resolution). They do{" "}
-              <strong>not</strong> govern business domain permissions inside Yinglima or Inhyma ERP (e.g. quote
-              creation, warehouse stock moves, customer invoices), which are evaluated autonomously by local ERP engines.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs Bar */}
-      <div
-        style={{
-          display: "flex",
-          borderBottom: "1px solid var(--color-border)",
-          marginBottom: "20px",
-          gap: "8px",
-        }}
-      >
-        <button
-          type="button"
-          className="btn"
-          style={{
-            background: "none",
-            border: "none",
-            borderRadius: 0,
-            borderBottom: activeTab === "roles" ? "2px solid var(--color-primary)" : "2px solid transparent",
-            color: activeTab === "roles" ? "var(--color-primary)" : "var(--color-text-secondary)",
-            fontWeight: activeTab === "roles" ? 700 : 500,
-            padding: "10px 16px",
-            fontSize: "14px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}
-          onClick={() => setActiveTab("roles")}
-        >
-          <ICONS.shield width={16} height={16} />
-          Platform Roles ({roles.length})
-        </button>
-
-        <button
-          type="button"
-          className="btn"
-          style={{
-            background: "none",
-            border: "none",
-            borderRadius: 0,
-            borderBottom: activeTab === "permissions" ? "2px solid var(--color-primary)" : "2px solid transparent",
-            color: activeTab === "permissions" ? "var(--color-primary)" : "var(--color-text-secondary)",
-            fontWeight: activeTab === "permissions" ? 700 : 500,
-            padding: "10px 16px",
-            fontSize: "14px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}
-          onClick={() => setActiveTab("permissions")}
-        >
-          <ICONS.key width={16} height={16} />
-          Platform Permissions ({permissions.length})
-        </button>
-
-        <button
-          type="button"
-          className="btn"
-          style={{
-            background: "none",
-            border: "none",
-            borderRadius: 0,
-            borderBottom: activeTab === "assignments" ? "2px solid var(--color-primary)" : "2px solid transparent",
-            color: activeTab === "assignments" ? "var(--color-primary)" : "var(--color-text-secondary)",
-            fontWeight: activeTab === "assignments" ? 700 : 500,
-            padding: "10px 16px",
-            fontSize: "14px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}
-          onClick={() => setActiveTab("assignments")}
-        >
-          <ICONS.user width={16} height={16} />
-          User Role Assignments
-        </button>
-
-        <button
-          type="button"
-          className="btn"
-          style={{
-            background: "none",
-            border: "none",
-            borderRadius: 0,
-            borderBottom: activeTab === "matrix" ? "2px solid var(--color-primary)" : "2px solid transparent",
-            color: activeTab === "matrix" ? "var(--color-primary)" : "var(--color-text-secondary)",
-            fontWeight: activeTab === "matrix" ? 700 : 500,
-            padding: "10px 16px",
-            fontSize: "14px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}
-          onClick={() => setActiveTab("matrix")}
-        >
-          <ICONS.check width={16} height={16} />
-          Role-Permission Matrix
-        </button>
-      </div>
-
       {loading ? (
         <SkeletonTable rows={6} cols={5} />
       ) : (
-        <>
-          {/* ========================================================================= */}
-          {/* ========================================================================= */}
-          {/* TAB 1: Roles & Access Control (Unified Platform RBAC Hub)                 */}
-          {/* ========================================================================= */}
-          {activeTab === "roles" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-              <div
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Controls Bar: Search & Count */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "12px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ position: "relative", minWidth: "260px", maxWidth: "360px", flex: 1 }}>
+              <span
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-                  gap: "18px",
-                }}
-              >
-                {roles.map((role) => {
-                  const permCount = (role.permission_keys || []).length;
-                  return (
-                    <div
-                      key={role.id}
-                      className="card"
-                      style={{
-                        padding: "20px",
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "space-between",
-                        borderTop: `4px solid ${role.is_active ? "var(--color-primary)" : "var(--color-muted)"}`,
-                      }}
-                    >
-                      <div>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "flex-start",
-                            marginBottom: "8px",
-                          }}
-                        >
-                          <div>
-                            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>
-                              {role.display_name}
-                            </h3>
-                            <span
-                              className="badge"
-                              style={{
-                                backgroundColor: "#e0f2fe",
-                                color: "#0369a1",
-                                fontFamily: "monospace",
-                                fontSize: "11px",
-                                marginTop: "4px",
-                              }}
-                            >
-                              {role.role_key}
-                            </span>
-                          </div>
-                          <StatusBadge isActive={role.is_active} />
-                        </div>
-
-                        <p
-                          style={{
-                            margin: "12px 0 16px",
-                            fontSize: "13px",
-                            color: "var(--color-text-secondary)",
-                            lineHeight: 1.5,
-                            minHeight: "40px",
-                          }}
-                        >
-                          {role.description || "No description provided."}
-                        </p>
-
-                        {/* Access Policy Section */}
-                        <div
-                          style={{
-                            marginBottom: "16px",
-                            padding: "12px",
-                            borderRadius: "6px",
-                            backgroundColor: "#f8fafc",
-                            border: "1px solid #e2e8f0",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              marginBottom: "8px",
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: "11.5px",
-                                fontWeight: 700,
-                                color: "#475569",
-                                textTransform: "uppercase",
-                                letterSpacing: "0.03em",
-                              }}
-                            >
-                              Access Policy ({permCount} Permissions)
-                            </span>
-                            <button
-                              type="button"
-                              className="btn btn-sm"
-                              onClick={() => {
-                                setManagePolicyRole(role);
-                                setPolicySearch("");
-                                setPolicyDomainFilter("ALL");
-                              }}
-                              style={{
-                                fontSize: "11px",
-                                padding: "2px 8px",
-                                background: "#f0fdf4",
-                                border: "1px solid #86efac",
-                                color: "#166534",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                                fontWeight: 600,
-                              }}
-                            >
-                              Manage Policy
-                            </button>
-                          </div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", maxHeight: "110px", overflowY: "auto" }}>
-                            {permCount === 0 ? (
-                              <span style={{ fontSize: "12px", color: "var(--color-muted)", fontStyle: "italic" }}>
-                                No permissions granted yet.
-                              </span>
-                            ) : (
-                              (role.permission_keys || []).map((pKey) => (
-                                <span
-                                  key={pKey}
-                                  style={{
-                                    fontFamily: "monospace",
-                                    fontSize: "11px",
-                                    padding: "2px 6px",
-                                    borderRadius: "4px",
-                                    backgroundColor: "#ffffff",
-                                    color: "var(--color-text)",
-                                    border: "1px solid #cbd5e1",
-                                  }}
-                                >
-                                  {pKey}
-                                </span>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          paddingTop: "14px",
-                          borderTop: "1px solid var(--color-border)",
-                          gap: "8px",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-secondary"
-                          onClick={() => handleOpenEditRole(role)}
-                        >
-                          Edit Role
-                        </button>
-                        <div style={{ display: "flex", gap: "6px" }}>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline"
-                            style={{ color: "#166534", borderColor: "#86efac", backgroundColor: "#f0fdf4" }}
-                            onClick={() => {
-                              setManagePolicyRole(role);
-                              setPolicySearch("");
-                              setPolicyDomainFilter("ALL");
-                            }}
-                          >
-                            Manage Policy
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-primary"
-                            onClick={() => {
-                              setAssignRoleKey(role.role_key);
-                              setAssignScope("GLOBAL");
-                              setAssignErpId("");
-                              setAssignModalOpen(true);
-                            }}
-                          >
-                            Assign User
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Merged Section 2: User Role Assignments & Live Effective Permissions */}
-              <div style={{ marginTop: "12px", borderTop: "2px solid #e2e8f0", paddingTop: "24px" }}>
-                <div style={{ marginBottom: "16px" }}>
-                  <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>
-                    User Role Assignments & Effective Permissions
-                  </h3>
-                  <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-text-secondary)" }}>
-                    Inspect identity role assignments and live computed effective access across all ERPs.
-                  </p>
-                </div>
-                {renderUserAssignmentsContent()}
-              </div>
-            </div>
-          )}
-
-          {/* ========================================================================= */}
-          {/* TAB 2: Platform Permissions Catalog                                       */}
-          {/* ========================================================================= */}
-          {activeTab === "permissions" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {/* Filter / Search Bar */}
-              <div
-                className="card"
-                style={{
-                  padding: "16px 20px",
+                  position: "absolute",
+                  left: "10px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "var(--color-muted)",
                   display: "flex",
-                  justifyContent: "space-between",
                   alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "12px",
+                  pointerEvents: "none",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", flex: 1 }}>
-                  <div style={{ position: "relative", minWidth: "260px" }}>
-                    <input
-                      type="text"
-                      className="form-input"
-                      style={{ paddingLeft: "34px", height: "36px", fontSize: "13px" }}
-                      placeholder="Search permission key or description..."
-                      value={permissionSearch}
-                      onChange={(e) => setPermissionSearch(e.target.value)}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: "10px",
-                        top: "50%",
-                        transform: "translateY(-50%)",
-                        color: "var(--color-muted)",
-                      }}
-                    >
-                      <ICONS.search width={14} height={14} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--color-text-secondary)" }}>
-                      Domain:
-                    </span>
-                    <select
-                      className="form-select"
-                      style={{ width: "auto", height: "36px", fontSize: "13px" }}
-                      value={permissionDomainFilter}
-                      onChange={(e) => setPermissionDomainFilter(e.target.value)}
-                    >
-                      <option value="ALL">All Domains ({permissions.length})</option>
-                      {domains.map((dom) => (
-                        <option key={dom} value={dom}>
-                          {dom}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ fontSize: "13px", color: "var(--color-muted)" }}>
-                  Showing <strong>{filteredPermissions.length}</strong> of <strong>{permissions.length}</strong> permissions
-                </div>
-              </div>
-
-              {/* Permissions Table */}
-              <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Permission Key</th>
-                        <th>Functional Domain</th>
-                        <th>Description</th>
-                        <th>Defined At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredPermissions.map((perm) => (
-                        <tr key={perm.id}>
-                          <td>
-                            <code
-                              style={{
-                                fontFamily: "monospace",
-                                fontSize: "12px",
-                                fontWeight: 700,
-                                color: "var(--color-primary)",
-                                backgroundColor: "#f0fdf4",
-                                border: "1px solid #bbf7d0",
-                                padding: "3px 7px",
-                                borderRadius: "4px",
-                              }}
-                            >
-                              {perm.permission_key}
-                            </code>
-                          </td>
-                          <td>
-                            <span
-                              className="badge"
-                              style={{
-                                backgroundColor: "#f1f5f9",
-                                color: "var(--color-text)",
-                                fontWeight: 600,
-                                fontSize: "11px",
-                              }}
-                            >
-                              {getPermissionDomain(perm.permission_key)}
-                            </span>
-                          </td>
-                          <td style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>
-                            {perm.description || "No description provided."}
-                          </td>
-                          <td style={{ fontSize: "12px", color: "var(--color-muted)" }}>
-                            {new Date(perm.created_at).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                <ICONS.search width={14} height={14} />
+              </span>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Search platform roles..."
+                style={{ paddingLeft: "32px", height: "36px", fontSize: "13px", width: "100%" }}
+                value={roleSearch}
+                onChange={(e) => setRoleSearch(e.target.value)}
+              />
             </div>
-          )}
+            <div style={{ fontSize: "13px", color: "var(--color-muted)" }}>
+              Showing <strong>{filteredRoles.length}</strong> of <strong>{baseRoles.length}</strong> platform roles
+            </div>
+          </div>
 
-          {/* ========================================================================= */}
-          {/* TAB 3: User Role Assignments                                              */}
-          {/* ========================================================================= */}
-          {activeTab === "assignments" && renderUserAssignmentsContent()}
-
-          {/* ========================================================================= */}
-          {/* TAB 4: Role-Permission Matrix                                             */}
-          {/* ========================================================================= */}
-          {activeTab === "matrix" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div
-                className="card"
-                style={{
-                  padding: "14px 18px",
-                  backgroundColor: "#f8fafc",
-                  fontSize: "13px",
-                  color: "var(--color-text-secondary)",
-                }}
-              >
-                Click any checkbox to grant or revoke that platform permission from a role. Changes are audited and
-                take effect immediately on the control plane.
-              </div>
-
-              <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-                <table className="table" style={{ margin: 0 }}>
+          {/* Roles List Table */}
+          {filteredRoles.length === 0 ? (
+            <div className="card" style={{ padding: "40px 20px", textAlign: "center" }}>
+              <p style={{ margin: 0, color: "var(--color-muted)", fontSize: "14px" }}>
+                {roleSearch
+                  ? "No platform roles matched your search criteria."
+                  : "No platform roles configured."}
+              </p>
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+              <div className="table-responsive">
+                <table className="table" style={{ margin: 0, width: "100%" }}>
                   <thead>
-                    <tr>
-                      <th style={{ minWidth: "260px" }}>Permission Key / Domain</th>
-                      {roles.map((role) => (
-                        <th key={role.id} style={{ textAlign: "center", minWidth: "140px" }}>
-                          <div style={{ fontWeight: 700, color: "var(--color-text)" }}>{role.display_name}</div>
-                          <div style={{ fontSize: "11px", color: "var(--color-muted)", fontFamily: "monospace" }}>
-                            {role.role_key}
-                          </div>
-                        </th>
-                      ))}
+                    <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                      <th style={{ width: "40%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Platform Role
+                      </th>
+                      <th style={{ width: "26%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Access Policy
+                      </th>
+                      <th style={{ width: "12%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Status
+                      </th>
+                      <th style={{ width: "22%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {permissions.map((perm) => (
-                      <tr key={perm.id}>
-                        <td>
-                          <div style={{ fontFamily: "monospace", fontSize: "12px", fontWeight: 700, color: "var(--color-primary)" }}>
-                            {perm.permission_key}
-                          </div>
-                          <div style={{ fontSize: "11px", color: "var(--color-muted)", marginTop: "2px" }}>
-                            {perm.description || getPermissionDomain(perm.permission_key)}
-                          </div>
-                        </td>
-                        {roles.map((role) => {
-                          const hasPerm = (role.permission_keys || []).includes(perm.permission_key);
-                          const isToggling = matrixToggling === `${role.id}:${perm.permission_key}`;
-
-                          return (
-                            <td key={role.id} style={{ textAlign: "center" }}>
-                              <label
+                    {filteredRoles.map((role) => {
+                      const roleActiveKeys = (role.permission_keys || []).filter((k) =>
+                        activePermissions.some((p) => p.permission_key === k)
+                      );
+                      const permCount = roleActiveKeys.length;
+                      const fixed = isFixedRole(role);
+                      return (
+                        <tr
+                          key={role.id}
+                          style={{ transition: "background-color 0.12s ease" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                        >
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                              <div
                                 style={{
-                                  display: "inline-flex",
+                                  width: "36px",
+                                  height: "36px",
+                                  borderRadius: "8px",
+                                  background: fixed
+                                    ? "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)"
+                                    : role.is_active
+                                      ? "linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)"
+                                      : "#f1f5f9",
+                                  color: fixed ? "#b45309" : role.is_active ? "#0369a1" : "#94a3b8",
+                                  display: "flex",
                                   alignItems: "center",
                                   justifyContent: "center",
-                                  cursor: isToggling ? "wait" : "pointer",
-                                  padding: "6px",
+                                  flexShrink: 0,
                                 }}
                               >
-                                <input
-                                  type="checkbox"
-                                  checked={hasPerm}
-                                  disabled={isToggling}
-                                  onChange={() => handleToggleMatrixPermission(role, perm.permission_key)}
+                                {fixed ? <ICONS.lock width={18} height={18} /> : <ICONS.shield width={18} height={18} />}
+                              </div>
+                              <div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                  <span style={{ fontWeight: 600, color: "var(--color-text)", fontSize: "14px" }}>
+                                    {role.display_name}
+                                  </span>
+                                  {fixed && (
+                                    <span
+                                      className="badge"
+                                      style={{
+                                        backgroundColor: "#fef3c7",
+                                        color: "#92400e",
+                                        border: "1px solid #fde68a",
+                                        fontSize: "10px",
+                                        padding: "1px 6px",
+                                        fontWeight: 600,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "3px",
+                                      }}
+                                    >
+                                      Fixed System Role
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ marginTop: "3px" }}>
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      backgroundColor: "#f1f5f9",
+                                      color: "#475569",
+                                      fontFamily: "monospace",
+                                      fontSize: "10.5px",
+                                      padding: "1px 6px",
+                                    }}
+                                  >
+                                    {role.role_key}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                <span
+                                  className="badge"
                                   style={{
-                                    width: "18px",
-                                    height: "18px",
-                                    cursor: isToggling ? "wait" : "pointer",
-                                    accentColor: "var(--color-primary)",
+                                    backgroundColor: permCount > 0 ? "#f0fdf4" : "#f8fafc",
+                                    color: permCount > 0 ? "#166534" : "#64748b",
+                                    border: permCount > 0 ? "1px solid #bbf7d0" : "1px solid #e2e8f0",
+                                    fontSize: "11px",
+                                    fontWeight: 600,
                                   }}
-                                />
-                              </label>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
+                                >
+                                  {permCount} {permCount === 1 ? "Permission" : "Permissions"}
+                                </span>
+                              </div>
+                              {permCount > 0 && (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "2px" }}>
+                                  {roleActiveKeys.slice(0, 2).map((pKey) => (
+                                    <span
+                                      key={pKey}
+                                      style={{
+                                        fontFamily: "monospace",
+                                        fontSize: "10.5px",
+                                        padding: "1px 5px",
+                                        borderRadius: "3px",
+                                        backgroundColor: "#f8fafc",
+                                        color: "#64748b",
+                                        border: "1px solid #e2e8f0",
+                                      }}
+                                    >
+                                      {pKey}
+                                    </span>
+                                  ))}
+                                  {permCount > 2 && (
+                                    <span
+                                      style={{
+                                        fontSize: "10.5px",
+                                        color: "var(--color-muted)",
+                                        alignSelf: "center",
+                                      }}
+                                    >
+                                      +{permCount - 2} more
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
+                            <StatusBadge isActive={role.is_active} />
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle", textAlign: "right" }}>
+                            <div style={{ display: "flex", justifyContent: "flex-end", gap: "6px", alignItems: "center" }}>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline"
+                                style={{
+                                  color: "#166534",
+                                  borderColor: "#86efac",
+                                  backgroundColor: "#f0fdf4",
+                                  fontSize: "12px",
+                                  padding: "5px 11px",
+                                  fontWeight: 600,
+                                  whiteSpace: "nowrap",
+                                }}
+                                onClick={() => {
+                                  setManagePolicyRole(role);
+                                  setPolicySearch("");
+                                  setPolicyDomainFilter("ALL");
+                                }}
+                                title={`Manage permissions policy for ${role.display_name}`}
+                              >
+                                Manage Policy
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-secondary"
+                                style={{ fontSize: "12px", padding: "5px 11px", whiteSpace: "nowrap" }}
+                                onClick={() => handleOpenEditRole(role)}
+                                title={`Edit ${role.display_name}`}
+                              >
+                                Edit Role
+                              </button>
+                              {!fixed && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-danger"
+                                  style={{
+                                    fontSize: "12px",
+                                    padding: "5px 10px",
+                                    whiteSpace: "nowrap",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                  }}
+                                  onClick={() => setDeletingRoleTarget(role)}
+                                  title={`Delete role ${role.display_name}`}
+                                >
+                                  <ICONS.trash width={13} height={13} />
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
 
       {/* ========================================================================= */}
@@ -1306,138 +628,434 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
       <Modal
         open={!!managePolicyRole}
         onClose={() => setManagePolicyRole(null)}
-        title={managePolicyRole ? `Access Policy: ${managePolicyRole.display_name} (${managePolicyRole.role_key})` : "Access Policy"}
+        title={
+          managePolicyRole ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "8px",
+                  background: isFixedRole(managePolicyRole) ? "#fef3c7" : "#e0f2fe",
+                  color: isFixedRole(managePolicyRole) ? "#b45309" : "#0284c7",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {isFixedRole(managePolicyRole) ? <ICONS.lock width={16} height={16} /> : <ICONS.shield width={16} height={16} />}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <span>Access Policy: {managePolicyRole.display_name}</span>
+                <span
+                  className="badge"
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: "11px",
+                    padding: "2px 7px",
+                    backgroundColor: "#f1f5f9",
+                    color: "#475569",
+                  }}
+                >
+                  {managePolicyRole.role_key}
+                </span>
+                {isFixedRole(managePolicyRole) && (
+                  <span
+                    className="badge"
+                    style={{
+                      backgroundColor: "#fef3c7",
+                      color: "#92400e",
+                      border: "1px solid #fde68a",
+                      fontSize: "10.5px",
+                      padding: "2px 7px",
+                      fontWeight: 600,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "3px",
+                    }}
+                  >
+                    <ICONS.lock width={10} height={10} />
+                    Fixed System Role
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : (
+            "Access Policy"
+          )
+        }
+        subtitle="Configure granted platform permissions for this role. Permissions take effect immediately."
         variant="center"
-        cardStyle={{ maxWidth: "680px", maxHeight: "85vh", display: "flex", flexDirection: "column" }}
+        cardStyle={{
+          maxWidth: "760px",
+          height: "85vh",
+          maxHeight: "85vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
+        bodyStyle={{
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          minHeight: 0,
+          padding: "20px 24px",
+        }}
+        footer={
+          managePolicyRole && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+              <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>
+                <strong>{activeGrantedKeys.length}</strong> of <strong>{activePermissions.length}</strong> platform permissions granted
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                style={{ padding: "6px 18px", fontSize: "13px", fontWeight: 600 }}
+                onClick={() => setManagePolicyRole(null)}
+              >
+                Done
+              </button>
+            </div>
+          )
+        }
       >
         {managePolicyRole && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <p style={{ margin: 0, fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-              Toggle platform permissions granted under this role policy. Changes take effect immediately.
-            </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px", flex: 1, minHeight: 0, overflow: "hidden" }}>
+            {/* Top Stats Overview Card */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "12px 16px",
+                backgroundColor: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                borderRadius: "10px",
+                gap: "16px",
+                flexWrap: "wrap",
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div
+                  style={{
+                    width: "10px",
+                    height: "10px",
+                    borderRadius: "50%",
+                    backgroundColor:
+                      activeGrantedKeys.length > 0 ? "#10b981" : "#94a3b8",
+                  }}
+                />
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                  {activeGrantedKeys.length} of {activePermissions.length} Permissions Active
+                </span>
+              </div>
 
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Search permissions..."
-                style={{ flex: 1, minWidth: "200px", height: "36px", fontSize: "13px" }}
-                value={policySearch}
-                onChange={(e) => setPolicySearch(e.target.value)}
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, maxWidth: "220px" }}>
+                <div
+                  style={{
+                    flex: 1,
+                    height: "6px",
+                    borderRadius: "3px",
+                    backgroundColor: "#e2e8f0",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${activePermissions.length ? (activeGrantedKeys.length / activePermissions.length) * 100 : 0}%`,
+                      height: "100%",
+                      backgroundColor:
+                        activeGrantedKeys.length === activePermissions.length
+                          ? "#10b981"
+                          : "var(--color-primary)",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
+                  {activePermissions.length
+                    ? Math.round(
+                      (activeGrantedKeys.length / activePermissions.length) * 100
+                    )
+                    : 0}
+                  %
+                </span>
+              </div>
+            </div>
+
+            {/* Search and Domain Filter Controls */}
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", flexShrink: 0 }}>
+              <div style={{ position: "relative", flex: 1, minWidth: "220px" }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Search permissions by key, description, or domain..."
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    fontSize: "13px",
+                    paddingLeft: "34px",
+                    borderRadius: "8px",
+                  }}
+                  value={policySearch}
+                  onChange={(e) => setPolicySearch(e.target.value)}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "10px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "#94a3b8",
+                    pointerEvents: "none",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  <ICONS.search width={15} height={15} />
+                </div>
+                {policySearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPolicySearch("")}
+                    style={{
+                      position: "absolute",
+                      right: "10px",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      border: "none",
+                      background: "transparent",
+                      color: "#94a3b8",
+                      cursor: "pointer",
+                      padding: "2px",
+                      fontSize: "12px",
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
               <select
                 className="form-input"
-                style={{ width: "190px", height: "36px", fontSize: "13px" }}
+                style={{ width: "210px", height: "38px", fontSize: "13px", borderRadius: "8px" }}
                 value={policyDomainFilter}
                 onChange={(e) => setPolicyDomainFilter(e.target.value)}
               >
-                <option value="ALL">All Domains ({permissions.length})</option>
-                {domains.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
+                <option value="ALL">All Domains ({activePermissions.length})</option>
+                {domains.map((d) => {
+                  const count = activePermissions.filter((p) => getPermissionDomain(p.permission_key) === d).length;
+                  return (
+                    <option key={d} value={d}>
+                      {d} ({count})
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
-            <div style={{ maxHeight: "380px", overflowY: "auto", border: "1px solid var(--color-border)", borderRadius: "6px" }}>
-              {permissions
-                .filter((p) => {
-                  const domain = getPermissionDomain(p.permission_key);
-                  if (policyDomainFilter !== "ALL" && domain !== policyDomainFilter) return false;
-                  if (policySearch.trim()) {
-                    const q = policySearch.toLowerCase();
-                    return (
-                      p.permission_key.toLowerCase().includes(q) ||
-                      (p.description || "").toLowerCase().includes(q) ||
-                      domain.toLowerCase().includes(q)
-                    );
-                  }
-                  return true;
-                })
-                .map((perm) => {
-                  const hasPerm = (managePolicyRole.permission_keys || []).includes(perm.permission_key);
-                  const isToggling = matrixToggling === `${managePolicyRole.id}:${perm.permission_key}`;
+            {/* Grouped Permissions Scrollable List */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                border: "1px solid var(--color-border)",
+                borderRadius: "10px",
+                padding: "10px",
+                backgroundColor: "#f8fafc",
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+              }}
+            >
+              {groupedPolicyPermissions.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--color-muted)" }}>
+                  <p style={{ margin: 0, fontSize: "14px", fontWeight: 500 }}>No permissions match your search or filter.</p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginTop: "10px", fontSize: "12px" }}
+                    onClick={() => {
+                      setPolicySearch("");
+                      setPolicyDomainFilter("ALL");
+                    }}
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              ) : (
+                groupedPolicyPermissions.map(([domainName, perms]) => {
+                  const domainGrantedCount = perms.filter((p) =>
+                    (managePolicyRole.permission_keys || []).includes(p.permission_key)
+                  ).length;
 
                   return (
                     <div
-                      key={perm.id}
+                      key={domainName}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "10px 14px",
-                        borderBottom: "1px solid #f1f5f9",
-                        backgroundColor: hasPerm ? "#f8fafc" : "#ffffff",
+                        backgroundColor: "#ffffff",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                        overflow: "hidden",
+                        flexShrink: 0,
                       }}
                     >
-                      <div style={{ flex: 1, paddingRight: "14px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span
-                            style={{
-                              fontFamily: "monospace",
-                              fontSize: "12px",
-                              fontWeight: 700,
-                              color: hasPerm ? "var(--color-primary)" : "var(--color-text)",
-                            }}
-                          >
-                            {perm.permission_key}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "10px",
-                              padding: "1px 6px",
-                              borderRadius: "4px",
-                              backgroundColor: "#f1f5f9",
-                              color: "#64748b",
-                            }}
-                          >
-                            {getPermissionDomain(perm.permission_key)}
-                          </span>
-                        </div>
-                        {perm.description && (
-                          <div style={{ fontSize: "11.5px", color: "var(--color-muted)", marginTop: "3px" }}>
-                            {perm.description}
-                          </div>
-                        )}
-                      </div>
-                      <label style={{ cursor: isToggling ? "wait" : "pointer", display: "flex", alignItems: "center", padding: "4px" }}>
-                        <input
-                          type="checkbox"
-                          checked={hasPerm}
-                          disabled={isToggling}
-                          onChange={async () => {
-                            await handleToggleMatrixPermission(managePolicyRole, perm.permission_key);
-                            setManagePolicyRole((prev) => {
-                              if (!prev) return null;
-                              const keys = prev.permission_keys || [];
-                              const nextKeys = keys.includes(perm.permission_key)
-                                ? keys.filter((k) => k !== perm.permission_key)
-                                : [...keys, perm.permission_key];
-                              return { ...prev, permission_keys: nextKeys };
-                            });
-                          }}
+                      {/* Domain Header */}
+                      <div
+                        style={{
+                          padding: "10px 14px",
+                          backgroundColor: "#f1f5f9",
+                          borderBottom: "1px solid #e2e8f0",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                          {domainName}
+                        </span>
+                        <span
+                          className="badge"
                           style={{
-                            width: "18px",
-                            height: "18px",
-                            cursor: isToggling ? "wait" : "pointer",
-                            accentColor: "var(--color-primary)",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            padding: "2px 8px",
+                            backgroundColor:
+                              domainGrantedCount === perms.length
+                                ? "#dcfce7"
+                                : domainGrantedCount > 0
+                                  ? "#e0f2fe"
+                                  : "#f1f5f9",
+                            color:
+                              domainGrantedCount === perms.length
+                                ? "#166534"
+                                : domainGrantedCount > 0
+                                  ? "#0369a1"
+                                  : "#64748b",
+                            border:
+                              domainGrantedCount === perms.length
+                                ? "1px solid #bbf7d0"
+                                : domainGrantedCount > 0
+                                  ? "1px solid #bae6fd"
+                                  : "1px solid #e2e8f0",
                           }}
-                        />
-                      </label>
+                        >
+                          {domainGrantedCount} of {perms.length} granted
+                        </span>
+                      </div>
+
+                      {/* Domain Permissions */}
+                      <div style={{ display: "flex", flexDirection: "column" }}>
+                        {perms.map((perm, idx) => {
+                          const hasPerm = (managePolicyRole.permission_keys || []).includes(perm.permission_key);
+                          const isToggling = permissionToggling === `${managePolicyRole.id}:${perm.permission_key}`;
+
+                          return (
+                            <div
+                              key={perm.id}
+                              onClick={async () => {
+                                if (isToggling) return;
+                                await handleToggleRolePermission(managePolicyRole, perm.permission_key);
+                                setManagePolicyRole((prev) => {
+                                  if (!prev) return null;
+                                  const keys = prev.permission_keys || [];
+                                  const nextKeys = keys.includes(perm.permission_key)
+                                    ? keys.filter((k) => k !== perm.permission_key)
+                                    : [...keys, perm.permission_key];
+                                  return { ...prev, permission_keys: nextKeys };
+                                });
+                              }}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                padding: "10px 14px",
+                                borderBottom: idx < perms.length - 1 ? "1px solid #f1f5f9" : "none",
+                                backgroundColor: hasPerm ? "#fafffb" : "#ffffff",
+                                cursor: isToggling ? "wait" : "pointer",
+                                transition: "background-color 0.15s ease",
+                                flexShrink: 0,
+                              }}
+                            >
+                              <div style={{ flex: 1, paddingRight: "16px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <span
+                                    style={{
+                                      fontFamily: "monospace",
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                      color: hasPerm ? "#15803d" : "#0f172a",
+                                    }}
+                                  >
+                                    {perm.permission_key}
+                                  </span>
+                                </div>
+                                {perm.description && (
+                                  <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px", lineHeight: 1.4 }}>
+                                    {perm.description}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 600,
+                                    padding: "2px 8px",
+                                    borderRadius: "12px",
+                                    backgroundColor: hasPerm ? "#dcfce7" : "#f1f5f9",
+                                    color: hasPerm ? "#166534" : "#94a3b8",
+                                    border: hasPerm ? "1px solid #bbf7d0" : "1px solid #e2e8f0",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "3px",
+                                  }}
+                                >
+                                  {hasPerm ? (
+                                    <>
+                                      <ICONS.check width={11} height={11} /> Granted
+                                    </>
+                                  ) : (
+                                    "Not Granted"
+                                  )}
+                                </span>
+                                <input
+                                  type="checkbox"
+                                  checked={hasPerm}
+                                  disabled={isToggling}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={async () => {
+                                    await handleToggleRolePermission(managePolicyRole, perm.permission_key);
+                                    setManagePolicyRole((prev) => {
+                                      if (!prev) return null;
+                                      const keys = prev.permission_keys || [];
+                                      const nextKeys = keys.includes(perm.permission_key)
+                                        ? keys.filter((k) => k !== perm.permission_key)
+                                        : [...keys, perm.permission_key];
+                                      return { ...prev, permission_keys: nextKeys };
+                                    });
+                                  }}
+                                  style={{
+                                    width: "18px",
+                                    height: "18px",
+                                    cursor: isToggling ? "wait" : "pointer",
+                                    accentColor: "var(--color-primary)",
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
-                })}
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: "8px" }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setManagePolicyRole(null)}
-              >
-                Close
-              </button>
+                })
+              )}
             </div>
           </div>
         )}
@@ -1485,20 +1103,6 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
             />
           </div>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="new-role-desc">
-              Description
-            </label>
-            <textarea
-              id="new-role-desc"
-              className="form-input"
-              rows={3}
-              placeholder="Describe the operational responsibilities of this role..."
-              value={newRoleDescription}
-              onChange={(e) => setNewRoleDescription(e.target.value)}
-            />
-          </div>
-
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
             <button
               type="button"
@@ -1538,29 +1142,22 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
             />
           </div>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="edit-role-desc">
-              Description
-            </label>
-            <textarea
-              id="edit-role-desc"
-              className="form-input"
-              rows={3}
-              value={editRoleDescription}
-              onChange={(e) => setEditRoleDescription(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginTop: "4px" }}>
             <input
               id="edit-role-active"
               type="checkbox"
               checked={editRoleActive}
+              disabled={editingRole ? isFixedRole(editingRole) : false}
               onChange={(e) => setEditRoleActive(e.target.checked)}
-              style={{ width: "16px", height: "16px", accentColor: "var(--color-primary)" }}
+              style={{ width: "16px", height: "16px", marginTop: "2px", accentColor: "var(--color-primary)" }}
             />
-            <label htmlFor="edit-role-active" style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text)", cursor: "pointer" }}>
+            <label htmlFor="edit-role-active" style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text)", cursor: editingRole && isFixedRole(editingRole) ? "not-allowed" : "pointer" }}>
               Active (Role can be assigned and held by users)
+              {editingRole && isFixedRole(editingRole) && (
+                <span style={{ display: "block", fontSize: "11px", color: "var(--color-muted)", fontWeight: 400, marginTop: "2px" }}>
+                  Fixed system role must always remain active.
+                </span>
+              )}
             </label>
           </div>
 
@@ -1580,178 +1177,27 @@ export function PlatformAuthz({ defaultTab }: PlatformAuthzProps = {}) {
         </form>
       </Modal>
 
-      {/* Define Permission Modal */}
-      <Modal
-        open={createPermModalOpen}
-        onClose={() => setCreatePermModalOpen(false)}
-        title="Define Platform Permission"
-        variant="center"
-        cardStyle={{ maxWidth: "500px" }}
-      >
-        <form onSubmit={handleCreatePermission} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="new-perm-key">
-              Permission Key (lowercase.dot.delimited) *
-            </label>
-            <input
-              id="new-perm-key"
-              type="text"
-              className="form-input"
-              placeholder="e.g. platform.security.scan"
-              value={newPermKey}
-              onChange={(e) => setNewPermKey(e.target.value.toLowerCase())}
-              required
-            />
-            <span className="form-helper">
-              Must start with a letter and contain only lowercase letters, digits, and dots.
-            </span>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="new-perm-desc">
-              Description
-            </label>
-            <textarea
-              id="new-perm-desc"
-              className="form-input"
-              rows={3}
-              placeholder="Describe the exact action this permission authorizes..."
-              value={newPermDescription}
-              onChange={(e) => setNewPermDescription(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setCreatePermModalOpen(false)}
-              disabled={creatingPerm}
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={creatingPerm}>
-              {creatingPerm ? "Defining..." : "Define Permission"}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Assign Role Modal */}
-      <Modal
-        open={assignModalOpen}
-        onClose={() => setAssignModalOpen(false)}
-        title={`Assign Platform Role to ${selectedUser?.display_name || "User"}`}
-        variant="center"
-        cardStyle={{ maxWidth: "520px" }}
-      >
-        <form onSubmit={handleAssignRole} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="assign-role-select">
-              Platform Role *
-            </label>
-            <select
-              id="assign-role-select"
-              className="form-select"
-              value={assignRoleKey}
-              onChange={(e) => setAssignRoleKey(e.target.value)}
-              required
-            >
-              <option value="">-- Select Platform Role --</option>
-              {roles
-                .filter((r) => r.is_active)
-                .map((r) => (
-                  <option key={r.id} value={r.role_key}>
-                    {r.display_name} ({r.role_key})
-                  </option>
-                ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Authorization Scope *</label>
-            <div style={{ display: "flex", gap: "20px", marginTop: "4px" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="assign-scope"
-                  value="GLOBAL"
-                  checked={assignScope === "GLOBAL"}
-                  onChange={() => setAssignScope("GLOBAL")}
-                />
-                <span style={{ fontSize: "13px", fontWeight: 600 }}>Global (All Platform Operations)</span>
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="assign-scope"
-                  value="ERP"
-                  checked={assignScope === "ERP"}
-                  onChange={() => setAssignScope("ERP")}
-                />
-                <span style={{ fontSize: "13px", fontWeight: 600 }}>ERP-Scoped (Target ERP Only)</span>
-              </label>
-            </div>
-          </div>
-
-          {assignScope === "ERP" && (
-            <div className="form-group">
-              <label className="form-label" htmlFor="assign-erp-select">
-                Target ERP Instance *
-              </label>
-              <select
-                id="assign-erp-select"
-                className="form-select"
-                value={assignErpId}
-                onChange={(e) => setAssignErpId(e.target.value)}
-                required={assignScope === "ERP"}
-              >
-                <option value="">-- Select Target ERP --</option>
-                {erps.map((erp) => (
-                  <option key={erp.id} value={erp.id}>
-                    {erp.name} ({erp.erp_key})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setAssignModalOpen(false)}
-              disabled={assigningRole}
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={assigningRole}>
-              {assigningRole ? "Assigning..." : "Assign Role"}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Revoke Assignment Confirmation */}
+      {/* Delete Role Confirmation Dialog */}
       <ConfirmDialog
-        open={Boolean(revokeTarget)}
-        title="Revoke Platform Role Assignment"
+        open={Boolean(deletingRoleTarget)}
+        title="Delete Platform Role"
         message={
           <span>
-            Are you sure you want to revoke the role <strong>{revokeTarget?.role_key}</strong> from{" "}
-            <strong>{selectedUser?.display_name}</strong>?
+            Are you sure you want to delete the platform role <strong>{deletingRoleTarget?.display_name}</strong> (<code>{deletingRoleTarget?.role_key}</code>)?
             <br />
             <br />
-            The user will immediately lose any platform permissions granted through this assignment.
-            Audit logs will retain this assignment record for compliance.
+            This action cannot be undone. Any platform user currently assigned to this role will immediately lose access granted by its access policy.
           </span>
         }
-        confirmLabel="Revoke Role Assignment"
+        confirmLabel="Delete Role"
         danger
-        loading={revokingAssignment}
-        onConfirm={handleRevokeAssignment}
-        onCancel={() => setRevokeTarget(null)}
+        loading={deletingRoleLoading}
+        onConfirm={handleDeleteRole}
+        onCancel={() => setDeletingRoleTarget(null)}
       />
+
+
+
     </AppShell>
   );
 }

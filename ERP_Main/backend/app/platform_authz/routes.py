@@ -35,6 +35,7 @@ from app.platform_authz.service import PlatformAuthzService
 router = APIRouter(prefix="/global/authz", tags=["Platform Authorization"])
 
 _MANAGE = "platform.system.manage"
+_VIEW = "platform.user.read"
 
 
 def _request_id(request: Request) -> str:
@@ -93,7 +94,7 @@ async def create_permission(
 @router.get("/permissions", summary="List every defined platform permission")
 async def list_permissions(
     request: Request,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission(_MANAGE)),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission(_VIEW)),
     service: PlatformAuthzService = Depends(get_platform_authz_service),
 ) -> dict:
     """List every defined platform permission."""
@@ -117,7 +118,7 @@ async def create_role(
 @router.get("/roles", summary="List every defined platform role")
 async def list_roles(
     request: Request,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission(_MANAGE)),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission(_VIEW)),
     service: PlatformAuthzService = Depends(get_platform_authz_service),
 ) -> dict:
     """List every defined platform role, including each one's granted permission keys."""
@@ -129,7 +130,7 @@ async def list_roles(
 async def get_role(
     request: Request,
     role_id: uuid.UUID,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission(_MANAGE)),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission(_VIEW)),
     service: PlatformAuthzService = Depends(get_platform_authz_service),
 ) -> dict:
     """Fetch a single platform role by id."""
@@ -152,6 +153,18 @@ async def update_role(
     return build_success_response(
         _role_to_dict(role), request_id=_request_id(request), message="Platform role updated."
     )
+
+
+@router.delete("/roles/{role_id}", summary="Delete a flexible platform role")
+async def delete_role(
+    request: Request,
+    role_id: uuid.UUID,
+    principal: AuthorizedPrincipal = Depends(require_platform_permission(_MANAGE)),
+    service: PlatformAuthzService = Depends(get_platform_authz_service),
+) -> dict:
+    """Delete a flexible platform role. Fixed system roles cannot be deleted."""
+    await service.delete_role(role_id, actor_id=principal.principal_id, actor_label=principal.principal_label)
+    return build_success_response(None, request_id=_request_id(request), message="Platform role deleted.")
 
 
 @router.post("/roles/{role_id}/permissions", summary="Grant a permission to a role")
@@ -213,7 +226,7 @@ async def assign_role(
 async def list_user_assignments(
     request: Request,
     global_user_id: uuid.UUID,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission(_MANAGE)),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission(_VIEW)),
     service: PlatformAuthzService = Depends(get_platform_authz_service),
 ) -> dict:
     """List every platform role assignment (active or not) for a Global User."""
@@ -244,7 +257,7 @@ async def revoke_assignment(
 async def get_effective_permissions(
     request: Request,
     global_user_id: uuid.UUID,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission(_MANAGE)),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission(_VIEW)),
     service: PlatformAuthzService = Depends(get_platform_authz_service),
 ) -> dict:
     """Compute and return a Global User's currently-effective platform permissions (global + per-ERP)."""

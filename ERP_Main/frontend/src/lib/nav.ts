@@ -56,7 +56,6 @@ export const NAV_SECTIONS: NavSection[] = [
 export const ACCESS_SECTION_TABS: NavItem[] = [
   { key: "users", label: "Global Users", path: "/access/users", icon: "users" },
   { key: "roles", label: "Roles", path: "/access/roles", icon: "userCheck", superAdminOnly: true },
-  { key: "permissions", label: "Permissions", path: "/access/permissions", icon: "key", superAdminOnly: true },
 ];
 
 export const NAV_ITEMS_BY_KEY: Record<string, NavItem> = {};
@@ -71,23 +70,22 @@ for (const tab of ACCESS_SECTION_TABS) {
   }
 }
 
-NAV_ITEMS_BY_KEY["erps"] = NAV_ITEMS_BY_KEY["erp-switcher"] || NAV_ITEMS_BY_KEY["erp-registry"];
-NAV_ITEMS_BY_KEY["my-erps"] = NAV_ITEMS_BY_KEY["erp-switcher"];
-NAV_ITEMS_BY_KEY["integration"] = NAV_ITEMS_BY_KEY["integrations"];
-NAV_ITEMS_BY_KEY["health"] = NAV_ITEMS_BY_KEY["system-health"];
+// The following four keys never resolved to anything (no "erp-switcher",
+// "erp-registry", "integrations", or "system-health" key is ever defined
+// in NAV_SECTIONS above), so they always evaluated to `undefined` --
+// removed as dead code while cleaning up the pages they referred to.
 NAV_ITEMS_BY_KEY["authz"] = NAV_ITEMS_BY_KEY["roles"];
 NAV_ITEMS_BY_KEY["reporting"] = { key: "reporting", label: "Reports & Exports", path: "/reporting", icon: "barChart" };
-NAV_ITEMS_BY_KEY["search"] = { key: "search", label: "Federated Search", path: "/search", icon: "search" };
 NAV_ITEMS_BY_KEY["access"] = NAV_ITEMS_BY_KEY["users"];
 
 export const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "ERP Ecosystem Dashboard",
-  
+
   // ERPs
   "/erps": "ERP Switcher",
   "/erps/switcher": "ERP Switcher",
   "/my-erps": "ERP Switcher",
-  
+
   // Users & Access
   "/access": "Users & Access Control",
   "/access/users": "Global Users",
@@ -95,8 +93,6 @@ export const PAGE_TITLES: Record<string, string> = {
   "/access/roles": "Roles & Access Policies",
   "/authz": "Roles & Access Policies",
   "/access/permissions": "Platform Permissions",
-  "/access/memberships": "ERP Memberships",
-  "/memberships": "ERP Memberships",
   "/access/policies": "Roles & Access Policies",
   "/conflicts": "Identity Linking Conflicts",
 
@@ -111,9 +107,8 @@ export const PAGE_TITLES: Record<string, string> = {
   "/settings": "Control Plane Settings",
   "/settings/general": "Control Plane Settings",
 
-  // Reports & Search
+  // Reports
   "/reporting": "Global Reporting & Export Jobs",
-  "/search": "Universal Federated Search",
   "/login": "Sign In",
   "/403": "Access Denied",
 };
@@ -131,4 +126,3 @@ export const INTEGRATION_SECTION_TABS = getSectionTabs("INTEGRATIONS");
 export const SYNC_SECTION_TABS = getSectionTabs("SYNCHRONIZATION");
 export const MONITORING_SECTION_TABS = getSectionTabs("MONITORING & AUDIT");
 export const SETTINGS_SECTION_TABS = getSectionTabs("SETTINGS");
-

@@ -206,7 +206,7 @@ async def declare_module(
     request: Request,
     erp_id: uuid.UUID,
     payload: ErpModuleCreate,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.capability.update")),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.erp.update")),
     service: ErpRegistryService = Depends(get_erp_registry_service),
     audit: GlobalAuditService = Depends(get_global_audit_service),
 ) -> dict:

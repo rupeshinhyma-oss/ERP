@@ -199,7 +199,7 @@ async def test_e2e_complete_15_step_workflow(admin_client: AsyncClient, client: 
     await _create_role(
         admin_client,
         role_key=role_key,
-        permission_keys=["platform.report.read", "platform.report.export", "platform.search.read", "platform.dashboard.read"],
+        permission_keys=["platform.report.read", "platform.report.export", "platform.search.read"],
     )
     await _assign_role(admin_client, user_id=user_id, role_key=role_key, scope="GLOBAL")
 

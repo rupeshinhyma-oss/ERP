@@ -57,77 +57,55 @@ _SEED_ACTOR_LABEL = "seed_platform_authz script"
 # The full platform permission catalog (Phase 5 Section 6). Every entry
 # here is created if missing; nothing is ever deleted by this script.
 _PERMISSION_CATALOG: list[tuple[str, str]] = [
-    ("platform.erp.read", "View ERP registry entries."),
-    ("platform.erp.create", "Register a new ERP instance."),
-    ("platform.erp.update", "Update an ERP instance's metadata."),
-    ("platform.erp.suspend", "Suspend an ERP instance."),
-    ("platform.erp.decommission", "Permanently decommission an ERP instance."),
+    ("platform.audit.view", "View the audit module and platform audit logs."),
     ("platform.user.read", "View Global User accounts."),
     ("platform.user.create", "Create a Global User account."),
     ("platform.user.update", "Update a Global User account."),
     ("platform.user.disable", "Disable a Global User account."),
-    ("platform.membership.read", "View ERP memberships."),
-    ("platform.membership.create", "Create an ERP membership."),
-    ("platform.membership.update", "Update an ERP membership."),
-    ("platform.membership.revoke", "Revoke an ERP membership."),
-    ("platform.federation.read", "View federation clients and signing keys."),
-    ("platform.federation.create", "Register a new federation client."),
-    ("platform.federation.update", "Update a federation client's configuration."),
-    ("platform.federation.rotate_keys", "Rotate federation signing keys."),
-    ("platform.service_identity.read", "View service identities."),
-    ("platform.service_identity.create", "Create a service identity."),
-    ("platform.service_identity.rotate", "Rotate a service identity's credential."),
-    ("platform.service_identity.revoke", "Revoke a service identity."),
-    ("platform.capability.read", "View ERP capability declarations."),
-    ("platform.capability.update", "Update ERP capability declarations."),
-    ("platform.audit.read", "View platform audit log entries."),
-    ("platform.security_events.read", "View platform security events."),
-    ("platform.system.manage", "Manage platform roles, permissions, and role assignments."),
-    ("platform.dashboard.read", "View the platform dashboard (Phase 7)."),
-    ("platform.search.read", "Search the global read model across every ERP, regardless of membership (Phase 7)."),
-    ("platform.report.read", "View global reports (Phase 7)."),
-    ("platform.report.export", "Export a global report to CSV/XLSX (Phase 7)."),
-    ("platform.reconciliation.execute", "Run a reconciliation pass for an ERP's global projections (Phase 7)."),
-    ("platform.projection.rebuild", "Rebuild a global projection from its source events (Phase 7)."),
-]
-
-# role_key -> list of permission_keys granted. PLATFORM_SUPER_ADMIN's
-# grant list is computed below as "every permission in the catalog"
-# rather than duplicated here, so it can never silently drift out of
-# sync with _PERMISSION_CATALOG as new permissions are added over time.
-_ADMIN_PERMISSIONS: list[str] = [
-    key
-    for key, _ in _PERMISSION_CATALOG
-    if key
-    not in {
-        "platform.erp.decommission",
-        "platform.federation.rotate_keys",
-        "platform.service_identity.revoke",
+    (
         "platform.system.manage",
-    }
+        "Administer platform roles, permissions, and role assignments (create/update/delete a role, "
+        "grant/revoke a permission, assign/revoke a role). Also used by app.integration and "
+        "app.sync_policy for their own admin-only operations -- this is the one existing, shared "
+        "'system administration' permission key, not a new one introduced here.",
+    ),
 ]
 
-_OPERATOR_PERMISSIONS: list[str] = [
-    "platform.erp.read",
-    "platform.erp.create",
-    "platform.erp.update",
+# role_key -> list of permission_keys granted.
+#
+# PLATFORM_SUPER_ADMIN's own grant list is computed in seed() as "every
+# permission in the catalog" rather than duplicated here, so it can never
+# silently drift out of sync with _PERMISSION_CATALOG as new permissions
+# are added over time.
+#
+# PLATFORM_ADMIN's list below is deliberately its OWN explicit list, not
+# derived from the full catalog: per this module's own docstring, Admin
+# gets "everything except... role/permission administration itself" --
+# platform.system.manage is intentionally excluded here (only
+# PLATFORM_SUPER_ADMIN holds it). Keep this list in sync by hand when a
+# new non-system-admin permission is added to the catalog; deriving it
+# automatically would silently re-grant every future permission
+# (including any future destructive/system one) to PLATFORM_ADMIN,
+# exactly the bug this fix corrects for platform.system.manage itself.
+_ADMIN_PERMISSIONS: list[str] = [
+    "platform.audit.view",
     "platform.user.read",
     "platform.user.create",
     "platform.user.update",
-    "platform.membership.read",
-    "platform.membership.create",
-    "platform.membership.update",
-    "platform.federation.read",
-    "platform.federation.create",
-    "platform.service_identity.read",
-    "platform.capability.read",
-    "platform.audit.read",
-    "platform.dashboard.read",
-    "platform.search.read",
-    "platform.report.read",
+    "platform.user.disable",
 ]
 
-_VIEWER_PERMISSIONS: list[str] = [key for key, _ in _PERMISSION_CATALOG if key.endswith(".read")]
+_OPERATOR_PERMISSIONS: list[str] = [
+    "platform.audit.view",
+    "platform.user.read",
+    "platform.user.create",
+    "platform.user.update",
+]
+
+_VIEWER_PERMISSIONS: list[str] = [
+    "platform.audit.view",
+    "platform.user.read",
+]
 
 _ROLES: list[tuple[str, str, str]] = [
     ("PLATFORM_SUPER_ADMIN", "Platform Super Admin", "Unrestricted platform-wide access to every operation."),

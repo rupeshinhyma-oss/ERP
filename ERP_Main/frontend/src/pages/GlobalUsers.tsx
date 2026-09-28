@@ -104,7 +104,7 @@ export function GlobalUsers() {
         apiGet<GlobalUser[]>("/global/users?limit=250&offset=0"),
         apiGet<ErpInstance[]>("/global/erps").catch(() => []),
         apiGet<ErpMembership[]>("/global/memberships?limit=1000&offset=0").catch(() => []),
-        apiGet<any[]>("/global/identity/conflicts?status=PENDING_REVIEW").catch(() => []),
+        apiGet<any[]>("/global/identity/conflicts?status=PENDING").catch(() => []),
       ]);
       const usersList = Array.isArray(usersRes) ? usersRes : ((usersRes as any)?.data || []);
       const erpsList = Array.isArray(erpsRes) ? erpsRes : ((erpsRes as any)?.data || []);

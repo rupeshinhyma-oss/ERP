@@ -38,7 +38,7 @@ async def list_audit_entries(
     limit: int = Query(default=100, ge=1, le=1000),
     event_type: AuditEventType | None = None,
     target_id: uuid.UUID | None = None,
-    _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.audit.read")),
+    _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.audit.view")),
     service: GlobalAuditService = Depends(get_global_audit_service),
 ) -> dict:
     """List the most recent control-plane audit entries, optionally filtered by event type or target."""
