@@ -39,6 +39,7 @@ from app.hrms.schemas import (
     RegularizationRead,
     RegularizationRejectAction,
     RegularizationRequest,
+    TodayAttendanceRead,
 )
 
 router = APIRouter(prefix="/hrms/attendance", tags=["HRMS - Attendance"])
@@ -63,7 +64,14 @@ async def get_current_user_context(
             token = auth_header.split(" ", 1)[1]
             user = await auth_service.verify_access_token(token)
             if user:
-                return user.id, getattr(user, "is_admin", True)
+                perms = getattr(user, "permissions", set()) or set()
+                is_admin = bool(
+                    getattr(user, "is_super_admin", False)
+                    or "*" in perms
+                    or "hrms:admin" in perms
+                    or "hrms:approval" in perms
+                )
+                return user.id, is_admin
         except Exception:
             pass
 
@@ -151,9 +159,9 @@ async def get_today_attendance(
     employee_id: uuid.UUID = Depends(get_current_employee_id),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
-    record = await service.get_today_attendance(employee_id)
+    session_state = await service.get_today_session_state(employee_id)
     return build_success_response(
-        data=record.model_dump(mode="json") if record else None,
+        data=session_state.model_dump(mode="json"),
         message="Today's attendance retrieved successfully.",
     )
 

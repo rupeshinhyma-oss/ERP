@@ -83,6 +83,28 @@ interface AttendanceRecord {
   can_regularize: boolean;
 }
 
+interface TodayAttendanceResponse {
+  id?: string | null;
+  employee_id?: string | null;
+  attendance_date: string;
+  punched_in: boolean;
+  punched_out: boolean;
+  status: string;
+  punch_in: string | null;
+  punch_out: string | null;
+  total_hours: string;
+  working_minutes: number;
+  late_minutes: number;
+  early_exit_minutes: number;
+  office_location_id?: string | null;
+  office_name?: string | null;
+  assigned_office?: AssignedOffice | null;
+  is_irregular: boolean;
+  regularization_status: string;
+  can_regularize: boolean;
+  attendance_record?: AttendanceRecord | null;
+}
+
 interface CalendarDay {
   date: string;
   day_number: number;
@@ -128,6 +150,49 @@ interface RegularizationItem {
 // ---------------------------------------------------------------------------
 // Helpers: Timing Formats and Computations
 // ---------------------------------------------------------------------------
+export const TIMEZONE_IST = "Asia/Kolkata";
+
+export function formatDateTimeIST(
+  dateVal: string | Date | null | undefined,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (!dateVal) return "—";
+  try {
+    const d = typeof dateVal === "string" ? new Date(dateVal) : dateVal;
+    if (isNaN(d.getTime())) return typeof dateVal === "string" ? dateVal : "—";
+    return d.toLocaleTimeString("en-IN", {
+      timeZone: TIMEZONE_IST,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+      ...options,
+    });
+  } catch {
+    return "—";
+  }
+}
+
+export function formatDateIST(
+  dateVal: string | Date | null | undefined,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (!dateVal) return "—";
+  try {
+    const d = typeof dateVal === "string" ? new Date(dateVal) : dateVal;
+    if (isNaN(d.getTime())) return typeof dateVal === "string" ? dateVal : "—";
+    return d.toLocaleDateString("en-IN", {
+      timeZone: TIMEZONE_IST,
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      ...options,
+    });
+  } catch {
+    return "—";
+  }
+}
+
 function formatTime12h(timeStr: string): string {
   if (!timeStr) return "—";
   const parts = timeStr.trim().split(":");
@@ -296,6 +361,12 @@ export function AttendancePage() {
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth() + 1);
 
+  // Weekday offset for the 1st of the month (Monday-aligned grid)
+  const firstDayWeekdayOffset = useMemo(() => {
+    const d = new Date(selectedYear, selectedMonth - 1, 1).getDay();
+    return (d + 6) % 7;
+  }, [selectedYear, selectedMonth]);
+
   // Live timer tick (updates every 1 second)
   const [now, setNow] = useState<Date>(() => new Date());
 
@@ -357,7 +428,7 @@ export function AttendancePage() {
       const [policyRes, officeRes, todayRes] = await Promise.all([
         apiGet<AttendancePolicy>("/hrms/attendance/policy"),
         apiGet<AssignedOffice>("/hrms/attendance/assigned-office"),
-        apiGet<AttendanceRecord | null>("/hrms/attendance/today"),
+        apiGet<TodayAttendanceResponse | AttendanceRecord | null>("/hrms/attendance/today"),
       ]);
 
       if (policyRes?.data) {
@@ -371,23 +442,103 @@ export function AttendancePage() {
       }
       if (officeRes?.data) {
         setOffice(officeRes.data);
-        if (!coords) {
-          setCoords({ lat: officeRes.data.latitude, lng: officeRes.data.longitude });
-          setGpsStatus("connected");
-        }
+        setCoords((prev) => {
+          if (!prev) {
+            setGpsStatus("connected");
+            return { lat: officeRes.data.latitude, lng: officeRes.data.longitude };
+          }
+          return prev;
+        });
       }
       if (todayRes?.data) {
-        setTodayRecord(todayRes.data);
+        const raw = todayRes.data as any;
+        if (raw.assigned_office) {
+          setOffice(raw.assigned_office);
+        }
+        if (raw.punch_in || raw.punched_in) {
+          setTodayRecord({
+            id: raw.id || raw.attendance_record?.id || "today",
+            employee_id: raw.employee_id || raw.attendance_record?.employee_id || "",
+            attendance_date: raw.attendance_date,
+            punch_in: raw.punch_in,
+            punch_out: raw.punch_out,
+            status: raw.status,
+            working_minutes: raw.working_minutes || 0,
+            late_minutes: raw.late_minutes || 0,
+            early_exit_minutes: raw.early_exit_minutes || 0,
+            office_location_id: raw.office_location_id || null,
+            office_name: raw.office_name || null,
+            latitude: raw.latitude ?? raw.attendance_record?.latitude ?? null,
+            longitude: raw.longitude ?? raw.attendance_record?.longitude ?? null,
+            punch_in_distance: raw.punch_in_distance ?? raw.attendance_record?.punch_in_distance ?? null,
+            punch_out_distance: raw.punch_out_distance ?? raw.attendance_record?.punch_out_distance ?? null,
+            is_irregular: raw.is_irregular ?? false,
+            regularization_status: raw.regularization_status ?? "NONE",
+            can_regularize: raw.can_regularize ?? false,
+          });
+        } else {
+          setTodayRecord(null);
+        }
+      } else {
+        setTodayRecord(null);
       }
       await loadRegularizations();
     } catch (err: any) {
       console.error("Failed to load attendance initial data", err);
     }
-  }, [coords, loadRegularizations]);
+  }, [loadRegularizations]);
 
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+  // Window Focus & Visibility Rehydration (Phase B - hydrate entirely from backend, never React memory)
+  useEffect(() => {
+    const handleRehydrate = () => {
+      if (document.visibilityState === "visible") {
+        apiGet<TodayAttendanceResponse | AttendanceRecord | null>("/hrms/attendance/today").then((res) => {
+          if (res?.data) {
+            const raw = res.data as any;
+            if (raw.assigned_office) {
+              setOffice(raw.assigned_office);
+            }
+            if (raw.punch_in || raw.punched_in) {
+              setTodayRecord({
+                id: raw.id || raw.attendance_record?.id || "today",
+                employee_id: raw.employee_id || raw.attendance_record?.employee_id || "",
+                attendance_date: raw.attendance_date,
+                punch_in: raw.punch_in,
+                punch_out: raw.punch_out,
+                status: raw.status,
+                working_minutes: raw.working_minutes || 0,
+                late_minutes: raw.late_minutes || 0,
+                early_exit_minutes: raw.early_exit_minutes || 0,
+                office_location_id: raw.office_location_id || null,
+                office_name: raw.office_name || null,
+                latitude: raw.latitude ?? raw.attendance_record?.latitude ?? null,
+                longitude: raw.longitude ?? raw.attendance_record?.longitude ?? null,
+                punch_in_distance: raw.punch_in_distance ?? raw.attendance_record?.punch_in_distance ?? null,
+                punch_out_distance: raw.punch_out_distance ?? raw.attendance_record?.punch_out_distance ?? null,
+                is_irregular: raw.is_irregular ?? false,
+                regularization_status: raw.regularization_status ?? "NONE",
+                can_regularize: raw.can_regularize ?? false,
+              });
+            } else {
+              setTodayRecord(null);
+            }
+          } else {
+            setTodayRecord(null);
+          }
+        });
+      }
+    };
+    window.addEventListener("focus", handleRehydrate);
+    document.addEventListener("visibilitychange", handleRehydrate);
+    return () => {
+      window.removeEventListener("focus", handleRehydrate);
+      document.removeEventListener("visibilitychange", handleRehydrate);
+    };
+  }, []);
 
   useEffect(() => {
     if (activeTab === "approval") {
@@ -553,8 +704,13 @@ export function AttendancePage() {
     const isNeverEditable =
       day.status === "WEEKEND" ||
       day.status === "HOLIDAY" ||
+      day.status === "FUTURE" ||
+      day.status === "IN_PROGRESS" ||
+      day.status === "NOT_PUNCHED" ||
       day.status === "SCHEDULED" ||
       day.status === "ON_LEAVE" ||
+      day.status === "APPROVED_LEAVE" ||
+      day.status === "LEAVE" ||
       day.regularization_status === "APPROVED" ||
       (day.status === "PRESENT" && !day.is_irregular && day.regularization_status !== "PENDING");
 
@@ -566,15 +722,18 @@ export function AttendancePage() {
     setRegPunchIn(day.punch_in ? convertTo24h(day.punch_in) : convertTo24h(policyForm.shift_start_time || "10:30"));
     setRegPunchOut(day.punch_out ? convertTo24h(day.punch_out) : convertTo24h(policyForm.shift_end_time || "19:00"));
 
-    if (day.status === "MISSING_PUNCH") {
+    if (day.status === "ABSENT") {
+      setRegRequestType("ABSENT_REGULARIZATION");
+      setRegReason("Work From Home");
+    } else if (day.status === "MISSING_PUNCH") {
       setRegRequestType("MISSING_PUNCH");
-      setRegReason("GPS Issue");
+      setRegReason("Missing Punch");
     } else if (day.status === "LATE" || day.status === "HALF_DAY") {
       setRegRequestType("LATE_PUNCH");
       setRegReason("Traffic Delay");
     } else {
       setRegRequestType("LATE_PUNCH");
-      setRegReason("Traffic Delay");
+      setRegReason("Work From Home");
     }
     setRegNote("");
     setDrawerOpen(true);
@@ -861,12 +1020,7 @@ export function AttendancePage() {
                   <div className="hrms-date-chip">
                     <span className="hrms-date-chip-label">Today's Date</span>
                     <span className="hrms-date-chip-value">
-                      {now.toLocaleDateString("en-IN", {
-                        weekday: "short",
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
+                      {formatDateIST(now)}
                     </span>
                   </div>
 
@@ -875,6 +1029,7 @@ export function AttendancePage() {
                     <span className="hrms-clock-pulse" />
                     <span>
                       {now.toLocaleTimeString("en-IN", {
+                        timeZone: TIMEZONE_IST,
                         hour: "2-digit",
                         minute: "2-digit",
                         second: "2-digit",
@@ -1005,8 +1160,8 @@ export function AttendancePage() {
                         {!todayRecord?.punch_in
                           ? "Punch functionality will be available here."
                           : !todayRecord?.punch_out
-                          ? `Session started at ${new Date(todayRecord.punch_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                          : `Punched out at ${new Date(todayRecord.punch_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                          ? `Session started at ${formatDateTimeIST(todayRecord.punch_in)}`
+                          : `Punched out at ${formatDateTimeIST(todayRecord.punch_out)}`}
                       </div>
                     </div>
 
@@ -1078,12 +1233,8 @@ export function AttendancePage() {
 
                         <div className="hrms-punch-distance-chip">
                           <span style={{ color: "#0f172a" }}>
-                            Punched in at{" "}
-                            {new Date(todayRecord.punch_in).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}{" "}
-                            ({todayRecord.punch_in_distance ?? currentDistance}m from office)
+                            Punched in at {formatDateTimeIST(todayRecord.punch_in)} (
+                            {todayRecord.punch_in_distance ?? currentDistance}m from office)
                           </span>
                         </div>
                       </>
@@ -1102,7 +1253,10 @@ export function AttendancePage() {
                   </div>
 
                   <div style={{ fontSize: "12px", color: "#64748b", textAlign: "center" }}>
-                    Shift Policy: 10:30 AM – 7:00 PM • Grace up to 10:45 AM • Half Day after 11:30 AM
+                    Shift Policy: {formatTime12h(policy?.shift_start_time || "10:30")} –{" "}
+                    {formatTime12h(policy?.shift_end_time || "19:00")} • Grace up to{" "}
+                    {formatTime12h(policy?.grace_end_time || "10:45")} • Half Day after{" "}
+                    {formatTime12h(policy?.direct_half_day_time || "11:31")}
                   </div>
                 </div>
 
@@ -1166,9 +1320,7 @@ export function AttendancePage() {
                 <div className="hrms-summary-item">
                   <span className="hrms-summary-label">Punch In</span>
                   <span className="hrms-summary-value">
-                    {todayRecord?.punch_in
-                      ? new Date(todayRecord.punch_in).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                      : "—"}
+                    {todayRecord?.punch_in ? formatDateTimeIST(todayRecord.punch_in) : "—"}
                   </span>
                 </div>
 
@@ -1176,7 +1328,7 @@ export function AttendancePage() {
                   <span className="hrms-summary-label">Punch Out</span>
                   <span className="hrms-summary-value">
                     {todayRecord?.punch_out
-                      ? new Date(todayRecord.punch_out).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                      ? formatDateTimeIST(todayRecord.punch_out)
                       : todayRecord?.punch_in
                       ? "In Progress"
                       : "—"}
@@ -1276,6 +1428,11 @@ export function AttendancePage() {
                     </div>
                   ))}
 
+                  {/* Leading offset empty cells for weekday alignment (Phase H) */}
+                  {Array.from({ length: firstDayWeekdayOffset }).map((_, idx) => (
+                    <div key={`pad-${idx}`} className="hrms-cal-day padding" />
+                  ))}
+
                   {calendarDays.map((day) => {
                     const isToday =
                       day.day_number === now.getDate() &&
@@ -1285,18 +1442,21 @@ export function AttendancePage() {
                     const isWeekend = day.status === "WEEKEND";
 
                     // ==============================================================
-                    // Part 9 — Calendar Rules:
-                    // Show edit icon only for:
+                    // Day 3.6 — Regularize Button Rules:
+                    // Show pencil on:
                     // Late, Half Day, Missing Punch, Outside Geofence (is_irregular),
-                    // Pending Regularization.
-                    // Never show for:
-                    // Present, Holiday, Weekend, Future, Approved Leave.
+                    // Pending, Absent.
+                    // Never show on:
+                    // Present, Holiday, Weekend, Future, Approved Leave, In Progress.
                     // ==============================================================
                     const isNeverEditable =
                       day.status === "WEEKEND" ||
                       day.status === "HOLIDAY" ||
-                      day.status === "SCHEDULED" ||
-                      day.status === "ON_LEAVE" ||
+                      day.status === "FUTURE" ||
+                      day.status === "IN_PROGRESS" ||
+                      day.status === "NOT_PUNCHED" ||
+                      day.status === "APPROVED_LEAVE" ||
+                      day.status === "LEAVE" ||
                       day.regularization_status === "APPROVED" ||
                       (day.status === "PRESENT" && !day.is_irregular && day.regularization_status !== "PENDING");
 
@@ -1305,9 +1465,9 @@ export function AttendancePage() {
                       (day.status === "LATE" ||
                         day.status === "HALF_DAY" ||
                         day.status === "MISSING_PUNCH" ||
+                        day.status === "ABSENT" ||
                         day.is_irregular ||
                         day.regularization_status === "PENDING" ||
-                        day.early_exit_minutes > 0 ||
                         day.can_regularize);
 
                     let badgeClass = "status-scheduled";
@@ -1317,6 +1477,8 @@ export function AttendancePage() {
                     else if (day.status === "MISSING_PUNCH") badgeClass = "status-missing-punch";
                     else if (day.status === "IN_PROGRESS") badgeClass = "status-in-progress";
                     else if (day.status === "WEEKEND") badgeClass = "status-weekend";
+                    else if (day.status === "ABSENT") badgeClass = "status-absent";
+                    else if (day.status === "HOLIDAY") badgeClass = "status-holiday";
 
                     if (day.regularization_status === "PENDING") {
                       badgeClass = "status-pending";
@@ -1325,47 +1487,89 @@ export function AttendancePage() {
                     return (
                       <div
                         key={day.date}
-                        className={`hrms-cal-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""}`}
+                        className={`hrms-cal-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""} ${day.status === "FUTURE" ? "future" : ""}`}
                         data-testid={`calendar-day-${day.date}`}
                       >
+                        {/* Top: Day number, Today pill, Pencil top-right (Phase I) */}
                         <div className="hrms-cal-day-top">
-                          <span className="hrms-cal-day-num">{day.day_number}</span>
-                          <span className={`hrms-cal-status-badge ${badgeClass}`}>
-                            {day.regularization_status === "PENDING"
-                              ? "Pending Regularization"
-                              : day.regularization_status === "APPROVED"
-                              ? "APPROVED"
-                              : day.status}
-                          </span>
-                        </div>
-
-                        <div className="hrms-cal-day-body">
-                          {day.punch_in && <span>In: {day.punch_in}</span>}
-                          {day.punch_out && <span>Out: {day.punch_out}</span>}
-                          {day.late_minutes > 0 && (
-                            <span style={{ color: "#d97706" }}>+{day.late_minutes}m late</span>
-                          )}
-                          {day.early_exit_minutes > 0 && (
-                            <span style={{ color: "#b91c1c" }}>-{day.early_exit_minutes}m exit</span>
-                          )}
-                        </div>
-
-                        <div className="hrms-cal-day-footer">
+                          <div className="hrms-cal-day-top-left">
+                            <span className="hrms-cal-day-num">{day.day_number}</span>
+                            {isToday && <span className="hrms-today-pill">TODAY</span>}
+                          </div>
                           {canEdit ? (
                             <button
                               type="button"
-                              className="hrms-cal-edit-btn"
+                              className="hrms-cal-pencil-btn"
                               onClick={() => handleOpenRegularization(day)}
-                              title={day.regularization_status === "PENDING" ? "Regularization Pending Review" : "Request Attendance Regularization"}
+                              title={
+                                day.regularization_status === "PENDING"
+                                  ? "Regularization Pending Review"
+                                  : "Request Attendance Regularization"
+                              }
                               data-testid={`regularize-btn-${day.date}`}
                             >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M12 20h9" />
-                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                              </svg>
-                              <span>{day.regularization_status === "PENDING" ? "Pending" : "Regularize"}</span>
+                              ✏️
                             </button>
                           ) : null}
+                        </div>
+
+                        {/* Middle: Status badge */}
+                        <div className="hrms-cal-day-middle">
+                          {day.status !== "FUTURE" && day.status !== "NOT_PUNCHED" ? (
+                            <span className={`hrms-cal-status-badge ${badgeClass}`}>
+                              {day.regularization_status === "PENDING"
+                                ? "Pending Regularization"
+                                : day.regularization_status === "APPROVED"
+                                ? "APPROVED"
+                                : day.status === "HALF_DAY"
+                                ? "Half Day"
+                                : day.status === "MISSING_PUNCH"
+                                ? "Missing Punch"
+                                : day.status === "IN_PROGRESS"
+                                ? "In Progress"
+                                : day.status === "WEEKEND"
+                                ? "Weekend"
+                                : day.status === "ABSENT"
+                                ? "Absent"
+                                : day.status}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {/* Bottom: Punch In, Punch Out, Total Hours, Late minutes */}
+                        <div className="hrms-cal-day-bottom">
+                          {day.punch_in && (
+                            <div className="hrms-cal-timing-row">
+                              <span className="hrms-cal-timing-label">In:</span>
+                              <span className="hrms-cal-timing-val">{day.punch_in}</span>
+                            </div>
+                          )}
+                          {day.punch_out && (
+                            <div className="hrms-cal-timing-row">
+                              <span className="hrms-cal-timing-label">Out:</span>
+                              <span className="hrms-cal-timing-val">{day.punch_out}</span>
+                            </div>
+                          )}
+                          {day.working_minutes !== null && day.working_minutes !== undefined && day.working_minutes > 0 && (
+                            <div className="hrms-cal-timing-row">
+                              <span className="hrms-cal-timing-label">Hours:</span>
+                              <span className="hrms-cal-timing-val">
+                                {Math.floor(day.working_minutes / 60)}h {day.working_minutes % 60}m
+                              </span>
+                            </div>
+                          )}
+                          {day.late_minutes > 0 && (
+                            <div className="hrms-cal-timing-row late">
+                              <span className="hrms-cal-timing-label">Late:</span>
+                              <span className="hrms-cal-timing-val">+{day.late_minutes}m</span>
+                            </div>
+                          )}
+                          {day.early_exit_minutes > 0 && (
+                            <div className="hrms-cal-timing-row early-exit">
+                              <span className="hrms-cal-timing-label">Exit:</span>
+                              <span className="hrms-cal-timing-val">-{day.early_exit_minutes}m</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1424,7 +1628,7 @@ export function AttendancePage() {
                           Selected Day
                         </div>
                         <div style={{ fontSize: "15px", fontWeight: 700, color: "#0f172a", marginTop: 2 }}>
-                          {new Date(selectedDayForReg.date).toLocaleDateString("en-IN", {
+                          {formatDateIST(selectedDayForReg.date, {
                             weekday: "long",
                             day: "numeric",
                             month: "long",
@@ -1482,16 +1686,13 @@ export function AttendancePage() {
                           required
                           data-testid="regularization-reason-select"
                         >
+                          <option value="Work From Home">Work From Home</option>
+                          <option value="Missing Punch">Missing Punch</option>
+                          <option value="Client Meeting">Client Meeting</option>
+                          <option value="Medical Emergency">Medical Emergency</option>
                           <option value="Traffic Delay">Traffic Delay</option>
                           <option value="Traffic / Transit Delay">Traffic / Transit Delay</option>
-                          <option value="Client Meeting">Client Meeting</option>
-                          <option value="Client Meeting / Field Work">Client Meeting / Field Work</option>
                           <option value="GPS Issue">GPS Issue</option>
-                          <option value="Technical / GPS Glitch">Technical / GPS Glitch</option>
-                          <option value="Work From Home">Work From Home</option>
-                          <option value="Work From Home (Approved)">Work From Home (Approved)</option>
-                          <option value="Medical Emergency">Medical Emergency</option>
-                          <option value="Forgot to Punch Out">Forgot to Punch Out</option>
                           <option value="Other">Other</option>
                         </select>
                       </div>

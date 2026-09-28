@@ -45,11 +45,31 @@ from app.hrms.schemas import (
     RegularizationRead,
     RegularizationRejectAction,
     RegularizationRequest,
+    TodayAttendanceRead,
 )
 from app.users.models import User
 
-# Indian Standard Time (UTC+05:30) used organization-wide (IST has no DST)
-IST = timezone(timedelta(hours=5, minutes=30))
+# Indian Standard Time (Asia/Kolkata) used organization-wide (single timezone source, no hardcoded offsets)
+try:
+    from zoneinfo import ZoneInfo
+    IST = ZoneInfo("Asia/Kolkata")
+except Exception:
+    IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def to_ist(dt: datetime | None) -> datetime | None:
+    """Ensure datetime is converted to Indian Standard Time (Asia/Kolkata)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST)
+
+
+def format_time_ist(dt: datetime | None) -> str | None:
+    """Format datetime into IST 12-hour string (e.g. '10:30 AM')."""
+    ist_dt = to_ist(dt)
+    return ist_dt.strftime("%I:%M %p") if ist_dt else None
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -335,22 +355,34 @@ class HrmsAttendanceService:
             return None
 
         office_name = None
+        office_read = None
         if rec.office_location_id:
-            loc_res = await self.db.execute(
-                select(HrmsLocation.name).where(HrmsLocation.id == rec.office_location_id)
-            )
-            office_name = loc_res.scalar_one_or_none()
+            loc = await self.db.get(HrmsLocation, rec.office_location_id)
+            if loc:
+                office_name = loc.name
+                office_read = AssignedOfficeRead(
+                    id=loc.id,
+                    name=loc.name,
+                    address=loc.address,
+                    latitude=loc.latitude,
+                    longitude=loc.longitude,
+                    radius_meters=loc.radius_meters,
+                )
 
         can_regularize = self._can_regularize_record(rec)
+        punched_in = bool(rec.punch_in)
+        punched_out = bool(rec.punch_out)
+        working_mins = rec.working_minutes or 0
+        total_hours = f"{working_mins // 60}h {working_mins % 60:02d}m" if working_mins > 0 else "0h 00m"
 
         return AttendanceRecordRead(
             id=rec.id,
             employee_id=rec.employee_id,
             attendance_date=rec.attendance_date.isoformat(),
-            punch_in=rec.punch_in,
-            punch_out=rec.punch_out,
+            punch_in=to_ist(rec.punch_in),
+            punch_out=to_ist(rec.punch_out),
             status=rec.status,
-            working_minutes=rec.working_minutes or 0,
+            working_minutes=working_mins,
             late_minutes=rec.late_minutes,
             early_exit_minutes=rec.early_exit_minutes,
             office_location_id=rec.office_location_id,
@@ -364,8 +396,69 @@ class HrmsAttendanceService:
             regularization_reason=rec.regularization_reason,
             regularization_note=rec.regularization_note,
             can_regularize=can_regularize,
+            punched_in=punched_in,
+            punched_out=punched_out,
+            total_hours=total_hours,
+            assigned_office=office_read,
             created_at=rec.created_at,
             updated_at=rec.updated_at,
+        )
+
+    async def get_today_session_state(self, user_id: uuid.UUID) -> TodayAttendanceRead:
+        today = datetime.now(IST).date()
+        office = await self.get_assigned_office(user_id)
+        office_read = AssignedOfficeRead(
+            id=office.id,
+            name=office.name,
+            address=office.address,
+            latitude=office.latitude,
+            longitude=office.longitude,
+            radius_meters=office.radius_meters,
+        )
+
+        rec = await self.get_today_attendance(user_id, today)
+        if rec:
+            status = "IN_PROGRESS" if (rec.punch_in and not rec.punch_out) else rec.status
+            return TodayAttendanceRead(
+                id=rec.id,
+                employee_id=rec.employee_id,
+                attendance_date=rec.attendance_date,
+                punched_in=bool(rec.punch_in),
+                punched_out=bool(rec.punch_out),
+                status=status,
+                punch_in=rec.punch_in,
+                punch_out=rec.punch_out,
+                total_hours=rec.total_hours or "0h 00m",
+                working_minutes=rec.working_minutes or 0,
+                late_minutes=rec.late_minutes,
+                early_exit_minutes=rec.early_exit_minutes,
+                office_location_id=rec.office_location_id,
+                office_name=rec.office_name or office.name,
+                assigned_office=office_read,
+                is_irregular=rec.is_irregular,
+                regularization_status=rec.regularization_status,
+                can_regularize=rec.can_regularize,
+                attendance_record=rec,
+            )
+
+        return TodayAttendanceRead(
+            attendance_date=today.isoformat(),
+            punched_in=False,
+            punched_out=False,
+            status="NOT_PUNCHED",
+            punch_in=None,
+            punch_out=None,
+            total_hours="0h 00m",
+            working_minutes=0,
+            late_minutes=0,
+            early_exit_minutes=0,
+            office_location_id=office.id,
+            office_name=office.name,
+            assigned_office=office_read,
+            is_irregular=False,
+            regularization_status="NONE",
+            can_regularize=False,
+            attendance_record=None,
         )
 
     # -----------------------------------------------------------------------
@@ -462,7 +555,7 @@ class HrmsAttendanceService:
         record = res.scalar_one_or_none()
 
         if record:
-            record.punch_in = raw_time
+            record.punch_in = local_dt
             record.status = status
             record.working_minutes = 0
             record.late_minutes = late_minutes
@@ -476,7 +569,7 @@ class HrmsAttendanceService:
             record = HrmsAttendance(
                 employee_id=user_id,
                 attendance_date=today,
-                punch_in=raw_time,
+                punch_in=local_dt,
                 status=status,
                 working_minutes=0,
                 late_minutes=late_minutes,
@@ -493,11 +586,20 @@ class HrmsAttendanceService:
         await self.db.commit()
         await self.db.refresh(record)
 
+        office_read = AssignedOfficeRead(
+            id=office.id,
+            name=office.name,
+            address=office.address,
+            latitude=office.latitude,
+            longitude=office.longitude,
+            radius_meters=office.radius_meters,
+        )
+
         return AttendanceRecordRead(
             id=record.id,
             employee_id=record.employee_id,
             attendance_date=record.attendance_date.isoformat(),
-            punch_in=record.punch_in,
+            punch_in=to_ist(record.punch_in),
             punch_out=None,
             status=record.status,
             working_minutes=0,
@@ -512,6 +614,10 @@ class HrmsAttendanceService:
             is_irregular=record.is_irregular,
             regularization_status="NONE",
             can_regularize=self._can_regularize_record(record),
+            punched_in=True,
+            punched_out=False,
+            total_hours="0h 00m",
+            assigned_office=office_read,
             created_at=record.created_at,
             updated_at=record.updated_at,
         )
@@ -549,7 +655,7 @@ class HrmsAttendanceService:
         )
 
         # 3. Calculate working minutes
-        working_seconds = (raw_time - record.punch_in).total_seconds()
+        working_seconds = (local_dt - to_ist(record.punch_in)).total_seconds()
         working_mins = max(0, int(working_seconds / 60))
         record.working_minutes = working_mins
 
@@ -564,18 +670,28 @@ class HrmsAttendanceService:
             record.early_exit_minutes = early_exit_mins
             record.is_irregular = True
 
-        record.punch_out = raw_time
+        record.punch_out = local_dt
         record.punch_out_distance = round(distance, 1)
 
         await self.db.commit()
         await self.db.refresh(record)
 
+        office_read = AssignedOfficeRead(
+            id=office.id,
+            name=office.name,
+            address=office.address,
+            latitude=office.latitude,
+            longitude=office.longitude,
+            radius_meters=office.radius_meters,
+        )
+        total_hours = f"{working_mins // 60}h {working_mins % 60:02d}m" if working_mins > 0 else "0h 00m"
+
         return AttendanceRecordRead(
             id=record.id,
             employee_id=record.employee_id,
             attendance_date=record.attendance_date.isoformat(),
-            punch_in=record.punch_in,
-            punch_out=record.punch_out,
+            punch_in=to_ist(record.punch_in),
+            punch_out=to_ist(record.punch_out),
             status=record.status,
             working_minutes=record.working_minutes,
             late_minutes=record.late_minutes,
@@ -591,6 +707,10 @@ class HrmsAttendanceService:
             regularization_reason=record.regularization_reason,
             regularization_note=record.regularization_note,
             can_regularize=self._can_regularize_record(record),
+            punched_in=True,
+            punched_out=True,
+            total_hours=total_hours,
+            assigned_office=office_read,
             created_at=record.created_at,
             updated_at=record.updated_at,
         )
@@ -638,12 +758,11 @@ class HrmsAttendanceService:
             rec = record_map.get(cur_date)
 
             if rec:
-                # Active session live check
                 status = rec.status
-                if cur_date == today and rec.punch_in and not rec.punch_out:
+                if cur_date == today and rec.punch_in and not rec.punch_out and rec.status == "PRESENT":
                     status = "IN_PROGRESS"
 
-                can_regularize = self._can_regularize_record(rec)
+                can_regularize = self._can_regularize_record(rec) if status != "IN_PROGRESS" else False
 
                 days_list.append(
                     CalendarDayRead(
@@ -651,8 +770,8 @@ class HrmsAttendanceService:
                         day_number=d_num,
                         day_name=day_names[weekday_idx],
                         status=status,
-                        punch_in=rec.punch_in.strftime("%I:%M %p") if rec.punch_in else None,
-                        punch_out=rec.punch_out.strftime("%I:%M %p") if rec.punch_out else None,
+                        punch_in=format_time_ist(rec.punch_in),
+                        punch_out=format_time_ist(rec.punch_out),
                         working_minutes=rec.working_minutes,
                         late_minutes=rec.late_minutes,
                         early_exit_minutes=rec.early_exit_minutes,
@@ -668,15 +787,15 @@ class HrmsAttendanceService:
                     can_regularize = False
                     is_irregular = False
                 elif cur_date < today:
-                    status = "MISSING_PUNCH"
+                    status = "ABSENT"
                     can_regularize = True
-                    is_irregular = True
+                    is_irregular = False
                 elif cur_date == today:
                     status = "NOT_PUNCHED"
                     can_regularize = False
                     is_irregular = False
                 else:
-                    status = "SCHEDULED"
+                    status = "FUTURE"
                     can_regularize = False
                     is_irregular = False
 
@@ -712,7 +831,7 @@ class HrmsAttendanceService:
         req_date = date.fromisoformat(payload.date)
         notes = payload.notes or payload.note or ""
         req_type = payload.request_type or "LATE_PUNCH"
-        now_utc = datetime.now(timezone.utc)
+        now_ist = datetime.now(IST)
         is_direct = bool(payload.direct_regularize and is_admin)
 
         punch_in_dt = parse_time_on_date(req_date, payload.punch_in)
@@ -730,10 +849,11 @@ class HrmsAttendanceService:
         rec = res.scalar_one_or_none()
 
         if not rec:
+            initial_status = "PRESENT" if is_direct else ("MISSING_PUNCH" if req_type == "MISSING_PUNCH" else "ABSENT")
             rec = HrmsAttendance(
                 employee_id=user_id,
                 attendance_date=req_date,
-                status="PRESENT" if is_direct else "MISSING_PUNCH",
+                status=initial_status,
                 punch_in=punch_in_dt if is_direct else None,
                 punch_out=punch_out_dt if is_direct else None,
                 working_minutes=working_mins if is_direct else 0,
@@ -784,7 +904,7 @@ class HrmsAttendanceService:
             reg_req.attendance_record_id = rec.id
             if is_direct:
                 reg_req.status = "APPROVED"
-                reg_req.reviewed_at = now_utc
+                reg_req.reviewed_at = now_ist
                 reg_req.reviewed_by = user_id
                 reg_req.manager_remarks = "Directly regularized by Administrator"
                 reg_req.action_taken = "DIRECT_REGULARIZE"
@@ -800,8 +920,8 @@ class HrmsAttendanceService:
                 punch_out_time=payload.punch_out,
                 total_hours=payload.total_hours,
                 status="APPROVED" if is_direct else "PENDING",
-                submitted_at=now_utc,
-                reviewed_at=now_utc if is_direct else None,
+                submitted_at=now_ist,
+                reviewed_at=now_ist if is_direct else None,
                 reviewed_by=user_id if is_direct else None,
                 manager_remarks="Directly regularized by Administrator" if is_direct else None,
                 action_taken="DIRECT_REGULARIZE" if is_direct else None,
@@ -889,8 +1009,8 @@ class HrmsAttendanceService:
             rev_name = f"{rev.first_name} {rev.last_name}".strip() if rev else None
 
             att = att_map.get(r.attendance_record_id)
-            punch_in_str = r.punch_in_time or (att.punch_in.strftime("%I:%M %p") if att and att.punch_in else None)
-            punch_out_str = r.punch_out_time or (att.punch_out.strftime("%I:%M %p") if att and att.punch_out else None)
+            punch_in_str = r.punch_in_time or format_time_ist(att.punch_in if att else None)
+            punch_out_str = r.punch_out_time or format_time_ist(att.punch_out if att else None)
             hours_str = r.total_hours
             if not hours_str and att and att.working_minutes:
                 hours_str = f"{att.working_minutes // 60}h {att.working_minutes % 60:02d}m"
@@ -937,14 +1057,14 @@ class HrmsAttendanceService:
         if not reg_req:
             raise NotFoundException(f"Regularization request {request_id} not found.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_ist = datetime.now(IST)
         action = (payload.action if payload else "APPROVE") or "APPROVE"
         manager_remarks = (payload.manager_remarks if payload and payload.manager_remarks else "Approved").strip()
         if not manager_remarks:
             manager_remarks = "Approved"
 
         reg_req.status = "APPROVED"
-        reg_req.reviewed_at = now_utc
+        reg_req.reviewed_at = now_ist
         reg_req.reviewed_by = reviewer_id
         reg_req.manager_remarks = manager_remarks
         reg_req.action_taken = action
@@ -974,11 +1094,11 @@ class HrmsAttendanceService:
             att_rec.regularization_note = f"Approved ({action}): {manager_remarks}"
 
             # Apply requested punch timings if set
-            if reg_req.punch_in_time and not att_rec.punch_in:
+            if reg_req.punch_in_time:
                 p_in = parse_time_on_date(att_rec.attendance_date, reg_req.punch_in_time)
                 if p_in:
                     att_rec.punch_in = p_in
-            if reg_req.punch_out_time and not att_rec.punch_out:
+            if reg_req.punch_out_time:
                 p_out = parse_time_on_date(att_rec.attendance_date, reg_req.punch_out_time)
                 if p_out:
                     att_rec.punch_out = p_out
@@ -997,8 +1117,8 @@ class HrmsAttendanceService:
         emp = users_map.get(reg_req.employee_id)
         rev = users_map.get(reviewer_id)
 
-        punch_in_str = reg_req.punch_in_time or (att_rec.punch_in.strftime("%I:%M %p") if att_rec and att_rec.punch_in else None)
-        punch_out_str = reg_req.punch_out_time or (att_rec.punch_out.strftime("%I:%M %p") if att_rec and att_rec.punch_out else None)
+        punch_in_str = reg_req.punch_in_time or format_time_ist(att_rec.punch_in if att_rec else None)
+        punch_out_str = reg_req.punch_out_time or format_time_ist(att_rec.punch_out if att_rec else None)
         hours_str = reg_req.total_hours
         if not hours_str and att_rec and att_rec.working_minutes:
             hours_str = f"{att_rec.working_minutes // 60}h {att_rec.working_minutes % 60:02d}m"
@@ -1042,14 +1162,14 @@ class HrmsAttendanceService:
         if not reg_req:
             raise NotFoundException(f"Regularization request {request_id} not found.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_ist = datetime.now(IST)
         action = (payload.action if payload else "REJECT_LOP") or "REJECT_LOP"
         manager_remarks = (payload.manager_remarks if payload and payload.manager_remarks else "Rejected (Mark LOP)").strip()
         if not manager_remarks:
             manager_remarks = "Rejected (Mark LOP)"
 
         reg_req.status = "REJECTED"
-        reg_req.reviewed_at = now_utc
+        reg_req.reviewed_at = now_ist
         reg_req.reviewed_by = reviewer_id
         reg_req.manager_remarks = manager_remarks
         reg_req.action_taken = action
@@ -1088,8 +1208,8 @@ class HrmsAttendanceService:
         emp = users_map.get(reg_req.employee_id)
         rev = users_map.get(reviewer_id)
 
-        punch_in_str = reg_req.punch_in_time or (att_rec.punch_in.strftime("%I:%M %p") if att_rec and att_rec.punch_in else None)
-        punch_out_str = reg_req.punch_out_time or (att_rec.punch_out.strftime("%I:%M %p") if att_rec and att_rec.punch_out else None)
+        punch_in_str = reg_req.punch_in_time or format_time_ist(att_rec.punch_in if att_rec else None)
+        punch_out_str = reg_req.punch_out_time or format_time_ist(att_rec.punch_out if att_rec else None)
         hours_str = reg_req.total_hours
         if not hours_str and att_rec and att_rec.working_minutes:
             hours_str = f"{att_rec.working_minutes // 60}h {att_rec.working_minutes % 60:02d}m"
@@ -1127,17 +1247,19 @@ class HrmsAttendanceService:
     def _can_regularize_record(rec: HrmsAttendance) -> bool:
         """
         The edit icon must appear ONLY when:
-        Late, Half Day, Missing Punch, Outside Geofence, Pending Regularization.
+        Late, Half Day, Missing Punch, Outside Geofence, Pending Regularization, Absent.
         Never show for:
-        Present, Holiday, Weekend, Future, Approved Leave.
+        Present, Holiday, Weekend, Future, Approved Leave, In Progress.
         """
         if rec.regularization_status == "APPROVED":
             return False
         if rec.regularization_status == "PENDING":
             return True
+        if rec.status in ("WEEKEND", "HOLIDAY", "FUTURE", "NOT_PUNCHED", "EMPTY", "IN_PROGRESS", "APPROVED_LEAVE", "LEAVE"):
+            return False
         if rec.status == "PRESENT" and not rec.is_irregular and rec.early_exit_minutes == 0 and rec.late_minutes == 0:
             return False
-        if rec.status in ("LATE", "HALF_DAY", "MISSING_PUNCH"):
+        if rec.status in ("LATE", "HALF_DAY", "MISSING_PUNCH", "ABSENT"):
             return True
         if rec.is_irregular:
             return True

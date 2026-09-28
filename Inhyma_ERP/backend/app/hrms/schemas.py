@@ -306,10 +306,36 @@ class AttendanceRecordRead(BaseModel):
     regularization_reason: str | None = None
     regularization_note: str | None = None
     can_regularize: bool = False
+    punched_in: bool = False
+    punched_out: bool = False
+    total_hours: str | None = None
+    assigned_office: AssignedOfficeRead | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TodayAttendanceRead(BaseModel):
+    id: uuid.UUID | None = None
+    employee_id: uuid.UUID | None = None
+    attendance_date: str
+    punched_in: bool = False
+    punched_out: bool = False
+    status: str = "NOT_PUNCHED"
+    punch_in: datetime | None = None
+    punch_out: datetime | None = None
+    total_hours: str = "0h 00m"
+    working_minutes: int = 0
+    late_minutes: int = 0
+    early_exit_minutes: int = 0
+    office_location_id: uuid.UUID | None = None
+    office_name: str | None = None
+    assigned_office: AssignedOfficeRead | None = None
+    is_irregular: bool = False
+    regularization_status: str = "NONE"
+    can_regularize: bool = False
+    attendance_record: AttendanceRecordRead | None = None
 
 
 class CalendarDayRead(BaseModel):

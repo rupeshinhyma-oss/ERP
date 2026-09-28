@@ -471,3 +471,90 @@ async def test_day_3_5_regularization_with_timings(client: AsyncClient):
     # Approved day should NOT show edit icon
     assert day_15["can_regularize"] is False
 
+
+@pytest.mark.asyncio
+async def test_day_3_6_ist_timezone_and_absent_regularization(client: AsyncClient):
+    """
+    Day 3.6: IST Timezone & Absent Regularization Tests:
+    1. An unpunched past weekday must have status="ABSENT" and can_regularize=True.
+    2. Regularizing an Absent day creates a PENDING request with editable in/out times and reason.
+    3. Approving Absent regularization updates calendar to PRESENT/APPROVED with requested IST timings.
+    4. Punched timestamps in calendar must display in IST (e.g. 10:46 AM, never UTC 05:16 AM).
+    """
+    # Ensure clean state for test date (2026-09-08)
+    from datetime import date
+    from app.hrms.models import HrmsAttendanceRegularization
+    maker = get_sessionmaker()
+    async with maker() as session:
+        await session.execute(
+            delete(HrmsAttendanceRegularization).where(HrmsAttendanceRegularization.attendance_date == date(2026, 9, 8))
+        )
+        await session.execute(
+            delete(HrmsAttendance).where(HrmsAttendance.attendance_date == date(2026, 9, 8))
+        )
+        await session.commit()
+
+    # 1. Check past absent day (e.g. 2026-09-08)
+    cal_res = await client.get("/api/v1/hrms/attendance/calendar?year=2026&month=9")
+    assert cal_res.status_code == 200
+    day_8 = next(d for d in cal_res.json()["data"] if d["date"] == "2026-09-08")
+    assert day_8["status"] == "ABSENT"
+    assert day_8["can_regularize"] is True
+
+    # 2. Submit regularization for Absent day
+    absent_payload = {
+        "date": "2026-09-08",
+        "request_type": "ABSENT_REGULARIZATION",
+        "reason": "Work From Home",
+        "notes": "Worked from home due to network maintenance",
+        "punch_in": "10:30 AM",
+        "punch_out": "07:00 PM",
+        "total_hours": "8h30m",
+    }
+    submit_res = await client.post("/api/v1/hrms/attendance/regularize", json=absent_payload)
+    assert submit_res.status_code == 200
+    sub_data = submit_res.json()["data"]
+    assert sub_data["status"] == "PENDING"
+    assert sub_data["reason"] == "Work From Home"
+    assert sub_data["punch_in"] == "10:30 AM"
+    assert sub_data["punch_out"] == "07:00 PM"
+    reg_id = sub_data["id"]
+
+    # 3. Approve Absent regularization
+    app_res = await client.patch(
+        f"/api/v1/hrms/attendance/regularizations/{reg_id}/approve",
+        json={"action": "APPROVE", "manager_remarks": "Approved WFH request."},
+    )
+    assert app_res.status_code == 200
+    app_data = app_res.json()["data"]
+    assert app_data["status"] == "APPROVED"
+    assert app_data["punch_in"] == "10:30 AM"
+    assert app_data["punch_out"] == "07:00 PM"
+
+    # 4. Check calendar updated to PRESENT / APPROVED with IST timings
+    cal_res_after = await client.get("/api/v1/hrms/attendance/calendar?year=2026&month=9")
+    day_8_after = next(d for d in cal_res_after.json()["data"] if d["date"] == "2026-09-08")
+    assert day_8_after["status"] == "PRESENT"
+    assert day_8_after["regularization_status"] == "APPROVED"
+    assert day_8_after["punch_in"] == "10:30 AM"
+    assert day_8_after["punch_out"] == "07:00 PM"
+    assert day_8_after["can_regularize"] is False
+
+    # 5. Verify IST display for real punch (10:46 AM IST, NOT 05:16 AM UTC)
+    async with maker() as session:
+        await session.execute(
+            delete(HrmsAttendance).where(HrmsAttendance.attendance_date == date(2026, 9, 28))
+        )
+        await session.commit()
+
+    t_10_46 = "2026-09-28T05:16:00Z"
+    await client.post(
+        "/api/v1/hrms/attendance/punch-in",
+        json={"latitude": THANE_LAT, "longitude": THANE_LNG, "timestamp": t_10_46},
+    )
+    cal_res_pushed = await client.get("/api/v1/hrms/attendance/calendar?year=2026&month=9")
+    day_28 = next(d for d in cal_res_pushed.json()["data"] if d["date"] == "2026-09-28")
+    assert day_28["punch_in"] == "10:46 AM"
+    assert "05:16" not in (day_28["punch_in"] or "")
+
+
