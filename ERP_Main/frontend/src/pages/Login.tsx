@@ -7,7 +7,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Auth } from "@/lib/auth";
 import { useGlobalSession } from "@/lib/session";
-import { processIncomingSsoHandover } from "@/lib/ssoBridge";
+import { processIncomingSsoHandover, resolveSingleErpDirectUrl } from "@/lib/ssoBridge";
+import { getEcosystemCookie } from "@/lib/ecosystemSession";
 import { ErrorBanner } from "@/components/ui";
 
 const BRAND_NAME = "INHYMA SOLUTIONS LLP";
@@ -74,6 +75,29 @@ export function Login() {
   }, [navigate, redirectUrl]);
 
   if (Auth.isLoggedIn()) {
+    const cookie = getEcosystemCookie();
+    const isSuperAdmin = cookie?.role === "super_admin" || cookie?.user_type === "platform_admin";
+    const allowedErps = cookie?.allowed_erps || [];
+    const hasWildcard = allowedErps.includes("*");
+    const distinctErps = allowedErps.filter((k) => k && k !== "*" && k !== "control-plane");
+
+    if (!isSuperAdmin && !hasWildcard && distinctErps.length === 1) {
+      const profile = Auth.getProfile();
+      const directUrl = resolveSingleErpDirectUrl(
+        { erp_key: distinctErps[0] },
+        {
+          email: cookie?.email || (profile ? ("primary_email" in profile ? profile.primary_email : (profile as any).email) : ""),
+          display_name: cookie?.display_name || profile?.display_name,
+          role: cookie?.role || (profile ? ("role" in profile ? profile.role : (profile as any).role) : ""),
+          session_id: cookie?.session_id || Auth.getSessionId() || undefined,
+          allowed_erps: distinctErps,
+        }
+      );
+      if (directUrl) {
+        window.location.assign(directUrl);
+        return null;
+      }
+    }
     return <Navigate to={redirectUrl} replace />;
   }
 
@@ -89,7 +113,37 @@ export function Login() {
     setSubmitting(true);
 
     try {
-      await login(identifier.trim(), password);
+      const result = await login(identifier.trim(), password);
+
+      // Single ERP Direct Login:
+      // If user has permission to only 1 ERP, log directly into that ERP instead of opening ERPDashboard!
+      if (
+        result &&
+        result.userType === "global_user" &&
+        result.activeMemberships?.length === 1
+      ) {
+        const singleMem = result.activeMemberships[0];
+        const assignedKey = (singleMem.erp_key || singleMem.erp_name || "yinglima").toLowerCase();
+        const cleanKey = assignedKey.includes("yinglima") ? "yinglima" : assignedKey.includes("inhyma") ? "inhyma" : assignedKey;
+
+        const prof = result.profile;
+        const profEmail = prof ? ("primary_email" in prof ? prof.primary_email : (prof as any).email) : identifier.trim();
+        const profName = prof?.display_name || identifier.trim();
+        const profRole = prof && "role" in prof ? (prof as any).role : "global_user";
+
+        const directUrl = resolveSingleErpDirectUrl(singleMem, {
+          email: profEmail,
+          display_name: profName,
+          role: profRole,
+          session_id: Auth.getSessionId() || undefined,
+          allowed_erps: [cleanKey],
+        });
+        if (directUrl) {
+          window.location.assign(directUrl);
+          return;
+        }
+      }
+
       navigate(redirectUrl, { replace: true });
     } catch (err: unknown) {
       setError(err);

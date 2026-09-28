@@ -139,8 +139,8 @@ class UserRepository(BaseRepository[User]):
         from sqlalchemy import func
         from app.users.models import UserStatus
 
-        stmt = select(User)
-        count_stmt = select(func.count(User.id))
+        stmt = self._base_select()
+        count_stmt = select(func.count(User.id)).where(User.deleted_at.is_(None))
 
         filters = []
         if query and query.strip():

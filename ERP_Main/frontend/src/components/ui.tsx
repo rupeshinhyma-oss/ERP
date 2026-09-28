@@ -82,11 +82,15 @@ export interface ModalProps {
   open?: boolean;
   isOpen?: boolean;
   title?: ReactNode;
+  subtitle?: ReactNode;
+  headerAction?: ReactNode;
   onClose: () => void;
   children: ReactNode;
   variant?: "drawer" | "center";
   cardClassName?: string;
   cardStyle?: CSSProperties;
+  backdropStyle?: CSSProperties;
+  zIndex?: number;
   showHeader?: boolean;
   locked?: boolean;
 }
@@ -95,11 +99,15 @@ export function Modal({
   open,
   isOpen,
   title,
+  subtitle,
+  headerAction,
   onClose,
   children,
   variant = "drawer",
   cardClassName = "",
   cardStyle,
+  backdropStyle,
+  zIndex,
   showHeader = true,
   locked = false,
 }: ModalProps) {
@@ -108,9 +116,18 @@ export function Modal({
 
   if (!isModalOpen) return null;
 
+  const isCenter = variant === "center";
+  const backdropClasses = `modal-backdrop ${isCenter ? "modal-centered-backdrop modal-backdrop-center" : ""}`.trim();
+  const cardClasses = `modal-card ${isCenter ? "modal-dialog-card modal-card-center" : "modal-card-drawer"} ${cardClassName}`.trim();
+
   return (
     <div
-      className={`modal-backdrop ${variant === "center" ? "modal-backdrop-center" : ""}`}
+      className={backdropClasses}
+      style={{
+        ...(isCenter ? { display: "flex", justifyContent: "center", alignItems: "center", padding: "20px" } : {}),
+        ...(zIndex ? { zIndex } : {}),
+        ...backdropStyle,
+      }}
       onClick={(e) => {
         if (!locked && e.target === e.currentTarget) {
           onClose();
@@ -118,23 +135,33 @@ export function Modal({
       }}
     >
       <div
-        className={`modal-card ${variant === "center" ? "modal-card-center" : "modal-card-drawer"} ${cardClassName}`}
+        className={cardClasses}
         style={cardStyle}
       >
         {showHeader && (
           <div className="modal-header">
-            <h3 className="modal-title">{title}</h3>
-            {!locked && (
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={onClose}
-                aria-label="Close dialog"
-                style={{ cursor: "pointer" }}
-              >
-                <IconX width={18} height={18} />
-              </button>
-            )}
+            <div style={{ minWidth: 0, flex: 1, marginRight: "16px" }}>
+              <h3 className="modal-title" style={{ margin: 0 }}>{title}</h3>
+              {subtitle && (
+                <div style={{ fontSize: "12px", color: "var(--color-muted)", marginTop: "2px" }}>
+                  {subtitle}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+              {headerAction}
+              {!locked && (
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={onClose}
+                  aria-label="Close dialog"
+                  title="Close"
+                >
+                  <IconX width={18} height={18} />
+                </button>
+              )}
+            </div>
           </div>
         )}
         <div className="modal-body">{children}</div>
@@ -169,7 +196,7 @@ export function ConfirmDialog({
   loading?: boolean;
 }) {
   return (
-    <Modal open={open} onClose={onCancel} variant="center" title={title} locked={loading} cardStyle={{ maxWidth: "440px" }}>
+    <Modal open={open} onClose={onCancel} variant="center" title={title} locked={loading} cardStyle={{ maxWidth: "440px" }} zIndex={3000}>
       <div style={{ marginBottom: "20px", color: "var(--color-text-secondary)", fontSize: "14px", lineHeight: 1.5 }}>
         {message}
       </div>

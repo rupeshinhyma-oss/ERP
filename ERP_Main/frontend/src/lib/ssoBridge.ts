@@ -44,18 +44,42 @@ export const ECOSYSTEM_ERPS = getEcosystemErps();
  * Creates an SSO handover launch URL targeting any registered ERP.
  * Automatically passes the active unified session_id.
  */
-export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string): string {
+export function createSsoHandoverUrl(
+  targetBaseUrl: string,
+  targetPath?: string,
+  userOverride?: { email?: string; user?: string; role?: string; allowed_erps?: string[]; session_id?: string }
+): string {
   if (!targetBaseUrl) return "#";
 
-  const currentSessionId = Auth.getSessionId() || getEcosystemCookie()?.session_id;
+  const currentSessionId = userOverride?.session_id || Auth.getSessionId() || getEcosystemCookie()?.session_id;
   const currentCookie = getEcosystemCookie();
+  const profile = Auth.getProfile();
+
+  const activeEmail =
+    userOverride?.email ||
+    (profile ? ("primary_email" in profile ? profile.primary_email : (profile as any).email) : "") ||
+    currentCookie?.email ||
+    "";
+
+  const activeUser =
+    userOverride?.user ||
+    (profile ? (profile.display_name || (profile as any).username || activeEmail.split("@")[0]) : "") ||
+    currentCookie?.display_name ||
+    activeEmail.split("@")[0] ||
+    "user";
+
+  const activeRole =
+    userOverride?.role ||
+    (profile ? ("role" in profile ? profile.role : (profile as any).role) : "") ||
+    currentCookie?.role ||
+    "global_user";
 
   const payload: SsoHandoverPayload = {
-    role: (currentCookie?.role as any) || "super_admin",
-    user: currentCookie?.email || "admin",
-    email: currentCookie?.email || "admin@example.com",
+    role: (activeRole as any) || "global_user",
+    user: activeUser,
+    email: activeEmail,
     session_id: currentSessionId || undefined,
-    allowed_erps: currentCookie?.allowed_erps || ["*"],
+    allowed_erps: userOverride?.allowed_erps || currentCookie?.allowed_erps || ["*"],
     ts: Date.now(),
     sig: SSO_SIGNATURE,
   };
@@ -75,6 +99,62 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
     const separator = targetBaseUrl.includes("?") ? "&" : "?";
     return `${targetBaseUrl}${separator}sso_handover=${encodeURIComponent(btoa(JSON.stringify(payload)))}`;
   }
+}
+
+/**
+ * Resolves direct SSO handover launch URL for a single assigned ERP membership.
+ */
+export function resolveSingleErpDirectUrl(
+  membership: {
+    erp_key?: string;
+    erp_name?: string;
+    erp_instance_id?: string;
+  },
+  userContext?: {
+    email?: string;
+    display_name?: string;
+    role?: string;
+    session_id?: string;
+    allowed_erps?: string[];
+  }
+): string | null {
+  const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
+  const erpKey = (membership.erp_key || membership.erp_name || "").toLowerCase();
+
+  let targetHostUrl = "";
+  let cleanErpKey = "";
+  if (erpKey.includes("yinglima")) {
+    targetHostUrl = `http://${host}:5173/dashboard`;
+    cleanErpKey = "yinglima";
+  } else if (erpKey.includes("inhyma")) {
+    targetHostUrl = `http://${host}:5174/dashboard`;
+    cleanErpKey = "inhyma";
+  } else {
+    const matched = ECOSYSTEM_ERPS.find(
+      (e) => e.key !== "control-plane" && (e.key.toLowerCase().includes(erpKey) || erpKey.includes(e.key.toLowerCase()))
+    );
+    if (matched) {
+      targetHostUrl = matched.hostUrl;
+      cleanErpKey = matched.key;
+    }
+  }
+
+  if (!targetHostUrl) return null;
+  return createSsoHandoverUrl(
+    targetHostUrl,
+    undefined,
+    userContext
+      ? {
+          email: userContext.email,
+          user: userContext.display_name,
+          role: userContext.role,
+          session_id: userContext.session_id,
+          allowed_erps: userContext.allowed_erps || [cleanErpKey],
+        }
+      : {
+          allowed_erps: [cleanErpKey],
+        }
+  );
 }
 
 /**

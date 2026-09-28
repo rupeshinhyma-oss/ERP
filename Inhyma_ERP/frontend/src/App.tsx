@@ -20,6 +20,7 @@ import { setUnauthorizedHandler } from "@/lib/api";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
 
 import { LoginPage } from "@/pages/Login";
+import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { DashboardPage } from "@/pages/Dashboard";
 import { ForbiddenPage } from "@/pages/Forbidden";
 import { OrganizationPage } from "@/pages/Organization";
@@ -90,7 +91,6 @@ import { AddAdjustmentOrderPage } from "@/pages/AddAdjustmentOrderPage";
 import { StockTransferPage } from "@/pages/StockTransferPage";
 import { TransferOrderPdfPage } from "@/pages/TransferOrderPdfPage";
 import { AddTransferOrderPage } from "@/pages/AddTransferOrderPage";
-import { HrmsDashboardPage } from "@/pages/hrms/HrmsDashboardPage";
 
 export function App() {
   const navigate = useNavigate();
@@ -100,6 +100,9 @@ export function App() {
   // "already-logged-in" means nothing changed, so the user's current page
   // (wherever they navigated to) is left alone.
   useEffect(() => {
+    if (window.location.pathname.startsWith("/auth/callback")) {
+      return;
+    }
     processIncomingSsoHandover().then((result) => {
       if (result === "logged-in") {
         navigate("/dashboard", { replace: true });
@@ -135,6 +138,7 @@ export function App() {
       <ErrorBoundary key={location.pathname} title="This page ran into a problem.">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/quote/:token" element={<PublicSupplierQuotePage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -285,13 +289,6 @@ export function App() {
             }
           />
           <Route path="/marketing-tasks" element={<Navigate to="/marketing-task/list" replace />} />
-
-          {/* HRMS Module - Consolidated into Attendance Module with internal tabs */}
-          <Route path="/hrms" element={<HrmsDashboardPage />} />
-          <Route path="/hrms/dashboard" element={<Navigate to="/hrms" replace />} />
-          <Route path="/hrms/locations" element={<Navigate to="/hrms?tab=locations" replace />} />
-          <Route path="/hrms/employee-locations" element={<Navigate to="/hrms?tab=locations" replace />} />
-          <Route path="/hrms/wfh-requests" element={<Navigate to="/hrms?tab=history" replace />} />
 
           <Route path="/masters/company-list" element={<CompanyListPage />} />
           <Route path="/masters/countries" element={<CountriesPage />} />

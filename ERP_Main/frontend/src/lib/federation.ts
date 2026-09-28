@@ -169,7 +169,7 @@ export async function authorizeErpLaunch(
   }
 
   // 1. Resolve redirect URI (defaulting to /auth/callback on the target ERP)
-  const defaultRedirect = `${erp.base_url.replace(/\/$/, "")}/auth/callback`;
+  const defaultRedirect = `${erp.base_url.replace(/\/$/, "").replace(/\/dashboard\/?$/, "")}/auth/callback`;
   const targetRedirectUri = customRedirectUri || defaultRedirect;
 
   // 2. Validate redirect URI against ERP's base URL origin

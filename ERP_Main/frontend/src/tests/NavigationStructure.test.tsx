@@ -41,15 +41,15 @@ describe("8 Primary Navigation Sections Specification", () => {
   });
 
   it("contains all required navigation groups with correct section labels", () => {
-    expect(NAV_SECTIONS).toHaveLength(7);
+    expect(NAV_SECTIONS).toHaveLength(4);
 
     const sectionLabels = NAV_SECTIONS.map((s) => s.label);
     expect(sectionLabels).toContain("DASHBOARD");
     expect(sectionLabels).not.toContain("ERPS");
     expect(sectionLabels).toContain("USERS & ACCESS");
-    expect(sectionLabels).toContain("ORGANIZATIONS");
-    expect(sectionLabels).toContain("INTEGRATIONS");
-    expect(sectionLabels).toContain("SYNCHRONIZATION");
+    expect(sectionLabels).not.toContain("ORGANIZATIONS");
+    expect(sectionLabels).not.toContain("INTEGRATIONS");
+    expect(sectionLabels).not.toContain("SYNCHRONIZATION");
     expect(sectionLabels).toContain("MONITORING & AUDIT");
     expect(sectionLabels).toContain("SETTINGS");
   });
@@ -59,84 +59,49 @@ describe("8 Primary Navigation Sections Specification", () => {
   });
 
   it("verifies Users & Access section tabs and paths", () => {
-    expect(ACCESS_SECTION_TABS).toHaveLength(5);
+    expect(ACCESS_SECTION_TABS).toHaveLength(3);
     const keys = ACCESS_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual(["users", "roles", "permissions", "memberships", "access-policies"]);
+    expect(keys).toEqual(["users", "roles", "permissions"]);
   });
 
-  it("verifies Organizations section tabs and paths", () => {
-    expect(ORG_SECTION_TABS).toHaveLength(4);
-    const keys = ORG_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual(["companies", "organizations", "departments", "business-units"]);
+  it("verifies Organizations section is removed from sidebar tabs", () => {
+    expect(ORG_SECTION_TABS).toHaveLength(0);
   });
 
-  it("verifies Integrations section tabs and paths", () => {
-    expect(INTEGRATION_SECTION_TABS).toHaveLength(6);
-    const keys = INTEGRATION_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual([
-      "integrations",
-      "subscriptions",
-      "integration-events",
-      "delivery-status",
-      "failed-events",
-      "dead-letter-queue",
-    ]);
+  it("verifies Integrations section is removed from sidebar tabs", () => {
+    expect(INTEGRATION_SECTION_TABS).toHaveLength(0);
   });
 
-  it("verifies Synchronization section tabs and paths", () => {
-    expect(SYNC_SECTION_TABS).toHaveLength(7);
-    const keys = SYNC_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual([
-      "sync-policies",
-      "data-ownership",
-      "entity-mappings",
-      "reconciliation",
-      "conflicts",
-      "repair-replay",
-      "snapshots",
-    ]);
+  it("verifies Synchronization section is removed from sidebar tabs", () => {
+    expect(SYNC_SECTION_TABS).toHaveLength(0);
   });
 
   it("verifies Monitoring & Audit section tabs and paths", () => {
-    expect(MONITORING_SECTION_TABS).toHaveLength(8);
+    expect(MONITORING_SECTION_TABS).toHaveLength(1);
     const keys = MONITORING_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual([
-      "system-health",
-      "erp-health",
-      "queue-health",
-      "realtime-connections",
-      "workers",
-      "alerts",
-      "audit",
-      "security-events",
-    ]);
+    expect(keys).toEqual(["audit"]);
   });
 
   it("verifies Settings section tabs and paths", () => {
-    expect(SETTINGS_SECTION_TABS).toHaveLength(4);
+    expect(SETTINGS_SECTION_TABS).toHaveLength(1);
     const keys = SETTINGS_SECTION_TABS.map((t) => t.key);
-    expect(keys).toEqual([
-      "settings-general",
-      "settings-security",
-      "settings-sessions",
-      "settings-notifications",
-    ]);
+    expect(keys).toEqual(["settings-general"]);
   });
 
   it("renders SectionNavTabs properly with active indicator", () => {
     render(
       <MemoryRouter>
-        <SectionNavTabs items={ORG_SECTION_TABS} activeKey="departments" />
+        <SectionNavTabs items={ACCESS_SECTION_TABS} activeKey="roles" />
       </MemoryRouter>
     );
 
-    expect(screen.getByText("Companies")).toBeDefined();
-    expect(screen.getByText("Organizations")).toBeDefined();
-    expect(screen.getByText("Departments")).toBeDefined();
-    expect(screen.getByText("Business Units")).toBeDefined();
+    expect(screen.getByText("Global Users")).toBeDefined();
+    expect(screen.getByText("Roles")).toBeDefined();
+    expect(screen.getByText("Permissions")).toBeDefined();
+    expect(screen.queryByText("ERP Memberships")).toBeNull();
 
-    const deptsLink = screen.getByRole("link", { name: /Departments/i });
-    expect(deptsLink.getAttribute("href")).toBe("/organizations/departments");
+    const rolesLink = screen.getByRole("link", { name: /Roles/i });
+    expect(rolesLink.getAttribute("href")).toBe("/access/roles");
   });
 
   it("renders AppShell with ERP Switcher dropdown button", () => {
@@ -157,7 +122,7 @@ describe("8 Primary Navigation Sections Specification", () => {
     const icons = allItems.map((item) => item.icon);
     const uniqueIcons = new Set(icons);
 
-    expect(allItems.length).toBe(31);
+    expect(allItems.length).toBe(4);
     expect(uniqueIcons.size).toBe(allItems.length);
   });
 });

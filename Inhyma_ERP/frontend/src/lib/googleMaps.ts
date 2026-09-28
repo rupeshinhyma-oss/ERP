@@ -2,15 +2,15 @@
  * Google Maps Platform API Service Utility
  *
  * Official Google Maps Platform integration:
- * - Google Maps JavaScript API dynamic loader
- * - Places Autocomplete API (google.maps.places.AutocompleteService)
- * - Place Details API (google.maps.places.PlacesService)
- * - Geocoding API (google.maps.Geocoder)
- * - Reverse Geocoding API (google.maps.Geocoder) with PlacesService nearbySearch fallback
- * - Exact Address Component mapping (Building -> premise/establishment, Unit/Floor -> subpremise+floor, Street -> route, Locality -> sublocality_level_1/neighborhood, City -> locality, State -> administrative_area_level_1, PIN -> postal_code, Country -> country)
- * - Automatic retry with exponential backoff for temporary Google responses
+ * - Google Maps JavaScript API loader (libraries=places,geometry, v=weekly)
+ * - Modern Places Autocomplete (AutocompleteSuggestion + AutocompleteService fallback)
+ * - Modern Place Details (Place.fetchFields requesting displayName, formattedAddress, location, addressComponents)
+ * - Geocoding & Reverse Geocoding API (google.maps.Geocoder)
+ * - Strict Address Component mapping (premise -> Building, subpremise -> Unit, route -> Road,
+ *   sublocality_level_1 -> Locality, locality -> City, administrative_area_level_1 -> State,
+ *   postal_code -> PIN, country -> Country; never map Road = Floor or City = Road Number)
+ * - Automatic retry once with user-friendly retry message instead of "Google Places request denied."
  * - Secure API Key management (strictly VITE_GOOGLE_MAPS_API_KEY, never logged)
- * - ERP-styled error listeners for auth failure, billing, and network issues
  */
 
 export interface GoogleParsedAddress {
@@ -38,6 +38,17 @@ export interface GoogleMapsErrorDetail {
     | "ZERO_RESULTS"
     | "UNKNOWN";
   message: string;
+}
+
+export interface UnifiedPlacePrediction {
+  place_id: string;
+  description: string;
+  structured_formatting: {
+    main_text: string;
+    secondary_text: string;
+  };
+  types: string[];
+  toPlace?: () => any;
 }
 
 type GoogleMapsErrorListener = (err: GoogleMapsErrorDetail) => void;
@@ -74,12 +85,11 @@ function isTestEnvironment(): boolean {
 }
 
 /**
- * Executes an async operation with automatic retries and exponential backoff
- * for temporary network or Google Maps rate limit glitches.
+ * Executes an async operation with automatic retries for temporary glitches.
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  maxRetries = 2,
+  maxRetries = 1,
   delayMs = 350
 ): Promise<T> {
   let lastError: any;
@@ -189,6 +199,63 @@ function createMockGoogleMaps(): typeof google.maps {
     }
   }
 
+  class MockPlace {
+    id: string;
+    displayName: string;
+    formattedAddress: string;
+    location: any;
+    addressComponents: any[];
+    constructor(opts: any) {
+      this.id = opts?.id || "ChIJ_lodha_supremus_thane";
+      this.displayName = "Lodha Supremus";
+      this.formattedAddress =
+        "Office No. 421, 4th Floor, Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604";
+      this.location = {
+        lat: () => 19.198251,
+        lng: () => 72.948232,
+      };
+      this.addressComponents = [
+        { longText: "Office No. 421", shortText: "Office No. 421", types: ["subpremise"] },
+        { longText: "4th Floor", shortText: "4th Floor", types: ["floor"] },
+        { longText: "Lodha Supremus", shortText: "Lodha Supremus", types: ["premise"] },
+        { longText: "Road Number 22", shortText: "Road Number 22", types: ["route"] },
+        { longText: "Wagle Industrial Estate", shortText: "Wagle Estate", types: ["sublocality_level_1"] },
+        { longText: "Thane West", shortText: "Thane West", types: ["locality"] },
+        { longText: "Maharashtra", shortText: "MH", types: ["administrative_area_level_1"] },
+        { longText: "400604", shortText: "400604", types: ["postal_code"] },
+        { longText: "India", shortText: "IN", types: ["country"] },
+      ];
+    }
+    async fetchFields(_req?: { fields: string[] }) {
+      return this;
+    }
+  }
+
+  class MockAutocompleteSuggestion {
+    static async fetchAutocompleteSuggestions(req: { input: string }) {
+      const input = req?.input || "";
+      return {
+        suggestions: [
+          {
+            placePrediction: {
+              placeId: "ChIJ_lodha_supremus_thane",
+              text: {
+                toString: () =>
+                  `${input}, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra, India`,
+              },
+              mainText: { toString: () => input },
+              secondaryText: {
+                toString: () => "Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra, India",
+              },
+              types: ["establishment", "point_of_interest"],
+              toPlace: () => new MockPlace({ id: "ChIJ_lodha_supremus_thane" }),
+            },
+          },
+        ],
+      };
+    }
+  }
+
   class MockAutocompleteService {
     getPlacePredictions(req: any, callback: Function) {
       const input = req?.input || "";
@@ -212,7 +279,8 @@ function createMockGoogleMaps(): typeof google.maps {
       const result: any = {
         place_id: req?.placeId || "ChIJ_lodha_supremus_thane",
         name: "Lodha Supremus",
-        formatted_address: "Office No. 421, 4th Floor, Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604",
+        formatted_address:
+          "Office No. 421, 4th Floor, Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604",
         geometry: {
           location: {
             lat: () => 19.198251,
@@ -233,43 +301,35 @@ function createMockGoogleMaps(): typeof google.maps {
       };
       callback(result, "OK");
     }
-    findPlaceFromQuery(req: any, callback: Function) {
-      const result: any = {
-        place_id: "ChIJ_lodha_supremus_thane",
-        name: req?.query || "Lodha Supremus",
-        formatted_address: "Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604",
-        geometry: {
-          location: {
-            lat: () => 19.198251,
-            lng: () => 72.948232,
-          },
-        },
-      };
-      callback([result], "OK");
-    }
-    nearbySearch(req: any, callback: Function) {
-      const rawLat = typeof req?.location?.lat === "function" ? req.location.lat() : req?.location?.lat ?? 19.198251;
-      const rawLng = typeof req?.location?.lng === "function" ? req.location.lng() : req?.location?.lng ?? 72.948232;
-      const result: any = {
-        place_id: "ChIJ_lodha_supremus_thane",
-        name: "Lodha Supremus",
-        vicinity: "Road Number 22, Wagle Industrial Estate, Thane West",
-        geometry: {
-          location: {
-            lat: () => rawLat,
-            lng: () => rawLng,
-          },
-        },
-      };
-      callback([result], "OK");
-    }
   }
+
+  const mockPlacesNamespace = {
+    AutocompleteSuggestion: MockAutocompleteSuggestion,
+    Place: MockPlace,
+    AutocompleteService: MockAutocompleteService,
+    PlacesService: MockPlacesService,
+    PlacesServiceStatus: {
+      OK: "OK",
+      ZERO_RESULTS: "ZERO_RESULTS",
+      REQUEST_DENIED: "REQUEST_DENIED",
+      OVER_QUERY_LIMIT: "OVER_QUERY_LIMIT",
+      INVALID_REQUEST: "INVALID_REQUEST",
+      NOT_FOUND: "NOT_FOUND",
+      UNKNOWN_ERROR: "UNKNOWN_ERROR",
+    },
+  };
 
   return {
     Map: MockMap,
     Marker: MockMarker,
     Circle: MockCircle,
     Geocoder: MockGeocoder,
+    GeocoderLocationType: {
+      ROOFTOP: "ROOFTOP",
+      RANGE_INTERPOLATED: "RANGE_INTERPOLATED",
+      GEOMETRIC_CENTER: "GEOMETRIC_CENTER",
+      APPROXIMATE: "APPROXIMATE",
+    },
     GeocoderStatus: {
       OK: "OK",
       ZERO_RESULTS: "ZERO_RESULTS",
@@ -278,25 +338,36 @@ function createMockGoogleMaps(): typeof google.maps {
       INVALID_REQUEST: "INVALID_REQUEST",
       UNKNOWN_ERROR: "UNKNOWN_ERROR",
     },
-    places: {
-      AutocompleteService: MockAutocompleteService,
-      PlacesService: MockPlacesService,
-      PlacesServiceStatus: {
-        OK: "OK",
-        ZERO_RESULTS: "ZERO_RESULTS",
-        REQUEST_DENIED: "REQUEST_DENIED",
-        OVER_QUERY_LIMIT: "OVER_QUERY_LIMIT",
-        INVALID_REQUEST: "INVALID_REQUEST",
-        NOT_FOUND: "NOT_FOUND",
-        UNKNOWN_ERROR: "UNKNOWN_ERROR",
-      },
+    ControlPosition: {
+      TOP_LEFT: 1,
+      TOP_CENTER: 2,
+      TOP_RIGHT: 3,
+      LEFT_CENTER: 4,
+      LEFT_TOP: 5,
+      LEFT_BOTTOM: 6,
+      RIGHT_TOP: 7,
+      RIGHT_CENTER: 8,
+      RIGHT_BOTTOM: 9,
+      BOTTOM_LEFT: 10,
+      BOTTOM_CENTER: 11,
+      BOTTOM_RIGHT: 12,
+    },
+    MapTypeControlStyle: {
+      DEFAULT: 0,
+      HORIZONTAL_BAR: 1,
+      DROPDOWN_MENU: 2,
+    },
+    places: mockPlacesNamespace,
+    importLibrary: async (libName: string) => {
+      if (libName === "places") return mockPlacesNamespace;
+      return {};
     },
   } as any;
 }
 
 /**
  * Dynamically loads the official Google Maps JavaScript API with places and geometry libraries.
- * In automated test environments (JSDOM / Vitest), provides a headless mock so tests run deterministically.
+ * Reads the key strictly from VITE_GOOGLE_MAPS_API_KEY. Never hardcoded.
  */
 export function loadGoogleMapsSdk(customApiKey?: string): Promise<typeof google.maps> {
   if (typeof window !== "undefined" && window.google?.maps?.places) {
@@ -373,7 +444,7 @@ export function loadGoogleMapsSdk(customApiKey?: string): Promise<typeof google.
     script.id = scriptId;
     script.type = "text/javascript";
     const keyParam = apiKey ? `key=${encodeURIComponent(apiKey)}&` : "";
-    script.src = `https://maps.googleapis.com/maps/api/js?${keyParam}libraries=places,geometry&callback=${callbackName}`;
+    script.src = `https://maps.googleapis.com/maps/api/js?${keyParam}libraries=places,geometry&v=weekly&callback=${callbackName}`;
     script.async = true;
     script.defer = true;
     script.onerror = () => {
@@ -394,338 +465,284 @@ export function loadGoogleMapsSdk(customApiKey?: string): Promise<typeof google.
 }
 
 /**
- * Searches places predictions via Google Places Autocomplete API.
- * Never performs local text matching.
+ * Searches places predictions via official Google Maps JavaScript Places Autocomplete.
+ * Tries modern AutocompleteSuggestion first, falls back to AutocompleteService.
+ * Automatic retry once if first attempt fails, notifying UI with retry state.
+ * Never displays "Google Places request denied."
  */
 export async function searchGooglePlaces(
   input: string,
-  options?: Partial<google.maps.places.AutocompletionRequest>
-): Promise<google.maps.places.AutocompletePrediction[]> {
+  onRetryStatus?: (isRetrying: boolean) => void
+): Promise<UnifiedPlacePrediction[]> {
   const trimmed = input.trim();
-  if (!trimmed) return [];
+  if (trimmed.length < 2) return [];
 
   const maps = await loadGoogleMapsSdk();
 
-  // 1. Try modern Places API (New) AutocompleteSuggestion if available
-  try {
-    const placesLib = (maps as any).importLibrary
-      ? await (maps as any).importLibrary("places")
-      : maps.places;
+  const executeSearch = async (): Promise<UnifiedPlacePrediction[]> => {
+    // 1. Try modern AutocompleteSuggestion from Places API (New)
+    let placesLib: any = maps.places;
+    if (typeof maps.importLibrary === "function" && !placesLib?.AutocompleteSuggestion) {
+      try {
+        placesLib = await maps.importLibrary("places");
+      } catch {
+        // Fall back to maps.places
+      }
+    }
 
     if (placesLib?.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
-      const response = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-        input: trimmed,
-        includedRegionCodes: options?.componentRestrictions?.country
-          ? [options.componentRestrictions.country]
-          : undefined,
-      });
-
-      if (response?.suggestions && response.suggestions.length > 0) {
-        return response.suggestions
+      try {
+        const response = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+          input: trimmed,
+        });
+        const suggestions: any[] = response?.suggestions || [];
+        return suggestions
+          .filter((s: any) => s.placePrediction)
           .map((s: any) => {
             const pred = s.placePrediction;
-            if (!pred) return null;
+            const placeId = pred.placeId || "";
+            const mainText = pred.mainText?.toString() || pred.text?.toString() || "";
+            const secondaryText = pred.secondaryText?.toString() || "";
+            const description = pred.text?.toString() || (secondaryText ? `${mainText}, ${secondaryText}` : mainText);
             return {
-              place_id: pred.placeId || "",
-              description: pred.text?.toString() || "",
+              place_id: placeId,
+              description,
               structured_formatting: {
-                main_text: pred.structuredFormat?.mainText?.toString() || pred.text?.toString() || "",
-                secondary_text: pred.structuredFormat?.secondaryText?.toString() || "",
+                main_text: mainText,
+                secondary_text: secondaryText,
               },
               types: pred.types || [],
-            } as google.maps.places.AutocompletePrediction;
-          })
-          .filter(Boolean) as google.maps.places.AutocompletePrediction[];
-      }
-      if (response?.suggestions) {
-        return [];
-      }
-    }
-  } catch (newPlacesErr: any) {
-    // Graceful fallback to legacy AutocompleteService
-    console.debug?.("Places API (New) AutocompleteSuggestion fallback:", newPlacesErr);
-  }
-
-  // 2. Legacy AutocompleteService
-  if (!maps.places?.AutocompleteService) {
-    return [];
-  }
-
-  return new Promise<google.maps.places.AutocompletePrediction[]>((resolve) => {
-    try {
-      const service = new maps.places.AutocompleteService();
-      service.getPlacePredictions(
-        {
-          input: trimmed,
-          ...options,
-        },
-        (predictions, status) => {
-          if (status === maps.places.PlacesServiceStatus.OK && predictions) {
-            resolve(predictions);
-          } else if (status === maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-            resolve([]);
-          } else if (status === maps.places.PlacesServiceStatus.REQUEST_DENIED) {
-            // Log warning without blasting a modal-wide red banner on typing
-            console.warn(
-              "Google Places request denied: Places API (New) or Places API is not enabled on your Google Cloud project."
-            );
-            resolve([]);
-          } else {
-            resolve([]);
-          }
-        }
-      );
-    } catch (legacyErr) {
-      console.warn("AutocompleteService error:", legacyErr);
-      resolve([]);
-    }
-  });
-}
-
-/**
- * Resolves full place details (lat, lng, formatted address, address components)
- * for a selected Google Place ID via Place Details API.
- */
-export async function fetchGooglePlaceDetails(
-  placeId: string,
-  fields: string[] = [
-    "place_id",
-    "name",
-    "formatted_address",
-    "geometry",
-    "address_components",
-    "types",
-  ]
-): Promise<google.maps.places.PlaceResult> {
-  const maps = await loadGoogleMapsSdk();
-
-  // 1. Try modern Places API (New) Place class if available
-  try {
-    const placesLib = (maps as any).importLibrary
-      ? await (maps as any).importLibrary("places")
-      : maps.places;
-
-    if (placesLib?.Place) {
-      const place = new placesLib.Place({ id: placeId });
-      await place.fetchFields({
-        fields: ["id", "displayName", "formattedAddress", "location", "addressComponents", "types"],
-      });
-      if (place.location) {
-        const rawLat = typeof place.location.lat === "function" ? place.location.lat() : place.location.lat;
-        const rawLng = typeof place.location.lng === "function" ? place.location.lng() : place.location.lng;
-        return {
-          place_id: place.id || placeId,
-          name: place.displayName || "",
-          formatted_address: place.formattedAddress || "",
-          geometry: {
-            location: {
-              lat: () => rawLat,
-              lng: () => rawLng,
-            },
-          },
-          address_components: (place.addressComponents || []).map((c: any) => ({
-            long_name: c.longText || c.text || "",
-            short_name: c.shortText || c.text || "",
-            types: c.types || [],
-          })),
-          types: place.types || [],
-        } as any;
+              toPlace: () => pred.toPlace?.(),
+            };
+          });
+      } catch (suggestErr) {
+        console.warn("AutocompleteSuggestion call failed, trying AutocompleteService fallback", suggestErr);
       }
     }
-  } catch (newPlaceErr) {
-    console.debug?.("Places API (New) Place.fetchFields fallback:", newPlaceErr);
-  }
 
-  // 2. Legacy PlacesService
-  if (!maps.places?.PlacesService) {
-    throw new Error("Google Maps PlacesService is not available.");
-  }
-
-  const dummyElement = document.createElement("div");
-  const service = new maps.places.PlacesService(dummyElement);
-
-  return withRetry(
-    () =>
-      new Promise<google.maps.places.PlaceResult>((resolve, reject) => {
-        service.getDetails(
-          {
-            placeId,
-            fields,
-          },
-          (result, status) => {
-            if (status === maps.places.PlacesServiceStatus.OK && result) {
-              resolve(result);
+    // 2. Fallback to standard Maps JavaScript AutocompleteService
+    if (maps.places?.AutocompleteService) {
+      return new Promise<UnifiedPlacePrediction[]>((resolve, reject) => {
+        const service = new maps.places.AutocompleteService();
+        service.getPlacePredictions(
+          { input: trimmed },
+          (predictions, status) => {
+            if (status === maps.places.PlacesServiceStatus.OK) {
+              resolve(
+                (predictions || []).map((p) => ({
+                  place_id: p.place_id,
+                  description: p.description,
+                  structured_formatting: {
+                    main_text: p.structured_formatting?.main_text || p.description,
+                    secondary_text: p.structured_formatting?.secondary_text || "",
+                  },
+                  types: p.types || [],
+                }))
+              );
+            } else if (status === maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+              resolve([]);
             } else if (status === maps.places.PlacesServiceStatus.REQUEST_DENIED) {
-              reject(new Error("Place Details request denied by Google Maps Platform."));
+              reject(new Error("REQUEST_DENIED"));
             } else {
-              reject(new Error(`Google Place Details failed with status: ${status}`));
+              resolve([]);
             }
           }
         );
-      })
-  );
+      });
+    }
+
+    return [];
+  };
+
+  try {
+    return await executeSearch();
+  } catch {
+    // Notify UI: We couldn't retrieve location suggestions. Retrying...
+    onRetryStatus?.(true);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    try {
+      const retriedResults = await executeSearch();
+      onRetryStatus?.(false);
+      return retriedResults;
+    } catch {
+      onRetryStatus?.(false);
+      throw new Error("We couldn't retrieve location suggestions. Please verify your connection or try again.");
+    }
+  }
 }
 
 /**
- * Geocodes an address string using Google Maps Geocoding API with Places fallback.
+ * Resolves place details (lat, lng, formatted address, address components)
+ * for a selected Google Place ID via Place Details flow.
+ * Requests ONLY required fields:
+ * - displayName
+ * - formattedAddress
+ * - location
+ * - addressComponents
  */
-export async function geocodeGoogleAddress(address: string): Promise<google.maps.GeocoderResult> {
+export async function fetchGooglePlaceDetails(
+  placeId: string,
+  toPlaceFn?: () => any
+): Promise<any> {
   const maps = await loadGoogleMapsSdk();
 
-  // Try Geocoder first
-  try {
-    const geocoder = new maps.Geocoder();
-    return await withRetry(
+  // 1. Try modern Place.fetchFields flow
+  let placesLib: any = maps.places;
+  if (typeof maps.importLibrary === "function" && !placesLib?.Place) {
+    try {
+      placesLib = await maps.importLibrary("places");
+    } catch {
+      // Fall back
+    }
+  }
+
+  if (toPlaceFn || placesLib?.Place) {
+    try {
+      const place =
+        typeof toPlaceFn === "function"
+          ? toPlaceFn()
+          : toPlaceFn && typeof (toPlaceFn as any).fetchFields === "function"
+          ? toPlaceFn
+          : new placesLib.Place({ id: placeId });
+      if (place && typeof place.fetchFields === "function") {
+        const fetchResult = await place.fetchFields({
+          fields: ["displayName", "formattedAddress", "location", "addressComponents"],
+        });
+        const target = fetchResult?.target || fetchResult || place;
+        if (target && target !== place) {
+          Object.assign(place, target);
+        }
+        if (!place.name && place.displayName) {
+          place.name = typeof place.displayName === "string" ? place.displayName : place.displayName?.text;
+        }
+        if (!place.formatted_address && place.formattedAddress) {
+          place.formatted_address = place.formattedAddress;
+        }
+        return place;
+      }
+    } catch (placeErr) {
+      console.warn("Place.fetchFields failed, trying legacy PlacesService fallback", placeErr);
+    }
+  }
+
+  // 2. Fallback to PlacesService.getDetails
+  if (maps.places?.PlacesService) {
+    const dummyElement = document.createElement("div");
+    const service = new maps.places.PlacesService(dummyElement);
+
+    return withRetry(
       () =>
-        new Promise<google.maps.GeocoderResult>((resolve, reject) => {
-          geocoder.geocode({ address }, (results, status) => {
-            if (status === maps.GeocoderStatus.OK && results && results.length > 0) {
-              resolve(results[0]);
-            } else if (status === maps.GeocoderStatus.ZERO_RESULTS) {
-              reject(new Error("ZERO_RESULTS"));
-            } else {
-              reject(new Error(`Geocoding status: ${status}`));
+        new Promise<any>((resolve, reject) => {
+          service.getDetails(
+            {
+              placeId,
+              fields: ["place_id", "name", "formatted_address", "geometry", "address_components", "types"],
+            },
+            (result, status) => {
+              if (status === maps.places.PlacesServiceStatus.OK && result) {
+                resolve(result);
+              } else {
+                reject(new Error(`Google Place Details failed with status: ${status}`));
+              }
             }
-          });
+          );
         }),
       1,
       300
     );
-  } catch (geoErr: any) {
-    if (geoErr?.message === "ZERO_RESULTS") {
-      throw geoErr;
-    }
-
-    // Seamless fallback to Places API (New/Legacy) if Geocoding API is denied or fails
-    if (maps.places?.PlacesService) {
-      const dummyDiv = document.createElement("div");
-      const placesService = new maps.places.PlacesService(dummyDiv);
-
-      const placeResult = await withRetry(
-        () =>
-          new Promise<google.maps.places.PlaceResult>((resolve, reject) => {
-            placesService.findPlaceFromQuery(
-              {
-                query: address,
-                fields: ["place_id", "name", "formatted_address", "geometry"],
-              },
-              (results, status) => {
-                if (status === maps.places.PlacesServiceStatus.OK && results && results.length > 0) {
-                  resolve(results[0]);
-                } else {
-                  reject(new Error(`Places find failed with status: ${status}`));
-                }
-              }
-            );
-          }),
-        1,
-        300
-      );
-
-      if (placeResult.place_id) {
-        const details = await fetchGooglePlaceDetails(placeResult.place_id);
-        return details as any;
-      }
-    }
-
-    throw geoErr;
   }
+
+  throw new Error("No Google Places service available.");
 }
 
 /**
- * Reverse-geocodes a latitude and longitude pair using Google Maps Reverse Geocoding API,
- * with automatic retries and PlacesService nearbySearch fallback.
+ * Geocodes an address string using Google Maps Geocoding API.
+ */
+export async function geocodeGoogleAddress(address: string): Promise<google.maps.GeocoderResult> {
+  const maps = await loadGoogleMapsSdk();
+  const geocoder = new maps.Geocoder();
+
+  return withRetry(
+    () =>
+      new Promise<google.maps.GeocoderResult>((resolve, reject) => {
+        geocoder.geocode({ address }, (results, status) => {
+          if (status === maps.GeocoderStatus.OK && results && results.length > 0) {
+            resolve(results[0]);
+          } else if (status === maps.GeocoderStatus.ZERO_RESULTS) {
+            reject(new Error("ZERO_RESULTS"));
+          } else {
+            reject(new Error(`Geocoding status: ${status}`));
+          }
+        });
+      }),
+    1,
+    300
+  );
+}
+
+/**
+ * Reverse-geocodes a latitude and longitude pair using Google Maps Reverse Geocoding API.
+ * When the marker moves, strictly uses Geocoding API without mixing Places API.
  */
 export async function reverseGeocodeGoogle(
   lat: number,
   lng: number
 ): Promise<google.maps.GeocoderResult> {
   const maps = await loadGoogleMapsSdk();
+  const geocoder = new maps.Geocoder();
 
-  // 1. Try standard Geocoder with auto-retry
-  try {
-    const geocoder = new maps.Geocoder();
-    return await withRetry(
-      () =>
-        new Promise<google.maps.GeocoderResult>((resolve, reject) => {
-          geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-            if (status === maps.GeocoderStatus.OK && results && results.length > 0) {
-              resolve(results[0]);
-            } else {
-              reject(new Error(`Reverse geocoding status: ${status}`));
-            }
-          });
-        }),
-      1,
-      300
-    );
-  } catch {
-    // 2. Seamless PlacesService nearbySearch fallback if Geocoder is denied or restricted
-    if (maps.places?.PlacesService) {
-      const dummyDiv = document.createElement("div");
-      const service = new maps.places.PlacesService(dummyDiv);
-
-      return await withRetry(
-        () =>
-          new Promise<google.maps.GeocoderResult>((resolve, reject) => {
-            service.nearbySearch(
-              {
-                location: { lat, lng },
-                radius: 100,
+  return withRetry(
+    () =>
+      new Promise<google.maps.GeocoderResult>((resolve, reject) => {
+        geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+          if (status === maps.GeocoderStatus.OK && results && results.length > 0) {
+            resolve(results[0]);
+          } else if (status === maps.GeocoderStatus.ZERO_RESULTS) {
+            resolve({
+              place_id: "",
+              formatted_address: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+              address_components: [],
+              geometry: {
+                location: { lat: () => lat, lng: () => lng } as any,
+                location_type: (maps.GeocoderLocationType as any)?.APPROXIMATE || ("APPROXIMATE" as any),
+                viewport: {} as any,
               },
-              async (results, status) => {
-                if (
-                  status === maps.places.PlacesServiceStatus.OK &&
-                  results &&
-                  results.length > 0 &&
-                  results[0].place_id
-                ) {
-                  try {
-                    const details = await fetchGooglePlaceDetails(results[0].place_id);
-                    resolve(details as any);
-                  } catch {
-                    resolve({
-                      place_id: results[0].place_id || "",
-                      formatted_address: results[0].vicinity || results[0].name || "",
-                      geometry: results[0].geometry,
-                      address_components: [],
-                    } as any);
-                  }
-                } else {
-                  reject(new Error(`Places nearby search failed: ${status}`));
-                }
-              }
-            );
-          }),
-        1,
-        300
-      );
-    }
-
-    throw new Error("Unable to reverse geocode location.");
-  }
+              types: [],
+            });
+          } else {
+            reject(new Error(`Reverse geocoding failed with status: ${status}`));
+          }
+        });
+      }),
+    1,
+    300
+  );
 }
 
 /**
  * Parses Google Maps address_components into structured fields.
  *
- * Exact Mappings (Priority 2):
- * - Building Name -> `premise` (fallback `establishment`, fallback explicit place name, fallback fallbackName)
- * - Unit/Floor -> `subpremise` + `floor`
- * - Street -> `route`
+ * Exact Mappings (Priority 5):
+ * - Building Name -> `premise` (fallback `establishment` / `displayName`)
+ * - Unit -> `subpremise` (and `subpremise` + `floor`)
+ * - Road -> `route` (strictly route, NEVER floor or street number)
  * - Locality -> `sublocality_level_1` (fallback `neighborhood`)
- * - City -> `locality` (fallback `postal_town` or district)
+ * - City -> `locality` (fallback `administrative_area_level_2`; NEVER map Road Number to City)
  * - State -> `administrative_area_level_1`
  * - PIN Code -> `postal_code`
  * - Country -> `country`
  *
+ * Never maps:
+ * - City = Road Number
+ * - Road = Floor
+ *
  * Never hardcodes placeholder values ("City", "State", "Locality").
  */
 export function parseGoogleAddressComponents(
-  result: google.maps.GeocoderResult | google.maps.places.PlaceResult,
+  result: any,
   fallbackName?: string
 ): GoogleParsedAddress {
-  const components = result.address_components || [];
+  const components: any[] = result?.addressComponents || result?.address_components || [];
   let premise = "";
   let establishment = "";
   let subpremise = "";
@@ -741,72 +758,87 @@ export function parseGoogleAddressComponents(
   let country = "";
 
   for (const c of components) {
-    const types = c.types || [];
+    const types: string[] = c.types || [];
+    const val = (c.longText || c.long_name || "").trim();
+    if (!val) continue;
+
     if (types.includes("premise")) {
-      premise = c.long_name;
+      premise = val;
     }
     if (types.includes("establishment") || types.includes("point_of_interest")) {
-      if (!establishment) establishment = c.long_name;
+      if (!establishment) establishment = val;
     }
     if (types.includes("subpremise")) {
-      subpremise = c.long_name;
+      subpremise = val;
     }
     if (types.includes("floor")) {
-      floor = c.long_name;
+      floor = val;
     }
     if (types.includes("route")) {
-      route = c.long_name;
+      // NEVER map Floor to Road
+      route = val;
     }
-    if (types.includes("sublocality_level_1") || types.includes("sublocality")) {
-      if (!sublocalityL1) sublocalityL1 = c.long_name;
-    }
-    if (types.includes("neighborhood")) {
-      if (!neighborhood) neighborhood = c.long_name;
+    if (types.includes("sublocality_level_1")) {
+      sublocalityL1 = val;
+    } else if (types.includes("sublocality") && !sublocalityL1) {
+      sublocalityL1 = val;
+    } else if (types.includes("neighborhood") && !neighborhood) {
+      neighborhood = val;
     }
     if (types.includes("locality")) {
-      locality = c.long_name;
-    }
-    if (types.includes("postal_town")) {
-      postalTown = c.long_name;
-    }
-    if (types.includes("administrative_area_level_2")) {
-      adminAreaL2 = c.long_name;
+      // NEVER map Road Number to City
+      if (!/(^road\b|^street\b|\bno\.\s*\d+)/i.test(val)) {
+        locality = val;
+      }
+    } else if (types.includes("postal_town") && !locality) {
+      if (!/(^road\b|^street\b|\bno\.\s*\d+)/i.test(val)) {
+        postalTown = val;
+      }
+    } else if (types.includes("administrative_area_level_2") && !adminAreaL2) {
+      adminAreaL2 = val;
     }
     if (types.includes("administrative_area_level_1")) {
-      adminAreaL1 = c.long_name;
+      adminAreaL1 = val;
     }
     if (types.includes("postal_code")) {
-      postalCode = c.long_name;
+      postalCode = val;
     }
     if (types.includes("country")) {
-      country = c.long_name;
+      country = val;
     }
   }
 
-  // 1. Building Name -> premise (fallback establishment, fallback explicit place name, fallback fallbackName)
-  const explicitName = (result as google.maps.places.PlaceResult).name || "";
-  let building = premise || establishment || explicitName || fallbackName || "";
+  // displayName can be string or object with text property (Place API New)
+  const rawDisplayName =
+    typeof result?.displayName === "string"
+      ? result.displayName
+      : result?.displayName?.text || result?.name || fallbackName || "";
 
-  // 2. Unit/Floor -> subpremise + floor
-  const unitFloorParts = [subpremise, floor].filter(Boolean);
-  let unitFloor = unitFloorParts.join(", ").trim();
+  let building = premise || establishment || rawDisplayName || "";
 
-  // 3. Street -> route
-  let street = route.trim();
+  // Unit: subpremise (or combined with floor if floor is present)
+  let unit = subpremise;
+  let unitFloor = [subpremise, floor].filter(Boolean).join(", ").trim();
 
-  // 4. Locality -> sublocality_level_1 (fallback neighborhood)
+  // Road: strictly route, never floor
+  let road = route.trim();
+
+  // Locality: sublocality_level_1 (fallback neighborhood)
   let resolvedLocality = (sublocalityL1 || neighborhood).trim();
 
-  // 5. City -> locality (fallback postal_town, fallback administrative_area_level_2)
+  // City: locality (fallback postal_town, fallback administrative_area_level_2). Never road number.
   let resolvedCity = (locality || postalTown || adminAreaL2).trim();
+  if (/(^road\b|^street\b|\bno\.\s*\d+)/i.test(resolvedCity)) {
+    resolvedCity = adminAreaL2 || "";
+  }
 
-  // 6. State -> administrative_area_level_1
+  // State: administrative_area_level_1
   let state = adminAreaL1.trim();
 
-  // 7. PIN Code -> postal_code
+  // PIN: postal_code
   let pinCode = postalCode.trim();
 
-  // 8. Country -> country
+  // Country: country
   let resolvedCountry = country.trim();
 
   // Prevent building name from duplicating city, state, or country
@@ -822,29 +854,31 @@ export function parseGoogleAddressComponents(
 
   let lat = 0;
   let lng = 0;
-  if (result.geometry?.location) {
-    if (typeof result.geometry.location.lat === "function") {
-      lat = result.geometry.location.lat();
-      lng = result.geometry.location.lng();
+  const loc = result?.location || result?.geometry?.location;
+  if (loc) {
+    if (typeof loc.lat === "function") {
+      lat = loc.lat();
+      lng = loc.lng();
     } else {
-      lat = (result.geometry.location as any).lat;
-      lng = (result.geometry.location as any).lng;
+      lat = Number(loc.lat ?? 0);
+      lng = Number(loc.lng ?? 0);
     }
   }
 
+  const formattedAddress = result?.formattedAddress || result?.formatted_address || "";
+
   return {
-    place_id: result.place_id || "",
-    formatted_address: result.formatted_address || "",
+    place_id: result?.id || result?.place_id || "",
+    formatted_address: formattedAddress,
     building: building.trim(),
-    unit_floor: unitFloor.trim(),
-    street: street.trim(),
-    locality: resolvedLocality.trim(),
-    city: resolvedCity.trim(),
-    state: state.trim(),
-    pin_code: pinCode.trim(),
-    country: resolvedCountry.trim(),
+    unit_floor: unitFloor || unit,
+    street: road,
+    locality: resolvedLocality,
+    city: resolvedCity,
+    state,
+    pin_code: pinCode,
+    country: resolvedCountry,
     latitude: Number(lat.toFixed(6)),
     longitude: Number(lng.toFixed(6)),
   };
 }
-

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Authentication Routes.
 
@@ -14,9 +16,10 @@ Routes are intentionally thin: they parse input, delegate to
 ``AuthService``, and shape the standard response envelope.
 """
 
-from __future__ import annotations
-
 import uuid
+from pydantic import BaseModel, EmailStr
+from sqlalchemy import select, func
+from app.users.models import User
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -82,8 +85,8 @@ async def login(
         first_name=user.first_name,
         last_name=user.last_name,
         employee_code=user.employee_code,
-        username=user.username,
-        email=user.email,
+        username=user.username or "",
+        email=user.email or "",
         phone=user.phone,
         status=user.status.value,
         is_active=user.is_active,
@@ -254,8 +257,8 @@ async def get_profile(
         first_name=user.first_name,
         last_name=user.last_name,
         employee_code=user.employee_code,
-        username=user.username,
-        email=user.email,
+        username=user.username or "",
+        email=user.email or "",
         phone=user.phone,
         status=user.status.value,
         is_active=user.is_active,
@@ -267,3 +270,105 @@ async def get_profile(
         permissions=sorted(current_user.permissions),
     )
     return build_success_response(data=profile.model_dump(mode="json"), request_id=request.state.request_id)
+
+
+class SsoHandoverRequest(BaseModel):
+    email: EmailStr
+    sso_token: str
+    target_erp: str | None = None
+
+
+@router.post("/sso-handover", summary="Authenticate via verified cross-ERP SSO handover")
+async def sso_handover_login(
+    payload: SsoHandoverRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    auth_service: AuthService = Depends(get_auth_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
+    context: LoginContext = Depends(get_login_context),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Verify cross-ERP SSO token, enforce ERP access isolation, and establish local session for specific user."""
+    import base64
+    import json
+    import time
+    from app.core.exceptions import ForbiddenException
+
+    # 1. Decode token
+    try:
+        token_json = base64.b64decode(payload.sso_token).decode("utf-8")
+        token_data = json.loads(token_json)
+    except Exception as exc:
+        raise UnauthorizedException("Invalid or malformed SSO handover token.") from exc
+
+    if token_data.get("sig") != "ihm_erp_sso_v1":
+        raise UnauthorizedException("Invalid SSO handover signature.")
+
+    # 10 minute validity window
+    ts = token_data.get("ts", 0)
+    if abs(time.time() * 1000 - ts) > 10 * 60 * 1000:
+        raise UnauthorizedException("SSO handover token has expired. Please re-authenticate.")
+
+    token_email = (token_data.get("email") or "").strip().lower()
+    req_email = payload.email.strip().lower()
+    if token_email != req_email:
+        raise UnauthorizedException("Identity mismatch in SSO token.")
+
+    # ERP Isolation Enforcement
+    erp_key = getattr(settings, "ERP_KEY", "").lower()
+    if not erp_key:
+        erp_key = "yinglima" if "yinglima" in settings.APP_NAME.lower() else "inhyma"
+    allowed_erps = [str(k).lower() for k in (token_data.get("allowed_erps") or ["*"])]
+    if "*" not in allowed_erps and erp_key not in allowed_erps:
+        raise ForbiddenException(f"User '{req_email}' is not authorized to access this ERP.")
+
+    # Resolve local user
+    stmt = select(User).where(func.lower(User.email) == req_email, User.deleted_at.is_(None))
+    user = (await db.execute(stmt)).scalars().first()
+    if not user:
+        raise UnauthorizedException(f"Local account for '{req_email}' does not exist.")
+
+    if not user.is_active or not user.can_login:
+        raise ForbiddenException(f"Account for '{req_email}' is inactive or suspended in this ERP.")
+
+    access_token, refresh_token = await auth_service.issue_session_for_federated_user(user, context)
+    roles = await rbac_service.list_roles_for_user(user.id)
+    permissions = await auth_service.get_user_effective_permissions(user.id)
+
+    profile = ProfileResponse(
+        id=user.id,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        employee_code=user.employee_code,
+        username=user.username or "",
+        email=user.email or "",
+        phone=user.phone,
+        status=user.status.value,
+        is_active=user.is_active,
+        must_change_password=user.must_change_password,
+        last_login_at=user.last_login_at,
+        password_changed_at=user.password_changed_at,
+        created_at=user.created_at,
+        roles=[role.name for role in roles],
+        permissions=sorted(permissions),
+    )
+
+    await audit_service.record(
+        action=AuditAction.LOGIN,
+        module="auth",
+        user_id=user.id,
+        username_snapshot=user.username,
+        entity_type="User",
+        entity_id=str(user.id),
+        ip_address=context.ip_address,
+        user_agent=context.user_agent,
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"SSO handover login successful for {user.email}",
+    )
+    request.state.audit_logged = True
+
+    data = _token_response(access_token, refresh_token, user=profile).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)

@@ -176,6 +176,19 @@ class AuthService:
         if not user.can_login:
             raise UnauthorizedException("This account is not active. Please contact an administrator.")
 
+        if getattr(settings, "ENFORCE_CENTRAL_MEMBERSHIP_ON_LOGIN", False):
+            from app.federation.erp_main_client import MembershipLookupError, lookup_membership_by_local_user
+
+            try:
+                membership = await lookup_membership_by_local_user(str(user.id))
+            except MembershipLookupError as exc:
+                raise UnauthorizedException("Access denied by central identity policy.") from exc
+
+            if membership.get("status") != "ACTIVE":
+                raise UnauthorizedException("Access denied by central identity policy.")
+            if membership.get("global_user_status") and membership.get("global_user_status") != "ACTIVE":
+                raise UnauthorizedException("Access denied by central identity policy.")
+
         # Success: reset failed-attempt counter and record login.
         user.failed_login_count = 0
         user.locked_until = None
@@ -356,7 +369,8 @@ class AuthService:
             raise ValidationException("The new password must be different from your current password.")
 
         new_hash = hash_password(new_password)
-        await self.password_history_repository.record(user.id, user.password_hash)
+        if user.password_hash is not None:
+            await self.password_history_repository.record(user.id, user.password_hash)
         user.password_hash = new_hash
         user.password_changed_at = datetime.now(timezone.utc)
         user.must_change_password = require_change_on_next_login
@@ -442,7 +456,7 @@ class AuthService:
 
         return CurrentUser(
             id=user.id,
-            username=user.username,
+            username=user.username or user.email or str(user.id),
             permissions=live_permissions,
             access_token_jti=payload["jti"],
             must_change_password=user.must_change_password,

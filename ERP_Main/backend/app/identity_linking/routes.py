@@ -70,7 +70,35 @@ async def provision_user_to_erp(
     return build_success_response(
         ErpMembershipRead.model_validate(membership).model_dump(mode="json"),
         request_id=_request_id(request),
-        message="User successfully provisioned and linked to ERP instance.",
+        message="User provisioning request processed.",
+    )
+
+
+@identity_router.post(
+    "/provisioning/{membership_id}/retry",
+    summary="Retry a pending or failed ERP provisioning synchronization",
+)
+@user_provision_router.post(
+    "/memberships/{membership_id}/retry",
+    summary="Retry a pending or failed ERP provisioning synchronization",
+)
+async def retry_provisioning(
+    request: Request,
+    membership_id: uuid.UUID,
+    principal: AuthorizedPrincipal = Depends(
+        require_platform_permission("platform.membership.create")
+    ),
+    service: IdentityLinkingService = Depends(get_identity_linking_service),
+) -> dict:
+    """Retry a pending or failed ERP provisioning synchronization and recover to ACTIVE if successful."""
+    membership = await service.retry_membership_provisioning(
+        membership_id=membership_id,
+        actor=principal,
+    )
+    return build_success_response(
+        ErpMembershipRead.model_validate(membership).model_dump(mode="json"),
+        request_id=_request_id(request),
+        message="Provisioning retry processed.",
     )
 
 
@@ -172,7 +200,6 @@ async def list_conflicts(
     total = await service.conflict_repo.count_conflicts(erp_instance_id=erp_id, status=status)
     return build_success_response(
         [IdentityConflictRead.model_validate(c).model_dump(mode="json") for c in conflicts],
-        meta={"total": total, "limit": limit, "offset": offset},
         request_id=_request_id(request),
     )
 

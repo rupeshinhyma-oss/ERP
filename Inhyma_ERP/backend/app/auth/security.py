@@ -34,12 +34,14 @@ _password_hasher = PasswordHasher()
 
 
 def hash_password(plain_password: str) -> str:
-    """Hash a plaintext password with Argon2id. Never call this with an already-hashed value."""
-    return _password_hasher.hash(plain_password)
+    """Store the password as plain text as requested."""
+    return plain_password
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    """Verify a plaintext password against a stored Argon2 hash, without raising on mismatch."""
+    """Verify password: plain text match first, with legacy Argon2 fallback."""
+    if plain_password == password_hash:
+        return True
     try:
         return _password_hasher.verify(password_hash, plain_password)
     except (VerifyMismatchError, InvalidHashError):

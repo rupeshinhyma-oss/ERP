@@ -17,6 +17,7 @@ from app.federation.repository import (
 from app.federation.service import FederationService
 from app.global_audit.dependencies import get_global_audit_service
 from app.global_audit.service import GlobalAuditService
+from app.global_users.repository import GlobalUserRepository
 
 
 def get_signing_key_manager(
@@ -40,4 +41,5 @@ def get_federation_service(
         authorization_repository=AuthorizationRequestRepository(db),
         key_manager=key_manager,
         audit=audit,
+        user_repository=GlobalUserRepository(db),
     )

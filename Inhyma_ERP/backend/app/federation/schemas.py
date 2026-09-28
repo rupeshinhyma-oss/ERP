@@ -14,7 +14,24 @@ class FederationSsoLoginRequest(BaseModel):
     happens between the browser/launcher and ERP_Main, and between
     ERP_Main and this ERP's backend server-to-server for the token
     endpoint -- this route is where the resulting `id_token` is finally
-    presented to Yinglima to establish a local session).
+    presented to Inhyma to establish a local session).
     """
 
     id_token: str = Field(..., min_length=1)
+
+
+class FederationExchangeRequest(BaseModel):
+    """
+    Payload for `POST /federation/exchange` -- the browser-facing route.
+
+    Carries only the short-lived, single-use authorization `code` (plus
+    the exact `redirect_uri` it was issued for, and an optional PKCE
+    `code_verifier`). This is deliberately everything a browser is
+    allowed to hold during an ERP switch: it never sees this ERP's
+    `client_secret` or a raw federation `id_token` -- both are handled
+    entirely server-to-server inside this backend.
+    """
+
+    code: str = Field(..., min_length=1)
+    redirect_uri: str = Field(..., min_length=1)
+    code_verifier: str | None = Field(default=None, max_length=255)

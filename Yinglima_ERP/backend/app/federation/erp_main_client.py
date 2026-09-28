@@ -56,3 +56,31 @@ async def lookup_membership(global_user_id: uuid.UUID) -> dict[str, Any]:
     if not data:
         raise MembershipLookupError("ERP_Main returned no membership data.")
     return data
+
+
+async def lookup_membership_by_local_user(local_user_id: str | uuid.UUID) -> dict[str, Any]:
+    """
+    Resolve this ERP's own membership and GlobalUser status for a given local user id.
+
+    Returns the membership dict (`global_user_id`, `local_user_id`, `status`, `global_user_status`)
+    on success. Raises `MembershipLookupError` on any failure.
+    """
+    url = f"{settings.ERP_MAIN_API_BASE_URL}/internal/federation/memberships/by-local-user/{local_user_id}"
+    headers = {"Authorization": f"Bearer {settings.FEDERATION_SERVICE_CREDENTIAL}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise MembershipLookupError(f"Could not reach ERP_Main for local user membership lookup: {exc}") from exc
+
+    if response.status_code != 200:
+        raise MembershipLookupError(
+            f"ERP_Main membership lookup failed with status {response.status_code}: {response.text[:200]}"
+        )
+
+    body = response.json()
+    data = body.get("data")
+    if not data:
+        raise MembershipLookupError("ERP_Main returned no membership data for local user.")
+    return data

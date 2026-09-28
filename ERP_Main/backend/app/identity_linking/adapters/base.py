@@ -34,6 +34,7 @@ class BaseErpProvisioningAdapter(ABC):
         first_name: str | None = None,
         last_name: str | None = None,
         target_organization_id: str | None = None,
+        password: str | None = None,
     ) -> dict[str, Any]:
         """
         Provision the minimum required local ERP user account.
@@ -41,3 +42,30 @@ class BaseErpProvisioningAdapter(ABC):
         Returns a dictionary containing at least `{"local_user_id": str, "created": bool}`.
         """
         raise NotImplementedError
+
+    @abstractmethod
+    async def set_local_user_access(
+        self, erp: ErpInstance, local_user_id: str, *, allow_login: bool, reason: str | None = None
+    ) -> dict[str, Any] | None:
+        """
+        Block or restore a local account's ability to authenticate in the target ERP.
+
+        Used by GlobalUser status changes (suspend/disable/re-enable) and
+        by ErpMembership suspend/restore, to enforce ERP_Main's central
+        access decision on the local side -- never to modify local
+        RBAC/roles, and never to delete or provision an account.
+
+        Returns a dictionary containing at least `{"local_user_id": str,
+        "can_login": bool}` on success, or None if the target ERP could
+        not be reached (a soft failure -- see HttpErpProvisioningAdapter
+        for why this is intentionally non-fatal to the caller).
+        """
+        raise NotImplementedError
+
+    async def deprovision_local_user(
+        self, erp: ErpInstance, local_user_id: str, *, reason: str | None = None
+    ) -> dict[str, Any] | None:
+        """
+        Remove/deprovision a local user account when access is removed in ERP_Main.
+        """
+        return None

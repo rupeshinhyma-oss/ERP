@@ -280,10 +280,63 @@ class Settings(BaseSettings):
         default="CHANGE-ME-IN-PRODUCTION-erp-main-service-credential",
         description="Shared service credential used to call partner ERP internal endpoints.",
     )
+    # Phase 9: Explicit Spoke Service Credentials & Rotation
+    ERP_MAIN_TO_YINGLIMA_SERVICE_CREDENTIAL: str = Field(
+        default="",
+        description="Explicit service credential sent by ERP_Main when calling Yinglima ERP.",
+    )
+    ERP_MAIN_TO_YINGLIMA_SERVICE_CREDENTIAL_PREVIOUS: str | None = Field(
+        default=None,
+        description="Previous service credential for Yinglima ERP during rotation windows.",
+    )
+    ERP_MAIN_TO_INHYMA_SERVICE_CREDENTIAL: str = Field(
+        default="",
+        description="Explicit service credential sent by ERP_Main when calling Inhyma ERP.",
+    )
+    ERP_MAIN_TO_INHYMA_SERVICE_CREDENTIAL_PREVIOUS: str | None = Field(
+        default=None,
+        description="Previous service credential for Inhyma ERP during rotation windows.",
+    )
+
+    def get_service_credential_for_erp(self, erp_key: str) -> str:
+        """
+        Return the primary service credential to use when calling the given ERP.
+        Prefers spoke-specific configuration, falling back to FEDERATION_SERVICE_CREDENTIAL
+        for backward compatibility if configured.
+        """
+        key_norm = (erp_key or "").strip().lower()
+        if key_norm in ("yinglima", "yinglima_erp"):
+            cred = self.ERP_MAIN_TO_YINGLIMA_SERVICE_CREDENTIAL
+            if cred and "CHANGE-ME" not in cred:
+                return cred
+        elif key_norm in ("inhyma", "inhyma_erp"):
+            cred = self.ERP_MAIN_TO_INHYMA_SERVICE_CREDENTIAL
+            if cred and "CHANGE-ME" not in cred:
+                return cred
+
+        # Backward compatibility fallback
+        fallback = self.FEDERATION_SERVICE_CREDENTIAL
+        if fallback and "CHANGE-ME" not in fallback:
+            return fallback
+
+        return ""
+
     REPORT_EXPORT_DIR: str = Field(
         default="./app/reporting/exports",
         description="Filesystem directory for generated report export files.",
     )
+
+    # -------------------------------------------------------------------
+    # Background Provisioning Reconciliation & Recovery (Phase 8)
+    # -------------------------------------------------------------------
+    PROVISIONING_RECONCILIATION_ENABLED: bool = True
+    PROVISIONING_RECONCILIATION_INTERVAL_SECONDS: float = 15.0
+    PROVISIONING_RECONCILIATION_BATCH_SIZE: int = 25
+    PROVISIONING_LEASE_DURATION_SECONDS: int = 60
+    PROVISIONING_MAX_RETRIES: int = 10
+    PROVISIONING_BASE_BACKOFF_SECONDS: float = 5.0
+    PROVISIONING_MAX_BACKOFF_SECONDS: float = 300.0
+
 
     @property
     def federation_signing_key_path(self) -> Path:
@@ -324,6 +377,19 @@ class Settings(BaseSettings):
                 "FEDERATION_CLIENT_SECRET_PEPPER is still set to its placeholder value in a production "
                 "environment. Set a strong, random FEDERATION_CLIENT_SECRET_PEPPER via the environment."
             )
+        if self.is_production:
+            yinglima_cred = self.get_service_credential_for_erp("yinglima")
+            if not yinglima_cred:
+                raise RuntimeError(
+                    "Missing or placeholder service credential for Yinglima ERP in production. "
+                    "Set ERP_MAIN_TO_YINGLIMA_SERVICE_CREDENTIAL in the environment."
+                )
+            inhyma_cred = self.get_service_credential_for_erp("inhyma")
+            if not inhyma_cred:
+                raise RuntimeError(
+                    "Missing or placeholder service credential for Inhyma ERP in production. "
+                    "Set ERP_MAIN_TO_INHYMA_SERVICE_CREDENTIAL in the environment."
+                )
         _secrets = {
             "PLATFORM_JWT_SECRET_KEY": self.PLATFORM_JWT_SECRET_KEY,
             "SERVICE_CREDENTIAL_PEPPER": self.SERVICE_CREDENTIAL_PEPPER,
