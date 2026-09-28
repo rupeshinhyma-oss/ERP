@@ -132,6 +132,9 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://erp_user:erp_password@localhost:5432/erp_db
           DIRECT_URL: postgresql://erp_user:erp_password@localhost:5432/erp_db
+          DATABASE_POOL_SIZE: 5
+          DATABASE_MAX_OVERFLOW: 5
+          DATABASE_POOL_TIMEOUT_SECONDS: 30
           JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-chars-long
           PLATFORM_JWT_SECRET_KEY: test-secret-key-that-is-at-least-32-chars-long
           SERVICE_CREDENTIAL_PEPPER: test-secret-pepper-that-is-at-least-32-chars

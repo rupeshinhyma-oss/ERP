@@ -65,21 +65,22 @@ async def seeded_country(db_session):
     country = Country(name=f"Test Country {uuid.uuid4().hex}", code=code)
     db_session.add(country)
     await db_session.commit()
-    yield country
-
     try:
-        await db_session.rollback()
-        result = await db_session.execute(select(Buyer).where(Buyer.country_id == country.id))
-        for buyer in result.scalars().all():
-            await db_session.delete(buyer)
-        await db_session.flush()
+        yield country
+    finally:
+        try:
+            await db_session.rollback()
+            result = await db_session.execute(select(Buyer).where(Buyer.country_id == country.id))
+            for buyer in result.scalars().all():
+                await db_session.delete(buyer)
+            await db_session.flush()
 
-        existing = await db_session.get(Country, country.id)
-        if existing is not None:
-            await db_session.delete(existing)
-            await db_session.commit()
-    except Exception:
-        await db_session.rollback()
+            existing = await db_session.get(Country, country.id)
+            if existing is not None:
+                await db_session.delete(existing)
+                await db_session.commit()
+        except Exception:
+            await db_session.rollback()
 
 
 @pytest_asyncio.fixture(autouse=True)

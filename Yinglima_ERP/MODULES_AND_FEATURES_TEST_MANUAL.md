@@ -25,6 +25,7 @@
 12. [INVENTORY: Buyer Types Master Module](#12-inventory-buyer-types-master-module)
 12.1. [PURCHASE: Local Purchase Module](#121-purchase-local-purchase-module)
 13. [SALE: Inquiries & Proforma Workflow Module](#13-sale-inquiries--proforma-workflow-module)
+13.1. [SALE: Sale Process Order Management & Official Export Trade Documents Module](#131-sale-sale-process-order-management--official-export-trade-documents-module)
 14. [PLANNING: Master Shipment Planning Grid Module](#14-planning-master-shipment-planning-grid-module)
 15. [USER MANAGEMENT: Users Module](#15-user-management-users-module)
 16. [USER MANAGEMENT: Departments & Permissions (RBAC) Module](#16-user-management-departments--permissions-rbac-module)
@@ -488,7 +489,7 @@ Manage complete vendor team directory:
 1. **Header & Summary:**
    - Heading: `Product Price Directory`
    - Total Counter Badge: `N Products`
-   - Action Buttons: Filter Toggle Funnel button (`filterOpen` toggle styled `#0061f2` when active, `#475569` when closed), `📥 Export ▾` dropdown (`📊 Export to Excel (.xlsx)` with corporate navy header and auto-filters + `📄 Export to CSV (.csv)` with UTF-8 BOM, filter-aware up to 50,000 catalog items), `🔄 Refresh` (Bulk Import temporarily hidden).
+   - Action Buttons: Filter Toggle Funnel button (`filterOpen` toggle styled `#0061f2` when active, `#475569` when closed), `📥 Export ▾` dropdown (`📊 Export to Excel (.xlsx)` with corporate navy header and auto-filters + `📄 Export to CSV (.csv)` with UTF-8 BOM, filter-aware up to 50,000 catalog items), `🔄 Refresh` (Bulk import option removed permanently).
 2. **Expandable Top Filter Box (matching Products Master):**
    - Toggled open/closed by the header funnel button.
    - **Category Filter Dropdown:** `All` or specific category from `/masters/product-categories`.
@@ -497,8 +498,9 @@ Manage complete vendor team directory:
    - **Pricing Status Dropdown:** `All`, `Priced Items Only`, `Unpriced Items Only`.
    - **Action Buttons:** `[Reset]` (grey `#64748b` - resets all filters and search) and `[Search]` (amber `#f59e0b` - triggers filter execution).
 3. **Table Card Toolbar:**
-   - **Items/Page Selector:** `10`, `50`, `100` items per page.
+   - **Items/Page Selector & Frozen Columns Tool:** `10`, `50`, `100` items per page selector alongside `📌 Freeze Columns` toggle button in the yellow page toolbar box, enabling horizontal scroll while keeping Sr No and Product columns locked on the left.
    - **Search Catalog Input:** Debounced (300ms) multi-attribute search matching product code, product name, Tally alias, barcode, or vendor company name with `🔍` icon and instant `✕` clear button.
+   - **Live Exchange Rate Engine:** Automatic multi-currency conversion supporting USD, CNY/RMB, EUR, and INR with database persistence in `currency_rates`.
 3. **Main Table Columns:**
    - **Sr. No.:** Global 1-indexed running number across pages `((page - 1) * pageSize + idx + 1)`.
    - **Product Name & Code:**
@@ -1037,6 +1039,89 @@ Manage complete vendor team directory:
 - [ ] In Layer 3 Items view, click the **Export** button on the top-right toolbar. Select **Excel Spreadsheet (XLSX)** from the dropdown. Verify browser downloads `Inquiry_{Code}_{Date}.xlsx`. Open the file and verify columns (`Sr No`, `Product Code`, `Product Name`, `Quantity`, `UOM`, `Best Quote Price`, `Selected Supplier`, etc.) match active items.
 - [ ] In Layer 3 Items view, click the **Export** button and select **CSV Delimited (CSV)**. Verify browser downloads `Inquiry_{Code}_{Date}.csv` and file opens cleanly in Excel without character encoding issues.
 - [ ] Open a consignment with 0 items. Verify the **Export** button is disabled with tooltip `"No items to export"`.
+
+---
+
+## 13.1. SALE: Sale Process Order Management & Official Export Trade Documents Module
+
+- **Route:** `/sale/process` (List View), `/sale/process/new` (Add New Order), `/sale/process/:id/edit` (Edit Order)
+- **Active Key:** `sale-process`
+- **Icon:** `clipboardList`
+- **Required Permissions:** `sales.view` (read), `sales.create` (create), `sales.edit` (update), `sales.delete` (delete), `sales.export` (export)
+- **Purpose:** End-to-end sales lifecycle management for cross-border export orders from Chinese factory consignments to Indian buyers. Converts approved Shipment Planning consignments into finalized sales orders, manages delivery and container tracking, and auto-generates official customs-compliant trade documents: **Commercial Invoice (CI)** and **Packing List (PL)** matching `doc/Yinglima_CI_Inhyma_YL-EXP2026-54.xlsx`.
+
+### 13.1.1. Visual Elements & Actions (List View `/sale/process`)
+1. **Header & Summary Cards / Top KPIs:**
+   - Heading: `Sale Process Orders`
+   - Subtitle: `Consignment tracking, cross-border sales orders, commercial invoices & packing lists`
+   - Top KPI Stat Cards:
+     - **Total Orders:** Total sales orders count.
+     - **Total Order Value:** Sum of all sales orders in RMB (`¥`) and USD (`$`).
+     - **Dispatched Orders:** Orders currently in transit with BL / Container numbers.
+     - **Pending Orders:** Orders awaiting final sales confirmation or admin approval.
+2. **Action Bar & Global Controls:**
+   - **`+ Create Sale Process Order` Button:** Primary blue button routing to order creation form.
+   - **`🔍 Filter` Toggle Button:** Funnel icon button toggling the collapsible filter drawer.
+   - **`📥 Export ▾` Dropdown:** Exports full orders list to corporate styled Excel (`.xlsx`) or CSV.
+3. **Table Card Toolbar:**
+   - **Items/Page Selector:** `10`, `25`, `50`, `100` items per page.
+   - **Search Input:** Debounced search matching Order No, Consignment Code, Buyer Name, Container No, BL No, or LR No.
+4. **Main Table Columns:**
+   - **Sr. No.:** Global 1-indexed sequential running number across paginated results.
+   - **Order No & Date:** Formatted order number with date badge.
+   - **Consignment Code:** Extracted shipment consignment code (e.g. `Muminhyma 1`, `FB1`, `SEA 1`).
+   - **Buyer Name & Branch:** Buyer company name and receiving delivery location.
+   - **Total Quantity:** Total units/packages across line items.
+   - **Total Amount:** Currency-formatted order value with symbol.
+   - **Container / BL / LR Info:** Container number, Bill of Lading, and Lorry Receipt tracking.
+   - **Status Badge:** Workflow state:
+     - `Pending`: Amber badge (`#fef3c7`, text `#b45309`)
+     - `Sales Confirmed`: Tech blue (`#e0f2fe`, text `#0369a1`)
+     - `Admin Approved`: Emerald green (`#dcfce7`, text `#15803d`)
+     - `Dispatched`: Purple (`#f3e8ff`, text `#7e22ce`)
+     - `LR Received / Complete`: Indigo (`#ede9fe`, text `#4338ca`)
+     - `Cancelled`: Red (`#ffe4e6`, text `#be123c`)
+   - **Actions:** Kebab menu (`⋮`) containing:
+     - `👁️ View Details & Trade Documents`: Opens **Sale Process Detail & Commercial Invoice Modal**.
+     - `✏️ Edit Order`: Opens edit form.
+     - `🗑️ Delete Order`: Soft-deletes order.
+
+### 13.1.2. Sale Process Detail & Trade Document Modal (`SaleProcessDetailModal.tsx`)
+- **Trigger:** Clicking Order No link or selecting `👁️ View Details` from the row kebab menu.
+- **Top Modal Bar:**
+  - Order title with status badge and consignment code.
+  - Fixed-header protection (`flexShrink: 0`, `alignItems: "flex-start"`) preventing top bar from getting pushed off-screen.
+- **3-Tab Navigation Bar:**
+  1. `📋 Order Overview`: Standard ERP view with line items, basic landing rates, and workflow status transitions (`Pending` -> `Sales Confirmed` -> `Admin Approved` -> `Dispatched` -> `LR Complete`).
+  2. `📄 Commercial Invoice (CI)`: Formatted preview of the official Commercial Invoice matching the exact corporate typography, borders, and ICBC bank remittance card.
+  3. `📦 Packing List (PL)`: Formatted preview of the official Packing List with package carton breakdowns, weight summaries, and measurement details.
+- **Action Toolbar:**
+  - **`📥 Download Excel (.xlsx)` Button:** One-click download of the official dual-sheet `.xlsx` workbook generated via openpyxl. Uses active JWT token (`Auth.getAccessToken()`). Contains Sheet 1 `CI` and Sheet 2 `Packing List` with live formulas (`=SUM(...)`, `=E*F`), number formatting, borders, and embedded company seal + signature images.
+  - **`🖨️ Print / Save PDF` Button:** Triggers browser print dialog using an **isolated print iframe engine**. Automatically eliminates multi-page overlap and repeating headers:
+    - **Page 1:** Clean letterhead, invoice metadata, shipper/recipient cards, and first 10 items.
+    - **Page 2:** Column headers repeat automatically via `<thead>`, followed cleanly by items 11 to 27, yellow totals row, ICBC bank details, and official company stamp + signature.
+    - **Zero Overlap:** Complete isolation guarantees no elements are drawn on top of each other.
+
+### Test Cases for Sale Process Module
+- [ ] **TC-SP-01: Order Creation from Consignment:**
+  - Create a new Sale Process Order selecting an active Shipment Planning consignment & buyer. Verify all items, quantities, and rates import accurately.
+- [ ] **TC-SP-02: Status Workflow Progression:**
+  - Open Order Details modal. Click `Confirm Sales Order` &rarr; verify status turns `Sales Confirmed`. Click `Approve Order` &rarr; verify status turns `Admin Approved`. Click `Dispatch Order` &rarr; enter BL No & Container No &rarr; verify status turns `Dispatched`.
+- [ ] **TC-SP-03: Dual-Sheet Excel Trade Document Download:**
+  - In detail modal, click `📥 Download Excel (.xlsx)`.
+  - Verify browser downloads `Yinglima_CI_PL_{consignment_code}.xlsx`.
+  - Open in Excel: Verify Sheet 1 is `CI` and Sheet 2 is `Packing List`. Verify live formulas (`=SUM(...)`, `=E*F`), proper column widths, number formats (`$#,##0.00`), and official company seal + signature images.
+- [ ] **TC-SP-04: Isolated Multi-Page Print Preview (Commercial Invoice):**
+  - Select `📄 Commercial Invoice (CI)` tab and click `🖨️ Print / Save PDF`.
+  - Verify print dialog displays Page 1 and Page 2 without any element overlap.
+  - Verify Page 1 shows letterhead, invoice metadata, and rows 1–10.
+  - Verify Page 2 repeats the items table header, displays remaining rows, yellow total row, ICBC bank card, truth declaration, and company stamp + signature.
+- [ ] **TC-SP-05: Isolated Multi-Page Print Preview (Packing List):**
+  - Select `📦 Packing List (PL)` tab and click `🖨️ Print / Save PDF`.
+  - Verify Packing List prints cleanly with carton package breakdowns, net/gross weights, and CBM totals.
+- [ ] **TC-SP-06: Modal Viewport Top Bar Integrity:**
+  - Open the modal on a 1366x768 resolution or zoomed display. Scroll down the items table.
+  - Verify the modal header (`Sale Process Order: ...`, tabs, buttons) remains fully visible and is never pushed off the top edge of the screen.
 
 ---
 
@@ -1667,6 +1752,39 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-LP-05** | Financial Discrepancy Hard-Stop | Enter Invoice Total `10,000` with line items totaling `9,500`. | Red blocker banner displays `⛔ Invoice Discrepancy Detected`; Save button is disabled; submission prevented. |
 | **TC-LP-06** | Balanced Reconciliation Approval | Update line item rate or quantity so line items gross total equals `10,000`. | Red banner converts to green `✅ Invoice Total Matches Line Items Perfectly`; Save button is enabled. |
 | **TC-LP-07** | Detail Modal Inspection | On `/purchase/local` list, click invoice link or `👁️ View Details`. | Detail modal opens displaying supplier, receiving branch, expenses breakdown, line items landing rates, and download link. |
+
+---
+
+## 35. Sale Process & Export Trade Documents Engine (`/sale/process`)
+
+### 35.1. Module Overview & UI Layout Specifications
+- **Navigation:** Main Sidebar -> Sales -> **Sale Process** (`/sale/process`).
+- **Standardized List View Toolbar:**
+  - **Left Group:** `[ 50 ▾ ] Items/Page` selector with options `10`, `20`, `50`, `100`. Reactive pagination updates immediately and resets to Page 1.
+  - **Constraint:** Zero freeze column option (strictly streamlined per workflow instructions).
+  - **Right Group:** Medium-breadth search input (`290px`) positioned on the right side with 🔍 magnifier icon, clear `✕` button when terms are entered, and instant filtering on Order No, Consignment, Buyer Company, Container, BL, or LR No.
+- **Workflow Tabs:** `All`, `Pending`, `Sales Confirmed`, `Admin Approved`, `Dispatched`, `LR`, `Cancelled`.
+
+### 35.2. Trade Document Modal & Export Specifications
+- **Detail & Workflow Modal:** Click on Order No or `👁️ View Details` kebab action.
+- **3-Tab Navigation:**
+  - `📋 Order Overview`: Line items, basic prices, landed costs, and workflow status transitions.
+  - `📄 Commercial Invoice (CI)`: Formatted preview matching official corporate letterhead, consignee buyer profile, ICBC bank remittance card, and truth declaration.
+  - `📦 Packing List (PL)`: Formatted preview with package carton breakdowns, gross/net weights in kg, and volume CBM.
+- **Export Actions:**
+  - `📥 Download Excel (.xlsx)`: Generates dual-sheet workbook (`CI` and `Packing List`) with openpyxl live formulas and embedded official seal + signature.
+  - `🖨️ Print / Save PDF`: Isolated print iframe engine (`@page { size: A4 portrait; margin: 12mm 10mm; }`) with repeating table headers on multi-page splits, side-by-side company seal and handwritten signature (14px gap), and zero modal backdrop overlap.
+
+### 35.3. Test Cases & Verification Checklist
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-SP-01** | Standardized Table Toolbar | Navigate to `/sale/process`. | Toolbar displays at the top of the table card with `[ 50 ▾ ] Items/Page` on the left and a medium-breadth `290px` search input on the right. Zero freeze column buttons are displayed. |
+| **TC-SP-02** | Page Size Pagination Switch | Change page size dropdown to `10` or `20`. | Table immediately refreshes, showing the requested row count, and resets to Page 1. |
+| **TC-SP-03** | Right-Hand Search & Clear | Type query in search bar. Click `✕` clear button. | Typing filters orders instantly; `✕` appears when query is present; clicking `✕` empties input, restores full list, and resets page. |
+| **TC-SP-04** | Trade Document Detail Modal | Click any Order No link. | Modal opens with 3 tabs (`Order Overview`, `Commercial Invoice`, `Packing List`). Navigation bar is clearly visible without being clipped. |
+| **TC-SP-05** | Isolated A4 Print & Signature Layout | Click `🖨️ Print / Save PDF` in CI or PL tab. | Dedicated print preview opens cleanly. Company seal and signature sit neatly side-by-side with no overlap or clipping. |
+| **TC-SP-06** | Dual-Sheet Excel Export | Click `📥 Download Excel (.xlsx)`. | Browser downloads `Yinglima_CI_PL_{consignment_code}.xlsx`. Opening in Excel shows both `CI` and `Packing List` sheets with live formulas and embedded seal + signature. |
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP.*

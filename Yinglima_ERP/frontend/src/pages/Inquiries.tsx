@@ -245,18 +245,16 @@ export function InquiriesPage() {
         let total_order = 0;
 
         for (const s of summaries) {
-          total_order += s.consignment_count || 0;
-          if (s.consignment_status === "proposed") {
-            pending += s.consignment_count || 0;
-            ongoing += s.consignment_count || 0;
-          } else if (s.consignment_status === "partial_approved") {
-            ongoing += s.consignment_count || 0;
-            approved += s.approved_count || 0;
-            pending += s.proposed_count || 0;
-          } else if (s.consignment_status === "fully_approved") {
-            approved += s.consignment_count || 0;
-            completed += s.consignment_count || 0;
-          }
+          const totalConsignments = s.consignment_count || 0;
+          const fullyApproved = s.approved_count || 0;
+          const proposed = s.proposed_count || 0;
+          const partial = Math.max(0, totalConsignments - fullyApproved - proposed);
+
+          total_order += totalConsignments;
+          completed += fullyApproved;
+          approved += fullyApproved + partial;
+          pending += proposed;
+          ongoing += proposed + partial;
         }
         setStats({ pending, approved, ongoing, completed, total_order });
       } catch {
@@ -626,17 +624,13 @@ function CompaniesView({
     let completed = 0;
     summaries.forEach((s) => {
       const st = s.consignment_status;
-      if (st === "proposed") {
-        pending++;
-        ongoing++;
-      } else if (st === "partial_approved") {
-        ongoing++;
-        pending++;
-        approved++;
-      } else if (st === "fully_approved") {
-        approved++;
-        completed++;
-      }
+      const fullyApproved = s.approved_count || 0;
+      const proposed = s.proposed_count || 0;
+
+      if (proposed > 0 || st === "proposed") pending++;
+      if (st === "partial_approved" || proposed > 0) ongoing++;
+      if (fullyApproved > 0 || st === "partial_approved" || st === "fully_approved") approved++;
+      if (fullyApproved > 0 || st === "fully_approved") completed++;
     });
     return { all: summaries.length, pending, ongoing, approved, completed };
   }, [summaries]);
@@ -646,10 +640,12 @@ function CompaniesView({
     if (statusTab === "all") return summaries;
     return summaries.filter((s) => {
       const st = s.consignment_status;
-      if (statusTab === "pending") return st === "proposed" || (s.proposed_count || 0) > 0;
-      if (statusTab === "ongoing") return st === "partial_approved" || st === "proposed";
-      if (statusTab === "approved") return st === "fully_approved" || st === "partial_approved" || (s.approved_count || 0) > 0;
-      if (statusTab === "completed") return st === "fully_approved";
+      const fullyApproved = s.approved_count || 0;
+      const proposed = s.proposed_count || 0;
+      if (statusTab === "pending") return proposed > 0 || st === "proposed";
+      if (statusTab === "ongoing") return st === "partial_approved" || proposed > 0;
+      if (statusTab === "approved") return fullyApproved > 0 || st === "partial_approved" || st === "fully_approved";
+      if (statusTab === "completed") return fullyApproved > 0 || st === "fully_approved";
       return true;
     });
   }, [summaries, statusTab]);

@@ -330,3 +330,41 @@ async def export_sale_orders(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get(
+    "/orders/{id}/trade-details",
+    summary="Get enriched export trade document details (CI & Packing List)",
+)
+async def get_trade_document_details(
+    id: uuid.UUID,
+    request: Request,
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    data = await service.get_trade_document_details(id)
+    return build_success_response(data=data, request_id=req_id)
+
+
+@router.get(
+    "/orders/{id}/export-trade-docs",
+    summary="Download official dual-sheet Commercial Invoice & Packing List Excel workbook",
+)
+async def export_trade_documents_excel(
+    id: uuid.UUID,
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> Response:
+    output = await service.export_trade_documents_excel(id)
+    order = await service.repo.get_by_id(id)
+    clean_code = (order.consignment_code or f"Order_{order.order_no}").replace("/", "_").replace(" ", "_") if order else str(id)
+    filename = f"Yinglima_CI_PL_{clean_code}.xlsx"
+    return Response(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )

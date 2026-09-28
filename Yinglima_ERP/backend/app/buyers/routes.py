@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -365,20 +365,21 @@ async def export_buyers(
 async def import_buyers(
     request: Request,
     file: UploadFile = File(...),
+    update_existing: bool = Query(False, description="Update existing records matching company name instead of skipping"),
     service: BuyerService = Depends(get_buyer_service),
     current_user: CurrentUser = Depends(require_permission("buyer.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import buyers from an uploaded CSV/XLSX file, validating every row with 3-way duplicate detection."""
     raw_bytes = await file.read()
-    summary = await service.import_file(file.filename or "import.csv", raw_bytes)
+    summary = await service.import_file(file.filename or "import.csv", raw_bytes, update_existing=update_existing)
     await _record_action(
         audit_service=audit_service,
         request=request,
         action=AuditAction.IMPORT,
         actor=current_user,
         entity_id="bulk",
-        description=f"Imported buyers: {summary.created} created, {summary.failed} failed, {summary.duplicate_count} duplicates.",
+        description=f"Imported buyers: {summary.created} created, {summary.updated} updated, {summary.failed} failed, {summary.duplicate_count} duplicates.",
         new_values=summary.as_dict(),
     )
     return build_success_response(data=summary.as_dict(), request_id=request.state.request_id)

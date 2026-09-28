@@ -82,6 +82,7 @@ class ImportSummary:
 
     total_rows: int = 0
     created: int = 0
+    updated: int = 0
     failed: int = 0
     duplicate_count: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
@@ -98,6 +99,7 @@ class ImportSummary:
         return {
             "total_rows": self.total_rows,
             "created": self.created,
+            "updated": self.updated,
             "failed": self.failed,
             "duplicate_count": self.duplicate_count,
             "errors": self.errors,
@@ -118,6 +120,10 @@ def _read_excel_rows(raw_bytes: bytes) -> list[dict[str, str]]:
     """Parse the first worksheet of an .xlsx workbook into header->value dict rows."""
     workbook = load_workbook(filename=io.BytesIO(raw_bytes), read_only=True, data_only=True)
     sheet = workbook.active
+    if sheet is None:
+        sheet = workbook.worksheets[0] if workbook.worksheets else None
+    if sheet is None:
+        return []
     rows_iter = sheet.iter_rows(values_only=True)
     try:
         header = [str(h).strip() if h is not None else "" for h in next(rows_iter)]
@@ -209,8 +215,13 @@ async def run_import(
                         continue
                     seen_keys.add(key_values)
 
-            await row_creator(field_values)
-            summary.created += 1
+            res = await row_creator(field_values)
+            if isinstance(res, tuple) and len(res) == 2 and res[0] == "updated":
+                summary.updated += 1
+            elif isinstance(res, dict) and res.get("action") == "updated":
+                summary.updated += 1
+            else:
+                summary.created += 1
         except ConflictException as exc:
             summary.failed += 1
             summary.duplicate_count += 1
@@ -246,7 +257,10 @@ def build_excel_export(headers: list[str], rows: list[dict[str, Any]], *, sheet_
     """Build .xlsx file bytes from a list of header names and row dicts."""
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = sheet_title[:31]  # Excel sheet-title length limit
+    if sheet is None:
+        sheet = workbook.create_sheet(title=sheet_title[:31])
+    else:
+        sheet.title = sheet_title[:31]  # Excel sheet-title length limit
     sheet.append(headers)
     for row in rows:
         sheet.append([row.get(h) for h in headers])

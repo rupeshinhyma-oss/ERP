@@ -65,21 +65,31 @@ async def seeded_country(db_session):
     country = Country(name=f"Test Country {uuid.uuid4().hex}", code=code)
     db_session.add(country)
     await db_session.commit()
-    yield country
-
     try:
-        await db_session.rollback()
-        result = await db_session.execute(select(Buyer).where(Buyer.country_id == country.id))
-        for buyer in result.scalars().all():
-            await db_session.delete(buyer)
-        await db_session.flush()
+        yield country
+    finally:
+        try:
+            session_factory = get_sessionmaker()
+            async with session_factory() as cleanup_session:
+                result = await cleanup_session.execute(select(Buyer).where(Buyer.country_id == country.id))
+                buyers = result.scalars().all()
+                b_ids = [str(b.id) for b in buyers]
+                if b_ids:
+                    await cleanup_session.execute(delete(SyncedEntityMapping).where(SyncedEntityMapping.local_entity_id.in_(b_ids)))
+                    await cleanup_session.execute(delete(SyncedBuyerSource).where(SyncedBuyerSource.local_buyer_id.in_(b_ids)))
+                    for buyer in buyers:
+                        await cleanup_session.delete(buyer)
+                    await cleanup_session.flush()
 
-        existing = await db_session.get(Country, country.id)
-        if existing is not None:
-            await db_session.delete(existing)
-            await db_session.commit()
-    except Exception:
-        await db_session.rollback()
+                await cleanup_session.execute(delete(SyncedEntityMapping))
+                await cleanup_session.execute(delete(SyncedBuyerSource))
+
+                existing = await cleanup_session.get(Country, country.id)
+                if existing is not None:
+                    await cleanup_session.delete(existing)
+                await cleanup_session.commit()
+        except Exception:
+            pass
 
 
 @pytest_asyncio.fixture(autouse=True)

@@ -99,12 +99,38 @@ class ProductPriceRepository:
         if total_count == 0:
             return [], 0
 
+        from app.common.currency import get_active_rates
+        rates = await get_active_rates()
+        cny_rate = float(rates.get("CNY", 7.14))
+        eur_rate = float(rates.get("EUR", 0.92))
+        inr_rate = float(rates.get("INR", 83.50))
+        params["cny_rate"] = cny_rate
+        params["eur_rate"] = eur_rate
+        params["inr_rate"] = inr_rate
+
+        norm_spl_price_sql = """
+            (CASE 
+                WHEN UPPER(COALESCE(spl.currency, 'USD')) IN ('CNY', 'RMB') THEN spl.unit_price / :cny_rate
+                WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'EUR' THEN spl.unit_price / :eur_rate
+                WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'INR' THEN spl.unit_price / :inr_rate
+                ELSE spl.unit_price
+             END)
+        """
+        norm_best_price_sql = """
+            (CASE 
+                WHEN UPPER(COALESCE(best.currency, 'USD')) IN ('CNY', 'RMB') THEN best.unit_price / :cny_rate
+                WHEN UPPER(COALESCE(best.currency, 'USD')) = 'EUR' THEN best.unit_price / :eur_rate
+                WHEN UPPER(COALESCE(best.currency, 'USD')) = 'INR' THEN best.unit_price / :inr_rate
+                ELSE best.unit_price
+             END)
+        """
+
         # Determine order
         dir_clean = "DESC" if sort_dir.lower() == "desc" else "ASC"
         nulls_order = "NULLS LAST" if dir_clean == "ASC" else "NULLS FIRST"
 
         if sort_by == "best_price":
-            order_sql = f"best.unit_price {dir_clean} {nulls_order}, p.product_name_tally ASC"
+            order_sql = f"{norm_best_price_sql} {dir_clean} {nulls_order}, p.product_name_tally ASC"
             paginate_in_cte = False
         elif sort_by == "product_code":
             order_sql = f"p.product_code {dir_clean} {nulls_order}"
@@ -183,7 +209,7 @@ class ProductPriceRepository:
                     JOIN suppliers s ON s.id = spl.supplier_id AND s.deleted_at IS NULL
                     WHERE spl.product_id IN (SELECT id FROM paged)
                       AND spl.unit_price IS NOT NULL
-                    ORDER BY spl.product_id, spl.unit_price ASC, spl.updated_at DESC
+                    ORDER BY spl.product_id, {norm_spl_price_sql} ASC, spl.updated_at DESC
                 ) best ON best.product_id = p.id
                 ORDER BY {order_sql};
             """
@@ -235,7 +261,7 @@ class ProductPriceRepository:
                     FROM supplier_product_links spl
                     JOIN suppliers s ON s.id = spl.supplier_id AND s.deleted_at IS NULL
                     WHERE spl.unit_price IS NOT NULL
-                    ORDER BY spl.product_id, spl.unit_price ASC, spl.updated_at DESC
+                    ORDER BY spl.product_id, {norm_spl_price_sql} ASC, spl.updated_at DESC
                 ) best ON best.product_id = p.id
                 WHERE {where_sql}
                 ORDER BY {order_sql}
@@ -278,6 +304,12 @@ class ProductPriceRepository:
 
     async def get_product_suppliers(self, product_id: uuid.UUID) -> list[ProductPriceSupplierItem]:
         """Fetch all suppliers linked to a product with their quote details."""
+        from app.common.currency import get_active_rates
+        rates = await get_active_rates()
+        cny_rate = float(rates.get("CNY", 7.14))
+        eur_rate = float(rates.get("EUR", 0.92))
+        inr_rate = float(rates.get("INR", 83.50))
+
         query = text("""
             SELECT
                 spl.id AS link_id,
@@ -303,10 +335,15 @@ class ProductPriceRepository:
             LEFT JOIN states st ON st.id = s.state_id
             LEFT JOIN countries co ON co.id = s.country_id
             WHERE spl.product_id = :product_id
-            ORDER BY spl.unit_price ASC NULLS LAST, spl.updated_at DESC;
+            ORDER BY (CASE 
+                        WHEN UPPER(COALESCE(spl.currency, 'USD')) IN ('CNY', 'RMB') THEN spl.unit_price / :cny_rate
+                        WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'EUR' THEN spl.unit_price / :eur_rate
+                        WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'INR' THEN spl.unit_price / :inr_rate
+                        ELSE spl.unit_price
+                      END) ASC NULLS LAST, spl.updated_at DESC;
         """)
 
-        res = await self.session.execute(query, {"product_id": str(product_id)})
+        res = await self.session.execute(query, {"product_id": str(product_id), "cny_rate": cny_rate, "eur_rate": eur_rate, "inr_rate": inr_rate})
         rows = res.fetchall()
 
         items: list[ProductPriceSupplierItem] = []
@@ -374,6 +411,8 @@ class ProductPriceRepository:
             },
         )
         row = res.fetchone()
+        if not row:
+            raise NotFoundException("Failed to assign supplier price link")
         return row[0]
 
     async def update_supplier_price(self, link_id: uuid.UUID, payload: UpdatePricePayload) -> None:
@@ -400,17 +439,18 @@ class ProductPriceRepository:
         query = text(f"""
             UPDATE supplier_product_links
             SET {", ".join(updates)}
-            WHERE id = :link_id;
+            WHERE id = :link_id
+            RETURNING id;
         """)
         res = await self.session.execute(query, params)
-        if res.rowcount == 0:
+        if not res.fetchone():
             raise NotFoundException("Supplier price link not found")
 
     async def delete_supplier_price(self, link_id: uuid.UUID) -> None:
         """Remove a supplier price link."""
-        query = text("DELETE FROM supplier_product_links WHERE id = :link_id;")
+        query = text("DELETE FROM supplier_product_links WHERE id = :link_id RETURNING id;")
         res = await self.session.execute(query, {"link_id": str(link_id)})
-        if res.rowcount == 0:
+        if not res.fetchone():
             raise NotFoundException("Supplier price link not found")
 
     async def get_link_by_id(self, link_id: uuid.UUID) -> dict[str, Any] | None:

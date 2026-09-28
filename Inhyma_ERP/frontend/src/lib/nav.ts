@@ -98,6 +98,17 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: "HRMS",
+    items: [
+      { key: "hrms-attendance", label: "Attendance", path: "/hrms/attendance", icon: "clock" },
+      { key: "hrms-leave", label: "Leave", path: "/hrms/leave", icon: "calendar" },
+      { key: "hrms-expenses", label: "Expense Management", path: "/hrms/expenses", icon: "creditCard" },
+      { key: "hrms-site-visit", label: "Site Visit", path: "/hrms/site-visit", icon: "map" },
+      { key: "hrms-payroll", label: "Payroll", path: "/hrms/payroll", icon: "coins" },
+      { key: "hrms-setup", label: "Setup", path: "/hrms/setup", icon: "settings" },
+    ],
+  },
+  {
     label: "USER MANAGEMENT",
     items: [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
@@ -228,6 +239,12 @@ export const PAGE_TITLES: Record<string, string> = {
   "masters-adjustment-purpose": "Adjustment Purpose",
   "masters-call-types": "Call Types",
   "call-logs-follow-up": "Follow Up Logs",
+  "hrms-attendance": "Attendance",
+  "hrms-leave": "Leave",
+  "hrms-expenses": "Expense Management",
+  "hrms-site-visit": "Site Visit",
+  "hrms-payroll": "Payroll",
+  "hrms-setup": "HRMS Setup",
 };
 
 export const DEFAULT_BRAND_NAME = "Inhyma";
