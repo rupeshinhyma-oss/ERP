@@ -554,8 +554,8 @@ class BuyerService:
             return build_csv_export(EXPORT_HEADERS, rows)
         return build_excel_export(EXPORT_HEADERS, rows, sheet_title="Buyers")
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> Any:
-        """Validate and import buyers from an uploaded CSV/XLSX file with 3-way duplicate detection."""
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> Any:
+        """Validate and import buyers from an uploaded CSV/XLSX file with 3-way duplicate detection and update mode."""
         from app.buyers.validators import validate_buyer_row
         from app.masters.import_export import model_to_dict, parse_rows_from_file, run_import
 
@@ -602,22 +602,175 @@ class BuyerService:
 
         seen_in_batch = set()
 
-        async def _create(field_values: dict[str, Any]) -> Buyer:
+        async def _create(field_values: dict[str, Any]) -> Buyer | tuple[str, Buyer]:
             company_name = field_values["company_name"].strip()
             calling_num = field_values.get("contact_calling_number")
             wa_num = field_values.get("contact_whatsapp_number")
             country_raw = field_values.pop("country_raw", "").strip()
             cat_names_raw = field_values.pop("category_names_raw", None)
             sub_cat_names_raw = field_values.pop("sub_category_names_raw", None)
+            emails = field_values.pop("emails", None)
 
             # In-batch duplicate check
             batch_key = company_name.lower()
             if batch_key in seen_in_batch:
                 raise ConflictException(f"Buyer '{company_name}' appears multiple times in the import file (duplicate).")
 
+            # ----------------------------------------------------------
+            # UPDATE EXISTING MODE: If buyer exists by company name, safely update
+            # ----------------------------------------------------------
+            if update_existing and batch_key in existing_name_map:
+                target_buyer = existing_name_map[batch_key]
+                update_kwargs: dict[str, Any] = {}
+
+                # Strict Buyer Type validation if provided
+                buyer_type_raw = field_values.get("buyer_type")
+                if buyer_type_raw and str(buyer_type_raw).strip():
+                    bt_clean = str(buyer_type_raw).strip().lower()
+                    matched_bt = valid_buyer_type_map.get(bt_clean)
+                    if not matched_bt:
+                        valid_list_str = ", ".join(sorted(set(valid_buyer_type_map.values())))
+                        raise BadRequestException(
+                            f"Buyer Type '{buyer_type_raw}' does not exist in Buyer Type Master. Must be one of: {valid_list_str}."
+                        )
+                    update_kwargs["buyer_type"] = matched_bt
+
+                # Strict Country validation if provided
+                if country_raw and country_raw.strip():
+                    matched_country = next(
+                        (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
+                        None,
+                    )
+                    if matched_country is None:
+                        raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
+                    update_kwargs["country_id"] = matched_country.id
+
+                # Category validation if provided
+                category_ids: list[Any] | None = None
+                if cat_names_raw and str(cat_names_raw).strip():
+                    category_ids = []
+                    for cn in cat_names_raw.split(","):
+                        cn_clean = cn.strip().lower()
+                        if not cn_clean:
+                            continue
+                        matched_cat = next((c for c in all_cats if c.name.lower() == cn_clean), None)
+                        if not matched_cat:
+                            raise BadRequestException(f"Product Category '{cn.strip()}' does not exist in Category Master.")
+                        category_ids.append(matched_cat.id)
+
+                # Sub-Category validation if provided
+                sub_category_ids: list[Any] | None = None
+                if sub_cat_names_raw and str(sub_cat_names_raw).strip():
+                    sub_category_ids = []
+                    for scn in sub_cat_names_raw.split(","):
+                        scn_clean = scn.strip().lower()
+                        if not scn_clean:
+                            continue
+                        matched_sc = next((sc for sc in all_sub_cats if sc.name.lower() == scn_clean), None)
+                        if not matched_sc:
+                            raise BadRequestException(f"Product Sub Category '{scn.strip()}' does not exist in Sub Category Master.")
+                        sub_category_ids.append(matched_sc.id)
+
+                # Calling number: only update if provided, and check no collision with OTHER buyers
+                clean_call = re.sub(r"\D", "", calling_num) if calling_num else ""
+                if clean_call and len(clean_call) >= 6:
+                    if clean_call in existing_calling_map and existing_calling_map[clean_call].id != target_buyer.id:
+                        dup = existing_calling_map[clean_call]
+                        raise ConflictException(
+                            f"Calling number '{calling_num}' already exists in Buyer Master (used by '{dup.company_name}').",
+                            details={"existing": _serialize_buyer_for_compare(dup)},
+                        )
+                    if clean_call in existing_whatsapp_map and existing_whatsapp_map[clean_call].id != target_buyer.id:
+                        dup = existing_whatsapp_map[clean_call]
+                        raise ConflictException(
+                            f"Calling number '{calling_num}' already exists as WhatsApp number in Buyer Master (used by '{dup.company_name}').",
+                            details={"existing": _serialize_buyer_for_compare(dup)},
+                        )
+                    update_kwargs["contact_calling_number"] = calling_num
+
+                # WhatsApp number: only update if provided, and check no collision with OTHER buyers
+                clean_wa = re.sub(r"\D", "", wa_num) if wa_num else ""
+                if clean_wa and len(clean_wa) >= 6:
+                    if clean_wa in existing_whatsapp_map and existing_whatsapp_map[clean_wa].id != target_buyer.id:
+                        dup = existing_whatsapp_map[clean_wa]
+                        raise ConflictException(
+                            f"WhatsApp number '{wa_num}' already exists in Buyer Master (used by '{dup.company_name}').",
+                            details={"existing": _serialize_buyer_for_compare(dup)},
+                        )
+                    if clean_wa in existing_calling_map and existing_calling_map[clean_wa].id != target_buyer.id:
+                        dup = existing_calling_map[clean_wa]
+                        raise ConflictException(
+                            f"WhatsApp number '{wa_num}' already exists as Calling number in Buyer Master (used by '{dup.company_name}').",
+                            details={"existing": _serialize_buyer_for_compare(dup)},
+                        )
+                    update_kwargs["contact_whatsapp_number"] = wa_num
+
+                # Other direct fields: ONLY update if non-null and not empty/blank string
+                skip_fields = {
+                    "company_name", "buyer_type", "country_id", "contact_calling_number", "contact_whatsapp_number",
+                    "category_ids", "sub_category_ids", "contact_full_name", "contact_designation", "contact_salutation",
+                    "emails",
+                }
+                for k, v in field_values.items():
+                    if k not in skip_fields:
+                        if v is not None and str(v).strip() != "":
+                            update_kwargs[k] = v
+
+                # Validate potential_reason if potential is updated
+                if "potential" in update_kwargs:
+                    pot_val = update_kwargs["potential"]
+                    pot_reason = update_kwargs.get("potential_reason", target_buyer.potential_reason)
+                    self._validate_potential_reason(pot_val, pot_reason)
+
+                # Persist updates to target buyer (never blanking out any existing field)
+                if update_kwargs:
+                    await self.repository.update(target_buyer, **update_kwargs)
+                if category_ids is not None:
+                    await self.repository.replace_category_links(target_buyer.id, category_ids)
+                if sub_category_ids is not None:
+                    await self.repository.replace_sub_category_links(target_buyer.id, sub_category_ids)
+                if emails is not None and len(emails) > 0:
+                    await self.repository.replace_emails(target_buyer.id, emails)
+
+                # Update primary contact if contact name was supplied in this row
+                contact_name = field_values.get("contact_full_name")
+                if contact_name and str(contact_name).strip():
+                    primary_contact = next((c for c in getattr(target_buyer, "contacts", []) if c.is_primary), None)
+                    if primary_contact:
+                        c_updates: dict[str, Any] = {"person_name": str(contact_name).strip()}
+                        if field_values.get("contact_designation"):
+                            c_updates["designation"] = str(field_values["contact_designation"]).strip()
+                        if calling_num:
+                            c_updates["calling_number"] = calling_num
+                        if wa_num:
+                            c_updates["whatsapp_number"] = wa_num
+                        await self.contact_repository.update(primary_contact, **c_updates)
+                    else:
+                        await self.contact_repository.create(
+                            buyer_id=target_buyer.id,
+                            salutation=field_values.get("contact_salutation"),
+                            person_name=str(contact_name).strip(),
+                            designation=field_values.get("contact_designation"),
+                            country_id=update_kwargs.get("country_id", target_buyer.country_id),
+                            calling_number=calling_num or target_buyer.contact_calling_number,
+                            whatsapp_number=wa_num or target_buyer.contact_whatsapp_number,
+                            email=None,
+                            is_primary=True,
+                        )
+
+                seen_in_batch.add(batch_key)
+                if clean_call and len(clean_call) >= 6:
+                    existing_calling_map[clean_call] = target_buyer
+                if clean_wa and len(clean_wa) >= 6:
+                    existing_whatsapp_map[clean_wa] = target_buyer
+                return ("updated", target_buyer)
+
+            # ----------------------------------------------------------
+            # INSERT MODE (or new record in Update mode):
+            # ----------------------------------------------------------
             # 1. Company Name Duplicate Check
-            if company_name.lower() in existing_name_map:
-                dup = existing_name_map[company_name.lower()]
+            if batch_key in existing_name_map:
+                dup = existing_name_map[batch_key]
                 raise ConflictException(
                     f"Buyer '{company_name}' already exists in Buyer Master (duplicate company name).",
                     details={"existing": _serialize_buyer_for_compare(dup)},
@@ -701,6 +854,7 @@ class BuyerService:
                         raise BadRequestException(f"Product Sub Category '{scn.strip()}' does not exist in Sub Category Master.")
                     sub_category_ids.append(matched_sc.id)
             field_values["sub_category_ids"] = sub_category_ids
+            field_values["emails"] = emails or []
 
             buyer = await self.create(**field_values)
             seen_in_batch.add(batch_key)

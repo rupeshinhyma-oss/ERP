@@ -543,11 +543,11 @@ class SupplierService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """
         Validate and import suppliers from an uploaded CSV/XLSX file.
 
-        Skips duplicate company names safely and links categories/subcategories/products if supplied.
+        Skips duplicate company names safely or updates them if update_existing is True.
         """
         rows = parse_rows_from_file(filename, raw_bytes)
 
@@ -583,16 +583,11 @@ class SupplierService:
                 ).capitalize(),
             }
 
-        async def _create(field_values: dict[str, Any]) -> Supplier:
-            company_name = field_values["company_name"].strip()
+        seen_in_batch = set()
 
-            # Duplicate check on Company Name
-            if company_name.lower() in existing_map:
-                dup_supplier = existing_map[company_name.lower()]
-                raise ConflictException(
-                    f"Supplier '{company_name}' already exists in Supplier Master (duplicate company name).",
-                    details={"existing": _serialize_supplier_for_compare(dup_supplier)},
-                )
+        async def _create(field_values: dict[str, Any]) -> Supplier | tuple[str, Supplier]:
+            company_name = field_values["company_name"].strip()
+            batch_key = company_name.lower()
 
             country_raw = field_values.pop("country_code", "").strip()
             state_raw = field_values.pop("state_name", "").strip()
@@ -601,6 +596,144 @@ class SupplierService:
             cat_names_raw = field_values.pop("category_names_raw", None)
             sub_cat_names_raw = field_values.pop("sub_category_names_raw", None)
             _prod_names_raw = field_values.pop("product_names_raw", None)
+
+            contact_name = field_values.pop("contact_full_name", None)
+            contact_desig = field_values.pop("contact_designation", None)
+            contact_call = field_values.pop("contact_calling_number", None)
+            contact_wa = field_values.pop("contact_whatsapp_number", None)
+            contact_wc = field_values.pop("contact_wechat_number", None)
+
+            # ----------------------------------------------------------
+            # UPDATE EXISTING MODE: If supplier exists, safely update
+            # ----------------------------------------------------------
+            if update_existing and batch_key in existing_map:
+                target_supplier = existing_map[batch_key]
+                update_kwargs: dict[str, Any] = {}
+
+                # 1. Country validation if provided
+                target_country_id = target_supplier.country_id
+                if country_raw:
+                    c_match = next(
+                        (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
+                        None,
+                    )
+                    if c_match is None:
+                        raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
+                    update_kwargs["country_id"] = c_match.id
+                    target_country_id = c_match.id
+
+                # 2. State validation if provided
+                target_state_id = target_supplier.state_id
+                if state_raw:
+                    s_match = next(
+                        (s for s in all_states if s.country_id == target_country_id and (s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower()))),
+                        None,
+                    )
+                    if s_match is None:
+                        s_match = next((s for s in all_states if s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower())), None)
+                    if s_match is None:
+                        raise BadRequestException(f"State '{state_raw}' does not exist in State Master.")
+                    update_kwargs["state_id"] = s_match.id
+                    target_state_id = s_match.id
+
+                # 3. City validation if provided
+                if city_raw:
+                    ct_match = next(
+                        (ct for ct in all_cities if ct.state_id == target_state_id and ct.name.lower() == city_raw.lower()),
+                        None,
+                    )
+                    if ct_match is None:
+                        ct_match = next((ct for ct in all_cities if ct.name.lower() == city_raw.lower()), None)
+                    if ct_match is None:
+                        raise BadRequestException(f"City '{city_raw}' does not exist in City Master.")
+                    update_kwargs["city_id"] = ct_match.id
+
+                # 4. Category validation if provided
+                if cat_names_raw and str(cat_names_raw).strip():
+                    cat_ids = []
+                    for cn in cat_names_raw.split(","):
+                        cn_clean = cn.strip().lower()
+                        if not cn_clean:
+                            continue
+                        matched_cat = next((c for c in all_cats if c.name.lower() == cn_clean), None)
+                        if not matched_cat:
+                            raise BadRequestException(f"Product Category '{cn.strip()}' does not exist in Category Master.")
+                        cat_ids.append(matched_cat.id)
+                    await self.repository.replace_category_links(target_supplier.id, cat_ids)
+
+                # 5. Sub-Category validation if provided
+                if sub_cat_names_raw and str(sub_cat_names_raw).strip():
+                    sub_ids = []
+                    for scn in sub_cat_names_raw.split(","):
+                        scn_clean = scn.strip().lower()
+                        if not scn_clean:
+                            continue
+                        matched_sc = next((sc for sc in all_sub_cats if sc.name.lower() == scn_clean), None)
+                        if not matched_sc:
+                            raise BadRequestException(f"Product Sub Category '{scn.strip()}' does not exist in Sub Category Master.")
+                        sub_ids.append(matched_sc.id)
+                    await self.repository.replace_sub_category_links(target_supplier.id, sub_ids)
+
+                # Only non-empty / non-blank fields update
+                skip_fields = {"company_name", "country_id", "state_id", "city_id", "category_ids", "sub_category_ids"}
+                for k, v in field_values.items():
+                    if k not in skip_fields and v is not None and str(v).strip() != "":
+                        update_kwargs[k] = v
+
+                if contact_call and str(contact_call).strip():
+                    update_kwargs["contact_calling_number"] = str(contact_call).strip()
+                if contact_wa and str(contact_wa).strip():
+                    update_kwargs["contact_whatsapp_number"] = str(contact_wa).strip()
+                if contact_wc and str(contact_wc).strip():
+                    update_kwargs["contact_wechat_number"] = str(contact_wc).strip()
+
+                if update_kwargs:
+                    await self.repository.update(target_supplier, **update_kwargs)
+
+                if email and str(email).strip():
+                    await self.repository.replace_emails(target_supplier.id, [str(email).strip()])
+
+                if contact_name and str(contact_name).strip():
+                    primary_c = next((c for c in getattr(target_supplier, "contacts", []) if c.is_primary), None)
+                    if primary_c:
+                        c_up: dict[str, Any] = {"person_name": str(contact_name).strip()}
+                        if contact_desig:
+                            c_up["designation"] = str(contact_desig).strip()
+                        if contact_call:
+                            c_up["calling_number"] = str(contact_call).strip()
+                        if contact_wa:
+                            c_up["whatsapp_number"] = str(contact_wa).strip()
+                        if contact_wc:
+                            c_up["wechat_number"] = str(contact_wc).strip()
+                        await self.contact_repository.update(primary_c, **c_up)
+                    else:
+                        await self.contact_repository.create(
+                            supplier_id=target_supplier.id,
+                            salutation=None,
+                            person_name=str(contact_name).strip(),
+                            designation=contact_desig,
+                            handling_territory=None,
+                            country_id=target_country_id,
+                            calling_number=contact_call,
+                            whatsapp_number=contact_wa,
+                            wechat_number=contact_wc,
+                            email=email,
+                            is_primary=True,
+                        )
+
+                seen_in_batch.add(batch_key)
+                return ("updated", target_supplier)
+
+            # ----------------------------------------------------------
+            # INSERT MODE (or new record in Update mode):
+            # ----------------------------------------------------------
+            # Duplicate check on Company Name
+            if batch_key in existing_map:
+                dup_supplier = existing_map[batch_key]
+                raise ConflictException(
+                    f"Supplier '{company_name}' already exists in Supplier Master (duplicate company name).",
+                    details={"existing": _serialize_supplier_for_compare(dup_supplier)},
+                )
 
             # 1. Strict Country validation (by code or name)
             country = next(
@@ -664,12 +797,6 @@ class SupplierService:
                 field_values.get("visited_factory_office", False), field_values.get("visit_remarks")
             )
 
-            contact_name = field_values.pop("contact_full_name", None)
-            contact_desig = field_values.pop("contact_designation", None)
-            contact_call = field_values.pop("contact_calling_number", None)
-            contact_wa = field_values.pop("contact_whatsapp_number", None)
-            contact_wc = field_values.pop("contact_wechat_number", None)
-
             supplier = await self.create(**field_values)
             if email:
                 await self.repository.replace_emails(supplier.id, [email])
@@ -690,7 +817,7 @@ class SupplierService:
                 )
 
             # Prevent duplicate within the same batch file
-            existing_map[company_name.lower()] = supplier
+            existing_map[batch_key] = supplier
             return supplier
 
         summary = await run_import(

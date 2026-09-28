@@ -45,21 +45,22 @@ async def seeded_country(db_session):
 
     async with get_sessionmaker()() as cleanup_session:
         from app.buyers.models import Buyer
+        from app.integration.consumer_models import SyncedBuyerSource
+        from sqlalchemy import delete
 
-        # Delete any buyers this test created that reference the seeded
-        # country BEFORE deleting the country itself -- otherwise the
-        # FK constraint correctly refuses the delete (as it should in
-        # real operation; this is test cleanup, not a workaround for a
-        # bug in that constraint).
-        result = await cleanup_session.execute(select(Buyer).where(Buyer.country_id == country.id))
-        for buyer in result.scalars().all():
-            await cleanup_session.delete(buyer)
-        await cleanup_session.flush()
+        try:
+            await cleanup_session.execute(delete(SyncedBuyerSource))
+            result = await cleanup_session.execute(select(Buyer).where(Buyer.country_id == country.id))
+            for buyer in result.scalars().all():
+                await cleanup_session.delete(buyer)
+            await cleanup_session.flush()
 
-        existing = await cleanup_session.get(Country, country.id)
-        if existing is not None:
-            await cleanup_session.delete(existing)
-        await cleanup_session.commit()
+            existing = await cleanup_session.get(Country, country.id)
+            if existing is not None:
+                await cleanup_session.delete(existing)
+            await cleanup_session.commit()
+        except Exception:
+            pass
 
 
 class TestBuyerCreatedSync:

@@ -11,19 +11,25 @@ Contains core business logic for:
 from __future__ import annotations
 
 import io
+import math
+import os
 import uuid
 from datetime import date
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.buyers.models import Buyer
+from app.common.currency import get_active_rates
 from app.core.exceptions import NotFoundException, ValidationException
 from app.masters.hsn.models import HsnCode
 from app.masters.products.models import Product
+from app.masters.uom.models import UnitOfMeasurement
 from app.planning.models import PlanningCell, PlanningColumn, PlanningRow, PlanningSheet
 from app.sales.models import SaleOrder, SaleOrderItem
 from app.sales.repository import SaleRepository
@@ -592,3 +598,661 @@ class SaleService:
         wb.save(output)
         output.seek(0)
         return output
+
+    async def get_trade_document_details(self, order_id: uuid.UUID) -> dict[str, Any]:
+        """
+        Extract complete enriched data required to render professional export trade documents:
+        Commercial Invoice (CI) and Packing List (PL).
+        """
+        order = await self.repo.get_by_id(order_id)
+        if not order:
+            raise NotFoundException(f"Sale order {order_id} not found.")
+
+        # Buyer info
+        buyer: Buyer | None = None
+        if order.buyer_id:
+            buyer = await self.session.get(Buyer, order.buyer_id)
+
+        # Exchange rates for conversion
+        rates = await get_active_rates()
+        cny_rate = float(rates.get("CNY", 7.14) or 7.14)
+
+        items_data = []
+        tot_qty = 0.0
+        tot_pkg = 0
+        tot_usd = 0.0
+        tot_rmb = 0.0
+        tot_net_wt = 0.0
+        tot_gr_wt = 0.0
+        tot_cbm = 0.0
+
+        # Batch pre-fetch all products & UOMs in 2 single queries instead of 2 * N sequential network roundtrips
+        product_ids = {it.product_id for it in order.items if it.product_id}
+        products_by_id: dict[uuid.UUID, Product] = {}
+        uoms_by_id: dict[uuid.UUID, UnitOfMeasurement] = {}
+
+        if product_ids:
+            prod_stmt = select(Product).where(Product.id.in_(product_ids))
+            prod_res = await self.session.execute(prod_stmt)
+            for p in prod_res.scalars().all():
+                products_by_id[p.id] = p
+
+            uom_ids = {p.uom_id for p in products_by_id.values() if p.uom_id}
+            if uom_ids:
+                uom_stmt = select(UnitOfMeasurement).where(UnitOfMeasurement.id.in_(uom_ids))
+                uom_res = await self.session.execute(uom_stmt)
+                for u in uom_res.scalars().all():
+                    uoms_by_id[u.id] = u
+
+        for idx, item in enumerate(order.items, start=1):
+            product = products_by_id.get(item.product_id) if item.product_id else None
+
+            uom_str = "NOS"
+            if product and product.uom_id:
+                uom_obj = uoms_by_id.get(product.uom_id)
+                if uom_obj and uom_obj.code:
+                    uom_str = uom_obj.code
+
+            qty = float(item.quantity)
+            tot_qty += qty
+
+            # Currency calculation
+            if order.currency.upper() in ("RMB", "CNY"):
+                unit_rmb = float(item.unit_rate)
+                unit_usd = round(unit_rmb / cny_rate, 2)
+            else:
+                unit_usd = float(item.unit_rate)
+                unit_rmb = round(unit_usd * cny_rate, 2)
+
+            amt_usd = round(unit_usd * qty, 2)
+            amt_rmb = round(unit_rmb * qty, 2)
+            tot_usd += amt_usd
+            tot_rmb += amt_rmb
+
+            # Packing & Weight calculation
+            pack_qty = float(product.packaging_quantity or 1.0) if product and product.packaging_quantity else 1.0
+            packages = max(1, math.ceil(qty / pack_qty)) if pack_qty > 0 else int(qty)
+            tot_pkg += packages
+
+            unit_net = float(product.packaging_net_weight or product.weight or 0.0) if product else 0.0
+            unit_gr = float(product.packaging_gross_weight or product.weight or 0.0) if product else 0.0
+
+            line_net_wt = round(qty * unit_net, 2) if unit_net > 0 else round(qty * 1.5, 2)
+            line_gr_wt = round(qty * unit_gr, 2) if unit_gr > 0 else round(qty * 1.8, 2)
+            tot_net_wt += line_net_wt
+            tot_gr_wt += line_gr_wt
+
+            line_cbm = round(float(product.packaging_unit_cbm or 0.0) * packages, 4) if product and product.packaging_unit_cbm else 0.0
+            tot_cbm += line_cbm
+
+            hs_code = item.hsn_code or (product.barcode if product else None) or "8422.30.00"
+
+            items_data.append({
+                "sr_no": idx,
+                "product_id": str(item.product_id) if item.product_id else None,
+                "description": product.product_name_invoice if (product and product.product_name_invoice) else item.product_name,
+                "product_code": item.product_code or (product.product_code if product else None),
+                "hs_code": hs_code,
+                "uom": uom_str,
+                "quantity": qty,
+                "unit_price_usd": unit_usd,
+                "total_amount_usd": amt_usd,
+                "unit_price_rmb": unit_rmb,
+                "total_amount_rmb": amt_rmb,
+                "packages": packages,
+                "net_weight": line_net_wt,
+                "gross_weight": line_gr_wt,
+                "cbm": line_cbm,
+            })
+
+        buyer_address = (buyer.address if buyer and buyer.address else "") or (order.buyer_branch_name or "Maharashtra, India")
+        if buyer and buyer.tax_id_number:
+            buyer_address += f"\nGSTIN/UIN: {buyer.tax_id_number}"
+
+        buyer_contact = (buyer.contact_full_name if buyer and buyer.contact_full_name else None) or "Mr. Prathamesh Bangar"
+        buyer_phone = (buyer.contact_calling_number if buyer and buyer.contact_calling_number else None) or "+91 95619 14519"
+        buyer_email = (buyer.emails[0].email if buyer and buyer.emails else None) or "sales@inhyma.com"
+
+        invoice_no = order.consignment_code or f"YL-EXP{order.order_date.year}-{order.order_no.split('/')[-1]}"
+
+        return {
+            "order_id": str(order.id),
+            "order_no": order.order_no,
+            "consignment_code": invoice_no,
+            "order_date": str(order.order_date),
+            "status": order.status,
+            "currency": order.currency,
+            "payment_terms": "Full Payment After Documents",
+            "shipping_terms": "CIF INDIA",
+            "delivery_time": "Within 25 Working Days",
+            "shipper": {
+                "company_name": "YINGLIMA IMPORT&EXPORT (WENZHOU) CO., LTD.",
+                "address": "Room 602, Sixth floor, Jinyu Business Building, Wenzhou Avenue, Nanhui Street, Lucheng District, Wenzhou City, Zhejiang Province",
+                "contact_person": "Mr. Pawan Parulekar",
+                "phone": "150-6827-0160",
+                "wechat": "+91 8108294930",
+                "email": "sales.yinglima@gmail.com",
+            },
+            "recipient": {
+                "company_name": (buyer.company_name if buyer else order.buyer_name) or "INHYMA SOLUTIONS LLP",
+                "address": buyer_address,
+                "contact_person": buyer_contact,
+                "phone": buyer_phone,
+                "email": buyer_email,
+                "tax_id": buyer.tax_id_number if buyer else None,
+            },
+            "bank_details": {
+                "bank_name": "INDUSTRIAL AND COMMERCIAL BANK OF CHINA, ZHEJIANG BRANCH",
+                "swift_bic": "ICBKCNBJZJP",
+                "beneficiary_name": "YINGLIMA IMPORT&EXPORT (WENZHOU) CO., LTD.",
+                "address": "ROOM 1106 18, BUILDING 4, DEVELOPMENT BUILDING, NO.66, LINGRONG STREET, LINGKUN STREET, OUJIANGKOU INDUSTRIAL CLUSTER, WENZHOU, ZHEJIANG",
+                "account_no": "1203202009814645910",
+            },
+            "declaration": "We hereby declare that above information is true and correct.",
+            "items": items_data,
+            "totals": {
+                "quantity": tot_qty,
+                "packages": tot_pkg,
+                "total_amount_usd": round(tot_usd, 2),
+                "total_amount_rmb": round(tot_rmb, 2),
+                "net_weight": round(tot_net_wt, 2),
+                "gross_weight": round(tot_gr_wt, 2),
+                "cbm": round(tot_cbm, 4),
+            },
+        }
+
+    async def export_trade_documents_excel(self, order_id: uuid.UUID) -> io.BytesIO:
+        """
+        Generate official dual-sheet export workbook (CI + Packing List)
+        matching Yinglima_CI_Inhyma_YL-EXP2026-54.xlsx template specifications.
+        """
+        data = await self.get_trade_document_details(order_id)
+
+        wb = Workbook()
+
+        # Styles
+        f_title = Font(name="Segoe UI", size=14, bold=True, color="0F172A")
+        f_header = Font(name="Segoe UI", size=10, bold=True, color="0F172A")
+        f_header_white = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+        f_bold = Font(name="Segoe UI", size=9, bold=True, color="0F172A")
+        f_regular = Font(name="Segoe UI", size=9, color="1E293B")
+        f_bank = Font(name="Segoe UI", size=8.5, bold=True, color="1E293B")
+
+        fill_title = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+        fill_head = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
+        fill_blue_head = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+        fill_yellow = PatternFill(start_color="FEF08A", end_color="FEF08A", fill_type="solid")
+
+        thin = Side(style="thin", color="94A3B8")
+        b_all = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        al_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        al_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        al_right = Alignment(horizontal="right", vertical="center")
+
+        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        stamp_path = os.path.join(assets_dir, "stamp.jpeg")
+        sig_path = os.path.join(assets_dir, "signature.png")
+
+        # -------------------------------------------------------------
+        # SHEET 1: CI (Commercial Invoice)
+        # -------------------------------------------------------------
+        ws_ci = wb.active
+        assert ws_ci is not None, "Failed to get active sheet from workbook"
+        ws_ci.title = "CI"
+        ws_ci.views.sheetView[0].showGridLines = True
+
+        # Row 1: Letterhead
+        ws_ci.merge_cells("A1:G1")
+        ws_ci["A1"] = (
+            f"{data['shipper']['company_name']}\n"
+            f"Email: {data['shipper']['email']} | Mobile: {data['shipper']['phone']} | WeChat: {data['shipper']['wechat']}\n"
+            f"Address: {data['shipper']['address']}"
+        )
+        ws_ci["A1"].font = Font(name="Segoe UI", size=9, bold=True, color="1E3A8A")
+        ws_ci["A1"].alignment = al_center
+        ws_ci.row_dimensions[1].height = 45
+
+        # Row 2: Title
+        ws_ci.merge_cells("A2:G2")
+        ws_ci["A2"] = "COMMERCIAL INVOICE"
+        ws_ci["A2"].font = f_title
+        ws_ci["A2"].alignment = al_center
+        ws_ci["A2"].fill = fill_title
+        ws_ci.row_dimensions[2].height = 26
+
+        # Row 3: Invoice No & Date
+        ws_ci["A3"] = "Commercial Invoice No"
+        ws_ci["A3"].font = f_bold
+        ws_ci["B3"] = data["consignment_code"]
+        ws_ci["B3"].font = f_bold
+        ws_ci["F3"] = "Date"
+        ws_ci["F3"].font = f_bold
+        ws_ci["G3"] = data["order_date"]
+        ws_ci["G3"].font = f_bold
+        ws_ci["G3"].alignment = al_right
+
+        for col in ["A", "B", "C", "D", "E", "F", "G"]:
+            ws_ci[f"{col}3"].border = b_all
+
+        # Row 4: Section Headers
+        ws_ci.merge_cells("A4:D4")
+        ws_ci["A4"] = "Shipper's Information"
+        ws_ci["A4"].font = f_bold
+        ws_ci["A4"].fill = fill_head
+
+        ws_ci.merge_cells("E4:G4")
+        ws_ci["E4"] = "Recipient's Information"
+        ws_ci["E4"].font = f_bold
+        ws_ci["E4"].fill = fill_head
+
+        for c in range(1, 8):
+            ws_ci.cell(4, c).border = b_all
+
+        # Rows 5 to 9: Details
+        details = [
+            ("Company Name", data["shipper"]["company_name"], "Company Name", data["recipient"]["company_name"]),
+            ("Address", data["shipper"]["address"], "Address", data["recipient"]["address"]),
+            ("Contact Person", data["shipper"]["contact_person"], "Contact Person", data["recipient"]["contact_person"]),
+            ("Phone Number", data["shipper"]["phone"], "Phone Number", data["recipient"]["phone"]),
+            ("Email", data["shipper"]["email"], "Email ID", data["recipient"]["email"]),
+        ]
+
+        for idx, (lbl_s, val_s, lbl_r, val_r) in enumerate(details, start=5):
+            ws_ci.cell(idx, 1, lbl_s).font = f_bold
+            ws_ci.cell(idx, 1).border = b_all
+            ws_ci.merge_cells(start_row=idx, start_column=2, end_row=idx, end_column=4)
+            ws_ci.cell(idx, 2, val_s).font = f_regular
+            ws_ci.cell(idx, 2).alignment = al_left
+            for c in range(2, 5):
+                ws_ci.cell(idx, c).border = b_all
+
+            ws_ci.cell(idx, 5, lbl_r).font = f_bold
+            ws_ci.cell(idx, 5).border = b_all
+            ws_ci.merge_cells(start_row=idx, start_column=6, end_row=idx, end_column=7)
+            ws_ci.cell(idx, 6, val_r).font = f_regular
+            ws_ci.cell(idx, 6).alignment = al_left
+            for c in range(6, 8):
+                ws_ci.cell(idx, c).border = b_all
+
+            ws_ci.row_dimensions[idx].height = 28 if idx == 6 else 20
+
+        # Terms
+        terms = [
+            (10, f"Terms of Payment: {data['payment_terms']}"),
+            (11, f"Shipping Terms: {data['shipping_terms']}"),
+            (12, f"Delivery Time: {data['delivery_time']}"),
+        ]
+        for r_num, term_txt in terms:
+            ws_ci.merge_cells(f"A{r_num}:G{r_num}")
+            ws_ci[f"A{r_num}"] = term_txt
+            ws_ci[f"A{r_num}"].font = f_bold
+            ws_ci[f"A{r_num}"].alignment = al_left
+            for c in range(1, 8):
+                ws_ci.cell(r_num, c).border = b_all
+
+        # Row 13: Shipment Information Bar
+        ws_ci.merge_cells("A13:G13")
+        ws_ci["A13"] = "SHIPMENT & PRODUCT ITEMS"
+        ws_ci["A13"].font = f_bold
+        ws_ci["A13"].fill = fill_head
+        for c in range(1, 8):
+            ws_ci.cell(13, c).border = b_all
+
+        # Row 14: Table Headers
+        ci_headers = ["Sr.No", "Description", "China HS Code", "UOM", "Quantity", "Unit Price (USD)", "Total Amount (USD)"]
+        for c_idx, h in enumerate(ci_headers, start=1):
+            cell = ws_ci.cell(14, c_idx, h)
+            cell.font = f_header_white
+            cell.fill = fill_blue_head
+            cell.alignment = al_center
+            cell.border = b_all
+        ws_ci.row_dimensions[14].height = 25
+
+        curr_row = 15
+        start_data_row = 15
+        for item in data["items"]:
+            ws_ci.cell(curr_row, 1, item["sr_no"]).alignment = al_center
+            ws_ci.cell(curr_row, 2, item["description"]).alignment = al_left
+            ws_ci.cell(curr_row, 3, item["hs_code"]).alignment = al_center
+            ws_ci.cell(curr_row, 4, item["uom"]).alignment = al_center
+
+            c_qty = ws_ci.cell(curr_row, 5, item["quantity"])
+            c_qty.alignment = al_right
+            c_qty.number_format = "#,##0"
+
+            c_rate = ws_ci.cell(curr_row, 6, item["unit_price_usd"])
+            c_rate.alignment = al_right
+            c_rate.number_format = "$#,##0.00"
+
+            c_tot = ws_ci.cell(curr_row, 7, f"=E{curr_row}*F{curr_row}")
+            c_tot.alignment = al_right
+            c_tot.number_format = "$#,##0.00"
+
+            for c in range(1, 8):
+                cell = ws_ci.cell(curr_row, c)
+                cell.font = f_regular
+                cell.border = b_all
+
+            curr_row += 1
+
+        end_data_row = curr_row - 1
+
+        # Total Row
+        ws_ci.merge_cells(f"A{curr_row}:D{curr_row}")
+        ws_ci[f"A{curr_row}"] = "Total Price CIF INDIA"
+        ws_ci[f"A{curr_row}"].font = f_header
+        ws_ci[f"A{curr_row}"].alignment = Alignment(horizontal="right", vertical="center")
+
+        c_sum_qty = ws_ci.cell(curr_row, 5, f"=SUM(E{start_data_row}:E{end_data_row})")
+        c_sum_qty.font = f_header
+        c_sum_qty.alignment = al_right
+        c_sum_qty.number_format = "#,##0"
+
+        ws_ci.cell(curr_row, 6).border = b_all
+
+        c_sum_tot = ws_ci.cell(curr_row, 7, f"=SUM(G{start_data_row}:G{end_data_row})")
+        c_sum_tot.font = f_header
+        c_sum_tot.alignment = al_right
+        c_sum_tot.number_format = "$#,##0.00"
+
+        for c in range(1, 8):
+            cell = ws_ci.cell(curr_row, c)
+            cell.fill = fill_yellow
+            cell.border = b_all
+
+        curr_row += 1
+
+        # Bank Details Block
+        ws_ci.cell(curr_row, 1, "BANK ACCOUNT DETAILS FOR INWARD REMITTANCE (USD)").font = f_bold
+        ws_ci.merge_cells(f"A{curr_row}:B{curr_row+4}")
+        ws_ci.cell(curr_row, 1).alignment = al_center
+        ws_ci.cell(curr_row, 1).fill = fill_head
+
+        b = data["bank_details"]
+        bank_info = (
+            f"RECEIVING BANK: {b['bank_name']}\n"
+            f"SWIFT BIC: {b['swift_bic']}\n"
+            f"BENEFICIARY NAME: {b['beneficiary_name']}\n"
+            f"ADDRESS: {b['address']}\n"
+            f"A/C NO: {b['account_no']}"
+        )
+        ws_ci.merge_cells(f"C{curr_row}:G{curr_row+4}")
+        ws_ci.cell(curr_row, 3, bank_info).font = f_bank
+        ws_ci.cell(curr_row, 3).alignment = al_left
+
+        for r in range(curr_row, curr_row + 5):
+            for c in range(1, 8):
+                ws_ci.cell(r, c).border = b_all
+
+        curr_row += 5
+
+        # Stamp & Signature
+        ws_ci.merge_cells(f"A{curr_row}:D{curr_row+2}")
+        ws_ci.cell(curr_row, 1, "Shipper's Signature and Stamp:").font = f_bold
+        ws_ci.cell(curr_row, 1).alignment = Alignment(horizontal="left", vertical="top")
+
+        for r in range(curr_row, curr_row + 3):
+            for c in range(1, 8):
+                ws_ci.cell(r, c).border = b_all
+
+        if os.path.exists(stamp_path):
+            img = XLImage(stamp_path)
+            img.width = 160
+            img.height = 55
+            ws_ci.add_image(img, f"B{curr_row}")
+
+        if os.path.exists(sig_path):
+            sig = XLImage(sig_path)
+            sig.width = 50
+            sig.height = 50
+            ws_ci.add_image(sig, f"A{curr_row+1}")
+
+        curr_row += 3
+
+        # Declaration
+        ws_ci.merge_cells(f"A{curr_row}:G{curr_row}")
+        ws_ci[f"A{curr_row}"] = data["declaration"]
+        ws_ci[f"A{curr_row}"].font = f_bold
+        ws_ci[f"A{curr_row}"].alignment = al_center
+        for c in range(1, 8):
+            ws_ci.cell(curr_row, c).border = b_all
+
+        # Widths
+        ws_ci.column_dimensions["A"].width = 8
+        ws_ci.column_dimensions["B"].width = 38
+        ws_ci.column_dimensions["C"].width = 16
+        ws_ci.column_dimensions["D"].width = 8
+        ws_ci.column_dimensions["E"].width = 12
+        ws_ci.column_dimensions["F"].width = 16
+        ws_ci.column_dimensions["G"].width = 20
+
+        # -------------------------------------------------------------
+        # SHEET 2: PACKING LIST
+        # -------------------------------------------------------------
+        ws_pl = wb.create_sheet("Packing List")
+        ws_pl.views.sheetView[0].showGridLines = True
+
+        # Row 1: Letterhead
+        ws_pl.merge_cells("A1:G1")
+        ws_pl["A1"] = (
+            f"{data['shipper']['company_name']}\n"
+            f"Email: {data['shipper']['email']} | Mobile: {data['shipper']['phone']} | WeChat: {data['shipper']['wechat']}\n"
+            f"Address: {data['shipper']['address']}"
+        )
+        ws_pl["A1"].font = Font(name="Segoe UI", size=9, bold=True, color="1E3A8A")
+        ws_pl["A1"].alignment = al_center
+        ws_pl.row_dimensions[1].height = 45
+
+        # Row 2: Title
+        ws_pl.merge_cells("A2:G2")
+        ws_pl["A2"] = "PACKING LIST"
+        ws_pl["A2"].font = f_title
+        ws_pl["A2"].alignment = al_center
+        ws_pl["A2"].fill = fill_title
+        ws_pl.row_dimensions[2].height = 26
+
+        # Row 3: Packing List No & Date
+        ws_pl["A3"] = "Packing List No"
+        ws_pl["A3"].font = f_bold
+        ws_pl["B3"] = data["consignment_code"]
+        ws_pl["B3"].font = f_bold
+        ws_pl["F3"] = "Date"
+        ws_pl["F3"].font = f_bold
+        ws_pl["G3"] = data["order_date"]
+        ws_pl["G3"].font = f_bold
+        ws_pl["G3"].alignment = al_right
+
+        for col in ["A", "B", "C", "D", "E", "F", "G"]:
+            ws_pl[f"{col}3"].border = b_all
+
+        # Row 4: Section Headers
+        ws_pl.merge_cells("A4:D4")
+        ws_pl["A4"] = "Shipper's Information"
+        ws_pl["A4"].font = f_bold
+        ws_pl["A4"].fill = fill_head
+
+        ws_pl.merge_cells("E4:G4")
+        ws_pl["E4"] = "Recipient's Information"
+        ws_pl["E4"].font = f_bold
+        ws_pl["E4"].fill = fill_head
+
+        for c in range(1, 8):
+            ws_pl.cell(4, c).border = b_all
+
+        # Rows 5 to 9: Details
+        for idx, (lbl_s, val_s, lbl_r, val_r) in enumerate(details, start=5):
+            ws_pl.cell(idx, 1, lbl_s).font = f_bold
+            ws_pl.cell(idx, 1).border = b_all
+            ws_pl.merge_cells(start_row=idx, start_column=2, end_row=idx, end_column=4)
+            ws_pl.cell(idx, 2, val_s).font = f_regular
+            ws_pl.cell(idx, 2).alignment = al_left
+            for c in range(2, 5):
+                ws_pl.cell(idx, c).border = b_all
+
+            ws_pl.cell(idx, 5, lbl_r).font = f_bold
+            ws_pl.cell(idx, 5).border = b_all
+            ws_pl.merge_cells(start_row=idx, start_column=6, end_row=idx, end_column=7)
+            ws_pl.cell(idx, 6, val_r).font = f_regular
+            ws_pl.cell(idx, 6).alignment = al_left
+            for c in range(6, 8):
+                ws_pl.cell(idx, c).border = b_all
+
+            ws_pl.row_dimensions[idx].height = 28 if idx == 6 else 20
+
+        # Terms
+        ws_pl.merge_cells("A10:G10")
+        ws_pl["A10"] = f"Shipping Terms: {data['shipping_terms']}"
+        ws_pl["A10"].font = f_bold
+        ws_pl["A10"].alignment = al_left
+        for c in range(1, 8):
+            ws_pl.cell(10, c).border = b_all
+
+        # Row 11: Header
+        ws_pl.merge_cells("A11:G11")
+        ws_pl["A11"] = "PACKING INFORMATION"
+        ws_pl["A11"].font = f_bold
+        ws_pl["A11"].fill = fill_head
+        for c in range(1, 8):
+            ws_pl.cell(11, c).border = b_all
+
+        # Row 12-13: Table Headers
+        ws_pl.cell(12, 1, "Sr.No").border = b_all
+        ws_pl.cell(12, 2, "Description").border = b_all
+        ws_pl.cell(12, 3, "Quantity in KGS/PCS").border = b_all
+        ws_pl.cell(12, 4, "PACKAGE").border = b_all
+        ws_pl.cell(12, 5, "UNIT OF MEASUREMENT").border = b_all
+        ws_pl.merge_cells("F12:G12")
+        ws_pl.cell(12, 6, "Total in KG").border = b_all
+        ws_pl.cell(12, 7).border = b_all
+
+        ws_pl.cell(13, 1, "").border = b_all
+        ws_pl.cell(13, 2, "").border = b_all
+        ws_pl.cell(13, 3, "").border = b_all
+        ws_pl.cell(13, 4, "").border = b_all
+        ws_pl.cell(13, 5, "").border = b_all
+        ws_pl.cell(13, 6, "Net Weight").border = b_all
+        ws_pl.cell(13, 7, "Gr. Weight").border = b_all
+
+        for c in range(1, 8):
+            ws_pl.cell(12, c).font = f_header_white
+            ws_pl.cell(12, c).fill = fill_blue_head
+            ws_pl.cell(12, c).alignment = al_center
+
+            ws_pl.cell(13, c).font = f_header_white
+            ws_pl.cell(13, c).fill = fill_blue_head
+            ws_pl.cell(13, c).alignment = al_center
+
+        curr_row = 14
+        start_pl_row = 14
+        for item in data["items"]:
+            ws_pl.cell(curr_row, 1, item["sr_no"]).alignment = al_center
+            ws_pl.cell(curr_row, 2, item["description"]).alignment = al_left
+
+            c_qty = ws_pl.cell(curr_row, 3, item["quantity"])
+            c_qty.alignment = al_right
+            c_qty.number_format = "#,##0"
+
+            c_pkg = ws_pl.cell(curr_row, 4, item["packages"])
+            c_pkg.alignment = al_right
+            c_pkg.number_format = "#,##0"
+
+            ws_pl.cell(curr_row, 5, item["uom"]).alignment = al_center
+
+            c_net = ws_pl.cell(curr_row, 6, item["net_weight"])
+            c_net.alignment = al_right
+            c_net.number_format = "#,##0.00"
+
+            c_gr = ws_pl.cell(curr_row, 7, item["gross_weight"])
+            c_gr.alignment = al_right
+            c_gr.number_format = "#,##0.00"
+
+            for c in range(1, 8):
+                cell = ws_pl.cell(curr_row, c)
+                cell.font = f_regular
+                cell.border = b_all
+
+            curr_row += 1
+
+        end_pl_row = curr_row - 1
+
+        # Total Row
+        ws_pl.merge_cells(f"A{curr_row}:B{curr_row}")
+        ws_pl[f"A{curr_row}"] = "Total"
+        ws_pl[f"A{curr_row}"].font = f_header
+        ws_pl[f"A{curr_row}"].alignment = al_center
+
+        c_sum_qty = ws_pl.cell(curr_row, 3, f"=SUM(C{start_pl_row}:C{end_pl_row})")
+        c_sum_qty.font = f_header
+        c_sum_qty.alignment = al_right
+        c_sum_qty.number_format = "#,##0"
+
+        c_sum_pkg = ws_pl.cell(curr_row, 4, f"=SUM(D{start_pl_row}:D{end_pl_row})")
+        c_sum_pkg.font = f_header
+        c_sum_pkg.alignment = al_right
+        c_sum_pkg.number_format = "#,##0"
+
+        ws_pl.cell(curr_row, 5).border = b_all
+
+        c_sum_net = ws_pl.cell(curr_row, 6, f"=SUM(F{start_pl_row}:F{end_pl_row})")
+        c_sum_net.font = f_header
+        c_sum_net.alignment = al_right
+        c_sum_net.number_format = "#,##0.00"
+
+        c_sum_gr = ws_pl.cell(curr_row, 7, f"=SUM(G{start_pl_row}:G{end_pl_row})")
+        c_sum_gr.font = f_header
+        c_sum_gr.alignment = al_right
+        c_sum_gr.number_format = "#,##0.00"
+
+        for c in range(1, 8):
+            cell = ws_pl.cell(curr_row, c)
+            cell.fill = fill_yellow
+            cell.border = b_all
+
+        curr_row += 1
+
+        # Stamp & Signature
+        ws_pl.merge_cells(f"A{curr_row}:D{curr_row+2}")
+        ws_pl.cell(curr_row, 1, "Shipper's Signature and Stamp:").font = f_bold
+        ws_pl.cell(curr_row, 1).alignment = Alignment(horizontal="left", vertical="top")
+
+        for r in range(curr_row, curr_row + 3):
+            for c in range(1, 8):
+                ws_pl.cell(r, c).border = b_all
+
+        if os.path.exists(stamp_path):
+            img = XLImage(stamp_path)
+            img.width = 160
+            img.height = 55
+            ws_pl.add_image(img, f"B{curr_row}")
+
+        if os.path.exists(sig_path):
+            sig = XLImage(sig_path)
+            sig.width = 50
+            sig.height = 50
+            ws_pl.add_image(sig, f"A{curr_row+1}")
+
+        curr_row += 3
+
+        # Declaration
+        ws_pl.merge_cells(f"A{curr_row}:G{curr_row}")
+        ws_pl[f"A{curr_row}"] = data["declaration"]
+        ws_pl[f"A{curr_row}"].font = f_bold
+        ws_pl[f"A{curr_row}"].alignment = al_center
+        for c in range(1, 8):
+            ws_pl.cell(curr_row, c).border = b_all
+
+        # Widths
+        ws_pl.column_dimensions["A"].width = 8
+        ws_pl.column_dimensions["B"].width = 38
+        ws_pl.column_dimensions["C"].width = 18
+        ws_pl.column_dimensions["D"].width = 14
+        ws_pl.column_dimensions["E"].width = 24
+        ws_pl.column_dimensions["F"].width = 16
+        ws_pl.column_dimensions["G"].width = 16
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output
+

@@ -367,7 +367,7 @@ class ProductService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import products from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
@@ -399,7 +399,7 @@ class ProductService:
                 "Status": (p.status.value if hasattr(p.status, "value") else str(p.status or "active")).capitalize(),
             }
 
-        async def _create(field_values: dict[str, Any]) -> Product:
+        async def _create(field_values: dict[str, Any]) -> Product | tuple[str, Product]:
             category_code = field_values.pop("category_code")
             sub_category_code = field_values.pop("sub_category_code", None)
             brand_code = field_values.pop("brand_code", None)
@@ -466,7 +466,13 @@ class ProductService:
                     f"Product Code '{raw_product_code}' appears multiple times in the import file (in-file duplicate)."
                 )
 
+            # Check if Product Code already exists in DB
+            existing_code = None
+            if raw_product_code:
+                existing_code = await self.repository.get_by_code(raw_product_code)
+
             # Check if Product Name already exists in DB
+            existing_dup = None
             if product_name:
                 from sqlalchemy import select, or_
                 stmt_dup = select(Product).where(
@@ -477,20 +483,32 @@ class ProductService:
                 )
                 res_dup = await self.repository.session.execute(stmt_dup)
                 existing_dup = res_dup.scalars().first()
-                if existing_dup is not None:
-                    raise ConflictException(
-                        f"Product '{product_name}' already exists in Product Master (Code: {existing_dup.product_code}) — duplicate skipped.",
-                        details={"existing": _serialize_for_compare(existing_dup)},
-                    )
 
-            # Check if Product Code already exists in DB
-            if raw_product_code:
-                existing_code = await self.repository.get_by_code(raw_product_code)
-                if existing_code is not None:
-                    raise ConflictException(
-                        f"Product Code '{raw_product_code}' already exists in Product Master (used by '{existing_code.product_name_tally or existing_code.product_name}') — duplicate skipped.",
-                        details={"existing": _serialize_for_compare(existing_code)},
-                    )
+            # UPDATE EXISTING MODE:
+            if update_existing and (existing_code or existing_dup):
+                target_prod = existing_code or existing_dup
+                update_kwargs: dict[str, Any] = {}
+                for k, v in field_values.items():
+                    if k not in ("product_code",) and v is not None and str(v).strip() != "":
+                        update_kwargs[k] = v
+                if update_kwargs:
+                    await self.repository.update(target_prod, **update_kwargs)
+                seen_names.add(clean_name_key)
+                if clean_code_key:
+                    seen_codes.add(clean_code_key)
+                return ("updated", target_prod)
+
+            if existing_dup is not None:
+                raise ConflictException(
+                    f"Product '{product_name}' already exists in Product Master (Code: {existing_dup.product_code}) — duplicate skipped.",
+                    details={"existing": _serialize_for_compare(existing_dup)},
+                )
+
+            if existing_code is not None:
+                raise ConflictException(
+                    f"Product Code '{raw_product_code}' already exists in Product Master (used by '{existing_code.product_name_tally or existing_code.product_name}') — duplicate skipped.",
+                    details={"existing": _serialize_for_compare(existing_code)},
+                )
 
             created_prod = await self.repository.create(**field_values)
             seen_names.add(clean_name_key)

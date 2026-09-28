@@ -562,6 +562,7 @@ export interface InFileDuplicate {
 export interface ImportSummary {
   total_rows: number;
   created: number;
+  updated?: number;
   failed: number;
   duplicate_count: number;
   errors: ImportRowError[];

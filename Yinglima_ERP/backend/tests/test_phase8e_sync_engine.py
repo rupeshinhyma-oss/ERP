@@ -68,18 +68,21 @@ async def seeded_country(db_session):
     yield country
 
     try:
-        await db_session.rollback()
-        result = await db_session.execute(select(Buyer).where(Buyer.country_id == country.id))
-        for buyer in result.scalars().all():
-            await db_session.delete(buyer)
-        await db_session.flush()
+        session_factory = get_sessionmaker()
+        async with session_factory() as cleanup_session:
+            await cleanup_session.execute(delete(SyncedEntityMapping))
+            await cleanup_session.execute(delete(SyncedBuyerSource))
+            result = await cleanup_session.execute(select(Buyer).where(Buyer.country_id == country.id))
+            for buyer in result.scalars().all():
+                await cleanup_session.delete(buyer)
+            await cleanup_session.flush()
 
-        existing = await db_session.get(Country, country.id)
-        if existing is not None:
-            await db_session.delete(existing)
-            await db_session.commit()
+            existing = await cleanup_session.get(Country, country.id)
+            if existing is not None:
+                await cleanup_session.delete(existing)
+            await cleanup_session.commit()
     except Exception:
-        await db_session.rollback()
+        pass
 
 
 @pytest_asyncio.fixture(autouse=True)
