@@ -357,6 +357,7 @@ export function BuyersPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [importMode, setImportMode] = useState<"create" | "update">("create");
   const [wizardPending, setWizardPending] = useState<{
     file: File;
     rows: SheetRow[];
@@ -502,6 +503,18 @@ export function BuyersPage() {
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+
+  const handleOpenDetail = useCallback(async (buyer: Buyer) => {
+    setDetailBuyer(buyer);
+    try {
+      const { data } = await apiGet<Buyer>(`/buyers/${buyer.id}`);
+      if (data) {
+        setDetailBuyer(data);
+      }
+    } catch (err) {
+      console.error("Failed to load full buyer detail for drawer:", err);
+    }
+  }, []);
 
   // Sync browser back arrow with modal & drawer: close them instead of
   // navigating back to Dashboard.
@@ -890,44 +903,56 @@ export function BuyersPage() {
     setEditTab("profile");
     setEditingId(buyer.id);
     setError(null);
-    setWhatsappSameAsCalling(
-      Boolean(buyer.contact_calling_number && buyer.contact_calling_number === buyer.contact_whatsapp_number)
-    );
     setValidationErrors({});
+    setShowCompanySuggestions(false);
+
+    let fullBuyer: Buyer = buyer;
+    try {
+      const { data } = await apiGet<Buyer>(`/buyers/${buyer.id}`);
+      if (data) {
+        fullBuyer = data;
+      }
+    } catch (err) {
+      console.error("Failed to load full buyer profile for editing:", err);
+    }
+
+    setWhatsappSameAsCalling(
+      Boolean(fullBuyer.contact_calling_number && fullBuyer.contact_calling_number === fullBuyer.contact_whatsapp_number)
+    );
     setForm({
-      company_name: buyer.company_name,
-      buyer_type: buyer.buyer_type || "",
-      country_id: buyer.country_id,
-      city: buyer.city || "",
-      address: buyer.address || "",
-      contact_salutation: buyer.contact_salutation || "",
-      contact_full_name: buyer.contact_full_name || "",
-      contact_designation: buyer.contact_designation || "",
-      contact_calling_number: buyer.contact_calling_number || "",
-      contact_whatsapp_number: buyer.contact_whatsapp_number || "",
-      emails: buyer.emails || [],
-      tax_id_number: buyer.tax_id_number || "",
-      website: buyer.website || "",
-      current_status: buyer.current_status || "",
-      product_range: buyer.product_range || "",
-      potential: buyer.potential || "",
-      potential_reason: buyer.potential_reason || "",
-      buyer_grade: buyer.buyer_grade || "",
-      currently_buying_from: buyer.currently_buying_from || "",
-      overall_remarks: buyer.overall_remarks || "",
-      is_active: buyer.is_active !== false ? "true" : "false",
+      company_name: fullBuyer.company_name,
+      buyer_type: fullBuyer.buyer_type || "",
+      country_id: fullBuyer.country_id,
+      city: fullBuyer.city || "",
+      address: fullBuyer.address || "",
+      contact_salutation: fullBuyer.contact_salutation || "",
+      contact_full_name: fullBuyer.contact_full_name || "",
+      contact_designation: fullBuyer.contact_designation || "",
+      contact_calling_number: fullBuyer.contact_calling_number || "",
+      contact_whatsapp_number: fullBuyer.contact_whatsapp_number || "",
+      emails: fullBuyer.emails || [],
+      tax_id_number: fullBuyer.tax_id_number || "",
+      website: fullBuyer.website || "",
+      current_status: fullBuyer.current_status || "",
+      product_range: fullBuyer.product_range || "",
+      potential: fullBuyer.potential || "",
+      potential_reason: fullBuyer.potential_reason || "",
+      buyer_grade: fullBuyer.buyer_grade || "",
+      currently_buying_from: fullBuyer.currently_buying_from || "",
+      overall_remarks: fullBuyer.overall_remarks || "",
+      is_active: fullBuyer.is_active !== false ? "true" : "false",
     });
-    setCategoryIds(buyer.category_ids || []);
-    setSubCategoryIds(buyer.sub_category_ids || []);
+    setCategoryIds(fullBuyer.category_ids || []);
+    setSubCategoryIds(fullBuyer.sub_category_ids || []);
     setFormCityId(null);
-    if (buyer.city && buyer.country_id) {
+    if (fullBuyer.city && fullBuyer.country_id) {
       void (async () => {
         try {
           const res = await apiGet<Array<{ id: string; name: string }>>(
-            `/masters/cities${toQueryString({ search: buyer.city, country_id: buyer.country_id, page: 1, page_size: 5 })}`
+            `/masters/cities${toQueryString({ search: fullBuyer.city, country_id: fullBuyer.country_id, page: 1, page_size: 5 })}`
           );
           const matched = res.data?.find(
-            (c) => c.name.toLowerCase() === buyer.city?.toLowerCase() || c.id === buyer.city
+            (c) => c.name.toLowerCase() === fullBuyer.city?.toLowerCase() || c.id === fullBuyer.city
           );
           if (matched) {
             setFormCityId(matched.id);
@@ -937,7 +962,6 @@ export function BuyersPage() {
         }
       })();
     }
-    setShowCompanySuggestions(false);
     try {
       const { data } = await apiGet<BuyerContact[]>(`/buyers/${buyer.id}/contacts`);
       setContacts(data || []);
@@ -1505,6 +1529,102 @@ export function BuyersPage() {
               padding: "28px 36px",
             }}
           >
+            {/* Import Mode Selection */}
+            <div style={{ marginBottom: "26px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                Select Import Mode
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", maxWidth: "800px" }}>
+                {/* Mode 1: Add New */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("create")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("create"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "create" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>➕</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "create" ? "#1d4ed8" : "#1e293b" }}>
+                      Add New Records Only
+                    </strong>
+                    {importMode === "create" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Upload only brand new buyer accounts. Any rows with duplicate company names, phone numbers, or WhatsApp numbers will be safely skipped.
+                  </div>
+                </div>
+
+                {/* Mode 2: Update / Modify */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("update")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("update"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "update" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>✏️</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "update" ? "#1d4ed8" : "#1e293b" }}>
+                      Update / Modify Existing Records
+                    </strong>
+                    {importMode === "update" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Update existing buyers matching company names. <strong>Zero Data Loss:</strong> Blank cells in your file are ignored and will never erase existing fields.
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Info Callout */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  maxWidth: "800px",
+                  background: importMode === "create" ? "#f8fafc" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span>{importMode === "create" ? "ℹ️" : "🛡️"}</span>
+                <span>
+                  {importMode === "create"
+                    ? "Strict creation mode: Existing database records remain untouched. Any duplicate rows will be reported."
+                    : "Safe non-destructive update: Only columns with values in your uploaded file will update matching records. Empty columns are kept intact."}
+                </span>
+              </div>
+            </div>
+
             {/* Import File Section */}
             <div style={{ marginBottom: "24px" }}>
               <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
@@ -1687,7 +1807,11 @@ export function BuyersPage() {
                   boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
                 }}
               >
-                {importLoading ? "Importing..." : "Import"}
+                {importLoading
+                  ? "Importing..."
+                  : importMode === "update"
+                  ? "Proceed with Update"
+                  : "Import"}
               </button>
             </div>
           </div>
@@ -1701,6 +1825,7 @@ export function BuyersPage() {
               apiBase="/buyers"
               entityName="buyer"
               importHeaders={BUYER_IMPORT_HEADERS}
+              initialMode={importMode}
               onClose={() => setWizardPending(null)}
               onComplete={(summary) => {
                 setWizardPending(null);
@@ -1974,13 +2099,25 @@ export function BuyersPage() {
                           let items = subCategories.items;
                           if (categoryIds.length > 0) {
                             items = items.filter((sc) => categoryIds.includes(sc.category_id));
+                            items = [...items].sort((a, b) => {
+                              const idxA = categoryIds.indexOf(a.category_id);
+                              const idxB = categoryIds.indexOf(b.category_id);
+                              if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                              return a.name.localeCompare(b.name);
+                            });
                           }
                           if (q) {
                             items = items.filter(
                               (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
                             );
                           }
-                          return items.map((sc) => ({ value: sc.id, label: sc.name }));
+                          const catMap = new Map<string, string>();
+                          categories.items.forEach((c) => catMap.set(c.id, c.name));
+                          return items.map((sc) => ({
+                            value: sc.id,
+                            label: sc.name,
+                            group: catMap.get(sc.category_id) || "Other Categories",
+                          }));
                         }}
                         fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                       />
@@ -3001,7 +3138,7 @@ export function BuyersPage() {
                           title={r.company_name}
                           onClick={(e) => {
                             e.preventDefault();
-                            setDetailBuyer(r);
+                            handleOpenDetail(r);
                           }}
                           style={{
                             color: "#2563eb",

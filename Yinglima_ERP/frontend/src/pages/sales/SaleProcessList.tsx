@@ -25,7 +25,7 @@ export function SaleProcessListPage() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const pageSize = 50;
+  const [pageSize, setPageSize] = useState<number>(50);
 
   // Metrics
   const [metrics, setMetrics] = useState<SaleSummaryMetrics>({
@@ -630,42 +630,6 @@ export function SaleProcessListPage() {
           </div>
         )}
 
-        {/* Search Bar */}
-        <div style={{ marginBottom: "16px" }}>
-          <div style={{ position: "relative" }}>
-            <input
-              type="text"
-              placeholder="Search by Order No, Consignment, Buyer Company, Container, BL, or LR No..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              style={{
-                width: "100%",
-                padding: "9px 12px 9px 36px",
-                borderRadius: "6px",
-                border: "1px solid #cbd5e1",
-                fontSize: "13px",
-                boxSizing: "border-box",
-                background: "#ffffff",
-              }}
-            />
-            <span
-              style={{
-                position: "absolute",
-                left: "12px",
-                top: "50%",
-                transform: "translateY(-50%)",
-                fontSize: "14px",
-                color: "#94a3b8",
-              }}
-            >
-              🔍
-            </span>
-          </div>
-        </div>
-
         {/* Orders Table */}
         <div
           style={{
@@ -676,6 +640,100 @@ export function SaleProcessListPage() {
             boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
           }}
         >
+          {/* Standard Table Toolbar: Items/Page on left, Medium Search on right (No Freeze option) */}
+          <div
+            style={{
+              padding: "10px 16px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "#f8fafc",
+              borderBottom: "1px solid #e2e8f0",
+              gap: "12px",
+            }}
+          >
+            {/* Left Group: Items/Page */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "13px",
+                  background: "#ffffff",
+                  cursor: "pointer",
+                }}
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+            </div>
+
+            {/* Right: Search Input Box (medium breadth) */}
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder="Search Order No, Consignment, Buyer..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                style={{
+                  padding: "7px 32px 7px 32px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  width: "290px",
+                  maxWidth: "100%",
+                  fontSize: "13px",
+                  outline: "none",
+                  background: "#ffffff",
+                }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  left: "10px",
+                  color: "#94a3b8",
+                  fontSize: "13px",
+                  pointerEvents: "none",
+                }}
+              >
+                🔍
+              </span>
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch("");
+                    setPage(1);
+                  }}
+                  title="Clear search"
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "13px",
+                    padding: "2px 4px",
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
           <div
             className="table-scroll"
             style={{

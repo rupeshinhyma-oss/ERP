@@ -6,7 +6,7 @@
  * Implements Option 1: Best Price Main Row + Expandable Accordion Sub-table.
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -14,9 +14,18 @@ import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Banner, Modal } from "@/components/ui";
 import { SearchableDropdown } from "@/components/SearchableDropdown";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, API_ORIGIN, downloadExport, toQueryString } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, API_ORIGIN, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type { Brand, Hsn, Product, ProductCategory, ProductSubCategory, Uom } from "@/types";
+
+const PRODUCT_PRICE_COLUMNS = [
+  "Sr. No.",
+  "Product Name & Code",
+  "Category & Brand",
+  "Best Price (Quote)",
+  "Primary Supplier",
+  "Actions",
+];
 
 interface ProductPriceRow {
   product_id: string;
@@ -136,6 +145,146 @@ export function ProductPricesPage() {
   const [subTableMoq, setSubTableMoq] = useState<Record<string, string>>({});
   const [subTableSaving, setSubTableSaving] = useState<Record<string, boolean>>({});
 
+  /* Freeze Columns State */
+  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
+    const saved = localStorage.getItem("product_prices_pinned_cols");
+    if (saved !== null) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        // fallback
+      }
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    localStorage.setItem("product_prices_pinned_cols", JSON.stringify(pinnedCols));
+  }, [pinnedCols]);
+
+  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
+  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
+  const [pinMenuOpen, setPinMenuOpen] = useState(false);
+  const pinMenuRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+
+  /* Close Freeze menu on click outside */
+  useEffect(() => {
+    if (!pinMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
+        setPinMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [pinMenuOpen]);
+
+  const togglePin = useCallback((colIdx: number) => {
+    setPinnedCols((prev) => {
+      const next = { ...prev };
+      if (next[colIdx]) {
+        delete next[colIdx];
+      } else {
+        next[colIdx] = colIdx === 5 ? "right" : "left";
+      }
+      return next;
+    });
+  }, []);
+
+  const displayOrder = useMemo(() => {
+    const allIndices = [0, 1, 2, 3, 4, 5];
+    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
+    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
+    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
+    return [...lefts, ...unpinned, ...rights];
+  }, [pinnedCols]);
+
+  useLayoutEffect(() => {
+    if (!tableRef.current) return;
+    const tableEl = tableRef.current;
+
+    const updateOffsets = () => {
+      const ths = tableEl.querySelectorAll("thead th");
+      if (!ths.length) return;
+
+      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+      let accumLeft = 0;
+      const nextLefts: Record<number, number> = {};
+      for (const idx of lefts) {
+        const thPos = displayOrder.indexOf(idx);
+        if (ths[thPos]) {
+          nextLefts[idx] = accumLeft;
+          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
+        }
+      }
+
+      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
+      let accumRight = 0;
+      const nextRights: Record<number, number> = {};
+      for (const idx of rights) {
+        const thPos = displayOrder.indexOf(idx);
+        if (ths[thPos]) {
+          nextRights[idx] = accumRight;
+          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
+        }
+      }
+
+      setColLeftOffsets(nextLefts);
+      setColRightOffsets(nextRights);
+    };
+
+    updateOffsets();
+    const ro = new ResizeObserver(() => updateOffsets());
+    ro.observe(tableEl);
+    return () => ro.disconnect();
+  }, [displayOrder, pinnedCols, items, loading]);
+
+  const getFreezeStyle = useCallback(
+    (colIdx: number, isHeader = false, bgOverride?: string): React.CSSProperties => {
+      const dir = pinnedCols[colIdx];
+      const stickyHeaderTop: React.CSSProperties = isHeader
+        ? { position: "sticky", top: 0, zIndex: 12, backgroundColor: "#f8fafc" }
+        : {};
+
+      if (!dir) {
+        return stickyHeaderTop;
+      }
+
+      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
+
+      const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
+      const isFirstRight = dir === "right" && colIdx === rights[0];
+      const bgColor = bgOverride || (isHeader ? "#f8fafc" : "#ffffff");
+
+      if (dir === "left") {
+        const left = colLeftOffsets[colIdx] ?? 0;
+        return {
+          position: "sticky",
+          top: isHeader ? 0 : undefined,
+          left: `${left}px`,
+          zIndex: isHeader ? 30 : 10,
+          backgroundColor: bgColor,
+          boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
+          borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
+        };
+      }
+
+      const right = colRightOffsets[colIdx] ?? 0;
+      return {
+        position: "sticky",
+        top: isHeader ? 0 : undefined,
+        right: `${right}px`,
+        zIndex: isHeader ? 30 : 10,
+        backgroundColor: bgColor,
+        boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
+        borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
+      };
+    },
+    [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]
+  );
+
   // Modals
   const [assignModalProduct, setAssignModalProduct] = useState<ProductPriceRow | null>(null);
   const [assignSupplierId, setAssignSupplierId] = useState<string>("");
@@ -145,17 +294,6 @@ export function ProductPricesPage() {
   const [assignNotes, setAssignNotes] = useState<string>("");
   const [assignSubmitting, setAssignSubmitting] = useState<boolean>(false);
 
-  // Bulk Import Modal
-  const [importModalOpen, setImportModalOpen] = useState<boolean>(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importSubmitting, setImportSubmitting] = useState<boolean>(false);
-  const [importResult, setImportResult] = useState<{
-    total_rows: number;
-    created: number;
-    updated: number;
-    failed: number;
-    errors: Array<{ row: number; error: string }>;
-  } | null>(null);
 
   // Product Detail Drawer
   const [drawerProduct, setDrawerProduct] = useState<Product | null>(null);
@@ -256,6 +394,58 @@ export function ProductPricesPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [exportMenuOpen]);
 
+  // Active currency conversion rates for multi-currency price comparison
+  const [currencyRates, setCurrencyRates] = useState<Record<string, number>>({ USD: 1.0, CNY: 7.14, EUR: 0.92, INR: 83.50 });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await apiGet<{ base: string; rates: Record<string, number> }>("/masters/currencies/rates");
+        if (data?.rates) {
+          setCurrencyRates(data.rates);
+        }
+      } catch {
+        // keep default fallback rates
+      }
+    })();
+  }, []);
+
+  const toUsd = useCallback(
+    (price: number | null | undefined, curr: string | null | undefined): number => {
+      if (price == null) return 999999999;
+      const c = (curr || "USD").toUpperCase();
+      const rate = currencyRates[c] || (c === "CNY" || c === "RMB" ? (currencyRates.CNY || 7.14) : c === "EUR" ? (currencyRates.EUR || 0.92) : c === "INR" ? (currencyRates.INR || 83.50) : 1.0);
+      return price / (rate > 0 ? rate : 1.0);
+    },
+    [currencyRates]
+  );
+
+  const getConvertedEstimate = useCallback(
+    (price: number | null | undefined, curr: string | null | undefined): string | null => {
+      if (price == null) return null;
+      const c = (curr || "USD").toUpperCase();
+      const cnyRate = currencyRates.CNY || currencyRates.RMB || 7.14;
+      const eurRate = currencyRates.EUR || 0.92;
+      const inrRate = currencyRates.INR || 83.50;
+
+      if (c === "CNY" || c === "RMB") {
+        const usdVal = price / cnyRate;
+        return `(~$ ${usdVal.toFixed(2)})`;
+      } else if (c === "USD") {
+        const cnyVal = price * cnyRate;
+        return `(~¥ ${cnyVal.toFixed(2)})`;
+      } else if (c === "EUR") {
+        const usdVal = price / eurRate;
+        return `(~$ ${usdVal.toFixed(2)})`;
+      } else if (c === "INR") {
+        const usdVal = price / inrRate;
+        return `(~$ ${usdVal.toFixed(2)})`;
+      }
+      return null;
+    },
+    [currencyRates]
+  );
+
   // Scoped subcategories
   const scopedSubCategories = useMemo(() => {
     if (!categoryFilter) return subCategories.items;
@@ -321,7 +511,7 @@ export function ProductPricesPage() {
 
       // Also keep the main row strictly synchronized with the database quotes
       if (quotes.length > 0) {
-        const sorted = [...quotes].sort((a, b) => (a.unit_price ?? 999999) - (b.unit_price ?? 999999));
+        const sorted = [...quotes].sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
         const best = sorted[0];
         setItems((prev) =>
           prev.map((r) => {
@@ -346,7 +536,7 @@ export function ProductPricesPage() {
     } finally {
       setLoadingQuotes((prev) => ({ ...prev, [productId]: false }));
     }
-  }, []);
+  }, [toUsd]);
 
   // Hover Pre-fetching: Fetches supplier quotes into memory as soon as mouse hovers over row or button
   const prefetchProductSuppliers = useCallback(
@@ -402,18 +592,13 @@ export function ProductPricesPage() {
     const updatedQuotes = (supplierQuotes[productId] || []).map((q) =>
       q.link_id === linkId ? { ...q, unit_price: num } : q
     );
-    updatedQuotes.sort((a, b) => (a.unit_price ?? 999999) - (b.unit_price ?? 999999));
+    updatedQuotes.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
     setSupplierQuotes((prev) => ({ ...prev, [productId]: updatedQuotes }));
 
     // 2. INSTANT OPTIMISTIC MAIN ROW UPDATE
-    const newLowest =
-      updatedQuotes.length > 0
-        ? updatedQuotes.reduce<number | null>(
-            (min, q) => (q.unit_price != null ? (min == null || q.unit_price < min ? q.unit_price : min) : min),
-            null
-          )
-        : num;
-    const newBestQuote = updatedQuotes.find((q) => q.unit_price === newLowest);
+    const bestQuote = updatedQuotes.find((q) => q.unit_price != null);
+    const newLowest = bestQuote ? bestQuote.unit_price : num;
+    const newBestQuote = bestQuote || updatedQuotes[0];
 
     setItems((prev) =>
       prev.map((row) => {
@@ -454,17 +639,13 @@ export function ProductPricesPage() {
 
     // 1. INSTANT OPTIMISTIC SUB-TABLE REMOVAL
     const remainingQuotes = (supplierQuotes[productId] || []).filter((q) => q.link_id !== linkId);
+    remainingQuotes.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
     setSupplierQuotes((prev) => ({ ...prev, [productId]: remainingQuotes }));
 
     // 2. INSTANT OPTIMISTIC MAIN ROW UPDATE
-    const newLowest =
-      remainingQuotes.length > 0
-        ? remainingQuotes.reduce<number | null>(
-            (min, q) => (q.unit_price != null ? (min == null || q.unit_price < min ? q.unit_price : min) : min),
-            null
-          )
-        : null;
-    const newBestQuote = remainingQuotes.find((q) => q.unit_price === newLowest);
+    const bestQuote = remainingQuotes.find((q) => q.unit_price != null);
+    const newLowest = bestQuote ? bestQuote.unit_price : null;
+    const newBestQuote = bestQuote || null;
 
     setItems((prev) =>
       prev.map((row) => {
@@ -539,7 +720,7 @@ export function ProductPricesPage() {
         created_at: new Date().toISOString(),
       };
       const nextList = idx >= 0 ? existing.map((q, i) => (i === idx ? newQuote : q)) : [...existing, newQuote];
-      nextList.sort((a, b) => (a.unit_price ?? 999999) - (b.unit_price ?? 999999));
+      nextList.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
       return { ...prev, [productId]: nextList };
     });
 
@@ -547,7 +728,7 @@ export function ProductPricesPage() {
     setItems((prev) =>
       prev.map((row) => {
         if (row.product_id === productId) {
-          const isNewBest = row.best_price == null || priceNum <= row.best_price;
+          const isNewBest = row.best_price == null || toUsd(priceNum, curr) <= toUsd(row.best_price, row.best_currency);
           const wasLinked = supplierQuotes[productId]?.some((q) => q.supplier_id === suppId);
           const newCount = wasLinked ? row.supplier_count : (row.supplier_count || 0) + 1;
           return {
@@ -647,7 +828,7 @@ export function ProductPricesPage() {
     setItems((prev) =>
       prev.map((row) => {
         if (row.product_id === productId) {
-          const isNewBest = row.best_price == null || priceVal <= row.best_price;
+          const isNewBest = row.best_price == null || toUsd(priceVal, curr) <= toUsd(row.best_price, row.best_currency);
           const wasLinked = supplierQuotes[productId]?.some((q) => q.supplier_id === suppId);
           const newCount = wasLinked ? row.supplier_count : (row.supplier_count || 0) + 1;
           return {
@@ -689,7 +870,7 @@ export function ProductPricesPage() {
         created_at: idx >= 0 ? existing[idx].created_at : new Date().toISOString(),
       };
       const nextList = idx >= 0 ? existing.map((q, i) => (i === idx ? newQuote : q)) : [...existing, newQuote];
-      nextList.sort((a, b) => (a.unit_price ?? 999999) - (b.unit_price ?? 999999));
+      nextList.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
       return { ...prev, [productId]: nextList };
     });
 
@@ -770,28 +951,6 @@ export function ProductPricesPage() {
     }
   };
 
-  // Bulk Import
-  const handleImportSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!importFile) return;
-
-    setImportSubmitting(true);
-    setImportResult(null);
-
-    const formData = new FormData();
-    formData.append("file", importFile);
-
-    try {
-      const { data } = await apiPostMultipart<any>("/inventory/product-prices/import", formData);
-      setImportResult(data);
-      setSuccess(`Import completed: ${data.created} created, ${data.updated} updated, ${data.failed} failed.`);
-      fetchPrices();
-    } catch (err) {
-      alert("Import failed: " + (err instanceof Error ? err.message : String(err)));
-    } finally {
-      setImportSubmitting(false);
-    }
-  };
 
   return (
     <AppShell activeKey="product-prices">
@@ -799,7 +958,7 @@ export function ProductPricesPage() {
         <Breadcrumb trail={["Inventory", "Product Prices"]} />
 
         {/* Page Header */}
-        <div className="page-header" style={{ marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+        <div className="page-header" style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <h1 style={{ margin: 0 }}>Product Price Directory</h1>
@@ -812,23 +971,43 @@ export function ProductPricesPage() {
             </div>
           </div>
 
-          {/* Action Toolbar */}
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            {hasPermission("product_price.import") && (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  setImportModalOpen(true);
-                  setImportFile(null);
-                  setImportResult(null);
-                }}
-                title="Bulk import product prices from Excel"
-              >
-                📥 Bulk Import
-              </button>
-            )}
-            {/* Filter Funnel Toggle */}
+          {/* Action Toolbar Aligned to Top-Right (Red Box area) */}
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginLeft: "auto" }}>
+            {/* Live Exchange Rate Indicator */}
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "5px 12px",
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                borderRadius: "6px",
+                fontSize: "12px",
+                color: "#475569",
+                fontWeight: 500,
+              }}
+              title="Daily central-bank synced exchange rates used for normalizing multi-currency supplier price comparison"
+            >
+              <span style={{ fontSize: "13px" }}>💱</span>
+              <span>1 USD ≈ <b style={{ color: "#0f172a" }}>¥{(currencyRates.CNY || 7.14).toFixed(2)} CNY</b></span>
+              <span style={{ color: "#cbd5e1" }}>|</span>
+              <span><b style={{ color: "#0f172a" }}>€{(currencyRates.EUR || 0.92).toFixed(2)} EUR</b></span>
+              <span style={{ color: "#cbd5e1" }}>|</span>
+              <span><b style={{ color: "#0f172a" }}>₹{(currencyRates.INR || 83.50).toFixed(2)} INR</b></span>
+            </div>
+
+            {/* Refresh Button */}
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={fetchPrices}
+              title="Refresh table data"
+            >
+              🔄 Refresh
+            </button>
+
+            {/* Filter Funnel Toggle (Moved to Right) */}
             <button
               type="button"
               className="btn"
@@ -852,7 +1031,7 @@ export function ProductPricesPage() {
               </svg>
             </button>
 
-            {/* Export Dropdown */}
+            {/* Export Dropdown (Moved to Right) */}
             {hasPermission("product_price.export") && (
               <div ref={exportMenuRef} style={{ position: "relative", display: "inline-block" }}>
               <button
@@ -987,16 +1166,6 @@ export function ProductPricesPage() {
               )}
             </div>
             )}
-
-            {/* Refresh Button */}
-            <button
-              type="button"
-              className="btn btn-small"
-              onClick={fetchPrices}
-              title="Refresh table data"
-            >
-              🔄 Refresh
-            </button>
           </div>
         </div>
 
@@ -1206,27 +1375,103 @@ export function ProductPricesPage() {
               borderBottom: "1px solid #e2e8f0",
             }}
           >
-            {/* Items Per Page */}
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "13px",
-                  background: "#ffffff",
-                }}
-              >
-                <option value={10}>10</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-              <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+            {/* Left Group: Items/Page + Freeze Columns (grouped together in yellow box) */}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                  }}
+                >
+                  <option value={10}>10</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+              </div>
+
+              {/* Freeze Columns Popover matching Products Master */}
+              <div ref={pinMenuRef} style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  onClick={() => setPinMenuOpen((v) => !v)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
+                    cursor: "pointer",
+                    color: "#0f172a",
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  📌 Freeze Columns ({Object.keys(pinnedCols).length})
+                </button>
+                {pinMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: "38px",
+                      zIndex: 100,
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "12px",
+                      minWidth: "220px",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      Toggle Frozen Columns
+                    </div>
+                    <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
+                      {PRODUCT_PRICE_COLUMNS.map((label, idx) => {
+                        const isPinned = Boolean(pinnedCols[idx]);
+                        return (
+                          <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                            <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPinnedCols({})}
+                        style={{
+                          width: "100%",
+                          padding: "6px 8px",
+                          fontSize: "12px",
+                          borderRadius: "4px",
+                          border: "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                          cursor: "pointer",
+                          color: "#dc2626",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Clear All Freezes
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Search Input Box */}
@@ -1278,112 +1523,126 @@ export function ProductPricesPage() {
             </div>
           </div>
           <div className="table-scroll" style={{ maxHeight: "calc(100vh - 270px)", minHeight: "380px", overflowY: "auto", overflowX: "auto" }}>
-            <table className="table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+            <table ref={tableRef} className="table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr style={{ textAlign: "left" }}>
-                  <th
-                    style={{
-                      position: "sticky",
-                      top: 0,
-                      left: 0,
-                      zIndex: 25,
-                      background: "#f8fafc",
-                      padding: "12px 14px",
-                      width: "70px",
-                      minWidth: "70px",
-                      textAlign: "center",
-                      color: "#475569",
-                      whiteSpace: "nowrap",
-                      borderBottom: "2px solid #cbd5e1",
-                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
-                    }}
-                  >
-                    Sr. No.
-                  </th>
-                  <th
-                    onClick={() => handleSort("product_name_tally")}
-                    style={{
-                      position: "sticky",
-                      top: 0,
-                      zIndex: 10,
-                      background: "#f8fafc",
-                      padding: "12px 14px",
-                      color: "#475569",
-                      minWidth: "260px",
-                      cursor: "pointer",
-                      userSelect: "none",
-                      borderBottom: "2px solid #cbd5e1",
-                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
-                    }}
-                    title="Click to sort by Product Name"
-                  >
-                    Product Name &amp; Code {sortBy === "product_name_tally" ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
-                  </th>
-                  <th
-                    style={{
-                      position: "sticky",
-                      top: 0,
-                      zIndex: 10,
-                      background: "#f8fafc",
-                      padding: "12px 14px",
-                      color: "#475569",
-                      width: "160px",
-                      borderBottom: "2px solid #cbd5e1",
-                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
-                    }}
-                  >
-                    Category &amp; Brand
-                  </th>
-                  <th
-                    onClick={() => handleSort("best_price")}
-                    style={{
-                      position: "sticky",
-                      top: 0,
-                      zIndex: 10,
-                      background: "#f8fafc",
-                      padding: "12px 14px",
-                      color: "#475569",
-                      width: "150px",
-                      cursor: "pointer",
-                      userSelect: "none",
-                      borderBottom: "2px solid #cbd5e1",
-                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
-                    }}
-                    title="Click to sort by Best Price"
-                  >
-                    Best Price (Quote) {sortBy === "best_price" ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
-                  </th>
-                  <th
-                    style={{
-                      position: "sticky",
-                      top: 0,
-                      zIndex: 10,
-                      background: "#f8fafc",
-                      padding: "12px 14px",
-                      color: "#475569",
-                      minWidth: "220px",
-                      borderBottom: "2px solid #cbd5e1",
-                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
-                    }}
-                  >
-                    Primary Supplier
-                  </th>
-                  <th
-                    style={{
-                      position: "sticky",
-                      top: 0,
-                      zIndex: 10,
-                      background: "#f8fafc",
-                      padding: "12px 14px",
-                      color: "#475569",
-                      width: "150px",
-                      textAlign: "center",
-                      borderBottom: "2px solid #cbd5e1",
-                      boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
-                    }}
-                  >
-                    Actions
-                  </th>
+                  {displayOrder.map((colIdx) => {
+                    switch (colIdx) {
+                      case 0:
+                        return (
+                          <th
+                            key={0}
+                            style={{
+                              padding: "12px 14px",
+                              width: "70px",
+                              minWidth: "70px",
+                              textAlign: "center",
+                              color: "#475569",
+                              whiteSpace: "nowrap",
+                              borderBottom: "2px solid #cbd5e1",
+                              boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                              ...getFreezeStyle(0, true),
+                            }}
+                          >
+                            Sr. No.
+                          </th>
+                        );
+                      case 1:
+                        return (
+                          <th
+                            key={1}
+                            onClick={() => handleSort("product_name_tally")}
+                            style={{
+                              padding: "12px 14px",
+                              color: "#475569",
+                              minWidth: "260px",
+                              cursor: "pointer",
+                              userSelect: "none",
+                              borderBottom: "2px solid #cbd5e1",
+                              boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                              ...getFreezeStyle(1, true),
+                            }}
+                            title="Click to sort by Product Name"
+                          >
+                            Product Name &amp; Code {sortBy === "product_name_tally" ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+                          </th>
+                        );
+                      case 2:
+                        return (
+                          <th
+                            key={2}
+                            style={{
+                              padding: "12px 14px",
+                              color: "#475569",
+                              width: "160px",
+                              minWidth: "160px",
+                              borderBottom: "2px solid #cbd5e1",
+                              boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                              ...getFreezeStyle(2, true),
+                            }}
+                          >
+                            Category &amp; Brand
+                          </th>
+                        );
+                      case 3:
+                        return (
+                          <th
+                            key={3}
+                            onClick={() => handleSort("best_price")}
+                            style={{
+                              padding: "12px 14px",
+                              color: "#475569",
+                              width: "150px",
+                              minWidth: "150px",
+                              cursor: "pointer",
+                              userSelect: "none",
+                              borderBottom: "2px solid #cbd5e1",
+                              boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                              ...getFreezeStyle(3, true),
+                            }}
+                            title="Click to sort by Best Price"
+                          >
+                            Best Price (Quote) {sortBy === "best_price" ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+                          </th>
+                        );
+                      case 4:
+                        return (
+                          <th
+                            key={4}
+                            style={{
+                              padding: "12px 14px",
+                              color: "#475569",
+                              minWidth: "220px",
+                              borderBottom: "2px solid #cbd5e1",
+                              boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                              ...getFreezeStyle(4, true),
+                            }}
+                          >
+                            Primary Supplier
+                          </th>
+                        );
+                      case 5:
+                        return (
+                          <th
+                            key={5}
+                            style={{
+                              padding: "12px 14px",
+                              color: "#475569",
+                              width: "150px",
+                              minWidth: "150px",
+                              textAlign: "center",
+                              borderBottom: "2px solid #cbd5e1",
+                              boxShadow: "0 2px 3px rgba(0, 0, 0, 0.06)",
+                              ...getFreezeStyle(5, true),
+                            }}
+                          >
+                            Actions
+                          </th>
+                        );
+                      default:
+                        return null;
+                    }
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -1423,304 +1682,323 @@ export function ProductPricesPage() {
                             transition: "background 0.15s ease",
                           }}
                         >
-                          {/* Sr No (Sticky on horizontal scroll) */}
-                          <td
-                            style={{
-                              position: "sticky",
-                              left: 0,
-                              zIndex: 5,
-                              backgroundColor: isExpanded ? "#f1f5f9" : idx % 2 === 0 ? "#ffffff" : "#fafafa",
-                              padding: "12px 14px",
-                              textAlign: "center",
-                              fontWeight: 600,
-                              color: "#64748b",
-                              fontSize: "13px",
-                            }}
-                          >
-                            {srNo}
-                          </td>
-
-                          {/* Product Name & Code */}
-                          <td style={{ padding: "12px 14px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                              {/* Photo thumbnail (shown only when product has an image) */}
-                              {row.images && row.images.length > 0 && (
-                                <div
-                                  style={{
-                                    width: "38px",
-                                    height: "38px",
-                                    borderRadius: "6px",
-                                    background: "#f1f5f9",
-                                    border: "1px solid #e2e8f0",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    overflow: "hidden",
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  <img
-                                    src={resolveImageUrl(row.images[0])}
-                                    alt="Thumb"
-                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                  />
-                                </div>
-                              )}
-
-                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <button
-                                  type="button"
-                                  onClick={() => openProductDrawer(row.product_id)}
-                                  style={{
-                                    background: "none",
-                                    border: "none",
-                                    padding: 0,
-                                    color: "var(--color-primary, #2563eb)",
-                                    fontSize: "14px",
-                                    fontWeight: 700,
-                                    cursor: "pointer",
-                                    textAlign: "left",
-                                    lineHeight: "1.3",
-                                  }}
-                                  title="Click to view product specifications"
-                                >
-                                  {row.product_name_tally || row.product_name}
-                                </button>
-
-                                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                                  {row.product_code && (
-                                    <span
-                                      style={{
-                                        fontSize: "11px",
-                                        fontFamily: "monospace",
-                                        background: "#e2e8f0",
-                                        padding: "1px 5px",
-                                        borderRadius: "4px",
-                                        color: "#334155",
-                                        fontWeight: 600,
-                                      }}
-                                    >
-                                      {row.product_code}
-                                    </span>
-                                  )}
-                                  {row.barcode && (
-                                    <span style={{ fontSize: "11px", color: "#64748b" }}>
-                                      Barcode: {row.barcode}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Category & Brand */}
-                          <td style={{ padding: "12px 14px", fontSize: "13px" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                              <span style={{ fontWeight: 600, color: "#334155" }}>
-                                {row.category_name || "—"}
-                              </span>
-                              <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11.5px", color: "#64748b" }}>
-                                <span>{row.brand_name || "Yinglima"}</span>
-                                {row.uom_code && <span>• ({row.uom_code})</span>}
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Best Price (Inline Editable) */}
-                          <td style={{ padding: "12px 14px" }}>
-                            {row.has_price || row.best_price != null ? (
-                              isEditingBestPrice ? (
-                                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                                  <span style={{ fontSize: "13px", fontWeight: 700, color: "#16a34a" }}>
-                                    {row.best_currency === "USD" ? "$" : "¥"}
-                                  </span>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    value={editPriceInput}
-                                    onChange={(e) => setEditPriceInput(e.target.value)}
-                                    autoFocus
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") saveInlinePrice(row.primary_link_id!, row.product_id);
-                                      if (e.key === "Escape") cancelInlineEdit();
-                                    }}
-                                    disabled={isSavingBestPrice}
+                          {displayOrder.map((colIdx) => {
+                            const rowBg = isExpanded ? "#f1f5f9" : idx % 2 === 0 ? "#ffffff" : "#fafafa";
+                            switch (colIdx) {
+                              case 0:
+                                return (
+                                  <td
+                                    key={0}
                                     style={{
-                                      width: "80px",
-                                      padding: "4px 6px",
-                                      fontSize: "13px",
-                                      fontWeight: 700,
-                                      borderRadius: "4px",
-                                      border: "1px solid #16a34a",
-                                    }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => saveInlinePrice(row.primary_link_id!, row.product_id)}
-                                    disabled={isSavingBestPrice}
-                                    style={{
-                                      background: "#16a34a",
-                                      color: "#fff",
-                                      border: "none",
-                                      borderRadius: "4px",
-                                      padding: "3px 6px",
-                                      cursor: "pointer",
-                                      fontSize: "11px",
-                                    }}
-                                    title="Save price (Enter)"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={cancelInlineEdit}
-                                    style={{
-                                      background: "#e2e8f0",
-                                      color: "#334155",
-                                      border: "none",
-                                      borderRadius: "4px",
-                                      padding: "3px 6px",
-                                      cursor: "pointer",
-                                      fontSize: "11px",
-                                    }}
-                                    title="Cancel (Esc)"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <div
-                                  onClick={() => {
-                                    if (row.primary_link_id) {
-                                      if (hasPermission("product_price.update")) startInlineEdit(row.primary_link_id, row.best_price);
-                                    } else {
-                                      if (hasPermission("product_price.create")) openAssignModal(row);
-                                    }
-                                  }}
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "6px",
-                                    padding: "4px 8px",
-                                    background: "#dcfce7",
-                                    border: "1px solid #86efac",
-                                    borderRadius: "6px",
-                                    color: "#15803d",
-                                    fontWeight: 700,
-                                    fontSize: "13.5px",
-                                    cursor: hasPermission("product_price.update") ? "pointer" : "default",
-                                  }}
-                                  title={hasPermission("product_price.update") ? "Click to inline-edit best price" : "Best Price"}
-                                >
-                                  <span>{formatCurrency(row.best_price, row.best_currency || "CNY")}</span>
-                                  {hasPermission("product_price.update") && <span style={{ fontSize: "11px", opacity: 0.7 }}>✏️</span>}
-                                </div>
-                              )
-                            ) : hasPermission("product_price.create") ? (
-                              <button
-                                type="button"
-                                onClick={() => openAssignModal(row)}
-                                style={{
-                                  padding: "4px 8px",
-                                  background: "#fffbeb",
-                                  border: "1px dashed #f59e0b",
-                                  borderRadius: "6px",
-                                  color: "#b45309",
-                                  fontSize: "12px",
-                                  fontWeight: 600,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                + Add Price
-                              </button>
-                            ) : (
-                              <span style={{ color: "#94a3b8", fontSize: "12px" }}>—</span>
-                            )}
-                          </td>
-
-                          {/* Primary Supplier & Expand Badge */}
-                          <td style={{ padding: "12px 14px", fontSize: "13px" }}>
-                            {row.primary_supplier_name ? (
-                              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                <span style={{ fontWeight: 600, color: "#1e293b" }}>
-                                  {row.primary_supplier_name}
-                                </span>
-                                <div>
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleRowExpansion(row.product_id, row.supplier_count)}
-                                    onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
-                                    style={{
-                                      background: isExpanded ? "#2563eb" : "#f1f5f9",
-                                      color: isExpanded ? "#ffffff" : "#2563eb",
-                                      border: "1px solid",
-                                      borderColor: isExpanded ? "#2563eb" : "#cbd5e1",
-                                      borderRadius: "12px",
-                                      padding: "2px 8px",
-                                      fontSize: "11.5px",
+                                      padding: "12px 14px",
+                                      textAlign: "center",
                                       fontWeight: 600,
-                                      cursor: "pointer",
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: "4px",
+                                      color: "#64748b",
+                                      fontSize: "13px",
+                                      ...getFreezeStyle(0, false, rowBg),
                                     }}
                                   >
-                                    <span>
-                                      {row.supplier_count} {row.supplier_count === 1 ? "Supplier" : "Suppliers"}
-                                    </span>
-                                    <span>{isExpanded ? "▲" : "▼"}</span>
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span style={{ color: "#94a3b8" }}>—</span>
-                                {hasPermission("product_price.create") && (
-                                  <button
-                                    type="button"
-                                    onClick={() => openAssignModal(row)}
-                                    onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
-                                    className="btn btn-tiny btn-outline"
-                                    style={{ fontSize: "11px", padding: "2px 6px" }}
-                                  >
-                                    + Assign
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </td>
+                                    {srNo}
+                                  </td>
+                                );
+                              case 1:
+                                return (
+                                  <td key={1} style={{ padding: "12px 14px", ...getFreezeStyle(1, false, rowBg) }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                      {/* Photo thumbnail (shown only when product has an image) */}
+                                      {row.images && row.images.length > 0 && (
+                                        <div
+                                          style={{
+                                            width: "38px",
+                                            height: "38px",
+                                            borderRadius: "6px",
+                                            background: "#f1f5f9",
+                                            border: "1px solid #e2e8f0",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            overflow: "hidden",
+                                            flexShrink: 0,
+                                          }}
+                                        >
+                                          <img
+                                            src={resolveImageUrl(row.images[0])}
+                                            alt="Thumb"
+                                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                          />
+                                        </div>
+                                      )}
 
-                          {/* Row Actions */}
-                          <td style={{ padding: "12px 14px", textAlign: "center" }}>
-                            <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-                              {hasPermission("product_price.create") && (
-                                <button
-                                  type="button"
-                                  onClick={() => openAssignModal(row)}
-                                  onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
-                                  className="btn btn-small btn-secondary"
-                                  style={{ fontSize: "12px", padding: "4px 8px" }}
-                                  title="Add another supplier quote for this product"
-                                >
-                                  + Quote
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => toggleRowExpansion(row.product_id, row.supplier_count)}
-                                onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
-                                className="btn btn-small"
-                                style={{
-                                  fontSize: "12px",
-                                  padding: "4px 8px",
-                                  background: isExpanded ? "#e2e8f0" : "#ffffff",
-                                }}
-                                title="Toggle supplier quotes comparison table"
-                              >
-                                {isExpanded ? "Close ▴" : "Compare ▾"}
-                              </button>
-                            </div>
-                          </td>
+                                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => openProductDrawer(row.product_id)}
+                                          style={{
+                                            background: "none",
+                                            border: "none",
+                                            padding: 0,
+                                            color: "var(--color-primary, #2563eb)",
+                                            fontSize: "14px",
+                                            fontWeight: 700,
+                                            cursor: "pointer",
+                                            textAlign: "left",
+                                            lineHeight: "1.3",
+                                          }}
+                                          title="Click to view product specifications"
+                                        >
+                                          {row.product_name_tally || row.product_name}
+                                        </button>
+
+                                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                          {row.product_code && (
+                                            <span
+                                              style={{
+                                                fontSize: "11px",
+                                                fontFamily: "monospace",
+                                                background: "#e2e8f0",
+                                                padding: "1px 5px",
+                                                borderRadius: "4px",
+                                                color: "#334155",
+                                                fontWeight: 600,
+                                              }}
+                                            >
+                                              {row.product_code}
+                                            </span>
+                                          )}
+                                          {row.barcode && (
+                                            <span style={{ fontSize: "11px", color: "#64748b" }}>
+                                              Barcode: {row.barcode}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                );
+                              case 2:
+                                return (
+                                  <td key={2} style={{ padding: "12px 14px", fontSize: "13px", ...getFreezeStyle(2, false, rowBg) }}>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                      <span style={{ fontWeight: 600, color: "#334155" }}>
+                                        {row.category_name || "—"}
+                                      </span>
+                                      <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11.5px", color: "#64748b" }}>
+                                        <span>{row.brand_name || "Yinglima"}</span>
+                                        {row.uom_code && <span>• ({row.uom_code})</span>}
+                                      </div>
+                                    </div>
+                                  </td>
+                                );
+                              case 3:
+                                return (
+                                  <td key={3} style={{ padding: "12px 14px", ...getFreezeStyle(3, false, rowBg) }}>
+                                    {row.has_price || row.best_price != null ? (
+                                      isEditingBestPrice ? (
+                                        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                          <span style={{ fontSize: "13px", fontWeight: 700, color: "#16a34a" }}>
+                                            {row.best_currency === "USD" ? "$" : row.best_currency === "EUR" ? "€" : row.best_currency === "INR" ? "₹" : "¥"}
+                                          </span>
+                                          <input
+                                            type="number"
+                                            step="0.01"
+                                            value={editPriceInput}
+                                            onChange={(e) => setEditPriceInput(e.target.value)}
+                                            autoFocus
+                                            onKeyDown={(e) => {
+                                              if (e.key === "Enter") saveInlinePrice(row.primary_link_id!, row.product_id);
+                                              if (e.key === "Escape") cancelInlineEdit();
+                                            }}
+                                            disabled={isSavingBestPrice}
+                                            style={{
+                                              width: "80px",
+                                              padding: "4px 6px",
+                                              fontSize: "13px",
+                                              fontWeight: 700,
+                                              borderRadius: "4px",
+                                              border: "1px solid #16a34a",
+                                            }}
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => saveInlinePrice(row.primary_link_id!, row.product_id)}
+                                            disabled={isSavingBestPrice}
+                                            style={{
+                                              background: "#16a34a",
+                                              color: "#fff",
+                                              border: "none",
+                                              borderRadius: "4px",
+                                              padding: "3px 6px",
+                                              cursor: "pointer",
+                                              fontSize: "11px",
+                                            }}
+                                            title="Save price (Enter)"
+                                          >
+                                            ✓
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={cancelInlineEdit}
+                                            style={{
+                                              background: "#e2e8f0",
+                                              color: "#334155",
+                                              border: "none",
+                                              borderRadius: "4px",
+                                              padding: "3px 6px",
+                                              cursor: "pointer",
+                                              fontSize: "11px",
+                                            }}
+                                            title="Cancel (Esc)"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div
+                                          onClick={() => {
+                                            if (row.primary_link_id) {
+                                              if (hasPermission("product_price.update")) startInlineEdit(row.primary_link_id, row.best_price);
+                                            } else {
+                                              if (hasPermission("product_price.create")) openAssignModal(row);
+                                            }
+                                          }}
+                                          style={{
+                                            display: "inline-flex",
+                                            flexDirection: "column",
+                                            alignItems: "flex-start",
+                                            padding: "4px 8px",
+                                            background: "#dcfce7",
+                                            border: "1px solid #86efac",
+                                            borderRadius: "6px",
+                                            color: "#15803d",
+                                            fontWeight: 700,
+                                            fontSize: "13.5px",
+                                            cursor: hasPermission("product_price.update") ? "pointer" : "default",
+                                          }}
+                                          title={hasPermission("product_price.update") ? "Click to inline-edit best price" : "Best Price"}
+                                        >
+                                          <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                            <span>{formatCurrency(row.best_price, row.best_currency || "CNY")}</span>
+                                            {hasPermission("product_price.update") && <span style={{ fontSize: "11px", opacity: 0.7 }}>✏️</span>}
+                                          </div>
+                                          {getConvertedEstimate(row.best_price, row.best_currency || "CNY") && (
+                                            <span style={{ fontSize: "10.5px", color: "#166534", fontWeight: 500, marginTop: "1px" }}>
+                                              {getConvertedEstimate(row.best_price, row.best_currency || "CNY")}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )
+                                    ) : hasPermission("product_price.create") ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => openAssignModal(row)}
+                                        style={{
+                                          padding: "4px 8px",
+                                          background: "#fffbeb",
+                                          border: "1px dashed #f59e0b",
+                                          borderRadius: "6px",
+                                          color: "#b45309",
+                                          fontSize: "12px",
+                                          fontWeight: 600,
+                                          cursor: "pointer",
+                                        }}
+                                      >
+                                        + Add Price
+                                      </button>
+                                    ) : (
+                                      <span style={{ color: "#94a3b8", fontSize: "12px" }}>—</span>
+                                    )}
+                                  </td>
+                                );
+                              case 4:
+                                return (
+                                  <td key={4} style={{ padding: "12px 14px", fontSize: "13px", ...getFreezeStyle(4, false, rowBg) }}>
+                                    {row.primary_supplier_name ? (
+                                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                        <span style={{ fontWeight: 600, color: "#1e293b" }}>
+                                          {row.primary_supplier_name}
+                                        </span>
+                                        <div>
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleRowExpansion(row.product_id, row.supplier_count)}
+                                            onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
+                                            style={{
+                                              background: isExpanded ? "#2563eb" : "#f1f5f9",
+                                              color: isExpanded ? "#ffffff" : "#2563eb",
+                                              border: "1px solid",
+                                              borderColor: isExpanded ? "#2563eb" : "#cbd5e1",
+                                              borderRadius: "12px",
+                                              padding: "2px 8px",
+                                              fontSize: "11.5px",
+                                              fontWeight: 600,
+                                              cursor: "pointer",
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              gap: "4px",
+                                            }}
+                                          >
+                                            <span>
+                                              {row.supplier_count} {row.supplier_count === 1 ? "Supplier" : "Suppliers"}
+                                            </span>
+                                            <span>{isExpanded ? "▲" : "▼"}</span>
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                        <span style={{ color: "#94a3b8" }}>—</span>
+                                        {hasPermission("product_price.create") && (
+                                          <button
+                                            type="button"
+                                            onClick={() => openAssignModal(row)}
+                                            onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
+                                            className="btn btn-tiny btn-outline"
+                                            style={{ fontSize: "11px", padding: "2px 6px" }}
+                                          >
+                                            + Assign
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                );
+                              case 5:
+                                return (
+                                  <td key={5} style={{ padding: "12px 14px", textAlign: "center", ...getFreezeStyle(5, false, rowBg) }}>
+                                    <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                                      {hasPermission("product_price.create") && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openAssignModal(row)}
+                                          onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
+                                          className="btn btn-small btn-secondary"
+                                          style={{ fontSize: "12px", padding: "4px 8px" }}
+                                          title="Add another supplier quote for this product"
+                                        >
+                                          + Quote
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleRowExpansion(row.product_id, row.supplier_count)}
+                                        onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
+                                        className="btn btn-small"
+                                        style={{
+                                          fontSize: "12px",
+                                          padding: "4px 8px",
+                                          background: isExpanded ? "#e2e8f0" : "#ffffff",
+                                        }}
+                                        title="Toggle supplier quotes comparison table"
+                                      >
+                                        {isExpanded ? "Close ▴" : "Compare ▾"}
+                                      </button>
+                                    </div>
+                                  </td>
+                                );
+                              default:
+                                return null;
+                            }
+                          })}
                         </tr>
 
                         {/* Option 1 Accordion Sub-Table */}
@@ -1785,9 +2063,14 @@ export function ProductPricesPage() {
                                     </thead>
                                     <tbody>
                                       {quotes.map((q) => {
+                                        const validUsdQuotes = quotes
+                                          .filter((item) => item.unit_price != null && !isNaN(Number(item.unit_price)))
+                                          .map((item) => toUsd(Number(item.unit_price), item.currency));
+                                        const lowestUsd = validUsdQuotes.length > 0 ? Math.min(...validUsdQuotes) : 999999999;
                                         const isSubEditing = editingLinkId === q.link_id;
                                         const isSubSaving = savingLinkId === q.link_id;
-                                        const isLowest = q.unit_price != null && row.best_price != null && q.unit_price <= row.best_price;
+                                        const qUsd = toUsd(q.unit_price, q.currency);
+                                        const isLowest = q.unit_price != null && Math.abs(qUsd - lowestUsd) < 0.0001;
 
                                         return (
                                           <tr
@@ -1890,28 +2173,36 @@ export function ProductPricesPage() {
                                                   </button>
                                                 </div>
                                               ) : hasPermission("product_price.update") ? (
-                                                <span
+                                                <div
                                                   onClick={() => startInlineEdit(q.link_id, q.unit_price)}
                                                   style={{
                                                     cursor: "pointer",
-                                                    fontWeight: 700,
-                                                    color: isLowest ? "#15803d" : "#0f172a",
+                                                    display: "inline-flex",
+                                                    flexDirection: "column",
                                                     borderBottom: "1px dashed #94a3b8",
                                                   }}
                                                   title="Click to inline-edit this quote"
                                                 >
-                                                  {formatCurrency(q.unit_price, q.currency)} ✏️
-                                                </span>
+                                                  <span style={{ fontWeight: 700, color: isLowest ? "#15803d" : "#0f172a" }}>
+                                                    {formatCurrency(q.unit_price, q.currency)} ✏️
+                                                  </span>
+                                                  {getConvertedEstimate(q.unit_price, q.currency) && (
+                                                    <span style={{ fontSize: "11px", color: isLowest ? "#16a34a" : "#64748b", fontWeight: 500 }}>
+                                                      {getConvertedEstimate(q.unit_price, q.currency)}
+                                                    </span>
+                                                  )}
+                                                </div>
                                               ) : (
-                                                <span
-                                                  style={{
-                                                    cursor: "default",
-                                                    fontWeight: 700,
-                                                    color: isLowest ? "#15803d" : "#0f172a",
-                                                  }}
-                                                >
-                                                  {formatCurrency(q.unit_price, q.currency)}
-                                                </span>
+                                                <div style={{ display: "inline-flex", flexDirection: "column" }}>
+                                                  <span style={{ fontWeight: 700, color: isLowest ? "#15803d" : "#0f172a" }}>
+                                                    {formatCurrency(q.unit_price, q.currency)}
+                                                  </span>
+                                                  {getConvertedEstimate(q.unit_price, q.currency) && (
+                                                    <span style={{ fontSize: "11px", color: isLowest ? "#16a34a" : "#64748b", fontWeight: 500 }}>
+                                                      {getConvertedEstimate(q.unit_price, q.currency)}
+                                                    </span>
+                                                  )}
+                                                </div>
                                               )}
                                             </td>
 
@@ -2378,127 +2669,7 @@ export function ProductPricesPage() {
           );
         })()}
 
-        {/* Modal: Bulk Excel Import */}
-        {importModalOpen && (
-          <Modal
-            open={true}
-            title="Bulk Import Product Prices"
-            variant="center"
-            cardStyle={{ maxWidth: "600px", width: "95%" }}
-            onClose={() => setImportModalOpen(false)}
-          >
-            <form onSubmit={handleImportSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <p style={{ fontSize: "13.5px", color: "#475569", margin: 0 }}>
-                Upload an Excel spreadsheet (<code>.xlsx</code>) containing columns for{" "}
-                <strong>Product Code</strong>, <strong>Supplier Name</strong>, and <strong>Unit Price</strong>.
-              </p>
 
-              <div style={{ background: "#f8fafc", padding: "12px 14px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                <a
-                  href={`${API_ORIGIN}/api/v1/inventory/product-prices/sample-template`}
-                  download="product_price_import_template.xlsx"
-                  style={{
-                    color: "var(--color-primary, #2563eb)",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    textDecoration: "none",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  📥 Download Sample Price Template (.xlsx)
-                </a>
-              </div>
-
-              {/* File Input */}
-              <div
-                style={{
-                  border: "2px dashed #cbd5e1",
-                  borderRadius: "8px",
-                  padding: "24px",
-                  textAlign: "center",
-                  background: "#fafafa",
-                }}
-              >
-                <input
-                  type="file"
-                  accept=".xlsx"
-                  id="bulk_price_excel"
-                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-                  style={{ display: "none" }}
-                />
-                <label
-                  htmlFor="bulk_price_excel"
-                  style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}
-                >
-                  <span style={{ fontSize: "28px" }}>📊</span>
-                  <span style={{ fontWeight: 600, color: "#1e293b", fontSize: "14px" }}>
-                    {importFile ? importFile.name : "Click to select Excel file (.xlsx)"}
-                  </span>
-                  <span style={{ fontSize: "12px", color: "#94a3b8" }}>
-                    {importFile ? `${(importFile.size / 1024).toFixed(1)} KB` : "Supports standard .xlsx workbooks"}
-                  </span>
-                </label>
-              </div>
-
-              {/* Import Results Display */}
-              {importResult && (
-                <div
-                  style={{
-                    background: importResult.failed === 0 ? "#f0fdf4" : "#fffbeb",
-                    border: `1px solid ${importResult.failed === 0 ? "#86efac" : "#fde68a"}`,
-                    borderRadius: "6px",
-                    padding: "14px",
-                  }}
-                >
-                  <div style={{ fontWeight: 700, fontSize: "13.5px", marginBottom: "6px", color: "#1e293b" }}>
-                    Import Summary:
-                  </div>
-                  <div style={{ display: "flex", gap: "16px", fontSize: "13px", marginBottom: "8px" }}>
-                    <span style={{ color: "#16a34a" }}>✅ Created: {importResult.created}</span>
-                    <span style={{ color: "#2563eb" }}>🔄 Updated: {importResult.updated}</span>
-                    <span style={{ color: "#dc2626" }}>❌ Failed: {importResult.failed}</span>
-                  </div>
-
-                  {importResult.errors && importResult.errors.length > 0 && (
-                    <div style={{ maxHeight: "150px", overflowY: "auto", fontSize: "12px", color: "#b91c1c" }}>
-                      <strong>Errors encountered:</strong>
-                      <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
-                        {importResult.errors.slice(0, 10).map((err, i) => (
-                          <li key={i}>
-                            Row {err.row}: {err.error}
-                          </li>
-                        ))}
-                        {importResult.errors.length > 10 && (
-                          <li>...and {importResult.errors.length - 10} more errors</li>
-                        )}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setImportModalOpen(false)}
-                >
-                  Close
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={!importFile || importSubmitting}
-                >
-                  {importSubmitting ? "Importing Data..." : "Start Import"}
-                </button>
-              </div>
-            </form>
-          </Modal>
-        )}
 
         {/* Product Detail Drawer */}
         <SideDrawer

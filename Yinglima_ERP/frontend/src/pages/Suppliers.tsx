@@ -72,6 +72,7 @@ import type {
   ImportSummary,
   PaginationMeta,
   Product,
+  ProductCategory,
   ProductSubCategory,
   Supplier,
   SupplierContact,
@@ -453,6 +454,7 @@ export function SuppliersPage() {
   const [isImportPageOpen, setIsImportPageOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [importMode, setImportMode] = useState<"create" | "update">("create");
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [wizardPending, setWizardPending] = useState<{
     file: File;
@@ -689,6 +691,7 @@ export function SuppliersPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const existingSuppliers = useLookup<Supplier>("/suppliers", 500);
+  const categoriesLookup = useLookup<ProductCategory>("/masters/product-categories", 500);
   const subCategoriesLookup = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
 
   async function resolveCountryPhoneCode(countryId: string | null): Promise<string> {
@@ -2065,6 +2068,102 @@ export function SuppliersPage() {
               padding: "28px 36px",
             }}
           >
+            {/* Import Mode Selection */}
+            <div style={{ marginBottom: "26px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                Select Import Mode
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", maxWidth: "800px" }}>
+                {/* Mode 1: Add New */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("create")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("create"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "create" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>➕</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "create" ? "#1d4ed8" : "#1e293b" }}>
+                      Add New Records Only
+                    </strong>
+                    {importMode === "create" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Upload only brand new supplier accounts. Any rows with duplicate supplier names or contact numbers will be safely skipped.
+                  </div>
+                </div>
+
+                {/* Mode 2: Update / Modify */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("update")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("update"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "update" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>✏️</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "update" ? "#1d4ed8" : "#1e293b" }}>
+                      Update / Modify Existing Records
+                    </strong>
+                    {importMode === "update" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Update existing suppliers matching supplier names. <strong>Zero Data Loss:</strong> Blank cells in your file are ignored and will never erase existing fields.
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Info Callout */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  maxWidth: "800px",
+                  background: importMode === "create" ? "#f8fafc" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span>{importMode === "create" ? "ℹ️" : "🛡️"}</span>
+                <span>
+                  {importMode === "create"
+                    ? "Strict creation mode: Existing database records remain untouched. Any duplicate rows will be reported."
+                    : "Safe non-destructive update: Only columns with values in your uploaded file will update matching records. Empty columns are kept intact."}
+                </span>
+              </div>
+            </div>
+
             {/* Import File Section */}
             <div style={{ marginBottom: "24px" }}>
               <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
@@ -2247,7 +2346,11 @@ export function SuppliersPage() {
                   boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
                 }}
               >
-                {importLoading ? "Importing..." : "Import"}
+                {importLoading
+                  ? "Importing..."
+                  : importMode === "update"
+                  ? "Proceed with Update"
+                  : "Import"}
               </button>
             </div>
           </div>
@@ -2261,6 +2364,7 @@ export function SuppliersPage() {
               apiBase="/suppliers"
               entityName="supplier"
               importHeaders={SUPPLIER_IMPORT_HEADERS}
+              initialMode={importMode}
               onClose={() => setWizardPending(null)}
               onComplete={(summary) => {
                 setWizardPending(null);
@@ -2508,13 +2612,34 @@ export function SuppliersPage() {
                           }
                           if (formCategoryIds.length > 0) {
                             items = items.filter((sc) => formCategoryIds.includes(sc.category_id));
+                            items = [...items].sort((a, b) => {
+                              const idxA = formCategoryIds.indexOf(a.category_id);
+                              const idxB = formCategoryIds.indexOf(b.category_id);
+                              if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                              return a.name.localeCompare(b.name);
+                            });
                           }
                           if (q) {
                             items = items.filter(
                               (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
                             );
                           }
-                          return items.map((sc) => ({ value: sc.id, label: sc.name }));
+                          const catMap = new Map<string, string>();
+                          if (categoriesLookup.items.length > 0) {
+                            categoriesLookup.items.forEach((c) => catMap.set(c.id, c.name));
+                          } else {
+                            try {
+                              const { data: cats } = await apiGet<any[]>("/masters/product-categories?page=1&page_size=500", { signal });
+                              if (cats) cats.forEach((c) => catMap.set(c.id, c.name));
+                            } catch {
+                              // fallback
+                            }
+                          }
+                          return items.map((sc) => ({
+                            value: sc.id,
+                            label: sc.name,
+                            group: catMap.get(sc.category_id) || "Other Categories",
+                          }));
                         }}
                         fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                       />

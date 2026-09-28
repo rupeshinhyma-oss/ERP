@@ -47,3 +47,43 @@ async def reset_peer_health_states() -> AsyncGenerator[None, None]:
     except Exception:
         pass
     yield
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def cleanup_test_buyer_artifacts() -> AsyncGenerator[None, None]:
+    """Ensure any test-generated buyers or countries never persist in the dev database."""
+    yield
+    try:
+        from sqlalchemy import select, delete
+        from app.database.engine import get_sessionmaker
+        from app.buyers.models import Buyer
+        from app.masters.countries.models import Country
+        from app.integration.sync_models import SyncedEntityMapping
+        from app.integration.consumer_models import SyncedBuyerSource
+
+        async with get_sessionmaker()() as session:
+            res_c = await session.execute(select(Country).where(Country.name.ilike("Test Country%")))
+            countries = res_c.scalars().all()
+            c_ids = [c.id for c in countries]
+
+            res_b = await session.execute(
+                select(Buyer).where(
+                    (Buyer.company_name.ilike("Locally Modified%"))
+                    | (Buyer.country_id.in_(c_ids) if c_ids else False)
+                )
+            )
+            buyers = res_b.scalars().all()
+            b_ids = [str(b.id) for b in buyers]
+
+            if b_ids:
+                await session.execute(delete(SyncedEntityMapping).where(SyncedEntityMapping.local_entity_id.in_(b_ids)))
+                await session.execute(delete(SyncedBuyerSource).where(SyncedBuyerSource.local_buyer_id.in_(b_ids)))
+                for b in buyers:
+                    await session.delete(b)
+                await session.flush()
+
+            for c in countries:
+                await session.delete(c)
+            await session.commit()
+    except Exception:
+        pass

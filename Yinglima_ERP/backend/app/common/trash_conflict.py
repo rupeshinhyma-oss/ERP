@@ -29,12 +29,13 @@ async def check_trash_or_duplicate(
     code_field: str = "code",
     exclude_id: uuid.UUID | None = None,
     extra_filters: dict[str, Any] | None = None,
+    name_only_check_trash: bool = False,
 ) -> None:
     """
     Check if a record with matching name or code already exists in the table.
 
     - If found and deleted_at is NOT None -> raises ConflictException with in_trash=True.
-    - If found and deleted_at IS None -> raises standard ConflictException.
+    - If found and deleted_at IS None -> raises standard ConflictException (unless name_only_check_trash is True).
     """
     if name and name.strip() and hasattr(model_cls, name_field):
         col = getattr(model_cls, name_field)
@@ -49,6 +50,7 @@ async def check_trash_or_duplicate(
         result = await session.execute(stmt)
         existing = result.scalars().first()
         if existing is not None:
+            existing_code = getattr(existing, code_field, getattr(existing, "code", getattr(existing, "product_code", None)))
             if hasattr(existing, "deleted_at") and existing.deleted_at is not None:
                 raise ConflictException(
                     f"{entity_type} '{clean_name}' already exists in the Trash.",
@@ -57,13 +59,15 @@ async def check_trash_or_duplicate(
                         "trash_id": str(existing.id),
                         "entity_type": entity_type,
                         "name": getattr(existing, name_field, clean_name),
-                        "code": getattr(existing, code_field, None),
+                        "code": existing_code,
                     },
                 )
-            raise ConflictException(
-                f"{entity_type} name {clean_name!r} is already in use.",
-                details={"existing": {"id": str(existing.id), "name": getattr(existing, name_field, clean_name)}},
-            )
+            if not name_only_check_trash:
+                code_msg = f" (Existing Code: {existing_code})" if existing_code else ""
+                raise ConflictException(
+                    f"{entity_type} name {clean_name!r} is already in use{code_msg}.",
+                    details={"existing": {"id": str(existing.id), "name": getattr(existing, name_field, clean_name), "code": existing_code}},
+                )
 
     if code and code.strip() and hasattr(model_cls, code_field):
         col = getattr(model_cls, code_field)
@@ -78,6 +82,7 @@ async def check_trash_or_duplicate(
         result = await session.execute(stmt)
         existing = result.scalars().first()
         if existing is not None:
+            existing_name = getattr(existing, name_field, getattr(existing, "name", getattr(existing, "product_name_tally", getattr(existing, "product_name", None))))
             if hasattr(existing, "deleted_at") and existing.deleted_at is not None:
                 raise ConflictException(
                     f"{entity_type} with code '{clean_code}' already exists in the Trash.",
@@ -85,13 +90,14 @@ async def check_trash_or_duplicate(
                         "in_trash": True,
                         "trash_id": str(existing.id),
                         "entity_type": entity_type,
-                        "name": getattr(existing, name_field, None),
+                        "name": existing_name,
                         "code": getattr(existing, code_field, clean_code),
                     },
                 )
+            name_msg = f" for '{existing_name}'" if existing_name else ""
             raise ConflictException(
-                f"{entity_type} code {clean_code!r} is already in use.",
-                details={"existing": {"id": str(existing.id), "code": getattr(existing, code_field, clean_code)}},
+                f"{entity_type} code {clean_code!r} is already in use{name_msg}.",
+                details={"existing": {"id": str(existing.id), "name": existing_name, "code": getattr(existing, code_field, clean_code)}},
             )
 
 

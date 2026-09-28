@@ -173,6 +173,25 @@ async def import_currencys(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.get("/rates", summary="Get active currency exchange rates")
+async def get_currency_rates_endpoint(request: Request) -> dict:
+    """Fetch all active currency conversion rates against USD."""
+    from app.common.currency import get_active_rates
+    rates = await get_active_rates()
+    return build_success_response(data={"base": "USD", "rates": rates}, request_id=request.state.request_id)
+
+
+@router.post("/rates/sync", summary="Synchronize currency rates from Frankfurter/ECB API")
+async def sync_currency_rates_endpoint(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Trigger an immediate live sync of exchange rates."""
+    from app.common.currency import sync_currency_rates_to_db
+    rates = await sync_currency_rates_to_db()
+    return build_success_response(data={"base": "USD", "rates": rates, "synced": True}, request_id=request.state.request_id)
+
+
 @router.get("/{currency_id}", summary="Get a currency")
 async def get_currency(
     currency_id: uuid.UUID,

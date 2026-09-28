@@ -195,6 +195,8 @@ class EmailInboundWorker:
         msg_id = (msg.get("Message-ID") or "").strip()
         if msg_id and msg_id in self._seen_message_ids:
             return
+        if msg_id:
+            self._save_seen_id(msg_id)
 
         from_raw = clean_decode_header(msg.get("From", ""))
         sender_email = extract_email_address(from_raw)

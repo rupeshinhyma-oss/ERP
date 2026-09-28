@@ -13,6 +13,7 @@ composition root of the application is easy to find and reason about.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -189,9 +190,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.inquiries.email_inbound_worker import email_inbound_worker
     await email_inbound_worker.start()
 
+    from app.common.currency import run_daily_currency_worker
+    currency_task = asyncio.create_task(run_daily_currency_worker())
+
     yield
 
     logger.info("Application shutting down.")
+    currency_task.cancel()
 
     # Gracefully drain the queue worker before closing the DB pool.
     await worker.stop()

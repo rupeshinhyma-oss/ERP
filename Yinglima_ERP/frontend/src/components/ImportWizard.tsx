@@ -189,14 +189,16 @@ async function uploadChunk(
   mapping: ColumnMapping,
   apiBase: string,
   importHeaders: ImportHeader[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  updateExisting: boolean = false
 ): Promise<ImportSummary> {
   const csvBlob = buildRemappedCsv(rowsChunk, mapping, importHeaders);
   const formData = new FormData();
   formData.append("file", csvBlob, "import.csv");
 
   const token = Auth.getAccessToken();
-  const res = await fetch(`${API_BASE}${apiBase}/import`, {
+  const url = `${API_BASE}${apiBase}/import${updateExisting ? "?update_existing=true" : ""}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
@@ -224,6 +226,7 @@ function mergeSummaries(
 ): void {
   target.total_rows += chunkSummary.total_rows || 0;
   target.created += chunkSummary.created || 0;
+  target.updated = (target.updated || 0) + (chunkSummary.updated || 0);
   target.failed += chunkSummary.failed || 0;
   target.duplicate_count += chunkSummary.duplicate_count || 0;
   // Row numbers inside each chunk's summary are 1-indexed *within that chunk's
@@ -621,6 +624,12 @@ export function ImportSummaryPanel({
             <b style={{ color: "var(--color-success)" }}>{summary.created}</b>
             <span className="muted">Created</span>
           </div>
+          {Boolean(summary.updated) && (
+            <div className="import-stat">
+              <b style={{ color: "#2563eb" }}>{summary.updated}</b>
+              <span className="muted">Updated</span>
+            </div>
+          )}
           <div className="import-stat">
             <b style={{ color: "var(--color-danger)" }}>{summary.failed}</b>
             <span className="muted">Failed</span>
@@ -726,6 +735,7 @@ export interface WizardModalProps {
   apiBase: string;
   entityName: string;
   importHeaders: ImportHeader[];
+  initialMode?: "create" | "update";
   onClose: () => void;
   onComplete: (summary: ImportSummary | null) => void;
   onError: (message: string) => void;
@@ -738,6 +748,7 @@ export function WizardModal({
   apiBase,
   entityName,
   importHeaders,
+  initialMode,
   onClose,
   onComplete,
   onError,
@@ -751,6 +762,7 @@ export function WizardModal({
     }
     return initial;
   });
+  const [importMode, setImportMode] = useState<"create" | "update">(initialMode || "create");
   const [importing, setImporting] = useState(false);
   const [progressText, setProgressText] = useState("Importing...");
   const [progressPercent, setProgressPercent] = useState(0);
@@ -800,6 +812,7 @@ export function WizardModal({
       const aggregated: ImportSummary = {
         total_rows: rows.length,
         created: 0,
+        updated: 0,
         failed: inFileDuplicates.length,
         duplicate_count: 0,
         errors: [],
@@ -831,7 +844,7 @@ export function WizardModal({
       if (total <= CHUNK_SIZE) {
         setProgressText(`Uploading ${total} row${total === 1 ? "" : "s"}...`);
         setProgressPercent(40);
-        const chunkSummary = await uploadChunk(keptRows, mapping, apiBase, importHeaders, signal);
+        const chunkSummary = await uploadChunk(keptRows, mapping, apiBase, importHeaders, signal, importMode === "update");
         setProgressPercent(100);
         setProgressText(`Imported ${total} of ${total} row${total === 1 ? "" : "s"}`);
         mergeSummaries(aggregated, chunkSummary, makeRowMapper(0));
@@ -841,7 +854,7 @@ export function WizardModal({
       let uploaded = 0;
       for (let start = 0; start < total; start += CHUNK_SIZE) {
         const chunk = keptRows.slice(start, start + CHUNK_SIZE);
-        const chunkSummary = await uploadChunk(chunk, mapping, apiBase, importHeaders, signal);
+        const chunkSummary = await uploadChunk(chunk, mapping, apiBase, importHeaders, signal, importMode === "update");
         mergeSummaries(aggregated, chunkSummary, makeRowMapper(start));
         uploaded += chunk.length;
 
@@ -852,7 +865,7 @@ export function WizardModal({
 
       return aggregated;
     },
-    [rows, mapping, apiBase, importHeaders]
+    [rows, mapping, apiBase, importHeaders, importMode]
   );
 
   async function handleImport() {
@@ -938,6 +951,129 @@ export function WizardModal({
             gap: "16px",
           }}
         >
+          {/* Mode Switcher (Shown only for modules supporting safe update) */}
+          {["/buyers", "/suppliers", "/masters/products"].some((p) => apiBase.startsWith(p)) && (
+            <div
+              style={{
+                background: "var(--color-bg-subtle, #f8fafc)",
+                border: "1px solid var(--color-border, #e2e8f0)",
+                borderRadius: "8px",
+                padding: "12px 16px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: "var(--color-text-secondary, #64748b)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                Select Import Action
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => setImportMode("create")}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: importing ? "not-allowed" : "pointer",
+                    textAlign: "left",
+                    transition: "all 0.15s ease",
+                    boxShadow: importMode === "create" ? "0 1px 3px rgba(37,99,235,0.12)" : "none",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      fontWeight: 700,
+                      color: importMode === "create" ? "#1e40af" : "#1e293b",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <span>➕</span> Add New Records Only
+                  </div>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px", lineHeight: "1.35" }}>
+                    Inserts new rows. Skips matching records to prevent duplicate entries.
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => setImportMode("update")}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: importing ? "not-allowed" : "pointer",
+                    textAlign: "left",
+                    transition: "all 0.15s ease",
+                    boxShadow: importMode === "update" ? "0 1px 3px rgba(37,99,235,0.12)" : "none",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      fontWeight: 700,
+                      color: importMode === "update" ? "#1e40af" : "#1e293b",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <span>✏️</span> Update / Modify Existing Records
+                  </div>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px", lineHeight: "1.35" }}>
+                    Matches existing records and updates filled values. Blank cells never overwrite.
+                  </div>
+                </button>
+              </div>
+
+              {/* Mode Guidance Note */}
+              <div
+                style={{
+                  fontSize: "12px",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  background: importMode === "create" ? "#f1f5f9" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                }}
+              >
+                {importMode === "create" ? (
+                  <span>
+                    ℹ️ <b>Strict Insert Mode:</b> Only new records will be created. Any duplicate record already in the system will be safely skipped.
+                  </span>
+                ) : (
+                  <span>
+                    🛡️ <b>Safe Enrichment Mode:</b> Updates matching records with new data in your file. <b>Empty or blank cells in your spreadsheet will NEVER erase existing data in the system.</b>
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="iw-file-info" style={{ margin: 0 }}>
             <span className="iw-file-name">📄 {file.name}</span>
             <span className="muted">{rowLabel} detected</span>
@@ -1071,7 +1207,11 @@ export function WizardModal({
             disabled={!canImport || importing}
             onClick={handleImport}
           >
-            {importing ? "Importing..." : `Import ${rowLabel}`}
+            {importing
+              ? "Importing..."
+              : importMode === "update"
+              ? `Update & Import ${rowLabel}`
+              : `Import ${rowLabel}`}
           </button>
         </div>
       </div>
