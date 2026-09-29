@@ -25,38 +25,15 @@ import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
-  SearchableDropdownMultiPanel,
   type DropdownOption,
 } from "@/components/SearchableDropdown";
-import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteField, autoTitleCase } from "@/components/fields";
-import { useLookup } from "@/lib/lookups";
+import { autoTitleCase } from "@/components/fields";
 import { useLiveModule } from "@/lib/live/useLive";
-
-function resolveImageUrl(url: string | null | undefined): string {
-  if (!url) return "";
-  let clean = url.trim();
-  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
-    clean = clean.slice(1, -1).trim();
-  }
-  if (!clean) return "";
-  if (clean.toLowerCase().startsWith("/static/uploads/")) {
-    clean = "/static/uploads/" + clean.slice("/static/uploads/".length);
-  } else if (clean.toLowerCase().startsWith("/uploads/")) {
-    clean = "/uploads/" + clean.slice("/uploads/".length);
-  }
-  if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
-    return encodeURI(clean);
-  }
-  const fullUrl = `${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`;
-  return encodeURI(fullUrl);
-}
 import {
-  API_ORIGIN,
   apiDelete,
   apiGet,
   apiPatch,
   apiPost,
-  apiPostMultipart,
   downloadExport,
   toQueryString,
 } from "@/lib/api";
@@ -107,7 +84,6 @@ const COMPANY_IMPORT_HEADERS: ImportHeader[] = [
   { key: "Status", label: "Status" },
 ];
 
-type ModalTab = "first" | "second" | "contacts" | "continue";
 
 const GST_STATE_CODE_MAP: Record<string, string> = {
   "01": "Jammu and Kashmir",
@@ -169,34 +145,48 @@ const EMPTY_QUICK_FORM = {
 
 const EMPTY_SUPPLIER_FORM = {
   company_name: "",
-  company_type: "",
-  brand_description: "",
-  area: "",
-  district: "",
-  sales_person_id: "",
-  contact_salutation: "",
+  contact_salutation: "Mr",
   contact_full_name: "",
   contact_designation: "",
-  contact_calling_number: "",
-  contact_whatsapp_number: "",
-  contact_wechat_number: "",
-  contact_indiamart_number: "",
-  emails: [] as string[],
   tax_id_number: "",
-  address: "",
-  town: "",
+  contact_calling_number: "",
+  contact_indiamart_number: "",
+  contact_whatsapp_number: "",
   primary_website: "",
+  email: "",
+  emails: [] as string[],
   secondary_website: "",
-  company_grade: "",
+  address: "",
+  area: "",
+  state_id: "",
+  district_id: "",
+  district: "",
+  city_id: "",
+  pincode: "",
   current_status: "",
+  company_type: "",
+  category_id: "",
+  company_grade: "",
   potential: "",
+  company_category: "",
+  product_manufacture_or_supply: "",
+  machines_buying_from: "",
+  spares_buying_from: "",
+  products_interested: "",
+  gst_registration_date: "",
+  age_of_company: "",
+  social_media: [{ platform: "", url: "" }] as Array<{ platform: string; url: string }>,
+  overall_remarks: "",
+  sales_person_id: "",
+  brand_description: "",
+  town: "",
   potential_reason: "",
   secondary_products_description: "",
   visited_factory_office: "false",
   visit_remarks: "",
   visit_media_input: "",
   visit_video_url: "",
-  overall_remarks: "",
+  contact_wechat_number: "",
   is_active: "true",
 };
 
@@ -230,38 +220,7 @@ function StatusPill({ value }: { value?: string | null }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
-function extractSubscriberNumber(val: string | undefined | null): string {
-  if (!val) return "";
-  const trimmed = val.trim();
-  if (trimmed.startsWith("+")) {
-    const spaceIdx = trimmed.indexOf(" ");
-    if (spaceIdx !== -1) {
-      return trimmed.slice(spaceIdx + 1).replace(/\D/g, "");
-    }
-    return ""; // Only prefix (e.g. "+86" or "+91") with no actual number!
-  }
-  return trimmed.replace(/\D/g, "");
-}
 
-function normalizePhoneValue(val: string | undefined | null): string | null {
-  if (!val) return null;
-  const subscriber = extractSubscriberNumber(val);
-  if (!subscriber) return null; // Blank / empty if only country prefix exists
-  return val.trim();
-}
-
-function validatePhoneNumber(val: string | undefined | null, fieldLabel = "Phone number"): string | null {
-  if (!val || !val.trim()) return null;
-  const subscriber = extractSubscriberNumber(val);
-  // If the subscriber digits are empty (only country prefix exists), it is valid/blank (optional).
-  if (!subscriber) return null;
-
-  const digits = val.replace(/\D/g, "");
-  if (digits.length < 7 || digits.length > 15) {
-    return `${fieldLabel} must have between 7 and 15 digits (including country code).`;
-  }
-  return null;
-}
 
 function CompanySkeletonRows({
   count = 8,
@@ -737,7 +696,382 @@ function SelectWithSearch({
   );
 }
 
-export function CompaniesPage() {
+export interface CompanyAutocompleteItem {
+  id: string;
+  company_name: string;
+  company_type?: string | null;
+  tax_id_number?: string | null;
+  area?: string | null;
+  district?: string | null;
+  city_id?: string | null;
+  state_id?: string | null;
+  contact_salutation?: string | null;
+  contact_full_name?: string | null;
+  contact_designation?: string | null;
+  contact_calling_number?: string | null;
+  contact_whatsapp_number?: string | null;
+  contact_indiamart_number?: string | null;
+  primary_website?: string | null;
+  sales_person_id?: string | null;
+}
+
+interface CompanyNameAutocompleteProps {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSelectCompany?: (company: CompanyAutocompleteItem) => void;
+  placeholder?: string;
+  hasError?: boolean;
+  errorMessage?: string;
+  preloadedCompanies?: Array<Company | CompanyAutocompleteItem>;
+  style?: React.CSSProperties;
+  inputStyle?: React.CSSProperties;
+  autoFocus?: boolean;
+}
+
+function CompanyNameAutocomplete({
+  id = "company_name",
+  value,
+  onChange,
+  onSelectCompany,
+  placeholder = "Enter company name",
+  hasError = false,
+  errorMessage,
+  preloadedCompanies = [],
+  style,
+  inputStyle,
+  autoFocus,
+}: CompanyNameAutocompleteProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [remoteItems, setRemoteItems] = useState<CompanyAutocompleteItem[]>([]);
+  const [, setIsSearching] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [hasSelectedExact, setHasSelectedExact] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const term = value.trim();
+
+  // Outside click listener
+  useEffect(() => {
+    function handleDocClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+        setIsFocused(false);
+      }
+    }
+    document.addEventListener("mousedown", handleDocClick);
+    return () => document.removeEventListener("mousedown", handleDocClick);
+  }, []);
+
+  // Debounced remote search
+  useEffect(() => {
+    if (!term || !isFocused || hasSelectedExact) {
+      setRemoteItems([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setIsSearching(true);
+      apiGet<CompanyAutocompleteItem[]>(`/companies/lookup?q=${encodeURIComponent(term)}&limit=30`)
+        .then((res) => {
+          if (res?.data) {
+            setRemoteItems(res.data);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setIsSearching(false));
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [term, isFocused, hasSelectedExact]);
+
+  // Combined suggestions
+  const suggestions = useMemo(() => {
+    if (!term) return [];
+    const termLower = term.toLowerCase();
+    const seen = new Set<string>();
+    const list: CompanyAutocompleteItem[] = [];
+
+    // Local matches from preloadedCompanies
+    for (const c of preloadedCompanies) {
+      if (c.company_name && c.company_name.toLowerCase().includes(termLower)) {
+        const key = c.company_name.toLowerCase().trim();
+        if (!seen.has(key)) {
+          seen.add(key);
+          list.push({
+            id: c.id,
+            company_name: c.company_name,
+            company_type: c.company_type,
+            tax_id_number: c.tax_id_number,
+            area: c.area,
+            district: c.district,
+            city_id: c.city_id,
+            state_id: c.state_id,
+            contact_salutation: (c as any).contact_salutation,
+            contact_full_name: (c as any).contact_full_name,
+            contact_designation: (c as any).contact_designation,
+            contact_calling_number: (c as any).contact_calling_number,
+            contact_whatsapp_number: (c as any).contact_whatsapp_number,
+            contact_indiamart_number: (c as any).contact_indiamart_number,
+            primary_website: (c as any).primary_website,
+            sales_person_id: (c as any).sales_person_id,
+          });
+        }
+      }
+    }
+
+    // Remote items from /companies/lookup
+    for (const r of remoteItems) {
+      const key = r.company_name.toLowerCase().trim();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(r);
+      }
+    }
+
+    return list;
+  }, [term, preloadedCompanies, remoteItems]);
+
+  const showDropdown = isOpen && isFocused && term.length > 0 && !hasSelectedExact;
+
+  function handleSelect(item: CompanyAutocompleteItem) {
+    onChange(item.company_name);
+    setHasSelectedExact(true);
+    setIsOpen(false);
+    setHighlightedIndex(-1);
+    if (onSelectCompany) {
+      onSelectCompany(item);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setIsOpen(false);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!showDropdown) {
+        setIsOpen(true);
+      } else {
+        setHighlightedIndex((prev) => Math.min(prev + 1, suggestions.length - 1));
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedIndex((prev) => Math.max(prev - 1, -1));
+    } else if (e.key === "Enter") {
+      if (showDropdown && highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+        e.preventDefault();
+        handleSelect(suggestions[highlightedIndex]);
+      }
+    }
+  }
+
+  function renderHighlight(text: string, query: string) {
+    if (!query) return text;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    const before = text.slice(0, idx);
+    const matched = text.slice(idx, idx + query.length);
+    const after = text.slice(idx + query.length);
+    return (
+      <>
+        {before}
+        <span style={{ color: "#0061f2", fontWeight: 700, backgroundColor: "#e0f2fe", borderRadius: "2px", padding: "0 1px" }}>
+          {matched}
+        </span>
+        {after}
+      </>
+    );
+  }
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", width: "100%", ...style }}>
+      <input
+        ref={inputRef}
+        id={id}
+        type="text"
+        autoComplete="off"
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        style={{
+          width: "100%",
+          height: "36px",
+          border: hasError ? "1px solid #ef4444" : isFocused ? "1px solid #0061f2" : "1px solid #cbd5e1",
+          borderRadius: "4px",
+          padding: "0 10px",
+          fontSize: "13.5px",
+          boxSizing: "border-box",
+          outline: "none",
+          boxShadow: isFocused ? "0 0 0 2px rgba(0, 97, 242, 0.15)" : "none",
+          transition: "border-color 0.15s, box-shadow 0.15s",
+          ...inputStyle,
+        }}
+        value={value}
+        onFocus={() => {
+          setIsFocused(true);
+          setIsOpen(true);
+        }}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setHasSelectedExact(false);
+          setIsOpen(true);
+          setHighlightedIndex(-1);
+        }}
+        onKeyDown={handleKeyDown}
+      />
+
+      {errorMessage && (
+        <div style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "3px" }}>{errorMessage}</div>
+      )}
+
+      {showDropdown && (
+        <div
+          ref={listRef}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "6px",
+            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.08)",
+            zIndex: 2500,
+            maxHeight: "260px",
+            overflowY: "auto",
+            boxSizing: "border-box",
+          }}
+        >
+          {/* Header */}
+          <div
+            style={{
+              padding: "6px 10px",
+              background: "#f8fafc",
+              borderBottom: "1px solid #e2e8f0",
+              fontSize: "11px",
+              fontWeight: 700,
+              color: "#64748b",
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              position: "sticky",
+              top: 0,
+              zIndex: 1,
+            }}
+          >
+            <span>Existing Companies</span>
+            <span
+              style={{
+                fontSize: "10px",
+                background: "#e0f2fe",
+                color: "#0061f2",
+                padding: "1px 6px",
+                borderRadius: "10px",
+                fontWeight: 600,
+              }}
+            >
+              {suggestions.length} {suggestions.length === 1 ? "match" : "matches"}
+            </span>
+          </div>
+
+          {/* List items */}
+          {suggestions.map((item, idx) => {
+            const isHighlighted = idx === highlightedIndex;
+            return (
+              <div
+                key={item.id || item.company_name + idx}
+                onClick={() => handleSelect(item)}
+                onMouseEnter={() => setHighlightedIndex(idx)}
+                style={{
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  background: isHighlighted ? "#eff6ff" : "#ffffff",
+                  borderLeft: isHighlighted ? "3px solid #0061f2" : "3px solid transparent",
+                  borderBottom: "1px solid #f1f5f9",
+                  transition: "background 0.1s ease, border-left 0.1s ease",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontSize: "13.5px",
+                      fontWeight: 600,
+                      color: "#1e293b",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {renderHighlight(item.company_name, term)}
+                  </div>
+                  {(item.tax_id_number || item.area || item.district) && (
+                    <div
+                      style={{
+                        fontSize: "11.5px",
+                        color: "#64748b",
+                        marginTop: "2px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {item.tax_id_number && (
+                        <span style={{ marginRight: "8px" }}>
+                          <strong>GST:</strong> {item.tax_id_number}
+                        </span>
+                      )}
+                      {(item.area || item.district) && (
+                        <span>{[item.area, item.district].filter(Boolean).join(", ")}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {item.company_type && (
+                  <span
+                    style={{
+                      fontSize: "10.5px",
+                      fontWeight: 600,
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                      background: "#f1f5f9",
+                      color: "#475569",
+                      marginLeft: "8px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {item.company_type}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+
+          {suggestions.length === 0 && (
+            <div
+              style={{
+                padding: "14px 12px",
+                textAlign: "center",
+                color: "#64748b",
+                fontSize: "12.5px",
+                background: "#ffffff",
+              }}
+            >
+              <span>✨</span> No existing company matches &ldquo;<strong>{term}</strong>&rdquo;. You can continue typing to create a new one.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
   const { profile, hasPermission } = useAuth();
   const canCreate = hasPermission("company.create") || hasPermission("supplier.create");
   const canUpdate = hasPermission("company.update") || hasPermission("supplier.update");
@@ -970,6 +1304,7 @@ export function CompaniesPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkCompanyId = searchParams.get("id");
+  const isAddParam = searchParams.get("add") === "full" || searchParams.get("add") === "true" || searchParams.get("action") === "add";
   const activeFetchCompanyIdRef = useRef<string | null>(null);
 
   const handleCloseDrawer = useCallback(() => {
@@ -988,6 +1323,12 @@ export function CompaniesPage() {
   useModalHistorySync(modalOpen, () => setModalOpen(false));
   useModalHistorySync(Boolean(drawerCompany), handleCloseDrawer);
   useModalHistorySync(isImportPageOpen, () => setIsImportPageOpen(false));
+
+  useEffect(() => {
+    if (defaultAdd || isAddParam) {
+      void openModal(null, "full");
+    }
+  }, [defaultAdd, isAddParam]);
 
   /* Quick Add Drawer state */
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false);
@@ -1016,7 +1357,7 @@ export function CompaniesPage() {
   const [defaultIndiaId, setDefaultIndiaId] = useState<string>("bf5a75c1-34e6-48ab-8a52-b537806107e0");
 
   useEffect(() => {
-    if (quickDrawerOpen) {
+    if (quickDrawerOpen || modalOpen) {
       void apiGet<Array<{ id: string; name: string }>>("/masters/states?page_size=250&status=active")
         .then((res) => {
           if (res?.data) {
@@ -1029,6 +1370,22 @@ export function CompaniesPage() {
         .then((res) => {
           const match = res?.data?.find((c) => c.name.toLowerCase().includes("india"));
           if (match) setDefaultIndiaId(match.id);
+        })
+        .catch(() => {});
+
+      void apiGet<Array<{ id: string; name: string }>>("/masters/product-categories?page_size=250&status=active")
+        .then((res) => {
+          if (res?.data) {
+            setProductCategories([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+          }
+        })
+        .catch(() => {});
+
+      void apiGet<Array<{ id: string; name: string }>>("/masters/company-categories?page_size=250&status=active")
+        .then((res) => {
+          if (res?.data) {
+            setCompanyCategories([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+          }
         })
         .catch(() => {});
 
@@ -1298,61 +1655,236 @@ export function CompaniesPage() {
     })();
   }, [deepLinkCompanyId, setSearchParams]);
   const [modalMode, setModalMode] = useState<"quick" | "full">("full");
-  const [modalTab, setModalTab] = useState<ModalTab>("first");
   const [currentCompanyId, setCurrentCompanyId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_SUPPLIER_FORM);
+  const [formDistricts, setFormDistricts] = useState<Array<{ id: string; name: string }>>([]);
+  const [formCities, setFormCities] = useState<Array<{ id: string; name: string }>>([]);
+  const [productCategories, setProductCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [companyCategories, setCompanyCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [gstFetching, setGstFetching] = useState(false);
+  const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
+
+  // Full Form Cascading: When form.state_id changes -> Fetch districts for that state
+  useEffect(() => {
+    if (!form.state_id) {
+      setFormDistricts([]);
+      setFormCities([]);
+      return;
+    }
+    void apiGet<Array<{ id: string; name: string }>>(
+      `/masters/districts/lookup?state_id=${form.state_id}`
+    )
+      .then((res) => {
+        if (res?.data) {
+          const sorted = [...res.data].sort((a, b) => a.name.localeCompare(b.name));
+          setFormDistricts(sorted);
+          if (form.district && !form.district_id) {
+            const m = sorted.find(
+              (d) => d.name.toLowerCase() === form.district.toLowerCase() || d.id === form.district
+            );
+            if (m) {
+              setForm((p) => ({ ...p, district_id: m.id, district: m.name }));
+            }
+          }
+        } else {
+          setFormDistricts([]);
+        }
+      })
+      .catch(() => setFormDistricts([]));
+  }, [form.state_id]);
+
+  // Full Form Cascading: When form.district_id changes -> Fetch cities for that district
+  useEffect(() => {
+    const distId = form.district_id;
+    if (!distId || !form.state_id) {
+      setFormCities([]);
+      return;
+    }
+    void apiGet<Array<{ id: string; name: string }>>(
+      `/masters/cities/lookup?district_id=${distId}&state_id=${form.state_id}`
+    )
+      .then((res) => {
+        if (res?.data) {
+          setFormCities([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+        } else {
+          setFormCities([]);
+        }
+      })
+      .catch(() => setFormCities([]));
+  }, [form.district_id, form.state_id]);
+
+  function handleCopyPrimaryFull() {
+    const direct = (form.contact_calling_number || "").trim();
+    const indiamart = (form.contact_indiamart_number || "").trim();
+    const val = direct || indiamart;
+    if (val) {
+      setForm((prev) => ({ ...prev, contact_whatsapp_number: val }));
+    }
+  }
+
+  async function handleFullFormGstFetch() {
+    const raw = (form.tax_id_number || "").trim().toUpperCase();
+    if (!raw) {
+      setValidationErrors((prev) => ({ ...prev, tax_id_number: "Please enter GST No." }));
+      return;
+    }
+    setGstFetching(true);
+    setFormAlert(null);
+    try {
+      const code = raw.slice(0, 2);
+      const stateName = GST_STATE_CODE_MAP[code];
+      if (stateName) {
+        const matched = quickStates.find(
+          (s) =>
+            s.name.toLowerCase() === stateName.toLowerCase() ||
+            s.name.toLowerCase().includes(stateName.toLowerCase()) ||
+            stateName.toLowerCase().includes(s.name.toLowerCase())
+        );
+        if (matched) {
+          setForm((prev) => ({
+            ...prev,
+            state_id: matched.id,
+            district_id: "",
+            district: "",
+            city_id: "",
+            tax_id_number: raw,
+          }));
+          setFormDistricts([]);
+          setFormCities([]);
+          setFormAlert({ type: "info", message: `State auto-detected: ${matched.name}. Please select District.` });
+          if (validationErrors.tax_id_number) setValidationErrors((prev) => ({ ...prev, tax_id_number: "" }));
+          if (validationErrors.state_id) setValidationErrors((prev) => ({ ...prev, state_id: "" }));
+        } else {
+          setFormAlert({ type: "info", message: `GST State Code: ${stateName}` });
+        }
+      } else {
+        setFormAlert({ type: "info", message: "GST recorded. Please select State." });
+      }
+    } finally {
+      setGstFetching(false);
+    }
+  }
+
+  function handleAddSocialMedia() {
+    setForm((prev) => ({
+      ...prev,
+      social_media: [...(prev.social_media || []), { platform: "", url: "" }],
+    }));
+  }
+
+  function handleUpdateSocialMedia(index: number, key: "platform" | "url", value: string) {
+    setForm((prev) => {
+      const list = [...(prev.social_media || [])];
+      if (!list[index]) list[index] = { platform: "", url: "" };
+      list[index] = { ...list[index], [key]: value };
+      return { ...prev, social_media: list };
+    });
+  }
+
+  function handleRemoveSocialMedia(index: number) {
+    setForm((prev) => {
+      const list = [...(prev.social_media || [])];
+      list.splice(index, 1);
+      if (list.length === 0) list.push({ platform: "", url: "" });
+      return { ...prev, social_media: list };
+    });
+  }
+
+  async function handleSaveFullCompany(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setFormAlert(null);
+    setValidationErrors({});
+
+    const errors: Record<string, string> = {};
+    if (!form.company_name.trim()) errors.company_name = "Company Name is required.";
+    if (!form.tax_id_number.trim()) errors.tax_id_number = "GST No is required.";
+    if (!form.state_id) errors.state_id = "State is required.";
+    if (!form.city_id) errors.city_id = "City is required.";
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      setError("Please fill all required fields marked with *.");
+      setSaving(false);
+      return;
+    }
+
+    try {
+      const emailList = form.email.trim()
+        ? [form.email.trim()]
+        : (form.emails && form.emails.length > 0 ? form.emails : []);
+
+      const cleanSocialMedia = (form.social_media || []).filter(
+        (sm) => sm.platform.trim() || sm.url.trim()
+      );
+
+      const categoryIds = form.category_id
+        ? [form.category_id]
+        : (formCategoryIds && formCategoryIds.length > 0 ? formCategoryIds : []);
+
+      const payload: Record<string, any> = {
+        company_name: form.company_name.trim(),
+        contact_salutation: form.contact_salutation || null,
+        contact_full_name: form.contact_full_name.trim() || null,
+        contact_designation: form.contact_designation.trim() || null,
+        tax_id_number: form.tax_id_number.trim().toUpperCase() || null,
+        contact_calling_number: form.contact_calling_number.trim() || null,
+        contact_indiamart_number: form.contact_indiamart_number.trim() || null,
+        contact_whatsapp_number: form.contact_whatsapp_number.trim() || null,
+        primary_website: form.primary_website.trim() || null,
+        emails: emailList,
+        secondary_website: form.secondary_website.trim() || null,
+        address: form.address.trim() || null,
+        area: form.area.trim() || null,
+        state_id: form.state_id || null,
+        district: form.district.trim() || null,
+        city_id: form.city_id || null,
+        pincode: form.pincode.trim() || null,
+        current_status: form.current_status || null,
+        company_type: form.company_type || null,
+        category_ids: categoryIds,
+        company_grade: form.company_grade || null,
+        potential: form.potential || null,
+        company_category: form.company_category || null,
+        product_manufacture_or_supply: form.product_manufacture_or_supply.trim() || null,
+        machines_buying_from: form.machines_buying_from.trim() || null,
+        spares_buying_from: form.spares_buying_from.trim() || null,
+        products_interested: form.products_interested.trim() || null,
+        gst_registration_date: form.gst_registration_date.trim() || null,
+        age_of_company: form.age_of_company.trim() || null,
+        social_media: cleanSocialMedia.length > 0 ? cleanSocialMedia : null,
+        overall_remarks: form.overall_remarks.trim() || null,
+        sales_person_id: form.sales_person_id || null,
+        country_id: defaultIndiaId,
+      };
+
+      const res = currentCompanyId
+        ? await apiPatch<Company>(`/companies/${currentCompanyId}`, payload)
+        : await apiPost<Company>("/companies", payload);
+
+      const saved = res.data;
+      setReloadCounter((c) => c + 1);
+      closeModal();
+      setAlertPopup({
+        title: currentCompanyId ? "Company Updated" : "Company Created",
+        message: `Company "${saved.company_name}" saved successfully.`,
+      });
+    } catch (err: any) {
+      const msg = err?.detail || err?.message || "Failed to save company.";
+      setError(msg);
+      setFormAlert({ type: "error", message: msg });
+    } finally {
+      setSaving(false);
+    }
+  }
   const [formCountryId, setFormCountryId] = useState<string | null>(null);
   const [formStateId, setFormStateId] = useState<string | null>(null);
-  const [formCityId, setFormCityId] = useState<string | null>(null);
   const [formCategoryIds, setFormCategoryIds] = useState<string[]>([]);
-  const [formSubCategoryIds, setFormSubCategoryIds] = useState<string[]>([]);
-  const [formProductIds, setFormProductIds] = useState<string[]>([]);
-  const [lockNewStatus, setLockNewStatus] = useState(false);
-  const [formStateCustomText, setFormStateCustomText] = useState("");
-  const [formCityCustomText, setFormCityCustomText] = useState("");
-  const [whatsappSameAsCalling, setWhatsappSameAsCalling] = useState(false);
-  const [wechatSameAsCalling, setWechatSameAsCalling] = useState(false);
-  const [callingNumberError, setCallingNumberError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [defaultChinaId, setDefaultChinaId] = useState<string | null>(null);
-  const [formCountryPhoneCode, setFormCountryPhoneCode] = useState<string>("+86");
   const [saving, setSaving] = useState(false);
-  const [uploadingMedia, setUploadingMedia] = useState(false);
-  const existingCompanies = useLookup<Company>("/companies", 500);
 
-  async function resolveCountryPhoneCode(countryId: string | null): Promise<string> {
-    if (!countryId) return "+86";
-    try {
-      const { data } = await apiGet<{ phone_code?: string }>(`/masters/countries/${countryId}`);
-      if (data?.phone_code) {
-        const rawCode = data.phone_code.trim().replace(/^\+/, "");
-        return `+${rawCode}`;
-      }
-    } catch {
-      // fallback
-    }
-    return "+86";
-  }
-
-  function replacePhonePrefix(fullNumber: string | undefined | null, newPrefix: string): string {
-    if (!fullNumber) return "";
-    const trimmed = fullNumber.trim();
-    if (!trimmed) return "";
-    if (trimmed.startsWith("+")) {
-      const spaceIdx = trimmed.indexOf(" ");
-      if (spaceIdx !== -1) {
-        const subscriber = trimmed.slice(spaceIdx + 1).trim();
-        return subscriber ? `${newPrefix} ${subscriber}` : newPrefix;
-      }
-      const match = trimmed.match(/^\+\d{1,4}(.*)$/);
-      if (match && match[1]) {
-        const subscriber = match[1].trim();
-        return subscriber ? `${newPrefix} ${subscriber}` : newPrefix;
-      }
-      return newPrefix;
-    }
-    return `${newPrefix} ${trimmed}`;
-  }
+// phone helpers removed
 
   function focusAndScrollToField(fieldId: string) {
     setTimeout(() => {
@@ -1369,86 +1901,6 @@ export function CompaniesPage() {
       }
     }, 60);
   }
-
-  const mediaList = useMemo(() => {
-    return form.visit_media_input
-      .split(",")
-      .map((u) => u.trim())
-      .filter(Boolean);
-  }, [form.visit_media_input]);
-
-  const addMediaUrls = (newUrls: string[]) => {
-    const combined = [...mediaList, ...newUrls];
-    const unique = Array.from(new Set(combined));
-    setField("visit_media_input", unique.join(", "));
-  };
-
-  const removeMediaUrl = (urlToRemove: string) => {
-    const filtered = mediaList.filter((u) => u !== urlToRemove);
-    setField("visit_media_input", filtered.join(", "));
-  };
-
-  const handleMediaFileUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setUploadingMedia(true);
-    const uploadedUrls: string[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await apiPostMultipart<{ url: string }>("/suppliers/upload-media", formData);
-        if (res.data?.url) {
-          uploadedUrls.push(res.data.url);
-        }
-      } catch (err) {
-        console.warn("Failed to upload media to Supabase storage:", err);
-      }
-    }
-
-    if (uploadedUrls.length > 0) {
-      addMediaUrls(uploadedUrls);
-    }
-    setUploadingMedia(false);
-  };
-
-  const fetchChinaId = useCallback(async (): Promise<string | null> => {
-    try {
-      const { data } = await apiGet<{ id: string; name: string }[]>(
-        "/masters/countries" +
-        toQueryString({
-          search: "China",
-          page: 1,
-          page_size: 20,
-          sort_order: "asc",
-          status: "active",
-        })
-      );
-      const china = (data || []).find((c) => c.name.toLowerCase().includes("china"));
-      if (china) return china.id;
-
-      // Fallback: list all countries
-      const { data: allData } = await apiGet<{ id: string; name: string }[]>(
-        "/masters/countries" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" })
-      );
-      const foundInAll = (allData || []).find((c) => c.name.toLowerCase().includes("china"));
-      if (foundInAll) return foundInAll.id;
-    } catch (err) {
-      console.error("Failed to fetch China ID:", err);
-    }
-    return null;
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchChinaId().then((id) => {
-      if (!cancelled && id) setDefaultChinaId(id);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchChinaId]);
 
   /* Tabs & Contacts State */
   const [editTab, setEditTab] = useState<"profile" | "contacts">("profile");
@@ -1494,8 +1946,20 @@ export function CompaniesPage() {
       "secondary_website",
       "visit_video_url",
       "visit_media_input",
+      "email",
+      "tax_id_number",
+      "state_id",
+      "district_id",
+      "city_id",
+      "pincode",
+      "contact_salutation",
+      "category_id",
+      "sales_person_id",
+      "gst_registration_date",
     ]);
-    const formatted = rawFields.has(id as string) ? value : autoTitleCase(value, id as string);
+    const formatted = id === "tax_id_number"
+      ? value.toUpperCase()
+      : rawFields.has(id as string) ? value : autoTitleCase(value, id as string);
     setForm((prev) => ({ ...prev, [id]: formatted }));
     if (validationErrors[id as string]) {
       setValidationErrors((prev) => ({ ...prev, [id as string]: "" }));
@@ -1652,16 +2116,7 @@ export function CompaniesPage() {
     []
   );
 
-  const companyNameFetcher = useCallback(
-    async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
-      const { data } = await apiGet<Company[]>(
-        "/companies" + toQueryString({ search: term, page: 1, page_size: 20 }),
-        { signal }
-      );
-      return data.map((d) => ({ value: d.company_name, label: d.company_name }));
-    },
-    []
-  );
+// companyNameFetcher removed
 
 
   const productFetcher = useCallback(
@@ -2030,88 +2485,72 @@ export function CompaniesPage() {
     }
     setCurrentCompanyId(supplier ? supplier.id : null);
     setModalMode(mode);
-    setModalTab("first");
     setEditTab("profile");
     setError(null);
     setAlertPopup(null);
     setContactFormOpen(false);
-    setWhatsappSameAsCalling(false);
-    setWechatSameAsCalling(false);
-    setCallingNumberError(null);
     setValidationErrors({});
-    setFormStateCustomText("");
-    setFormCityCustomText("");
 
     if (supplier) {
       setForm({
         company_name: supplier.company_name || "",
-        company_type: supplier.company_type || "",
-        brand_description: supplier.brand_description || "",
-        area: supplier.area || "",
-        district: supplier.district || "",
-        sales_person_id: supplier.sales_person_id || "",
-        contact_salutation: supplier.contact_salutation || "",
+        contact_salutation: supplier.contact_salutation || "Mr",
         contact_full_name: supplier.contact_full_name || "",
         contact_designation: supplier.contact_designation || "",
-        contact_calling_number: supplier.contact_calling_number || "",
-        contact_whatsapp_number: supplier.contact_whatsapp_number || "",
-        contact_wechat_number: supplier.contact_wechat_number || "",
-        contact_indiamart_number: supplier.contact_indiamart_number || "",
-        emails: supplier.emails || [],
         tax_id_number: supplier.tax_id_number || "",
-        address: supplier.address || "",
-        town: supplier.town || "",
+        contact_calling_number: supplier.contact_calling_number || "",
+        contact_indiamart_number: supplier.contact_indiamart_number || "",
+        contact_whatsapp_number: supplier.contact_whatsapp_number || "",
         primary_website: supplier.primary_website || "",
+        email: (supplier.emails && supplier.emails[0]) || "",
+        emails: supplier.emails || [],
         secondary_website: supplier.secondary_website || "",
-        company_grade: supplier.company_grade || "",
+        address: supplier.address || "",
+        area: supplier.area || "",
+        state_id: supplier.state_id || "",
+        district_id: supplier.district_id || "",
+        district: supplier.district || "",
+        city_id: supplier.city_id || "",
+        pincode: supplier.pincode || "",
         current_status: supplier.current_status || "",
+        company_type: supplier.company_type || "",
+        category_id: (supplier.category_ids && supplier.category_ids[0]) || "",
+        company_grade: supplier.company_grade || "",
         potential: supplier.potential || "",
+        company_category: supplier.company_category || "",
+        product_manufacture_or_supply: supplier.product_manufacture_or_supply || "",
+        machines_buying_from: supplier.machines_buying_from || "",
+        spares_buying_from: supplier.spares_buying_from || "",
+        products_interested: supplier.products_interested || "",
+        gst_registration_date: supplier.gst_registration_date || "",
+        age_of_company: supplier.age_of_company || "",
+        social_media: supplier.social_media && supplier.social_media.length > 0 ? supplier.social_media : [{ platform: "", url: "" }],
+        overall_remarks: supplier.overall_remarks || "",
+        sales_person_id: supplier.sales_person_id || "",
+        brand_description: supplier.brand_description || "",
+        town: supplier.town || "",
         potential_reason: supplier.potential_reason || "",
         secondary_products_description: supplier.secondary_products_description || "",
         visited_factory_office: String(supplier.visited_factory_office),
         visit_remarks: supplier.visit_remarks || "",
         visit_media_input: (supplier.visit_media || []).filter((u) => !u.startsWith("http") || u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) || u.includes("/storage/v1/object/public/")).join(", "),
         visit_video_url: (supplier.visit_media || []).find((u) => u.startsWith("http") && !u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) && !u.includes("/storage/v1/object/public/")) || "",
-        overall_remarks: supplier.overall_remarks || "",
+        contact_wechat_number: supplier.contact_wechat_number || "",
         is_active: String(supplier.is_active),
       });
       setFormCountryId(supplier.country_id || null);
       setFormStateId(supplier.state_id || null);
-      setFormCityId(supplier.city_id || null);
       setFormCategoryIds(supplier.category_ids || []);
-      setFormSubCategoryIds(supplier.sub_category_ids || []);
-      setFormProductIds(supplier.product_ids || []);
-      // Once a supplier is Existing it cannot be reverted to New.
-      setLockNewStatus(supplier.current_status === "existing");
       setContacts(supplier.contacts || []);
-      if (supplier.contact_calling_number && supplier.contact_whatsapp_number === supplier.contact_calling_number) {
-        setWhatsappSameAsCalling(true);
-      }
-      if (supplier.contact_calling_number && supplier.contact_wechat_number === supplier.contact_calling_number) {
-        setWechatSameAsCalling(true);
-      }
-      if (supplier.country_id) {
-        resolveCountryPhoneCode(supplier.country_id).then(setFormCountryPhoneCode);
-      } else {
-        setFormCountryPhoneCode("+86");
-      }
     } else {
       setForm(EMPTY_SUPPLIER_FORM);
       setFormStateId(null);
-      setFormCityId(null);
+      setFormDistricts([]);
+      setFormCities([]);
       setFormCategoryIds([]);
-      setFormSubCategoryIds([]);
-      setFormProductIds([]);
-      setLockNewStatus(false);
       setContacts([]);
-      setFormCountryPhoneCode("+86");
-
-      let chinaId = defaultChinaId;
-      if (!chinaId) {
-        chinaId = await fetchChinaId();
-        if (chinaId) setDefaultChinaId(chinaId);
-      }
-      setFormCountryId(chinaId);
+      setFormCountryId(defaultIndiaId || null);
+      setFormAlert(null);
     }
 
     setModalOpen(true);
@@ -2123,299 +2562,6 @@ export function CompaniesPage() {
     setError(null);
     setAlertPopup(null);
     setValidationErrors({});
-  }
-
-  function buildPayload() {
-    const emails = form.emails || [];
-    const isVisited = form.visited_factory_office === "true";
-    const visitPhotos = isVisited
-      ? form.visit_media_input
-        .split(",")
-        .map((v) => v.trim())
-        .filter(Boolean)
-      : [];
-    const visitVideo = isVisited && form.visit_video_url ? form.visit_video_url.trim() : "";
-    const visitMedia = visitVideo ? [...visitPhotos, visitVideo] : visitPhotos;
-
-    return {
-      company_name: form.company_name.trim(),
-      category_ids: formCategoryIds,
-      company_type: form.company_type ? form.company_type.trim() : null,
-
-      brand_description: form.brand_description.trim() || null,
-      country_id: formCountryId,
-      state_id: formStateId,
-      city_id: formCityId,
-      area: form.area.trim() || null,
-      district: form.district.trim() || null,
-      sales_person_id: form.sales_person_id || null,
-      contact_salutation: form.contact_salutation || null,
-      contact_full_name: form.contact_full_name.trim() || null,
-      contact_designation: form.contact_designation.trim() || null,
-      contact_calling_number: normalizePhoneValue(form.contact_calling_number),
-      contact_whatsapp_number: normalizePhoneValue(form.contact_whatsapp_number),
-      contact_wechat_number: normalizePhoneValue(form.contact_wechat_number),
-      contact_indiamart_number: normalizePhoneValue(form.contact_indiamart_number),
-      emails,
-      tax_id_number: form.tax_id_number.trim() || null,
-      address: form.address.trim() || null,
-      town: form.town.trim() || null,
-      primary_website: form.primary_website.trim() || null,
-      secondary_website: form.secondary_website.trim() || null,
-      sub_category_ids: formSubCategoryIds,
-      product_ids: formProductIds,
-      company_grade: form.company_grade || null,
-      current_status: form.current_status || null,
-      potential: form.potential || null,
-      potential_reason: form.potential_reason.trim() || null,
-      secondary_products_description: form.secondary_products_description.trim() || null,
-      visited_factory_office: isVisited,
-      visit_remarks: isVisited ? form.visit_remarks.trim() || null : null,
-      visit_media: visitMedia.length ? visitMedia : null,
-      overall_remarks: form.overall_remarks.trim() || null,
-      is_active: form.is_active === "true",
-    };
-  }
-
-  async function resolveCustomGeography(countryId: string | null) {
-    let stateId = formStateId;
-    let cityId = formCityId;
-
-    if (!stateId && formStateCustomText.trim() && countryId) {
-      try {
-        const { data: searchStates } = await apiGet<{ id: string; name: string }[]>(
-          `/masters/states${toQueryString({ search: formStateCustomText.trim(), country_id: countryId, page: 1, page_size: 5 })}`
-        );
-        const match = searchStates.find((s) => s.name.toLowerCase() === formStateCustomText.trim().toLowerCase());
-        if (match) {
-          stateId = match.id;
-        } else {
-          const { data: newState } = await apiPost<{ id: string }>("/masters/states", {
-            name: formStateCustomText.trim(),
-            country_id: countryId,
-            code: formStateCustomText.trim().slice(0, 3).toUpperCase(),
-          });
-          stateId = newState.id;
-        }
-        setFormStateId(stateId);
-      } catch (err) {
-        console.error("Failed to resolve custom state:", err);
-      }
-    }
-
-    if (!cityId && formCityCustomText.trim() && stateId) {
-      try {
-        const { data: searchCities } = await apiGet<{ id: string; name: string }[]>(
-          `/masters/cities${toQueryString({ search: formCityCustomText.trim(), state_id: stateId, page: 1, page_size: 5 })}`
-        );
-        const match = searchCities.find((c) => c.name.toLowerCase() === formCityCustomText.trim().toLowerCase());
-        if (match) {
-          cityId = match.id;
-        } else {
-          const { data: newCity } = await apiPost<{ id: string }>("/masters/cities", {
-            name: formCityCustomText.trim(),
-            country_id: countryId,
-            state_id: stateId,
-            code: formCityCustomText.trim().slice(0, 3).toUpperCase(),
-          });
-          cityId = newCity.id;
-        }
-        setFormCityId(cityId);
-      } catch (err) {
-        console.error("Failed to resolve custom city:", err);
-      }
-    }
-
-    return { stateId, cityId };
-  }
-
-  async function resolveCustomCategories(): Promise<string[]> {
-    const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-    const resolvedIds: string[] = [];
-
-    for (const cat of formCategoryIds) {
-      if (isUUID(cat)) {
-        resolvedIds.push(cat);
-      } else {
-        try {
-          const { data: searchCats } = await apiGet<{ id: string; name: string }[]>(
-            `/masters/product-categories${toQueryString({ search: cat.trim(), page: 1, page_size: 5 })}`
-          );
-          const match = searchCats.find((c) => c.name.toLowerCase() === cat.trim().toLowerCase());
-          if (match) {
-            resolvedIds.push(match.id);
-          } else {
-            const { data: newCat } = await apiPost<{ id: string }>("/masters/product-categories", {
-              name: cat.trim(),
-              code: cat.trim().slice(0, 3).toUpperCase(),
-            });
-            resolvedIds.push(newCat.id);
-          }
-        } catch {
-          // If creation fails, skip
-        }
-      }
-    }
-    return resolvedIds;
-  }
-
-  async function saveCompanyData(nextAction?: ModalTab | "exit") {
-    // 1. Validate immediate required fields
-    const initialErrors: Record<string, string> = {};
-    if (!form.company_name.trim()) {
-      initialErrors.company_name = "Company Name is required.";
-    }
-    if (!formCountryId) {
-      initialErrors["field-country"] = "Country is required.";
-    }
-    if (!formStateId && !formStateCustomText.trim()) {
-      initialErrors["field-province"] = "Province is required.";
-    }
-    if (!formCityId && !formCityCustomText.trim()) {
-      initialErrors["field-city"] = "City is required.";
-    }
-    if (form.contact_calling_number) {
-      const callingErr = validatePhoneNumber(form.contact_calling_number, "Calling number");
-      if (callingErr) {
-        initialErrors["field-calling-number"] = callingErr;
-      }
-    }
-    if (form.contact_whatsapp_number) {
-      const whatsappErr = validatePhoneNumber(form.contact_whatsapp_number, "WhatsApp number");
-      if (whatsappErr) {
-        initialErrors["field-whatsapp-number"] = whatsappErr;
-      }
-    }
-
-    if (Object.keys(initialErrors).length > 0) {
-      setValidationErrors((prev) => ({ ...prev, ...initialErrors }));
-      setError(Object.values(initialErrors)[0]);
-      const firstFieldId = Object.keys(initialErrors)[0];
-      focusAndScrollToField(firstFieldId);
-      return false;
-    }
-
-    setError(null);
-    setAlertPopup(null);
-    setSaving(true);
-    try {
-      const { stateId, cityId } = await resolveCustomGeography(formCountryId);
-      const geoErrors: Record<string, string> = {};
-      if (!stateId && !formStateCustomText.trim()) {
-        geoErrors["field-province"] = "Province is required.";
-      } else if (formStateCustomText.trim() && !stateId) {
-        geoErrors["field-province"] = "Province could not be resolved — please select from dropdown.";
-      }
-      if (!cityId && !formCityCustomText.trim()) {
-        geoErrors["field-city"] = "City is required.";
-      } else if (formCityCustomText.trim() && !cityId) {
-        geoErrors["field-city"] = "City could not be resolved — please select from dropdown.";
-      }
-
-      if (Object.keys(geoErrors).length > 0) {
-        setValidationErrors((prev) => ({ ...prev, ...geoErrors }));
-        setError(Object.values(geoErrors)[0]);
-        const firstFieldId = Object.keys(geoErrors)[0];
-        focusAndScrollToField(firstFieldId);
-        setSaving(false);
-        return false;
-      }
-      const categoryIds = await resolveCustomCategories();
-
-      const basePayload = buildPayload();
-      const existingCompany = rows.find((s) => s.id === currentCompanyId);
-      const payload = {
-        ...basePayload,
-        version: existingCompany?.version,
-        state_id: stateId || formStateId,
-        city_id: cityId || formCityId,
-        category_ids: categoryIds,
-      };
-
-      const { data: supplier } = currentCompanyId
-        ? await apiPatch<Company>(`/companies/${currentCompanyId}`, payload)
-        : await apiPost<Company>("/companies", payload);
-      setCurrentCompanyId(supplier.id);
-      setContacts(supplier.contacts || []);
-      if (currentCompanyId && supplier) {
-        setRows((prev) => prev.map((row) => (row.id === supplier.id ? supplier : row)));
-      } else if (supplier) {
-        setRows((prev) => [supplier, ...prev]);
-        setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
-      }
-
-      if (supplier) {
-        void Promise.all([
-          resolver.resolve("countries", [supplier.country_id]),
-          resolver.resolve("states", [supplier.state_id]),
-          resolver.resolve("cities", [supplier.city_id]),
-          resolver.resolve("categories", supplier.category_ids || []),
-          resolver.resolve("subCategories", supplier.sub_category_ids || []),
-          resolver.resolve("products", supplier.product_ids || []),
-        ]).then(() => setNamesVersion((n) => n + 1));
-      }
-
-      setError(null);
-      setAlertPopup(null);
-      if (nextAction === "exit") {
-        closeModal();
-      } else if (nextAction === "continue") {
-        setModalMode("full");
-        setEditTab("profile");
-      } else if (nextAction) {
-        setModalTab(nextAction);
-      }
-      return true;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      const lower = msg.toLowerCase();
-      if (lower.includes("whatsapp")) {
-        setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": msg }));
-        focusAndScrollToField("field-whatsapp-number");
-        return false;
-      }
-      if (lower.includes("calling")) {
-        setValidationErrors((prev) => ({ ...prev, "field-calling-number": msg }));
-        focusAndScrollToField("field-calling-number");
-        return false;
-      }
-      if (lower.includes("company_name") || lower.includes("company name")) {
-        setValidationErrors((prev) => ({ ...prev, company_name: msg }));
-        focusAndScrollToField("company_name");
-        return false;
-      }
-      const title = lower.includes("duplicate") || lower.includes("already exists")
-        ? "Duplicate Company Warning"
-        : "Save Error";
-      setAlertPopup({ title, message: msg });
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (modalMode === "quick") {
-      await saveCompanyData("exit");
-    } else {
-      if (modalTab === "first") {
-        await saveCompanyData("second");
-      } else if (modalTab === "second") {
-        await saveCompanyData("contacts");
-      }
-    }
-  }
-
-  async function handleSaveAndContinue(e: React.MouseEvent) {
-    e.preventDefault();
-    await saveCompanyData("continue");
-  }
-
-  async function handleSaveAndExit(e: React.MouseEvent) {
-    e.preventDefault();
-    await saveCompanyData("exit");
   }
 
   async function refreshContacts() {
@@ -2442,7 +2588,7 @@ export function CompaniesPage() {
         }
         : EMPTY_CONTACT_FORM
     );
-    setContactCountryId(contact?.country_id || formCountryId || defaultChinaId || null);
+    setContactCountryId(contact?.country_id || formCountryId || defaultIndiaId || null);
     setContactSameCallingWhatsapp(false);
     setContactSameCallingWechat(false);
     setContactFormOpen(true);
@@ -2887,6 +3033,57 @@ export function CompaniesPage() {
 
   const startSrNo = (currentPage - 1) * pageSize + 1;
 
+  const fieldLabelStyle: React.CSSProperties = {
+    fontSize: "12px",
+    fontWeight: 600,
+    color: "#475569",
+    marginBottom: "6px",
+    display: "block",
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "9px 12px",
+    fontSize: "13px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "5px",
+    backgroundColor: "#ffffff",
+    color: "#1e293b",
+    outline: "none",
+    boxSizing: "border-box",
+    transition: "border-color 0.15s ease",
+  };
+
+  const selectStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "9px 12px",
+    fontSize: "13px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "5px",
+    backgroundColor: "#ffffff",
+    color: "#1e293b",
+    outline: "none",
+    boxSizing: "border-box",
+    cursor: "pointer",
+    transition: "border-color 0.15s ease",
+  };
+
+  const getInputStyle = (hasError: boolean): React.CSSProperties => ({
+    ...inputStyle,
+    borderColor: hasError ? "#ef4444" : "#cbd5e1",
+    backgroundColor: hasError ? "#fef2f2" : "#ffffff",
+  });
+
+  const errorStyle: React.CSSProperties = {
+    color: "#ef4444",
+    fontSize: "12px",
+    fontWeight: 600,
+    marginTop: "4px",
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+  };
+
   return (
     <AppShell activeKey="companies" pageClassName="page-suppliers">
       {modalOpen ? (
@@ -2895,10 +3092,10 @@ export function CompaniesPage() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
               <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
-                {modalMode === "quick" ? "Add Company (Quick)" : (currentCompanyId ? "Edit Company" : "Add Company")}
+                {currentCompanyId ? "Edit Company" : "Add New Company"}
               </h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
-                {modalMode === "quick" ? "Fill primary supplier details for quick creation." : "Complete the supplier details below."}
+                {currentCompanyId ? "Update company details below." : "Enter company information, contact details, and business profile."}
               </div>
             </div>
             <button
@@ -2919,7 +3116,7 @@ export function CompaniesPage() {
                 gap: "6px",
               }}
             >
-              ← BACK TO SUPPLIERS
+              ← BACK
             </button>
           </div>
           <div className="card" style={{ background: "#ffffff", padding: "28px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
@@ -2984,638 +3181,732 @@ export function CompaniesPage() {
                 )}
               </div>
             )}
-            {/* TAB 1: PROFILE FORM (SAME ORIGINAL DATA & FIELDS) */}
+            {/* TAB 1: PROFILE FORM (MATCHES PRODUCTION erp.inhymasolutions.com/user/addEdit) */}
             {(editTab === "profile" || modalMode === "quick") && (
-              <form onSubmit={handleSubmit} noValidate>
-                {/* SECTION 1: General & Primary Contact Info (First Data Form) */}
-                <div style={{ marginBottom: "24px" }}>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
-                    1. General Information
-                  </h3>
-                  {/* Row 1: Company Name + Category (2 columns) */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
-                    <div className="field" style={{ position: "relative" }}>
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
-                        Name of Company <span style={{ color: "#ef4444" }}>*</span>
+              <form onSubmit={handleSaveFullCompany} noValidate>
+                {/* SECTION 1: Company & Contact Information */}
+                <div style={{ marginBottom: "28px" }}>
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 700,
+                      color: "#1e293b",
+                      marginBottom: "18px",
+                      paddingBottom: "8px",
+                      borderBottom: "1px solid #e2e8f0",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span>🏢</span> Company &amp; Contact Information
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(4, 1fr)",
+                      gap: "16px",
+                      marginBottom: "16px",
+                    }}
+                  >
+                    {/* Row 1: Company Name *, Full Name (IndiaMart Or Other), Designation, GST No * */}
+                    <div>
+                      <label style={fieldLabelStyle}>
+                        Company Name <span style={{ color: "#ef4444" }}>*</span>
                       </label>
-                      <SearchableDropdown
+                      <CompanyNameAutocomplete
                         id="company_name"
-                        hasError={Boolean(validationErrors.company_name)}
                         value={form.company_name}
-                        onChange={(_, label) => {
-                          setField("company_name", label);
-                          if (validationErrors.company_name) setValidationErrors((prev) => ({ ...prev, company_name: "" }));
+                        onChange={(val) => setField("company_name", val)}
+                        onSelectCompany={(comp) => {
+                          setField("company_name", comp.company_name);
+                          if (!form.tax_id_number && comp.tax_id_number) setField("tax_id_number", comp.tax_id_number);
+                          if (!form.company_type && comp.company_type) setField("company_type", comp.company_type);
+                          if (!form.area && comp.area) setField("area", comp.area);
+                          if (!form.district && comp.district) setField("district", comp.district);
+                          if (!form.state_id && comp.state_id) setField("state_id", comp.state_id);
+                          if (!form.city_id && comp.city_id) setField("city_id", comp.city_id);
+                          if (!form.contact_full_name && comp.contact_full_name) setField("contact_full_name", comp.contact_full_name);
+                          if (!form.contact_designation && comp.contact_designation) setField("contact_designation", comp.contact_designation);
                         }}
-                        allowCustomText={true}
-                        onTextChange={(v) => {
-                          setField("company_name", v);
-                          if (validationErrors.company_name) setValidationErrors((prev) => ({ ...prev, company_name: "" }));
-                        }}
-                        placeholder="Search existing or type company name..."
-                        fetchOptions={companyNameFetcher}
-                        fetchLabelForValue={async (v) => v}
-                      />
-                      {validationErrors.company_name && (
-                        <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
-                          <span>⚠️</span> {validationErrors.company_name}
-                        </div>
-                      )}
-                      {(() => {
-                        const typed = (form.company_name || "").trim();
-                        if (!typed) return null;
-                        const cleanTyped = typed.toLowerCase().replace(/[\s-]/g, "");
-
-                        const matches = existingCompanies.items.filter((s) => {
-                          if (currentCompanyId && String(s.id).toLowerCase() === String(currentCompanyId).toLowerCase()) return false;
-                          const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
-                          return sName.includes(cleanTyped);
-                        }).slice(0, 5);
-
-                        const exact = existingCompanies.items.find((s) => {
-                          if (currentCompanyId && String(s.id).toLowerCase() === String(currentCompanyId).toLowerCase()) return false;
-                          const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
-                          return sName === cleanTyped;
-                        });
-
-                        return (
-                          <>
-                            {exact && (
-                              <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
-                                <span>⚠️</span> Supplier "{exact.company_name}" already exists!
-                              </div>
-                            )}
-                            {matches.length > 0 && !exact && (
-                              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#ffffff", border: "1px solid #cbd5e0", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", maxHeight: "160px", overflowY: "auto", marginTop: "2px" }}>
-                                <div style={{ padding: "6px 12px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
-                                  Existing Similar Companies:
-                                </div>
-                                {matches.map((s) => (
-                                  <div
-                                    key={s.id}
-                                    style={{ padding: "8px 12px", fontSize: "12.5px", cursor: "pointer", borderBottom: "1px solid #f8fafc", display: "flex", justifyContent: "space-between", background: "#fff" }}
-                                    onClick={() => setField("company_name", s.company_name)}
-                                  >
-                                    <span style={{ fontWeight: 600, color: "#1e293b" }}>{s.company_name}</span>
-                                    <span style={{ color: "#64748b", fontSize: "11.5px" }}>{s.company_type || "Company"}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </div>
-                    <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category (multiple)</label>
-                      <SearchableDropdownMultiPanel
-                        values={formCategoryIds}
-                        onChange={setFormCategoryIds}
-                        placeholder="-- Select Categories --"
-                        fetchOptions={searchFetcher("/masters/product-categories")}
-                        fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
+                        hasError={Boolean(validationErrors.company_name)}
+                        errorMessage={validationErrors.company_name}
+                        preloadedCompanies={rows}
+                        placeholder="Enter company name"
                       />
                     </div>
-                  </div>
 
-                  {/* Row 2: Company Type + Brand of Company's Products (2 columns) */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
-                    <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Company Type</label>
-                      <SearchableDropdown
-                        value={form.company_type ? form.company_type : null}
-                        onChange={(_v, label) => setField("company_type", label || _v || "")}
-                        allowCustomText={true}
-                        onTextChange={(text) => setField("company_type", text)}
-                        placeholder="Search or select supplier type..."
-                        fetchOptions={searchFetcher("/masters/supplier-types")}
-                        fetchLabelForValue={async (val) => val}
-                      />
-                    </div>
-                    <TextField id="brand_description" label="Brand of Company's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
-                  </div>
-
-
-
-                  {/* Row 3: Country + Province + City (3 columns) */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "24px" }}>
-                    <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
-                        Country <span style={{ color: "#ef4444" }}>*</span>
-                      </label>
-                      <SearchableDropdown
-                        id="field-country"
-                        hasError={Boolean(validationErrors["field-country"])}
-                        value={formCountryId}
-                        onChange={async (v) => {
-                          setFormCountryId(v);
-                          setFormStateId(null);
-                          setFormCityId(null);
-                          setFormStateCustomText("");
-                          setFormCityCustomText("");
-                          setValidationErrors((prev) => ({ ...prev, "field-country": "", "field-province": "", "field-city": "" }));
-                          const newCode = await resolveCountryPhoneCode(v);
-                          setFormCountryPhoneCode(newCode);
-                          setForm((prev) => ({
-                            ...prev,
-                            contact_calling_number: replacePhonePrefix(prev.contact_calling_number, newCode),
-                            contact_whatsapp_number: replacePhonePrefix(prev.contact_whatsapp_number, newCode),
-                            contact_wechat_number: replacePhonePrefix(prev.contact_wechat_number, newCode),
-                          }));
-                        }}
-                        placeholder="Search country..."
-                        fetchOptions={searchFetcher("/masters/countries")}
-                        fetchLabelForValue={fetchNameLabel("/masters/countries")}
-                      />
-                      {validationErrors["field-country"] && (
-                        <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
-                          <span>⚠️</span> {validationErrors["field-country"]}
-                        </div>
-                      )}
-                    </div>
-                    <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
-                        Province <span style={{ color: "#ef4444" }}>*</span>
-                      </label>
-                      <SearchableDropdown
-                        key={`field-province-${formCountryId || ""}`}
-                        id="field-province"
-                        hasError={Boolean(validationErrors["field-province"])}
-                        value={formStateId}
-                        onChange={(v, label) => {
-                          setFormStateId(v);
-                          setFormStateCustomText(v ? label : "");
-                          setFormCityId(null);
-                          setFormCityCustomText("");
-                          setValidationErrors((prev) => ({ ...prev, "field-province": "", "field-city": "" }));
-                        }}
-                        allowCustomText={true}
-                        onTextChange={(text) => {
-                          setFormStateCustomText(text);
-                          setFormStateId(null);
-                          setFormCityId(null);
-                          setFormCityCustomText("");
-                          setValidationErrors((prev) => ({ ...prev, "field-province": "", "field-city": "" }));
-                        }}
-                        placeholder="Search or type province..."
-                        fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
-                          formCountryId ? { country_id: formCountryId } : {}
-                        )}
-                        fetchLabelForValue={fetchNameLabel("/masters/states")}
-                      />
-                      {validationErrors["field-province"] && (
-                        <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
-                          <span>⚠️</span> {validationErrors["field-province"]}
-                        </div>
-                      )}
-                    </div>
-                    <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
-                        City <span style={{ color: "#ef4444" }}>*</span>
-                      </label>
-                      <SearchableDropdown
-                        key={`field-city-${formCountryId || ""}-${formStateId || ""}`}
-                        id="field-city"
-                        disabled={!formStateId}
-                        hasError={Boolean(validationErrors["field-city"])}
-                        value={formCityId}
-                        onChange={(v, label) => {
-                          setFormCityId(v);
-                          setFormCityCustomText(v ? label : "");
-                          setValidationErrors((prev) => ({ ...prev, "field-city": "" }));
-                        }}
-                        placeholder={formStateId ? "Search city from Master..." : "Select a province first..."}
-                        fetchOptions={
-                          !formStateId
-                            ? async () => []
-                            : searchFetcher("/masters/cities", (): Record<string, string> => ({
-                              state_id: formStateId,
-                            }))
-                        }
-                        fetchLabelForValue={fetchNameLabel("/masters/cities")}
-                      />
-                      {validationErrors["field-city"] && (
-                        <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
-                          <span>⚠️</span> {validationErrors["field-city"]}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <h4 style={{ fontSize: "14.5px", fontWeight: 700, margin: "0 0 14px 0", color: "#0f172a" }}>
-                    Primary Contact Information
-                  </h4>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px" }}>
-                    <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Mr. / Mrs / Ms - Full Name</label>
-                      <div style={{ display: "flex", gap: "8px" }}>
+                    <div>
+                      <label style={fieldLabelStyle}>Full Name (IndiaMart Or Other)</label>
+                      <div style={{ display: "flex", gap: "6px" }}>
                         <select
-                          value={form.contact_salutation}
+                          id="contact_salutation"
+                          style={{ ...selectStyle, width: "85px", flexShrink: 0 }}
+                          value={form.contact_salutation || "Mr"}
                           onChange={(e) => setField("contact_salutation", e.target.value)}
-                          style={{
-                            padding: "8px",
-                            fontSize: "13.5px",
-                            borderRadius: "6px",
-                            border: "1px solid #cbd5e1",
-                            background: "#ffffff",
-                            color: "#334155",
-                          }}
                         >
-                          <option value="">—</option>
-                          <option value="Mr.">Mr.</option>
-                          <option value="Mrs.">Mrs.</option>
-                          <option value="Ms.">Ms.</option>
+                          <option value="Mr">Mr</option>
+                          <option value="Ms">Ms</option>
+                          <option value="Mrs">Mrs</option>
+                          <option value="Dr">Dr</option>
                         </select>
                         <input
+                          id="contact_full_name"
                           type="text"
-                          maxLength={150}
-                          placeholder="Full Name"
+                          style={inputStyle}
+                          placeholder="Enter contact full name"
                           value={form.contact_full_name}
                           onChange={(e) => setField("contact_full_name", e.target.value)}
-                          style={{
-                            flex: 1,
-                            padding: "8px 11px",
-                            fontSize: "13.5px",
-                            borderRadius: "6px",
-                            border: "1px solid #cbd5e1",
-                            outline: "none",
-                          }}
                         />
                       </div>
                     </div>
 
-                    <TextField id="contact_designation" label="Designation" placeholder="e.g. Sales Manager" maxLength={150} value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
+                    <div>
+                      <label style={fieldLabelStyle}>Designation</label>
+                      <input
+                        id="contact_designation"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter designation"
+                        value={form.contact_designation}
+                        onChange={(e) => setField("contact_designation", e.target.value)}
+                      />
+                    </div>
 
-                    <PhoneGroupField
-                      id="field-calling-number"
-                      label="Calling Number"
-                      defaultPrefix={formCountryPhoneCode}
-                      value={form.contact_calling_number}
-                      hasError={Boolean(validationErrors["field-calling-number"] || callingNumberError)}
-                      hint={
-                        validationErrors["field-calling-number"] || callingNumberError ? (
-                          <span>
-                            <span>⚠️</span> {validationErrors["field-calling-number"] || callingNumberError}
-                          </span>
-                        ) : undefined
-                      }
-                      onChange={(val) => {
-                        setField("contact_calling_number", val);
-                        const err = validatePhoneNumber(val, "Calling number");
-                        setCallingNumberError(err);
-                        setValidationErrors((prev) => ({ ...prev, "field-calling-number": err || "" }));
-                        if (whatsappSameAsCalling) {
-                          setField("contact_whatsapp_number", val);
-                          const wErr = validatePhoneNumber(val, "WhatsApp number");
-                          setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": wErr || "" }));
-                        }
-                        if (wechatSameAsCalling) {
-                          setField("contact_wechat_number", val);
-                        }
-                      }}
-                      placeholder="13800000000"
-                    />
+                    <div>
+                      <label style={fieldLabelStyle}>
+                        GST No <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <input
+                          id="tax_id_number"
+                          type="text"
+                          maxLength={15}
+                          style={{ ...getInputStyle(Boolean(validationErrors.tax_id_number)), textTransform: "uppercase" }}
+                          placeholder="Enter 15-digit GSTIN"
+                          value={form.tax_id_number}
+                          onChange={(e) => setField("tax_id_number", e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleFullFormGstFetch}
+                          disabled={gstFetching}
+                          style={{
+                            padding: "0 12px",
+                            background: "#2563eb",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "5px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            cursor: gstFetching ? "not-allowed" : "pointer",
+                            whiteSpace: "nowrap",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          {gstFetching ? "Fetching..." : "Fetch Data"}
+                        </button>
+                      </div>
+                      {validationErrors.tax_id_number && (
+                        <div style={errorStyle}><span>⚠️</span> {validationErrors.tax_id_number}</div>
+                      )}
+                    </div>
 
-                    <PhoneGroupField
-                      id="field-whatsapp-number"
-                      defaultPrefix={formCountryPhoneCode}
-                      label={
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WhatsApp Number</span>
-                          <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 500 }}>
-                            <input
-                              type="checkbox"
-                              checked={whatsappSameAsCalling}
-                              onChange={(e) => {
-                                const checked = e.target.checked;
-                                setWhatsappSameAsCalling(checked);
-                                if (checked) {
-                                  setField("contact_whatsapp_number", form.contact_calling_number);
-                                  const wErr = validatePhoneNumber(form.contact_calling_number, "WhatsApp number");
-                                  setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": wErr || "" }));
-                                }
-                              }}
-                            />
-                            Same as calling
-                          </label>
-                        </div>
-                      }
-                      value={form.contact_whatsapp_number}
-                      hasError={Boolean(validationErrors["field-whatsapp-number"])}
-                      hint={
-                        validationErrors["field-whatsapp-number"] ? (
-                          <span>
-                            <span>⚠️</span> {validationErrors["field-whatsapp-number"]}
-                          </span>
-                        ) : undefined
-                      }
-                      onChange={(val) => {
-                        setWhatsappSameAsCalling(false);
-                        setField("contact_whatsapp_number", val);
-                        const err = validatePhoneNumber(val, "WhatsApp number");
-                        setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": err || "" }));
-                      }}
-                      placeholder="13800000000"
-                    />
+                    {/* Row 2: Contact Number (Direct), Contact Number (IndiaMart), WhatsApp Number, Company Website */}
+                    <div>
+                      <label style={fieldLabelStyle}>Contact Number (Direct)</label>
+                      <input
+                        id="contact_calling_number"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter direct number"
+                        value={form.contact_calling_number}
+                        onChange={(e) => setField("contact_calling_number", e.target.value)}
+                      />
+                    </div>
 
-                    <PhoneGroupField
-                      id="field-wechat-number"
-                      defaultPrefix={formCountryPhoneCode}
-                      label={
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WeChat Number</span>
-                          <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 500 }}>
-                            <input
-                              type="checkbox"
-                              checked={wechatSameAsCalling}
-                              onChange={(e) => {
-                                const checked = e.target.checked;
-                                setWechatSameAsCalling(checked);
-                                if (checked) setField("contact_wechat_number", form.contact_calling_number);
-                              }}
-                            />
-                            Same as calling
-                          </label>
-                        </div>
-                      }
-                      value={form.contact_wechat_number}
-                      hasError={Boolean(validationErrors["field-wechat-number"])}
-                      hint={
-                        validationErrors["field-wechat-number"] ? (
-                          <span>
-                            <span>⚠️</span> {validationErrors["field-wechat-number"]}
-                          </span>
-                        ) : undefined
-                      }
-                      onChange={(val) => {
-                        setWechatSameAsCalling(false);
-                        setField("contact_wechat_number", val);
-                        if (validationErrors["field-wechat-number"]) {
-                          setValidationErrors((prev) => ({ ...prev, "field-wechat-number": "" }));
-                        }
-                      }}
-                      placeholder="13800000000"
-                    />
+                    <div>
+                      <label style={fieldLabelStyle}>Contact Number (IndiaMart)</label>
+                      <input
+                        id="contact_indiamart_number"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter IndiaMart number"
+                        value={form.contact_indiamart_number}
+                        onChange={(e) => setField("contact_indiamart_number", e.target.value)}
+                      />
+                    </div>
 
-                    <EmailTagInput
-                      id="emails"
-                      label="Email IDs (Multiple)"
-                      emails={form.emails}
-                      onChange={(newEmails) => setForm((prev) => ({ ...prev, emails: newEmails }))}
-                      placeholder="Type email address and press Enter..."
-                    />
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                        <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>WhatsApp Number</label>
+                        <button
+                          type="button"
+                          onClick={handleCopyPrimaryFull}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#2563eb",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            padding: "0 4px",
+                            textDecoration: "underline",
+                          }}
+                        >
+                          Copy Primary
+                        </button>
+                      </div>
+                      <input
+                        id="contact_whatsapp_number"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter WhatsApp number"
+                        value={form.contact_whatsapp_number}
+                        onChange={(e) => setField("contact_whatsapp_number", e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Company Website</label>
+                      <input
+                        id="primary_website"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="https://..."
+                        value={form.primary_website}
+                        onChange={(e) => setField("primary_website", e.target.value)}
+                      />
+                    </div>
+
+                    {/* Row 3: Email (span 3), Webpage (IndiaMart Or Other) (span 1) */}
+                    <div style={{ gridColumn: "span 3" }}>
+                      <label style={fieldLabelStyle}>Email</label>
+                      <input
+                        id="email"
+                        type="email"
+                        style={inputStyle}
+                        placeholder="Enter email address"
+                        value={form.email}
+                        onChange={(e) => setField("email", e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Webpage (IndiaMart Or Other)</label>
+                      <input
+                        id="secondary_website"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter IndiaMart or other webpage"
+                        value={form.secondary_website}
+                        onChange={(e) => setField("secondary_website", e.target.value)}
+                      />
+                    </div>
+
+                    {/* Row 4: Address (span 2), Area (span 1), State * (span 1) */}
+                    <div style={{ gridColumn: "span 2" }}>
+                      <label style={fieldLabelStyle}>Address</label>
+                      <input
+                        id="address"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter full address"
+                        value={form.address}
+                        onChange={(e) => setField("address", e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Area</label>
+                      <input
+                        id="area"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter area / locality"
+                        value={form.area}
+                        onChange={(e) => setField("area", e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>
+                        State <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <SelectWithSearch
+                        id="state_id"
+                        value={form.state_id}
+                        placeholder="Select State"
+                        options={quickStates.map((s) => ({ value: s.id, label: s.name }))}
+                        hasError={Boolean(validationErrors.state_id)}
+                        onChange={(val) => {
+                          setField("state_id", val);
+                          setField("district_id", "");
+                          setField("district", "");
+                          setField("city_id", "");
+                          setFormDistricts([]);
+                          setFormCities([]);
+                          if (validationErrors.state_id) setValidationErrors((prev) => ({ ...prev, state_id: "" }));
+                        }}
+                      />
+                      {validationErrors.state_id && (
+                        <div style={errorStyle}><span>⚠️</span> {validationErrors.state_id}</div>
+                      )}
+                    </div>
+
+                    {/* Row 5: District (cascading), City * (cascading), Pincode, Empty */}
+                    <div>
+                      <label style={fieldLabelStyle}>District</label>
+                      <SelectWithSearch
+                        id="district_id"
+                        value={form.district_id}
+                        placeholder={!form.state_id ? "Select State First" : formDistricts.length === 0 ? "No Districts Found" : "Select District"}
+                        disabled={!form.state_id || formDistricts.length === 0}
+                        options={formDistricts.map((d) => ({ value: d.id, label: d.name }))}
+                        allowCustom={true}
+                        onChange={(val, lbl) => {
+                          setField("district_id", val);
+                          setField("district", lbl || val);
+                          setField("city_id", "");
+                          setFormCities([]);
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>
+                        City <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <SelectWithSearch
+                        id="city_id"
+                        value={form.city_id}
+                        placeholder={!form.district_id ? "Select District First" : formCities.length === 0 ? "No Cities Found" : "Select City"}
+                        disabled={!form.district_id || formCities.length === 0}
+                        options={formCities.map((c) => ({ value: c.id, label: c.name }))}
+                        allowCustom={true}
+                        hasError={Boolean(validationErrors.city_id)}
+                        onChange={(val) => {
+                          setField("city_id", val);
+                          if (validationErrors.city_id) setValidationErrors((prev) => ({ ...prev, city_id: "" }));
+                        }}
+                      />
+                      {validationErrors.city_id && (
+                        <div style={errorStyle}><span>⚠️</span> {validationErrors.city_id}</div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Pincode</label>
+                      <input
+                        id="pincode"
+                        type="text"
+                        maxLength={10}
+                        style={inputStyle}
+                        placeholder="Enter 6-digit pincode"
+                        value={form.pincode}
+                        onChange={(e) => setField("pincode", e.target.value)}
+                      />
+                    </div>
+
+                    <div>{/* 4th Column Spacer */}</div>
                   </div>
                 </div>
 
-                {/* SECTION 2: Company Profile & Verification Details */}
-                {modalMode === "full" && (
-                  <div style={{ marginBottom: "24px", borderTop: "1px solid #e2e8f0", paddingTop: "24px" }}>
-                    <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
-                      2. Company Profile &amp; Verification Details
-                    </h3>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "18px" }}>
-                      <TextField id="tax_id_number" label="Tax ID Number" maxLength={100} value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
-                      <TextField id="address" label="Address" maxLength={500} value={form.address} onChange={(v) => setField("address", v)} />
-                      <TextField id="town" label="Town" maxLength={150} value={form.town} onChange={(v) => setField("town", v)} />
-                      <WebsiteField id="primary_website" label="Primary Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />
-                      <WebsiteField id="secondary_website" label="Secondary Website" placeholder="https://..." value={form.secondary_website} onChange={(v) => setField("secondary_website", v)} />
-                      <SelectField id="company_grade" label="Company Grade" value={form.company_grade} onChange={(v) => setField("company_grade", v)}>
-                        <option value="">Select Grade</option>
-                        <option value="A">Grade A</option>
-                        <option value="B">Grade B</option>
-                        <option value="C">Grade C</option>
-                      </SelectField>
-                      <SelectField id="current_status" label="Current Status" value={form.current_status} onChange={(v) => setField("current_status", v)}>
+                {/* SECTION 2: Other Details */}
+                <div style={{ marginBottom: "28px" }}>
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 700,
+                      color: "#1e293b",
+                      marginBottom: "18px",
+                      paddingBottom: "8px",
+                      borderBottom: "1px solid #e2e8f0",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span>📋</span> Other Details
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(4, 1fr)",
+                      gap: "16px",
+                      marginBottom: "16px",
+                    }}
+                  >
+                    {/* Row 1: Current Status, Business Type, Category, Client Grade */}
+                    <div>
+                      <label style={fieldLabelStyle}>Current Status</label>
+                      <select
+                        id="current_status"
+                        style={selectStyle}
+                        value={form.current_status}
+                        onChange={(e) => setField("current_status", e.target.value)}
+                      >
                         <option value="">Select</option>
-                        <option value="new" disabled={lockNewStatus}>New</option>
+                        <option value="new">New</option>
                         <option value="existing">Existing</option>
-                      </SelectField>
-                      <SelectField id="potential" label="Potential (Yes / No)" value={form.potential} onChange={(v) => setField("potential", v)}>
-                        <option value="">Select Potential</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                      </SelectField>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
-                      <TextAreaField
-                        id="potential_reason"
-                        label="Reason for Potential Status"
-                        placeholder="Explain why..."
-                        rows={2}
-                        value={form.potential_reason}
-                        onChange={(v) => setField("potential_reason", v)}
+                    <div>
+                      <label style={fieldLabelStyle}>Business Type</label>
+                      <select
+                        id="company_type"
+                        style={selectStyle}
+                        value={form.company_type}
+                        onChange={(e) => setField("company_type", e.target.value)}
+                      >
+                        <option value="">Select</option>
+                        <option value="Manufacturer">Manufacturer</option>
+                        <option value="Trader">Trader</option>
+                        <option value="Dealer">Dealer</option>
+                        <option value="Agent">Agent</option>
+                        <option value="Exporter">Exporter</option>
+                        <option value="Wholesaler">Wholesaler</option>
+                        <option value="Distributor">Distributor</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Category</label>
+                      <select
+                        id="category_id"
+                        style={selectStyle}
+                        value={form.category_id}
+                        onChange={(e) => setField("category_id", e.target.value)}
+                      >
+                        <option value="">Select Category</option>
+                        {productCategories.map((pc) => (
+                          <option key={pc.id} value={pc.id}>
+                            {pc.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Client Grade</label>
+                      <select
+                        id="company_grade"
+                        style={selectStyle}
+                        value={form.company_grade}
+                        onChange={(e) => setField("company_grade", e.target.value)}
+                      >
+                        <option value="">Select</option>
+                        <option value="Grade A">Grade A</option>
+                        <option value="Grade B">Grade B</option>
+                        <option value="Grade C">Grade C</option>
+                      </select>
+                    </div>
+
+                    {/* Row 2: Potential, Business Categories, Product They Manufacture Or Supply, Machines Currently Buying From */}
+                    <div>
+                      <label style={fieldLabelStyle}>Potential</label>
+                      <select
+                        id="potential"
+                        style={selectStyle}
+                        value={form.potential}
+                        onChange={(e) => setField("potential", e.target.value)}
+                      >
+                        <option value="">Select</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Business Categories</label>
+                      <select
+                        id="company_category"
+                        style={selectStyle}
+                        value={form.company_category}
+                        onChange={(e) => setField("company_category", e.target.value)}
+                      >
+                        <option value="">Select Business Category</option>
+                        {companyCategories.map((cc) => (
+                          <option key={cc.id} value={cc.name}>
+                            {cc.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Product They Manufacture Or Supply</label>
+                      <input
+                        id="product_manufacture_or_supply"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter products manufactured / supplied"
+                        value={form.product_manufacture_or_supply}
+                        onChange={(e) => setField("product_manufacture_or_supply", e.target.value)}
                       />
-                      <TextAreaField
-                        id="secondary_products_description"
-                        label="Secondary Products Description"
-                        placeholder="Secondary products..."
-                        rows={2}
-                        value={form.secondary_products_description}
-                        onChange={(v) => setField("secondary_products_description", v)}
+                    </div>
+
+                    <div>
+                      <label style={fieldLabelStyle}>Machines Currently Buying From</label>
+                      <input
+                        id="machines_buying_from"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter suppliers / machines"
+                        value={form.machines_buying_from}
+                        onChange={(e) => setField("machines_buying_from", e.target.value)}
                       />
                     </div>
 
-                    <div style={{ marginBottom: "18px" }}>
-                      <SelectField id="visited_factory_office" label="Visited Factory / Office?" value={String(form.visited_factory_office).toLowerCase() === "true" ? "true" : "false"} onChange={(v) => setField("visited_factory_office", v)}>
-                        <option value="false">No</option>
-                        <option value="true">Yes</option>
-                      </SelectField>
+                    {/* Row 3: Spares Currently Buying From, Products Interested To Buy From Us, GST Registration Date, Age Of Company */}
+                    <div>
+                      <label style={fieldLabelStyle}>Spares Currently Buying From</label>
+                      <input
+                        id="spares_buying_from"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter spares suppliers"
+                        value={form.spares_buying_from}
+                        onChange={(e) => setField("spares_buying_from", e.target.value)}
+                      />
                     </div>
 
-                    {String(form.visited_factory_office).toLowerCase() === "true" && (
-                      <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "18px" }}>
-                        <div style={{ marginBottom: "16px" }}>
-                          <TextField
-                            id="visit_remarks"
-                            label="Visit Remarks / Summary"
-                            placeholder="Key observations from factory/office visit..."
-                            value={form.visit_remarks}
-                            onChange={(v) => setField("visit_remarks", v)}
-                          />
-                        </div>
+                    <div>
+                      <label style={fieldLabelStyle}>Products Interested To Buy From Us</label>
+                      <input
+                        id="products_interested"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="Enter interested products"
+                        value={form.products_interested}
+                        onChange={(e) => setField("products_interested", e.target.value)}
+                      />
+                    </div>
 
-                        <div style={{ marginBottom: "16px" }}>
-                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
-                            Visit Photos (Factory / Office)
-                          </label>
-                          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
-                            <label
-                              className="btn btn-small"
-                              style={{
-                                background: "#0061f2",
-                                color: "#ffffff",
-                                border: "none",
-                                borderRadius: "6px",
-                                padding: "7px 14px",
-                                fontWeight: 600,
-                                fontSize: "12.5px",
-                                cursor: uploadingMedia ? "not-allowed" : "pointer",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "6px",
-                              }}
-                            >
-                              📁 {uploadingMedia ? "Uploading..." : "Select Photos"}
-                              <input
-                                type="file"
-                                multiple
-                                accept="image/*"
-                                onChange={(e) => void handleMediaFileUpload(e.target.files)}
-                                disabled={uploadingMedia}
-                                style={{ display: "none" }}
-                              />
-                            </label>
-                            {uploadingMedia && (
-                              <span style={{ fontSize: "12px", color: "#64748b" }}>
-                                Uploading photos, please wait...
-                              </span>
-                            )}
-                          </div>
+                    <div>
+                      <label style={fieldLabelStyle}>GST Registration Date</label>
+                      <input
+                        id="gst_registration_date"
+                        type="date"
+                        style={inputStyle}
+                        value={form.gst_registration_date}
+                        onChange={(e) => setField("gst_registration_date", e.target.value)}
+                      />
+                    </div>
 
-                          {mediaList.length > 0 && (
-                            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "8px" }}>
-                              {mediaList.map((url, idx) => (
-                                <div
-                                  key={idx}
-                                  style={{
-                                    position: "relative",
-                                    width: "100px",
-                                    height: "80px",
-                                    borderRadius: "6px",
-                                    overflow: "hidden",
-                                    border: "1px solid #cbd5e1",
-                                    background: "#ffffff",
-                                  }}
-                                >
-                                  <img
-                                    src={resolveImageUrl(url)}
-                                    alt={`Visit photo ${idx + 1}`}
-                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => removeMediaUrl(url)}
-                                    title="Remove photo"
-                                    style={{
-                                      position: "absolute",
-                                      top: "4px",
-                                      right: "4px",
-                                      width: "22px",
-                                      height: "22px",
-                                      borderRadius: "50%",
-                                      background: "rgba(239, 68, 68, 0.9)",
-                                      color: "#ffffff",
-                                      border: "none",
-                                      cursor: "pointer",
-                                      fontSize: "12px",
-                                      fontWeight: 700,
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                                    }}
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                    <div>
+                      <label style={fieldLabelStyle}>Age Of Company</label>
+                      <input
+                        id="age_of_company"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="e.g. 5 Years"
+                        value={form.age_of_company}
+                        onChange={(e) => setField("age_of_company", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
 
-                        <div>
-                          <TextField
-                            id="visit_video_url"
-                            label="Factory Video / Inspection Folder Link (Optional)"
-                            placeholder="https://... (e.g. OneDrive, SharePoint, Google Drive, or Video URL)"
-                            value={form.visit_video_url}
-                            onChange={(v) => setField("visit_video_url", v)}
-                          />
-                        </div>
+                {/* SECTION 3: Social Media Details */}
+                <div style={{ marginBottom: "28px" }}>
+                  <div
+                    style={{
+                      fontSize: "15px",
+                      fontWeight: 700,
+                      color: "#1e293b",
+                      marginBottom: "18px",
+                      paddingBottom: "8px",
+                      borderBottom: "1px solid #e2e8f0",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span>🌐</span> Social Media Details
+                  </div>
+
+                  <div>
+                    {(form.social_media || []).map((sm, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          display: "flex",
+                          gap: "12px",
+                          alignItems: "center",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        <select
+                          style={{ ...selectStyle, width: "200px", flexShrink: 0 }}
+                          value={sm.platform}
+                          onChange={(e) => handleUpdateSocialMedia(idx, "platform", e.target.value)}
+                        >
+                          <option value="">Select Platform</option>
+                          <option value="LinkedIn">LinkedIn</option>
+                          <option value="Facebook">Facebook</option>
+                          <option value="Instagram">Instagram</option>
+                          <option value="Twitter">Twitter / X</option>
+                          <option value="YouTube">YouTube</option>
+                          <option value="Website">Website</option>
+                          <option value="WhatsApp">WhatsApp</option>
+                          <option value="Other">Other</option>
+                        </select>
+                        <input
+                          type="text"
+                          style={{ ...inputStyle, flex: 1 }}
+                          placeholder="Enter your link..."
+                          value={sm.url}
+                          onChange={(e) => handleUpdateSocialMedia(idx, "url", e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSocialMedia(idx)}
+                          title="Remove row"
+                          style={{
+                            width: "36px",
+                            height: "36px",
+                            borderRadius: "5px",
+                            border: "1px solid #fecaca",
+                            background: "#fef2f2",
+                            color: "#ef4444",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "14px",
+                            flexShrink: 0,
+                          }}
+                        >
+                          🗑
+                        </button>
                       </div>
-                    )}
-
-                    <div style={{ marginBottom: "16px" }}>
-                      <TextAreaField id="overall_remarks" label="Overall Remarks / Key Strengths" rows={2} value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
-                    </div>
-                  </div>
-                )}
-
-                {Boolean(error) && (
-                  <div style={{ marginTop: "20px" }}>
-                    <Banner error={error} />
-                  </div>
-                )}
-
-                {/* FORM FOOTER ACTION BUTTONS */}
-                <div style={{ paddingTop: "24px", marginTop: "28px", borderTop: "1px solid #e2e8f0", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
-                  <button type="button" className="btn" onClick={closeModal} style={{ background: "#ffffff", border: "1px solid #cbd5e1", color: "#475569", padding: "10px 20px", borderRadius: "6px", fontWeight: 600, fontSize: "14px" }}>
-                    Cancel
-                  </button>
-                  {modalMode === "quick" ? (
-                    <>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={saving}
-                        style={{
-                          background: "#ffffff",
-                          border: "1px solid #cbd5e1",
-                          color: "#334155",
-                          padding: "10px 24px",
-                          borderRadius: "6px",
-                          fontWeight: 600,
-                          fontSize: "14px",
-                          cursor: saving ? "not-allowed" : "pointer",
-                          opacity: saving ? 0.7 : 1,
-                        }}
-                        onClick={handleSaveAndExit}
-                      >
-                        {saving ? "Saving..." : "Save & Exit"}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={saving}
-                        style={{
-                          background: "#0061f2",
-                          color: "#ffffff",
-                          padding: "10px 24px",
-                          borderRadius: "6px",
-                          fontWeight: 600,
-                          fontSize: "14px",
-                          border: "none",
-                          cursor: saving ? "not-allowed" : "pointer",
-                          opacity: saving ? 0.7 : 1,
-                          boxShadow: "0 2px 6px rgba(0, 97, 242, 0.25)",
-                        }}
-                        onClick={handleSaveAndContinue}
-                      >
-                        {saving ? "Saving..." : "Save & Continue"}
-                      </button>
-                    </>
-                  ) : (
+                    ))}
                     <button
                       type="button"
-                      className="btn"
-                      disabled={saving}
+                      onClick={handleAddSocialMedia}
                       style={{
-                        background: "#0061f2",
-                        color: "#ffffff",
-                        padding: "10px 24px",
+                        padding: "6px 14px",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        color: "#2563eb",
+                        background: "#eff6ff",
+                        border: "1px solid #bfdbfe",
+                        borderRadius: "5px",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        marginTop: "4px",
+                      }}
+                    >
+                      + Add Social Media
+                    </button>
+                  </div>
+                </div>
+
+                {/* SECTION 4: Remarks, Sales Person & Bottom Action Controls */}
+                <div style={{ marginBottom: "16px" }}>
+                  <div style={{ marginBottom: "16px" }}>
+                    <label style={fieldLabelStyle}>Overall Observations / Remarks / Key Strengths</label>
+                    <textarea
+                      id="overall_remarks"
+                      rows={3}
+                      style={{ ...inputStyle, resize: "vertical" }}
+                      placeholder="Enter overall observations, remarks, or key strengths..."
+                      value={form.overall_remarks}
+                      onChange={(e) => setField("overall_remarks", e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ maxWidth: "350px", marginBottom: "20px" }}>
+                    <label style={fieldLabelStyle}>Sales Person</label>
+                    <select
+                      id="sales_person_id"
+                      style={selectStyle}
+                      value={form.sales_person_id}
+                      onChange={(e) => setField("sales_person_id", e.target.value)}
+                    >
+                      <option value="">Select Sales Person</option>
+                      {salesPersons.map((sp) => (
+                        <option key={sp.id} value={sp.id}>
+                          {sp.full_name || sp.username}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {formAlert && (
+                    <div
+                      style={{
+                        padding: "10px 14px",
+                        borderRadius: "6px",
+                        fontSize: "13px",
+                        marginBottom: "16px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        background: formAlert.type === "error" ? "#fef2f2" : "#eff6ff",
+                        color: formAlert.type === "error" ? "#b91c1c" : "#1d4ed8",
+                        border: `1px solid ${formAlert.type === "error" ? "#fecaca" : "#bfdbfe"}`,
+                      }}
+                    >
+                      <span>{formAlert.type === "error" ? "⚠️" : "ℹ️"}</span>
+                      <span>{formAlert.message}</span>
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: "12px",
+                      borderTop: "1px solid #f1f5f9",
+                      paddingTop: "20px",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={closeModal}
+                      style={{
+                        padding: "10px 22px",
+                        background: "#ffffff",
+                        color: "#475569",
+                        border: "1px solid #cbd5e1",
                         borderRadius: "6px",
                         fontWeight: 600,
                         fontSize: "14px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      style={{
+                        padding: "10px 28px",
+                        background: "#2563eb",
+                        color: "#ffffff",
                         border: "none",
+                        borderRadius: "6px",
+                        fontWeight: 700,
+                        fontSize: "14px",
                         cursor: saving ? "not-allowed" : "pointer",
                         opacity: saving ? 0.7 : 1,
-                        boxShadow: "0 2px 6px rgba(0, 97, 242, 0.25)",
+                        boxShadow: "0 2px 6px rgba(37,99,235,0.25)",
                       }}
-                      onClick={handleSaveAndExit}
                     >
-                      {saving ? "Saving..." : (currentCompanyId ? "Save Changes" : "Save Company")}
+                      {saving ? "Saving..." : (currentCompanyId ? "Update & Exit" : "Save & Exit")}
                     </button>
-                  )}
+                  </div>
                 </div>
               </form>
             )}
@@ -5159,28 +5450,39 @@ export function CompaniesPage() {
               <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "5px" }}>
                 Company Name <span style={{ color: "#ef4444" }}>*</span>
               </label>
-              <input
+              <CompanyNameAutocomplete
                 id="quick_company_name"
-                type="text"
-                style={{
-                  width: "100%",
-                  height: "36px",
-                  border: quickErrors.company_name ? "1px solid #ef4444" : "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  padding: "0 10px",
-                  fontSize: "13.5px",
-                  boxSizing: "border-box",
-                  outline: "none",
-                }}
                 value={quickForm.company_name}
-                onChange={(e) => {
-                  setQuickForm((p) => ({ ...p, company_name: e.target.value }));
+                onChange={(val) => {
+                  setQuickForm((p) => ({ ...p, company_name: val }));
                   if (quickErrors.company_name) setQuickErrors((p) => ({ ...p, company_name: "" }));
                 }}
+                onSelectCompany={(comp) => {
+                  setQuickForm((p) => ({
+                    ...p,
+                    company_name: comp.company_name,
+                    company_type: comp.company_type || p.company_type,
+                    tax_id_number: comp.tax_id_number || p.tax_id_number,
+                    area: comp.area || p.area,
+                    state_id: comp.state_id || p.state_id,
+                    district: comp.district || p.district,
+                    city_id: comp.city_id || p.city_id,
+                    contact_salutation: comp.contact_salutation || p.contact_salutation,
+                    contact_full_name: comp.contact_full_name || p.contact_full_name,
+                    contact_designation: comp.contact_designation || p.contact_designation,
+                    contact_calling_number: comp.contact_calling_number || p.contact_calling_number,
+                    contact_whatsapp_number: comp.contact_whatsapp_number || p.contact_whatsapp_number,
+                    contact_indiamart_number: comp.contact_indiamart_number || p.contact_indiamart_number,
+                    primary_website: comp.primary_website || p.primary_website,
+                    sales_person_id: comp.sales_person_id || p.sales_person_id,
+                  }));
+                  if (quickErrors.company_name) setQuickErrors((p) => ({ ...p, company_name: "" }));
+                }}
+                hasError={Boolean(quickErrors.company_name)}
+                errorMessage={quickErrors.company_name}
+                preloadedCompanies={rows}
+                placeholder="Enter company name"
               />
-              {quickErrors.company_name && (
-                <div style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "3px" }}>{quickErrors.company_name}</div>
-              )}
             </div>
 
             {/* 2. Business Type */}
@@ -5208,6 +5510,7 @@ export function CompaniesPage() {
               <div style={{ display: "flex", gap: "6px", width: "100%", minWidth: 0 }}>
                 <input
                   type="text"
+                  autoComplete="off"
                   style={{
                     flex: 1,
                     minWidth: 0,
@@ -5259,6 +5562,7 @@ export function CompaniesPage() {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 style={{
                   width: "100%",
                   height: "36px",
@@ -5286,7 +5590,7 @@ export function CompaniesPage() {
                 options={quickStates.map((s) => ({ value: s.id, label: s.name }))}
                 hasError={Boolean(quickErrors.state_id)}
                 onChange={(stateId) => {
-                  setQuickForm((p) => ({ ...p, state_id: stateId, city_id: "" }));
+                  setQuickForm((p) => ({ ...p, state_id: stateId, district: "", city_id: "" }));
                   if (quickErrors.state_id) setQuickErrors((p) => ({ ...p, state_id: "" }));
                 }}
               />
@@ -5303,10 +5607,11 @@ export function CompaniesPage() {
               <SelectWithSearch
                 id="quick_district"
                 value={quickForm.district}
-                placeholder="Select"
+                placeholder={!quickForm.state_id ? "Select State First" : "Select"}
                 options={quickDistricts.map((d) => ({ value: d.name, label: d.name }))}
                 allowCustom={true}
-                onChange={(val, lbl) => setQuickForm((p) => ({ ...p, district: lbl || val }))}
+                disabled={!quickForm.state_id}
+                onChange={(val, lbl) => setQuickForm((p) => ({ ...p, district: lbl || val, city_id: "" }))}
               />
             </div>
 
@@ -5318,8 +5623,14 @@ export function CompaniesPage() {
               <SelectWithSearch
                 id="quick_city_id"
                 value={quickForm.city_id}
-                placeholder="Select"
-                options={quickCities.map((c) => ({ value: c.id, label: c.name }))}
+                placeholder={!quickForm.district ? "Select District First" : "Select"}
+                disabled={!quickForm.district}
+                options={!quickForm.district ? [] : quickCities
+                  .filter((c: any) => {
+                    const matchedDist = quickDistricts.find((d) => d.name.toLowerCase() === quickForm.district.toLowerCase());
+                    return !c.district_id || (matchedDist && c.district_id === matchedDist.id);
+                  })
+                  .map((c) => ({ value: c.id, label: c.name }))}
                 allowCustom={true}
                 onChange={async (cityVal, cityLabel) => {
                   await handleQuickCitySelectOrCustom(cityVal, cityLabel);
@@ -5355,6 +5666,7 @@ export function CompaniesPage() {
                 </select>
                 <input
                   type="text"
+                  autoComplete="off"
                   style={{
                     flex: 1,
                     minWidth: 0,
@@ -5379,6 +5691,7 @@ export function CompaniesPage() {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 style={{
                   width: "100%",
                   height: "36px",
@@ -5401,6 +5714,7 @@ export function CompaniesPage() {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 style={{
                   width: "100%",
                   height: "36px",
@@ -5423,6 +5737,7 @@ export function CompaniesPage() {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 style={{
                   width: "100%",
                   height: "36px",
@@ -5463,6 +5778,7 @@ export function CompaniesPage() {
               </div>
               <input
                 type="text"
+                autoComplete="off"
                 style={{
                   width: "100%",
                   height: "36px",
@@ -5485,6 +5801,7 @@ export function CompaniesPage() {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 style={{
                   width: "100%",
                   height: "36px",

@@ -157,6 +157,7 @@ export function ErpRegistry() {
             />
             <input
               type="text"
+              autoComplete="off"
               className="form-input"
               style={{ paddingLeft: "32px", height: "36px", width: "100%" }}
               placeholder="Search ERPs by name or key..."

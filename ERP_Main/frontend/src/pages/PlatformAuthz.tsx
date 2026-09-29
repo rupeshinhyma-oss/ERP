@@ -387,6 +387,7 @@ export function PlatformAuthz() {
               </span>
               <input
                 type="text"
+                autoComplete="off"
                 className="form-input"
                 placeholder="Search platform roles..."
                 style={{ paddingLeft: "32px", height: "36px", fontSize: "13px", width: "100%" }}
@@ -1077,6 +1078,7 @@ export function PlatformAuthz() {
             <input
               id="new-role-key"
               type="text"
+              autoComplete="off"
               className="form-input"
               placeholder="e.g. AUDITOR, SECURITY_ADMIN"
               value={newRoleKey}
@@ -1095,6 +1097,7 @@ export function PlatformAuthz() {
             <input
               id="new-role-name"
               type="text"
+              autoComplete="off"
               className="form-input"
               placeholder="e.g. Compliance Auditor"
               value={newRoleName}
@@ -1135,6 +1138,7 @@ export function PlatformAuthz() {
             <input
               id="edit-role-name"
               type="text"
+              autoComplete="off"
               className="form-input"
               value={editRoleName}
               onChange={(e) => setEditRoleName(e.target.value)}

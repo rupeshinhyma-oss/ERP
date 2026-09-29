@@ -66,9 +66,15 @@ import { Reporting } from "./pages/Reporting";
 // Settings & Utilities
 import { SettingsHub } from "./pages/SettingsHub";
 import { Forbidden } from "./pages/Forbidden";
+import { initGlobalAutocompleteBlocker } from "./lib/autocompleteBlocker";
 
 export function App() {
   const navigate = useNavigate();
+
+  // Globally suppress intrusive browser autocomplete/autofill bubbles across all inputs
+  useEffect(() => {
+    return initGlobalAutocompleteBlocker();
+  }, []);
 
   // Process incoming cross-ERP SSO handover immediately on load. Only a
   // genuine fresh auto-login ("logged-in") should redirect to /dashboard;

@@ -41,13 +41,30 @@ All three systems connect to separate, isolated databases on **Supabase PostgreS
 
 ## 3. Project Documentation Library
 
-All comprehensive documentation is located in the **[`docs/`](docs/)** directory:
+Documentation is distributed across each dedicated system repository:
 
-- **[Master Technical Reference Manual](docs/MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md)** — Exhaustive documentation covering system architecture, boundary invariants, features of all 3 ERPs, cross-system workflows, CI/CD, and operational recovery.
-- **[Disaster Recovery Plan](docs/DISASTER_RECOVERY_PLAN.md)** — Recovery playbooks for Scenarios A through F (ERP_Main outage, partner ERP outages, database cloud outage, failed deployments, data corruption) with RTO < 15 min, RPO < 1 min.
-- **[Operational Runbooks](docs/OPERATIONAL_RUNBOOKS.md)** — SRE procedures RB-01 through RB-07 (deployment, migration, rollback, PITR drill, DLQ replay, key rotation, worker incident recovery).
-- **[Final Production Readiness Report](FINAL_PRODUCTION_READINESS_REPORT.md)** — Definitive 27-area readiness matrix and production sign-off (`PRODUCTION READY WITH DOCUMENTED RISKS`).
-- **[Production Readiness Gaps](PRODUCTION_READINESS_GAPS.md)** — Risk register and mitigation plans.
+### A. Central Control Plane (`ERP_Main`)
+Located in **[`ERP_Main/docs/`](ERP_Main/docs/)**:
+- **[System Architecture & Design](ERP_Main/docs/SYSTEM_ARCHITECTURE_AND_DESIGN.md)** — Control plane topology, OIDC authority, JWKS key management, and projections engine.
+- **[API Design & Endpoints](ERP_Main/docs/API_DESIGN_AND_ENDPOINTS.md)** — Complete endpoint reference for central auth, global users, roles, registry, and OIDC.
+- **[Changelog & Function Changes](ERP_Main/docs/CHANGELOG_AND_FUNCTION_CHANGES.md)** — Detailed history of updates, autocomplete blocker, wheel lockout, and access governance.
+- **[Disaster Recovery & Runbooks](ERP_Main/docs/DISASTER_RECOVERY_AND_RUNBOOKS.md)** — Operational recovery playbooks and key rotation procedures.
+
+### B. India Distribution & Production (`Inhyma_ERP`)
+Located in **[`Inhyma_ERP/doc/`](Inhyma_ERP/doc/)**:
+- **[System Architecture & Design](Inhyma_ERP/doc/SYSTEM_ARCHITECTURE_AND_DESIGN.md)** — Distribution topology, B2B company intelligence, and cascading geography.
+- **[API Design & Endpoints](Inhyma_ERP/doc/API_DESIGN_AND_ENDPOINTS.md)** — REST API specifications for Companies, Masters, Inventory, and Technical Tasks.
+- **[Changelog & Function Changes](Inhyma_ERP/doc/CHANGELOG_AND_FUNCTION_CHANGES.md)** — Chronological release history, company intelligence, and cascading resolution.
+- **[Complete Living Technical Manual](Inhyma_ERP/doc/SYSTEM_DOCUMENTATION.md)** — Exhaustive 15-section technical manual.
+- **[Modules & Features Test Manual](Inhyma_ERP/MODULES_AND_FEATURES_TEST_MANUAL.md)** — 40-section QA test catalog.
+
+### C. China Procurement & Sourcing (`Yinglima_ERP`)
+Located in **[`Yinglima_ERP/doc/`](Yinglima_ERP/doc/)**:
+- **[System Architecture & Design](Yinglima_ERP/doc/SYSTEM_ARCHITECTURE_AND_DESIGN.md)** — China sourcing engine, AI quotation extractor, and shipment planning sheets.
+- **[API Design & Endpoints](Yinglima_ERP/doc/API_DESIGN_AND_ENDPOINTS.md)** — REST API specifications for Suppliers, Inquiries, and Planning.
+- **[Changelog & Function Changes](Yinglima_ERP/doc/CHANGELOG_AND_FUNCTION_CHANGES.md)** — Release history, outbox delivery, and session synchronization.
+- **[Complete Living Technical Manual](Yinglima_ERP/doc/SYSTEM_DOCUMENTATION.md)** — Comprehensive technical reference manual.
+- **[Modules & Features Test Manual](Yinglima_ERP/MODULES_AND_FEATURES_TEST_MANUAL.md)** — Comprehensive QA test manual.
 
 ---
 
@@ -106,15 +123,5 @@ cd Inhyma_ERP/backend && python server.py
 ```bash
 docker compose -f docker-compose.prod.yml up -d
 ```
-
----
-
-## 4. Documentation & Changelogs
-
-- **[SYSTEM_CHANGES_AND_FEATURES_DOCUMENTATION.md](docs/SYSTEM_CHANGES_AND_FEATURES_DOCUMENTATION.md)** — **Latest System Changes & Architecture Manual (September 26, 2026)** covering unified ERP Access Grants, true spoke deprovisioning, single-ERP direct routing, multi-ERP switcher resolution, and identity isolation.
-- **[MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md](docs/MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md)** — Master technical reference manual for the entire multi-ERP ecosystem.
-- **[UPDATED_CHANGELOG_AND_MERGE_REPORT.md](docs/UPDATED_CHANGELOG_AND_MERGE_REPORT.md)** — Ecosystem changelogs, git merge status, and component health.
-- **[DISASTER_RECOVERY_PLAN.md](docs/DISASTER_RECOVERY_PLAN.md)** — DR playbooks for operational incidents.
-- **[OPERATIONAL_RUNBOOKS.md](docs/OPERATIONAL_RUNBOOKS.md)** — Standard operating procedures and deployment runbooks.
 
 

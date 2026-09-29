@@ -87,8 +87,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     engine = get_engine()
     try:
         from sqlalchemy import text
+        from app.database.base import Base
+        from app.leads.models import Lead
         async with engine.begin() as conn:
             await conn.execute(text("ALTER TABLE products ADD COLUMN organization_ids JSON;"))
+            await conn.run_sync(Base.metadata.create_all, tables=[Lead.__table__])
     except Exception:
         pass
 

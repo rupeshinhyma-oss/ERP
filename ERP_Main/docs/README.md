@@ -1,22 +1,37 @@
 # ERP_Main — Documentation Index
 
-Welcome to the documentation directory for **ERP_Main** (Global Control Plane, Identity Provider & Analytical Projection Hub).
+Welcome to the dedicated documentation directory for **ERP_Main** (Global Control Plane, Identity Provider & Analytical Projection Hub).
 
 ---
 
-## Central Multi-ERP Documentation
+## Technical Specifications & Guides
 
-- 🌐 **[Master Multi-ERP Ecosystem Documentation](../../docs/MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md)**:
-  - Unified multi-ERP architecture (`ERP_Main`, `Yinglima_ERP`, `Inhyma_ERP`).
-  - Supabase PostgreSQL connection pooling, budgeting, and disaster recovery.
-  - OpenID Connect (OIDC) federation, transactional outbox streaming, and global projections.
-- 📕 **[Disaster Recovery Plan](../../docs/DISASTER_RECOVERY_PLAN.md)**
-- 📗 **[Operational Runbooks](../../docs/OPERATIONAL_RUNBOOKS.md)**
+- 🏛️ **[System Architecture & Design](SYSTEM_ARCHITECTURE_AND_DESIGN.md)**:
+  - System topology, control plane role, and directory layout.
+  - Central OIDC identity authority, JWKS key management, and ecosystem sessions.
+  - Global user access governance, direct access grants, and conditional routing.
+  - Materialized projections engine and architectural invariants.
+
+- 🔌 **[API Design & Endpoints](API_DESIGN_AND_ENDPOINTS.md)**:
+  - Complete endpoint reference for authentication, global users, and roles.
+  - ERP instance registry and spoke discovery endpoints.
+  - OpenID Connect federation endpoints and JWKS.
+  - Event ingestion and asynchronous export engine.
+
+- 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
+  - Chronological history of functional updates and bug fixes.
+  - Global autocomplete & autofill blocker implementation (`autocompleteBlocker.ts`).
+  - Wheel scroll value lockout and spin-button removal.
+  - Access governance unification and true spoke user deprovisioning.
+
+- 🛡️ **[Disaster Recovery & Operational Runbooks](DISASTER_RECOVERY_AND_RUNBOOKS.md)**:
+  - High availability failure playbooks (control plane and cloud database outages).
+  - Standard operating procedures for key rotation and emergency deprovisioning.
 
 ---
 
-## Phase Delivery Reports
+## Historical Phase Delivery Reports
 
-- **[PHASE_7_BACKEND_COMPLETION.md](PHASE_7_BACKEND_COMPLETION.md)**: Phase 7 backend implementation details.
-- **[PHASE_7_FRONTEND_DELIVERY_REPORT.md](PHASE_7_FRONTEND_DELIVERY_REPORT.md)**: Phase 7 UI delivery and Vitest test suite.
-- **[PHASE_3_DELIVERY_REPORT.md](PHASE_3_DELIVERY_REPORT.md)**: Phase 3 global identity and service credentials delivery.
+- **[PHASE_7_BACKEND_COMPLETION.md](PHASE_7_BACKEND_COMPLETION.md)**: Backend completion summary.
+- **[PHASE_7_FRONTEND_DELIVERY_REPORT.md](PHASE_7_FRONTEND_DELIVERY_REPORT.md)**: Frontend delivery summary.
+- **[PHASE_3_DELIVERY_REPORT.md](PHASE_3_DELIVERY_REPORT.md)**: Global identity delivery report.

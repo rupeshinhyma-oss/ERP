@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 
 export interface ComboboxProps {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   options: string[];
@@ -9,9 +10,11 @@ export interface ComboboxProps {
   disabled?: boolean;
   style?: React.CSSProperties;
   inputStyle?: React.CSSProperties;
+  required?: boolean;
 }
 
 export function Combobox({
+  id,
   value,
   onChange,
   options,
@@ -20,6 +23,7 @@ export function Combobox({
   disabled = false,
   style,
   inputStyle,
+  required,
 }: ComboboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -128,8 +132,10 @@ export function Combobox({
       style={{ position: "relative", width: "100%", ...style }}
     >
       <input
+        id={id}
         ref={inputRef}
         type="text"
+        required={required}
         aria-label={ariaLabel}
         placeholder={placeholder}
         value={query}
@@ -144,17 +150,18 @@ export function Combobox({
         onKeyDown={handleKeyDown}
         style={{
           width: "100%",
-          height: "36px",
-          border: isOpen ? "1px solid #3b82f6" : "1px solid #cbd5e1",
-          borderRadius: "4px",
-          padding: "0 28px 0 10px",
-          fontSize: "13px",
-          background: "#ffffff",
-          color: "#1e293b",
+          height: "38px",
+          border: isOpen ? "1px solid #0061f2" : "1px solid #cbd5e1",
+          borderRadius: "6px",
+          padding: "0 32px 0 12px",
+          fontSize: "13.5px",
+          background: disabled ? "#f8fafc" : "#ffffff",
+          color: disabled ? "#94a3b8" : "#1e293b",
           outline: "none",
-          boxShadow: isOpen ? "0 0 0 2px rgba(59, 130, 246, 0.15)" : "none",
+          boxShadow: isOpen ? "0 0 0 2px rgba(0, 97, 242, 0.15)" : "none",
           cursor: disabled ? "not-allowed" : "text",
           transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+          boxSizing: "border-box",
           ...inputStyle,
         }}
       />
@@ -162,6 +169,7 @@ export function Combobox({
       {/* Dropdown toggle button */}
       <button
         type="button"
+        id={id ? `${id}-toggle` : undefined}
         aria-label={ariaLabel ? `Toggle ${ariaLabel} options` : "Toggle options"}
         disabled={disabled}
         tabIndex={-1}
@@ -180,7 +188,7 @@ export function Combobox({
           right: "1px",
           top: "1px",
           bottom: "1px",
-          width: "28px",
+          width: "32px",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

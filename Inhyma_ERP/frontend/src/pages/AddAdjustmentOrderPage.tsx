@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
 import { InventoryApi } from "@/lib/api";
 import { INITIAL_STOCK_ITEMS } from "@/pages/ProductStockPage";
 import "@/styles/stockAdjustment.css";
@@ -376,13 +377,12 @@ export function AddAdjustmentOrderPage() {
           <div className="add-adjustment-row-2">
             <div className="add-adj-field">
               <label htmlFor="adj-client">Client Name</label>
-              <input
+              <ClientNameAutocomplete
                 id="adj-client"
-                type="text"
-                className="add-adj-input"
-                placeholder="Enter Client Name"
                 value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
+                onChange={setClientName}
+                placeholder="Enter Client Name"
+                className="add-adj-input"
               />
             </div>
 

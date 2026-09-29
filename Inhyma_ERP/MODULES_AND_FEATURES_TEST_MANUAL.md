@@ -48,6 +48,7 @@
 37. [INVENTORY: Product Stock Module](#37-inventory-product-stock-module)
 38. [INVENTORY: Stock Adjustment & Order PDF Module](#38-inventory-stock-adjustment--order-pdf-module)
 39. [TASK: Technical Tasks Module](#39-task-technical-tasks-module)
+40. [GLOBAL PLATFORM HARDENING: Autocomplete Suppression & Wheel Lockout](#40-global-platform-hardening-autocomplete-suppression--wheel-lockout)
 
 ---
 
@@ -1474,9 +1475,10 @@ Checklist to execute:
    - `Status` — Active / Inactive status toggle pill.
    - `Action` — Quick Edit (pencil icon), Contacts Drawer (users icon), and Soft-Delete (trash can icon).
 7. **Multi-Tab Company Drawer / Add Page:**
-   - `Overview Tab`: Legal name, trade name, business classification, company category, company sector, GSTIN, PAN, TAN, and IEC.
+   - `Overview Tab`: Legal name, trade name, business classification, company category, company sector, GSTIN, PAN, TAN, IEC, GST registration date, age of company, product manufacture or supply, machines buying from, spares buying from, and products of interest.
    - `Contacts Tab`: Multi-contact person roster with name, department, designation, direct phone, WhatsApp number, email, and primary contact toggle.
-   - `Addresses Tab`: Multi-address matrix supporting Billing Head Office, Factory/Plant, and Dispatch Warehouses with PIN/ZIP validation.
+   - `Addresses Tab`: Multi-address matrix supporting Billing Head Office, Factory/Plant, and Dispatch Warehouses with cascading State ➔ District ➔ City dropdowns, area, and 6-digit Pincode.
+   - `Social Media Matrix`: Dynamic repeater allowing creation and management of social profiles (`platform` like LinkedIn, Twitter, Facebook, Instagram, YouTube and profile `url`).
    - `Financials & Credit Tab`: Credit limit (currency), credit period in days, payment terms selector, and bank account associations.
    - `Activity Timeline Tab`: Chronological audit trail of corporate mutations, status transitions, and RFQ consignments.
 
@@ -1485,10 +1487,35 @@ Checklist to execute:
 - [ ] Verify company list loads with correct pagination, search filters, and grade/potential badges.
 - [ ] Verify changing Grade or Potential directly from the table dropdown updates immediately via PATCH without page reload.
 - [ ] Verify creating a company requires legal name and validates GSTIN/PAN formatting.
+- [ ] Verify creating and editing a company persists all 10 extended intelligence fields:
+  - `pincode`: Validates numeric 6-digit postal code.
+  - `district_id`: Linked properly via cascading dropdown.
+  - `company_category`: Persists selected category.
+  - `product_manufacture_or_supply`: Persists manufacturing details.
+  - `machines_buying_from`: Persists machine vendor/competitor intelligence.
+  - `spares_buying_from`: Persists spare parts vendor/competitor intelligence.
+  - `products_interested`: Persists client product interests.
+  - `gst_registration_date`: Persists date string.
+  - `age_of_company`: Persists company tenure.
+  - `social_media`: Dynamic repeater adds multiple platform + URL entries and saves as structured JSON array.
 - [ ] Verify adding multiple contacts to a company persists all contacts in the database with primary flag enforcement.
 - [ ] Verify soft-deleting a company moves the record and linked contacts to Trash (`/trash`) with full restoration capability.
 - [ ] Verify spreadsheet import parses corporate fields and handles duplicate GSTIN/PAN conflicts gracefully.
 - [ ] Verify real-time WebSocket events (`company.created`, `company.updated`) refresh connected user sessions live.
+- [ ] Verify Add Company quick drawer extracts State, District, and City from Masters with cascading dependencies:
+  - Selecting State dynamically fetches districts for that state and resets District and City.
+  - District dropdown is disabled until State is selected.
+  - Selecting District dynamically fetches cities for that specific district and resets City.
+  - City dropdown is disabled until District is selected.
+  - Changing District clears selected City and refetches cities for the new district.
+  - Adding a custom city persists the new city in City Master with both `state_id` and `district_id`.
+- [ ] Verify Autocomplete and Autofill suppression:
+  - No black tooltip/popover bubbles (e.g., historical names like `ABC packaging`) appear over `Company Name *` or any other input.
+  - All 14 quick drawer inputs have `autocomplete="off"`.
+  - Global `autocompleteBlocker.ts` successfully monitors DOM and applies suppression attributes.
+- [ ] Verify Mouse Wheel value protection:
+  - Hovering and scrolling mouse wheel over any numeric input (e.g. credit limit, phone number, pincode) does NOT change numeric values.
+
 
 ---
 
@@ -1718,4 +1745,223 @@ Checklist to execute:
 - [ ] Verify multi-select checkboxes allow bulk deletion of technical service tasks.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 19, 2026 (Inventory: Product Stock, Stock Adjustment with PDF Engine, Companies, and Technical Tasks Comprehensive Upgrades).*
+
+## 40. GLOBAL PLATFORM HARDENING: Autocomplete Suppression & Wheel Lockout
+
+- **Files:** `frontend/src/lib/autocompleteBlocker.ts`, `frontend/src/App.tsx`, `frontend/src/main.tsx`, `frontend/src/style.css`
+- **Scope:** Global UI Engine, All Modals, Drawers, Input Fields, and Numeric Steppers across Inhyma ERP, ERP Main, and Yinglima ERP.
+- **Purpose:** Eliminates intrusive browser tooltip popovers / autocomplete bubbles (such as the black `ABC packaging` bubble over company names), blocks password manager heuristic injections, and prevents mouse wheel scrolling from inadvertently changing numeric values on hover.
+
+### Visual & Behavioral Specifications
+1. **Dynamic DOM Auto-Attribute Stamping:**
+   - Active `MutationObserver` on `document.body` monitors all DOM tree changes.
+   - Automatically injects `autocomplete="off"`, `autocapitalize="off"`, `spellcheck="false"`, `data-lpignore="true"` (LastPass blocker), and `data-form-type="other"` (1Password/Bitwarden heuristic disabler) into every `<form>`, `<input>`, `<textarea>`, and `<select>` element.
+2. **Capture-Phase Focus Interception:**
+   - Document-level capture listener on `focusin` intercepts focus before the browser renders historical suggestions or cached input overlays.
+3. **Explicit Form Hardening:**
+   - All 14 input fields in the Companies quick drawer explicitly carry `autoComplete="off"`.
+   - Control plane user management modals carry `autoComplete="off"` or `autoComplete="new-password"`.
+4. **Passive Wheel Lockout:**
+   - Document-level listener intercepts `wheel` events on `input[type="number"]` and immediately invokes `blur()`, severing mouse wheel scroll actions from value modification.
+5. **Spin-Button Styling Elimination:**
+   - Universal CSS removes webkit up/down arrows and forces `appearance: textfield` in Firefox to prevent cluttered numeric inputs.
+
+### Test Cases
+- [ ] Verify opening any modal or drawer (e.g. Companies quick drawer, Global Users modal, Technical Tasks drawer) does NOT display browser autocomplete bubbles or previous entry tooltips.
+- [ ] Verify typing in `Company Name *` field does not trigger floating black suggestion badges (e.g. `ABC packaging`).
+- [ ] Verify inspecting DOM elements in DevTools confirms `autocomplete="off"` and `data-lpignore="true"` are present on dynamically rendered inputs.
+- [ ] Verify hovering the mouse cursor over a numeric input (e.g. phone number, credit limit, pincode, task duration) and scrolling the mouse wheel does NOT alter the value.
+- [ ] Verify numeric inputs do not display native up/down stepper spin buttons in Chrome, Edge, or Firefox.
+
+---
+
+## 41. COMPANY MASTER: Typeahead Autocomplete & Entity Extraction
+
+- **Files:** `frontend/src/pages/Companies.tsx`, `backend/app/companies/routes.py`, `backend/tests/test_companies.py`
+- **Scope:** Inhyma ERP — Companies Directory (`/companies`), "Add Company" Quick Drawer, and "Full Company Profile" Modal Drawer.
+- **Purpose:** Enables instant lookup and extraction of existing companies from the database when typing letters in the `Company Name *` input, preventing redundant company creation and auto-populating known addresses, contacts, and tax IDs.
+
+### Visual & Behavioral Specifications
+1. **Instant Typeahead Extraction:**
+   - Typing any letter/character into `Company Name *` instantly searches local in-memory records (0ms) and debounces a remote database query to `GET /api/v1/companies/lookup?q=...` (150ms).
+   - Renders an elevated dropdown below the input styled with `box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12)`.
+2. **Matching Letter Highlight:**
+   - Matching letters/substrings within company names are highlighted in bold deep blue (`#0061f2`) on a soft blue background (`#e0f2fe`).
+3. **Company Preview Details:**
+   - Each suggestion entry displays:
+     - Company Name (with highlight).
+     - Company Type badge (`B2B`, `B2C`, etc.).
+     - GST / Tax ID Number (`GST: ...`).
+     - Location subtitle (`Area, District`).
+4. **Keyboard Accessibility:**
+   - `ArrowDown` & `ArrowUp`: Move focus across matching company items.
+   - `Enter`: Selects the highlighted company.
+   - `Escape`: Closes the dropdown popover.
+5. **Entity Auto-Fill on Select:**
+   - Clicking or pressing `Enter` on a company fills the `company_name` input and auto-populates all available matching data:
+     - Business Type (`company_type`)
+     - GST Number (`tax_id_number`)
+     - Area (`area`)
+     - State (`state_id`)
+     - District (`district`)
+     - City (`city_id`)
+     - Contact Person Salutation, Full Name, and Designation
+     - Contact Numbers (Calling, WhatsApp, IndiaMart)
+     - Primary Website URL
+     - Assigned Sales Person
+6. **Graceful Fallback:**
+   - If no existing company matches the typed query, the dropdown displays:  
+     `➕ No existing company matching "[query]". Will be created as a new company profile.`
+
+### Test Cases
+- [ ] Verify clicking `+ ADD COMPANY` on `/companies` opens the Quick Drawer with `Company Name *` focused or ready.
+- [ ] Verify typing `Pan` or `Apex` or `Zenith` displays a custom dropdown with matching companies from the database.
+- [ ] Verify matched letters in the suggestion list are highlighted in deep blue with a light blue pill.
+- [ ] Verify pressing `ArrowDown` moves active focus through the suggestions, and pressing `Enter` selects the highlighted company.
+- [ ] Verify selecting an existing company auto-fills the GST No, Area, State, District, City, and Contact details.
+- [ ] Verify pressing `Escape` or clicking outside dismisses the suggestion dropdown.
+- [ ] Verify typing a brand new company name that does not exist shows the helper note indicating it will be created as a new company profile.
+- [ ] Verify saving the company completes successfully via either "Save & Continue" or "Save & Exit".
+
+---
+
+## 42. STOCK ADJUSTMENT: Client Name Typeahead Extraction (Stock IN & Stock OUT)
+
+- **Files:** `frontend/src/components/ClientNameAutocomplete.tsx`, `frontend/src/pages/AddAdjustmentOrderPage.tsx`, `frontend/src/pages/StockAdjustmentPage.tsx`, `frontend/src/pages/__tests__/AddAdjustmentOrderPage.test.tsx`
+- **Scope:** Inhyma ERP — Add Adjustment Order Page (`/adjustment/addEdit`), Quick Adjustment Drawer (`/stock-adjustment`), for both **Stock IN** (`Addition`) and **Stock OUT** (`Deduction`).
+- **Purpose:** Enables instant lookup and extraction of registered companies in the `Client Name` input with exact visual alignment to the production ERP layout (`Company Name | Contact Person | Phone Number`).
+
+### Visual & Behavioral Specifications
+1. **Dropdown Trigger & Presentation:**
+   - Clicking or focusing into the `Client Name` field immediately opens the dropdown displaying available companies formatted as:  
+     `[Company Name] | [Contact Person Name] | [Phone Number]`
+   - If contact person is absent, renders as `[Company Name] | | [Phone Number]`.
+2. **Typeahead Character Highlighting:**
+   - As letters/words are typed, the company list filters dynamically.
+   - Matched characters in company names, contact persons, or phone numbers are highlighted in vivid blue (`#0061f2`) on a soft blue background (`#e0f2fe`).
+3. **Keyboard & Selection Controls:**
+   - `ArrowDown` & `ArrowUp` cycle through suggestions.
+   - `Enter` selects the highlighted company, populating `Client Name` with the company name and closing the popover.
+   - `Escape` dismisses the dropdown.
+4. **Dual Stock IN & Stock OUT Support:**
+   - Functions identically whether `Adjustment Type` is set to `Stock IN` or `Stock OUT`.
+   - Switching between `Stock IN` and `Stock OUT` preserves the selected client name.
+5. **Custom Client Name Support:**
+   - Freeform typing is fully supported for non-registered or ad-hoc clients.
+   - If no company matches the typed letters, displays: `➕ Use "[term]" as custom client name`.
+
+### Test Cases
+- [ ] Verify navigating to `/adjustment/addEdit?type=Addition` (Stock IN) displays the `Client Name` field with placeholder `Enter Client Name`.
+- [ ] Verify clicking/focusing into `Client Name` immediately displays the dropdown formatted as `Company | Contact | Phone`.
+- [ ] Verify typing letters (e.g. `Cir`, `Apex`, `Genius`) filters the options and highlights matched letters in blue.
+- [ ] Verify pressing `ArrowDown` moves highlight and `Enter` populates the company name.
+- [ ] Verify toggling `Adjustment Type` to `Stock OUT` maintains full typeahead autocomplete functionality.
+- [ ] Verify entering a custom client name not in the list allows saving the adjustment order successfully.
+- [ ] Verify the quick adjustment drawer on `/stock-adjustment` also provides the client autocomplete.
+
+---
+
+## 43. LEADS MODULE: Lead Inquiries Management & Sales Pipeline
+
+- **Files:**
+  - Frontend: `frontend/src/pages/LeadsPage.tsx`, `frontend/src/App.tsx`, `frontend/src/lib/nav.ts`, `frontend/src/components/icons.tsx`, `frontend/src/types/index.ts`, `frontend/src/pages/__tests__/LeadsPage.test.tsx`
+  - Backend: `backend/app/leads/models.py`, `backend/app/leads/schemas.py`, `backend/app/leads/repository.py`, `backend/app/leads/service.py`, `backend/app/leads/routes.py`, `backend/app/api/v1/router.py`, `backend/tests/test_leads.py`
+- **Scope:** Inhyma ERP — Lead Inquiries Management (`/lead/list`), Legacy aliases (`/leads`, `/lead`, `/leads/list`), Navigation Menu `LEAD` > `Leads`.
+- **Reference URL & UI:** `erp.inhymasolutions.com/lead/list`
+- **Purpose:** Full lifecycle acquisition, intake, assignment, and tracking of customer leads, inquiry requirements, acquisition channels, and sales allocations.
+
+### Visual & Behavioral Specifications (Companies Module UI Design Alignment)
+1. **Sidebar Navigation & Routing:**
+   - Positioned in sidebar under `LEAD` section with dedicated clipboard icon.
+   - Active route: `/lead/list` (with backward compatibility redirects for `/leads`, `/lead`, `/leads/list`, `/lead/list.html`).
+   - Page container uses `AppShell activeKey="leads" pageClassName="page-suppliers"` and `main.page` with breadcrumb trail `Dashboard / Leads`.
+   - Header bar uses `.page-header` with `h1` and `.page-subtitle` ("Lead directory, sourcing pipeline, contact tracking, and assignments.").
+2. **Top Action Controls (Exact Reference Match):**
+   - **Filter Button:** Styled button with funnel icon (`#0061f2` when open, `#475569` when closed) toggling the filter card (collapsed by default).
+   - **+ ADD NEW Button:** Uses `.btn-add-new` (`#0061f2` background, white text) opening the comprehensive slide drawer with autocomplete.
+   - **DELETE Button:** Clean action button (`#10b981` default, `#dc2626` when rows selected) with trash icon for bulk soft-deletion.
+3. **Exact 10-Field Dynamic Filter Card (Off by Default):**
+   - Collapsed by default, toggled via the funnel filter button in the top action bar:
+     * **Row 1:** `Lead Date Range` (with DateRangePicker), `Lead Created By` (select, default "Select"), `Business Type` (select, default "All").
+     * **Row 2:** `State` (select, default "All"), `District` (select, default "All", cascaded by State), `City` (select, default "All", cascaded by District/State).
+     * **Row 3:** `Lead Source` (select, default "Select"), `Priority` (select, default "All"), `Lead Allotted To` (select, default "All").
+     * **Row 4:** `Lead Status` (select, default "All"), and right-aligned `Reset` (slate `#64748b`) & `Search` (amber/gold `#eab308`) action buttons.
+   - **Dynamic List-Based Extraction:** Dropdown options dynamically aggregate and extract distinct non-empty values from the actual leads present in the list, enabling instant self-contained filtering without rigid presets.
+   - **Dual Client & Server-Side Filtering:** Reactive client-side evaluation against all 10 criteria combined with URL search params dispatched to `GET /api/v1/leads/` for high-volume enterprise datasets.
+4. **Data Table Controls & Layout (.card Architecture):**
+   - **Toolbar Header:** Starts directly with the authentic toolbar — `50 v Items/Page` selector (options: 10, 20, 50, 100) and `Search...` input with clear `×` button.
+   - **Interactive Column Sorting Across Every Column (Companies Module Parity):** Every data column features interactive 3-state sorting (Ascending `▲` -> Descending `▼` -> Reset). Active column headers display `#0284c7` badges with `#e0f2fe` backgrounds; inactive headers display subtle `↕` sort cues.
+   - **Table Scroll Container:** Rendered inside `.table-scroll` with `border-collapse: separate; border-spacing: 0` and sticky header capability.
+   - **13 Columns Matching Production Screenshot:**
+     1. `Checkbox` (`[ ]`): Header checkbox selects/deselects all visible rows.
+     2. `Sr. No.`: Row sequence number with sorting indicator (`▲` / `▼`).
+     3. `Company Name`: Sortable; primary blue link (`#0061f2`) that opens the **SideDrawer** displaying complete lead profile details.
+     4. `Business Type`: Sortable; category badge (`.chip`).
+     5. `Source`: Sortable; inquiry acquisition channel.
+     6. `Contact Person`: Sortable; contact name and direct phone number with icon.
+     7. `Priority`: Sortable; visual pill badge with color coding (Urgent, High, Medium, Low).
+     8. `Area/City`: Sortable; formatted geographic location (e.g. `GIDC / Vapi`).
+     9. `District / State`: Sortable; regional jurisdiction (e.g. `Valsad / Gujarat`).
+     10. `Requirements`: Sortable; summary of inquiry requirements/machinery specifications with tooltip.
+     11. `Allotted To`: Sortable; assigned sales representative.
+     12. `Added On`: Sortable; formatted inquiry date (`DD-MM-YYYY`).
+     13. `Action`: Quick Edit (pencil icon `#eff6ff`) and Single Delete (trash icon `#fef2f2`) buttons.
+   - **Empty State:** Distinct banner spanning all 13 columns displaying:
+     `No Data Available In Table` on soft gray background (`#f1f5f9`).
+   - **Pagination Footer:** Displays `Showing {start} To {end} Of {total} Entries` alongside windowed page number pills and `Previous` / `Next` buttons.
+5. **SideDrawer for Lead Profile (Companies Module Pattern):**
+   - Clicking on any Company Name opens `<SideDrawer>` with `<DetailFieldGrid>` presenting Company Name, Business Type, Source, Priority, Status, Address, Geographic hierarchy, Requirements, Contact Information (including Designation), and Notes.
+   - Includes "✏️ Edit Lead" action in the drawer header.
+6. **Shimmer Skeleton Loading:**
+   - Replaced spinner with `<LeadsTableSkeletonRows count={8} />` displaying smooth animated skeleton placeholder lines (`.skeleton-line`, `.skeleton-badge`) spanning all 13 table columns during data loading.
+7. **Add Lead Drawer (1:1 with Production Screenshot & Form Hardening):**
+   - Form layout matches production reference `media_1790675832944.png` with pixel-perfect alignment and exactly 13 fields and controls:
+     1. **Lead Source \***: Typable `Combobox` component with dropdown toggle chevron (`#lead-source-select-toggle`), real-time option filtering, custom text typing, and preloaded master lead sources with placeholder "Select".
+     2. **Company Name \***: With right-aligned `Add Company` link and `Search Company Name` placeholder, standardized to 38px height.
+     3. **Address**: Full-width text input (38px height).
+     4. **Area** & **State \***: 2-column balanced grid (`1fr 1fr`, gap 16px). `State *` is upgraded to a typable `Combobox` (`#lead-state-select`) pulling from Masters State (`/masters/states?status=active`). Changing State immediately resets District and City.
+     5. **District** & **City**: 2-column balanced grid with typable cascading `Combobox` components:
+        - **District** (`#lead-district-select`): Populated from Masters District (`/masters/districts/lookup?state_id={state_id}`). Disabled with placeholder "Select State First" when no state is selected. Changing District immediately resets City.
+        - **City** (`#lead-city-select`): Populated from Masters City (`/masters/cities/lookup?district_id={district_id}&state_id={state_id}`). Disabled with placeholder "Select District First" when no district is selected.
+     6. **Contact Person**, **Designation**, & **Priority**: 3-column balanced grid (`1fr 1fr 1fr`, gap 16px). Standardized Priority radio container (`height: 38px`, `display: flex`, `alignItems: center`) with `A ○  B ●  C ○` vertically aligned with adjacent input fields.
+     7. **Contact Number** & **Email**: 2-column contact inputs (38px height).
+     8. **Clients Requirements**: Full-width textarea with `minHeight: 90px`.
+     9. **Submit**: Full-width bright blue action button (`#0061f2`, `height: 42px`).
+8. **Robust Soft-Deletion & Bulk Deletion:**
+   - Both single row delete and bulk delete perform soft deletion (`is_deleted=True`), preserving full audit compliance and recovery via Trash (`/trash`).
+
+### Test Cases
+- [ ] Verify navigating to `/lead/list` displays the "Leads" heading, active sidebar item "Leads", and breadcrumbs `Dashboard / Leads`.
+- [ ] Verify the table displays pulsating CSS shimmer skeleton rows (`.skeleton-line` and `.skeleton-badge`) across all 13 columns while data is loading.
+- [ ] Verify the 3 top action buttons (Filter, + ADD NEW, and green DELETE) are present and properly styled.
+- [ ] Verify the table contains all 13 columns: Checkbox, Sr. No., Company Name, Business Type, Source, Contact Person, Priority, Area/City, District / State, Requirements, Allotted To, Added On, Action.
+- [ ] Verify when no records exist, the table displays `No Data Available In Table` spanning all 13 columns.
+- [ ] Verify clicking `+ ADD NEW` opens the drawer with exact 13 fields matching reference screenshot:
+  - Lead Source * typable combobox (both click-to-select and type-to-filter/custom entry supported)
+  - Company Name * with "Add Company" link and "Search Company Name" placeholder
+  - Address text input
+  - Area and State * (typable combobox from Masters State)
+  - District and City (typable comboboxes from Masters District and City)
+  - Contact Person, Designation, Priority (`A ○  B ○  C ○` radio buttons aligned to 38px row height)
+  - Contact Number and Email
+  - Clients Requirements textarea
+  - Full-width blue "Submit" button
+- [ ] Verify typing a custom source or selecting from dropdown in `Lead Source *` updates the field value and form state.
+- [ ] Verify State ➔ District ➔ City cascading in Leads Add/Edit drawer:
+  - District combobox is initially disabled with placeholder "Select State First".
+  - City combobox is initially disabled with placeholder "Select District First".
+  - Selecting State enables District and displays only districts belonging to that State.
+  - Selecting District enables City and displays only cities belonging to that District.
+  - Changing State resets both District and City.
+  - Changing District resets City.
+- [ ] Verify State ➔ District ➔ City cascading in Companies Quick Add & Add New drawers:
+  - Quick Add: Selecting State resets District & City; selecting District resets City; only respective child districts/cities are shown.
+  - Add New: Typable comboboxes (`SelectWithSearch`); State filters Districts; District filters Cities; resets cascaded children on change.
+- [ ] Verify selecting an existing company via `ClientNameAutocomplete` auto-fills Address, Area, State, District, City, Contact Person, Designation, Contact Number, and Email.
+- [ ] Verify clicking "Submit" validates required fields and submits `POST /api/v1/leads/`.
+- [ ] Verify clicking Edit on a table row pre-fills the drawer with lead details and updates via `PUT /api/v1/leads/{id}`.
+- [ ] Verify column header sorting (Ascending `▲`, Descending `▼`, Reset) works across all columns.
+- [ ] Verify bulk selection and clicking `DELETE` calls `POST /api/v1/leads/bulk-delete` with soft-deletion.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 29, 2026 (Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, and Typable Cascading Address Comboboxes).*

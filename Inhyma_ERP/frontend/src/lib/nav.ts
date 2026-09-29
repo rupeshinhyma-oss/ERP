@@ -162,9 +162,17 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "call-logs-follow-up", label: "Follow Up Logs", path: "/call-logs/follow-up", icon: "fileText" },
     ],
   },
+  {
+    label: "LEAD",
+    items: [
+      { key: "leads", label: "Leads", path: "/lead/list", icon: "clipboard" },
+    ],
+  },
 ];
 
 export const PAGE_TITLES: Record<string, string> = {
+  leads: "Leads",
+  "lead-list": "Leads",
   trash: "Trash Management",
   dashboard: "Dashboard",
   reports: "Reports & Analytics",
@@ -345,6 +353,11 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/employee-form.html": "/users",
   "/org-chart": "/users",
   "/org-chart.html": "/users",
+  "/lead/list.html": "/lead/list",
+  "/leads.html": "/lead/list",
+  "/leads": "/lead/list",
+  "/lead": "/lead/list",
+  "/leads/list": "/lead/list",
 };
 
 /**

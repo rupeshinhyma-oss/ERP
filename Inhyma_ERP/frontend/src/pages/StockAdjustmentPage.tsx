@@ -5,6 +5,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { Pagination } from "@/components/Pagination";
+import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
 import type { PaginationMeta } from "@/types";
 import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
 import { InventoryApi } from "@/lib/api";
@@ -1405,12 +1406,12 @@ export function StockAdjustmentPage({
                     <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                       Client Name (Optional)
                     </label>
-                    <input
-                      type="text"
-                      className="adjustment-filter-input"
-                      placeholder="e.g. GARUDA ENGINEERS"
+                    <ClientNameAutocomplete
+                      id="drawer-client-name"
                       value={newClientName}
-                      onChange={(e) => setNewClientName(e.target.value)}
+                      onChange={setNewClientName}
+                      placeholder="e.g. GARUDA ENGINEERS"
+                      className="adjustment-filter-input"
                     />
                   </div>
                 </div>
