@@ -5,6 +5,38 @@
 
 ---
 
+## [Release 2026-09-30] — Dual-Mode Master Import & Safe Update Engine
+
+### 1. Dual-Mode Excel/CSV Import ("Add New" vs "Update Existing")
+- **Interactive Action Switcher (`ImportWizard.tsx`, `MasterPage.tsx`):**
+  - **➕ Add New Records Only (Create):** Strictly inserts new records; skips matching entries to prevent accidental duplicates.
+  - **✏️ Update / Modify Existing Records (Safe Enrichment):** Matches existing records by unique code or name and updates filled columns.
+  - **Zero Data Loss Guarantee:** Empty or blank cells in the uploaded spreadsheet are completely ignored and will **never** overwrite or erase existing database values.
+- **Full Masters Coverage:** Enabled across Product Master (`/masters/products`) and all System Masters (`uom`, `currencies`, `countries`, `states`, `cities`, `brands`, `hsn`, `product-categories`, `product-sub-categories`, `buyer-types`, `supplier-types`, `company-list`).
+- **Automated Verification Suite:** Verified via [`tests/test_dual_mode_master_import.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/tests/test_dual_mode_master_import.py) with 100% pass rate.
+
+---
+
+## [Release 2026-09-29] — Supplier Multi-Media Links, Company Autocomplete & Gallery Fixes
+
+### 1. Supplier Multi-Media & Inspection Links (`visit_media`)
+- **File Added:** `VideoTagInput` in [`Yinglima_ERP/frontend/src/components/fields.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/fields.tsx) integrated into [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx).
+- Supports multiple links (comma/Enter separated) with smart icon pills (YouTube `▶️`, Google Drive `📁`, OneDrive `📂`, Video `🎥`).
+- Clickable pills open directly in a new tab (`target="_blank"`).
+
+### 2. Company Name Typeahead, Suggestion & Enter Key Support
+- Enhanced [`SearchableDropdown.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/SearchableDropdown.tsx) with `sublabel` support to show supplier types (`manufacturer`, `dealer / trader`) next to suggestions.
+- Suggestions cleanly grouped under `EXISTING SIMILAR SUPPLIERS`.
+- Dynamic `Use "<Typed>" (New)` option with `↵ Enter` keyboard badge.
+- Full keyboard navigation: pressing `Enter` or clicking immediately accepts custom name and closes dropdown.
+- Exact duplicate prevention (`⛔ Supplier already exists`) strictly enforced.
+
+### 3. Product Gallery & Media Deletion Persistence
+- Fixed photo deletion persistence in PostgreSQL without cascade or reference validation errors.
+- Added image error fallbacks for unavailable cloud storage.
+
+---
+
 ## [Release 2026-09-29] — Global Autocomplete Blocker & Ecosystem Form Hardening
 
 ### 1. Global Autocomplete & Autofill Blocker System
