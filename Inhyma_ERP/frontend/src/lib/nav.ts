@@ -40,6 +40,14 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: "TASK",
+    items: [
+      { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
+      { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
+      { key: "marketing-tasks", label: "Marketing Tasks", path: "/marketing-task/list", icon: "messageSquare" },
+    ],
+  },
+  {
     label: "CONTACT",
     items: [
       { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "company.view" },
@@ -90,14 +98,6 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: "TASK",
-    items: [
-      { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
-      { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
-      { key: "marketing-tasks", label: "Marketing Tasks", path: "/marketing-task/list", icon: "messageSquare" },
-    ],
-  },
-  {
     label: "HRMS",
     items: [
       { key: "hrms-attendance", label: "Attendance", path: "/hrms/attendance", icon: "clock" },
@@ -128,6 +128,8 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-cities", label: "Cities", path: "/masters/cities", permission: "city.view" },
           { key: "masters-districts", label: "Districts", path: "/masters/districts", permission: "district.view" },
           { key: "masters-states", label: "States", path: "/masters/states", permission: "state.view" },
+          { key: "masters-countries", label: "Countries", path: "/masters/countries", permission: "country.view" },
+          { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", permission: "currency.view" },
           { key: "masters-taxes", label: "Taxes", path: "/masters/taxes", permission: "tax.view" },
           { key: "masters-additional-charges", label: "Additional Charges", path: "/masters/additional-charges", permission: "additionalcharge.view" },
           { key: "masters-social-media", label: "Social Media", path: "/masters/social-media", permission: "socialmedia.view" },
@@ -139,6 +141,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-warehouses", label: "Warehouses", path: "/masters/warehouses", permission: "warehouse.view" },
           { key: "masters-uom", label: "UOM", path: "/masters/uom", permission: "uom.view" },
           { key: "masters-billing-company", label: "Billing Company", path: "/masters/billing-company", permission: "billingcompany.view" },
+          { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", permission: "organizationlist.view" },
           { key: "masters-technicians", label: "Technicians", path: "/masters/technicians", permission: "technician.view" },
           { key: "masters-banks", label: "Bank", path: "/masters/banks", permission: "bank.view" },
           { key: "masters-transport", label: "Transport", path: "/masters/transport", permission: "transport.view" },
@@ -148,10 +151,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-call-types", label: "Call Types", path: "/masters/call-types", permission: "call_type.view" },
         ],
       },
-      { key: "masters-countries", label: "Countries", path: "/masters/countries", icon: "globe", permission: "country.view" },
-      { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", icon: "coins", permission: "currency.view" },
       { key: "organization", label: "ERP Settings", path: "/organization", icon: "settings", permission: "organization.manage" },
-      { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", icon: "building", permission: "organizationlist.view" },
       { key: "audit", label: "Audit Log", path: "/audit", icon: "clock", permission: "audit.view" },
       { key: "trash", label: "Trash", path: "/trash", icon: "trash", permission: "trash.view" },
     ],
