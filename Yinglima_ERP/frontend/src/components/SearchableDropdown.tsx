@@ -24,8 +24,15 @@ import { autoTitleCase } from "@/components/fields";
 export interface DropdownOption {
   value: string;
   label: string;
+  sublabel?: string;
   group?: string;
 }
+
+export const isUUID = (s: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
+// Shared in-memory cache for resolved entity labels across all dropdowns
+const labelMemoryCache = new Map<string, string>();
 
 export type FetchOptions = (term: string, signal: AbortSignal) => Promise<DropdownOption[]>;
 export type FetchLabelForValue = (value: string) => Promise<string>;
@@ -108,8 +115,12 @@ export function SearchableDropdown({
     fetchFn(value)
       .then((resolved) => {
         if (cancelled) return;
-        setLabel(resolved || value);
-        setInputValue(resolved || value);
+        const finalLabel = resolved || value;
+        if (finalLabel && !isUUID(finalLabel)) {
+          labelMemoryCache.set(value, finalLabel);
+        }
+        setLabel(finalLabel);
+        setInputValue(finalLabel);
       })
       .catch(() => {
         /* leave as-is if the label can't be resolved */
@@ -214,10 +225,18 @@ export function SearchableDropdown({
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (disabled) return;
-    if (e.key === "Enter" && allowCustomText && activeIndex < 0 && inputValue.trim()) {
+    const maxIndex = showCustomOption ? options.length : options.length - 1;
+    if (e.key === "Enter") {
       e.preventDefault();
-      closeResults();
-      selectOption({ value: inputValue.trim(), label: inputValue.trim() });
+      if (activeIndex >= 0 && activeIndex < options.length && options[activeIndex]) {
+        selectOption(options[activeIndex]);
+      } else if (activeIndex === options.length && showCustomOption) {
+        closeResults();
+        selectOption({ value: inputValue.trim(), label: inputValue.trim() });
+      } else if (allowCustomText && inputValue.trim()) {
+        closeResults();
+        selectOption({ value: inputValue.trim(), label: inputValue.trim() });
+      }
       return;
     }
     if (!open) {
@@ -235,13 +254,10 @@ export function SearchableDropdown({
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, options.length - 1));
+      setActiveIndex((i) => Math.min(i + 1, maxIndex));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (activeIndex >= 0 && options[activeIndex]) selectOption(options[activeIndex]);
     } else if (e.key === "Escape") {
       closeResults();
     }
@@ -448,7 +464,14 @@ export function SearchableDropdown({
                           selectOption(opt);
                         }}
                       >
-                        <span>{opt.label}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span>{opt.label}</span>
+                          {opt.sublabel && (
+                            <span style={{ fontSize: "11px", color: "#64748b", background: "#f1f5f9", padding: "1px 6px", borderRadius: "4px" }}>
+                              {opt.sublabel}
+                            </span>
+                          )}
+                        </div>
                         {isSelected && (
                           <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: 700 }}>✓</span>
                         )}
@@ -505,7 +528,14 @@ export function SearchableDropdown({
                             selectOption(opt);
                           }}
                         >
-                          <span>{opt.label}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span>{opt.label}</span>
+                            {opt.sublabel && (
+                              <span style={{ fontSize: "11px", color: "#64748b", background: "#f1f5f9", padding: "1px 6px", borderRadius: "4px" }}>
+                                {opt.sublabel}
+                              </span>
+                            )}
+                          </div>
                           {isSelected && (
                             <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: 700 }}>✓</span>
                           )}
@@ -517,14 +547,28 @@ export function SearchableDropdown({
               })()}
               {showCustomOption && (
                 <div
-                  className="sd-option"
-                  style={{ fontStyle: "italic", color: "var(--color-primary, #0284c7)" }}
+                  className={`sd-option ${activeIndex === options.length ? "sd-active" : ""}`.trim()}
+                  style={{
+                    fontStyle: "italic",
+                    color: activeIndex === options.length ? "#1d4ed8" : "var(--color-primary, #0284c7)",
+                    background: activeIndex === options.length ? "#eff6ff" : undefined,
+                    fontWeight: 600,
+                    borderTop: options.length > 0 ? "1px solid #e2e8f0" : "none",
+                    padding: "8px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    cursor: "pointer",
+                  }}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     selectOption({ value: inputValue.trim(), label: inputValue.trim() });
                   }}
                 >
-                  Use "{inputValue.trim()}"
+                  <span>Use "{inputValue.trim()}" (New)</span>
+                  <span style={{ fontSize: "11px", fontWeight: 700, background: "#dbeafe", color: "#1e40af", padding: "2px 6px", borderRadius: "4px" }}>
+                    ↵ Enter
+                  </span>
                 </div>
               )}
               {onCreateNew && (
@@ -602,27 +646,42 @@ export function SearchableDropdownMulti({
 
     setSelected((prev) => {
       const knownLabels = new Map(prev.map((s) => [s.value, s.label]));
-      const needsResolving = ids.some((id) => !knownLabels.has(id));
+      const getBest = (id: string) => {
+        const k = knownLabels.get(id);
+        if (k && !isUUID(k)) return k;
+        if (labelMemoryCache.has(id)) return labelMemoryCache.get(id)!;
+        return k ?? id;
+      };
+      const needsResolving = ids.some((id) => {
+        const lbl = getBest(id);
+        return lbl === id || isUUID(lbl);
+      });
 
       if (!needsResolving) {
         // Same set, possibly reordered -- mirror the parent's order.
-        return ids.map((id) => ({ value: id, label: knownLabels.get(id) as string }));
+        return ids.map((id) => ({ value: id, label: getBest(id) }));
       }
 
       if (fetchLabelForValue) {
         void Promise.all(
-          ids.map(async (id) => ({
-            value: id,
-            label: knownLabels.get(id) ?? ((await fetchLabelForValue(id).catch(() => id)) || id),
-          }))
+          ids.map(async (id) => {
+            const current = getBest(id);
+            if (current !== id && !isUUID(current)) return { value: id, label: current };
+            const fetched = await fetchLabelForValue(id).catch(() => id);
+            const finalLabel = fetched || current;
+            if (finalLabel && !isUUID(finalLabel)) {
+              labelMemoryCache.set(id, finalLabel);
+            }
+            return { value: id, label: finalLabel };
+          })
         ).then((resolved) => {
           if (!cancelled) setSelected(resolved);
         });
-        // Show the ids until labels land, as the original did.
-        return ids.map((id) => ({ value: id, label: knownLabels.get(id) ?? id }));
+        // Show best known labels (or placeholder) until fetched labels land
+        return ids.map((id) => ({ value: id, label: getBest(id) }));
       }
 
-      return ids.map((id) => ({ value: id, label: knownLabels.get(id) ?? id }));
+      return ids.map((id) => ({ value: id, label: getBest(id) }));
     });
 
     return () => {
@@ -734,45 +793,71 @@ export function SearchableDropdownMulti({
         }}
         onClick={() => inputRef.current?.focus()}
       >
-        {selected.map((s, i) => (
-          <span
-            key={s.value}
-            style={{
-              background: "#0061f2",
-              color: "#ffffff",
-              fontSize: "12.5px",
-              fontWeight: 500,
-              padding: "4px 8px",
-              borderRadius: "4px",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              userSelect: "none",
-            }}
-          >
-            <button
-              type="button"
-              aria-label="Remove"
-              onClick={(e) => {
-                e.stopPropagation();
-                removeSelection(i);
-              }}
+        {selected.map((s, i) => {
+          const isLoading = isUUID(s.label);
+          if (isLoading) {
+            return (
+              <span
+                key={s.value}
+                style={{
+                  background: "#f1f5f9",
+                  color: "#64748b",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "11.5px",
+                  fontWeight: 500,
+                  padding: "3px 7px",
+                  borderRadius: "4px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  userSelect: "none",
+                }}
+                title="Loading name..."
+              >
+                <span style={{ fontSize: "10px" }}>⏳</span> Loading...
+              </span>
+            );
+          }
+          return (
+            <span
+              key={s.value}
               style={{
-                background: "transparent",
-                border: "none",
+                background: "#0061f2",
                 color: "#ffffff",
-                fontSize: "12px",
-                fontWeight: "bold",
-                cursor: "pointer",
-                padding: 0,
-                lineHeight: 1,
+                fontSize: "12.5px",
+                fontWeight: 500,
+                padding: "4px 8px",
+                borderRadius: "4px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                userSelect: "none",
               }}
             >
-              ✕
-            </button>
-            {s.label}
-          </span>
-        ))}
+              <button
+                type="button"
+                aria-label="Remove"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeSelection(i);
+                }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#ffffff",
+                  fontSize: "12px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  padding: 0,
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+              {s.label}
+            </span>
+          );
+        })}
         <input
           ref={inputRef}
           type="text"
@@ -925,7 +1010,11 @@ export function SearchableDropdownMultiPanel({
   // Sync selected item labels from options whenever options land or change
   useEffect(() => {
     if (options.length === 0 || selected.length === 0) return;
-    const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+    options.forEach((o) => {
+      if (o.value && o.label && !isUUID(o.label)) {
+        labelMemoryCache.set(o.value, o.label);
+      }
+    });
     const optMap = new Map(options.map((o) => [o.value, o.label]));
 
     let updated = false;
@@ -951,11 +1040,11 @@ export function SearchableDropdownMultiPanel({
     setSelected((prev) => {
       const knownLabels = new Map(prev.map((s) => [s.value, s.label]));
       const optMap = new Map(options.map((o) => [o.value, o.label]));
-      const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
       const getBestLabel = (id: string) => {
         const known = knownLabels.get(id);
         if (known && known !== id && !isUUID(known)) return known;
+        if (labelMemoryCache.has(id)) return labelMemoryCache.get(id)!;
         if (optMap.has(id)) return optMap.get(id)!;
         return id;
       };
@@ -975,7 +1064,11 @@ export function SearchableDropdownMultiPanel({
             const currentLbl = getBestLabel(id);
             if (currentLbl !== id && !isUUID(currentLbl)) return { value: id, label: currentLbl };
             const fetched = await fetchLabelForValue(id).catch(() => id);
-            return { value: id, label: fetched || currentLbl };
+            const finalLabel = fetched || currentLbl;
+            if (finalLabel && !isUUID(finalLabel)) {
+              labelMemoryCache.set(id, finalLabel);
+            }
+            return { value: id, label: finalLabel };
           })
         ).then((resolved) => { if (!cancelled) setSelected(resolved); });
         return ids.map((id) => ({ value: id, label: getBestLabel(id) }));
@@ -1070,47 +1163,75 @@ export function SearchableDropdownMultiPanel({
             <span style={{ color: "#94a3b8" }}>{placeholder}</span>
           ) : chipsPlacement === "below" ? (
             <span style={{ color: "#0f172a", fontWeight: 500 }}>
-              {selected.length === 1 ? selected[0].label : `${selected.length} Selected`}
+              {selected.length === 1 ? (isUUID(selected[0].label) ? "Loading..." : selected[0].label) : `${selected.length} Selected`}
             </span>
           ) : (
             <div style={{ display: "flex", flexWrap: "nowrap", gap: "5px", overflow: "hidden", alignItems: "center" }}>
-              {firstThree.map((s) => (
-                <span
-                  key={s.value}
-                  style={{
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    padding: "3px 9px",
-                    borderRadius: "4px",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    whiteSpace: "nowrap",
-                    flexShrink: 0,
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                  }}
-                >
-                  {s.label}
+              {firstThree.map((s) => {
+                const isLoading = isUUID(s.label);
+                if (isLoading) {
+                  return (
+                    <span
+                      key={s.value}
+                      style={{
+                        background: "#f1f5f9",
+                        color: "#64748b",
+                        border: "1px solid #cbd5e1",
+                        padding: "2px 8px",
+                        borderRadius: "4px",
+                        fontSize: "11.5px",
+                        fontWeight: 500,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        whiteSpace: "nowrap",
+                        flexShrink: 0,
+                      }}
+                      title="Loading name..."
+                    >
+                      <span style={{ fontSize: "10px" }}>⏳</span>
+                      <span>Loading...</span>
+                    </span>
+                  );
+                }
+                return (
                   <span
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeItem(s.value);
-                    }}
+                    key={s.value}
                     style={{
-                      cursor: "pointer",
-                      marginLeft: "2px",
-                      opacity: 0.85,
-                      fontSize: "11px",
-                      fontWeight: 700,
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      padding: "3px 9px",
+                      borderRadius: "4px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                      boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
                     }}
-                    title="Remove"
                   >
-                    ✕
+                    {s.label}
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeItem(s.value);
+                      }}
+                      style={{
+                        cursor: "pointer",
+                        marginLeft: "2px",
+                        opacity: 0.85,
+                        fontSize: "11px",
+                        fontWeight: 700,
+                      }}
+                      title="Remove"
+                    >
+                      ✕
+                    </span>
                   </span>
-                </span>
-              ))}
+                );
+              })}
               {extraCount > 0 && (
                 <span
                   onClick={(e) => {
@@ -1525,45 +1646,69 @@ export function SearchableDropdownMultiPanel({
             </div>
 
             <div style={{ overflowY: "auto", flex: 1, display: "flex", flexWrap: "wrap", gap: "8px", padding: "4px" }}>
-              {selected.map((s) => (
-                <span
-                  key={s.value}
-                  style={{
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    padding: "6px 10px",
-                    borderRadius: "6px",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  {s.label}
-                  <button
-                    type="button"
-                    onClick={() => removeItem(s.value)}
+              {selected.map((s) => {
+                const isLoading = isUUID(s.label);
+                if (isLoading) {
+                  return (
+                    <span
+                      key={s.value}
+                      style={{
+                        background: "#f1f5f9",
+                        color: "#64748b",
+                        border: "1px solid #cbd5e1",
+                        padding: "5px 9px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        fontWeight: 500,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
+                      }}
+                    >
+                      <span>⏳</span> Loading...
+                    </span>
+                  );
+                }
+                return (
+                  <span
+                    key={s.value}
                     style={{
-                      background: "rgba(255,255,255,0.25)",
-                      border: "none",
-                      borderRadius: "50%",
+                      background: "#0061f2",
                       color: "#ffffff",
-                      fontSize: "11px",
-                      fontWeight: "bold",
-                      cursor: "pointer",
-                      width: "18px",
-                      height: "18px",
-                      display: "flex",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      display: "inline-flex",
                       alignItems: "center",
-                      justifyContent: "center",
-                      padding: 0,
+                      gap: "8px",
                     }}
                   >
-                    ✕
-                  </button>
-                </span>
-              ))}
+                    {s.label}
+                    <button
+                      type="button"
+                      onClick={() => removeItem(s.value)}
+                      style={{
+                        background: "rgba(255,255,255,0.25)",
+                        border: "none",
+                        borderRadius: "50%",
+                        color: "#ffffff",
+                        fontSize: "11px",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                        width: "18px",
+                        height: "18px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 0,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                );
+              })}
             </div>
           </div>
         </div>

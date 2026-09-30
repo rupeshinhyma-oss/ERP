@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -156,17 +156,18 @@ async def export_currencys(
 async def import_currencys(
     request: Request,
     file: UploadFile = File(...),
+    update_existing: bool = Query(False, description="Update existing records matching code/name instead of skipping"),
     service: CurrencyService = Depends(get_currency_service),
     current_user: CurrentUser = Depends(require_permission("currency.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import currencys from an uploaded CSV/XLSX file, validating every row."""
     raw_bytes = await file.read()
-    summary = await service.import_file(file.filename or "import.csv", raw_bytes)
+    summary = await service.import_file(file.filename or "import.csv", raw_bytes, update_existing=update_existing)
     await _record_action(
         audit_service=audit_service, request=request, action=AuditAction.IMPORT,
         actor=current_user, entity_id="bulk",
-        description=f"Imported currencys: {summary.created} created, {summary.failed} failed.",
+        description=f"Imported currencies: {summary.created} created, {summary.updated} updated, {summary.failed} failed.",
         new_values=summary.as_dict(),
     )
     data = ImportSummaryRead(**summary.as_dict()).model_dump(mode="json")

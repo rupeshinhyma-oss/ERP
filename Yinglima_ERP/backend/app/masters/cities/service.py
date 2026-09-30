@@ -27,6 +27,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 from app.masters.states.repository import StateRepository
 
@@ -146,11 +147,11 @@ class CityService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import cities from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> City:
+        async def _create(field_values: dict[str, Any]) -> City | tuple[str, City]:
             country_code = field_values.pop("country_code")
             state_name = field_values.pop("state_name")
             country = await self.country_repository.get_by_code(country_code)
@@ -169,6 +170,13 @@ class CityService:
             field_values["state_id"] = state.id
             name = field_values["name"]
             existing = await self.repository.get_by_name_in_state(state.id, name)
+            if update_existing and existing is not None:
+                has_changes, changes = update_record_fields(existing, field_values)
+                if has_changes:
+                    await self.repository.update(existing, **changes)
+                    return ("updated", existing)
+                return ("unchanged", existing)
+
             if existing is not None:
                 raise ConflictException(
                     f"City {name!r} already exists in state {state_name!r}.",

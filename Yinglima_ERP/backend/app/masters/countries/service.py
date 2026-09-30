@@ -25,6 +25,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 
 
@@ -130,19 +131,29 @@ class CountryService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import countries from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> Country:
+        async def _create(field_values: dict[str, Any]) -> Country | tuple[str, Country]:
             name = field_values["name"]
             code = field_values["code"]
+
+            existing_by_code = await self.repository.get_by_code(code)
             existing_by_name = await self.repository.get_by_name(name)
+            existing = existing_by_code if existing_by_code is not None else existing_by_name
+
+            if update_existing and existing is not None:
+                has_changes, changes = update_record_fields(existing, field_values)
+                if has_changes:
+                    await self.repository.update(existing, **changes)
+                    return ("updated", existing)
+                return ("unchanged", existing)
+
             if existing_by_name is not None:
                 raise ConflictException(
                     f"Country name {name!r} already exists.", details={"existing": model_to_dict(existing_by_name)}
                 )
-            existing_by_code = await self.repository.get_by_code(code)
             if existing_by_code is not None:
                 raise ConflictException(
                     f"Country code {code!r} already exists.", details={"existing": model_to_dict(existing_by_code)}

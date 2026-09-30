@@ -646,6 +646,7 @@ export function MasterPage<T extends MasterRecord>({
   const [importError, setImportError] = useState<string | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [importMode, setImportMode] = useState<"create" | "update">("create");
   const [wizardPending, setWizardPending] = useState<{
     file: File;
     rows: SheetRow[];
@@ -1452,6 +1453,102 @@ export function MasterPage<T extends MasterRecord>({
               padding: "28px 36px",
             }}
           >
+            {/* Import Mode Selection */}
+            <div style={{ marginBottom: "26px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                Select Import Mode
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", maxWidth: "800px" }}>
+                {/* Mode 1: Add New */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("create")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("create"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "create" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>➕</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "create" ? "#1d4ed8" : "#1e293b" }}>
+                      Add New Records Only
+                    </strong>
+                    {importMode === "create" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Upload only brand new {entityName.toLowerCase()} records. Any duplicate rows that already exist in the system will be safely flagged and skipped.
+                  </div>
+                </div>
+
+                {/* Mode 2: Update / Modify */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("update")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("update"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "update" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>✏️</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "update" ? "#1d4ed8" : "#1e293b" }}>
+                      Update / Modify Existing Records
+                    </strong>
+                    {importMode === "update" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Update existing {entityName.toLowerCase()} records matching names or codes. <strong>Zero Data Loss:</strong> Blank cells in your file are ignored and will never erase existing fields.
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Info Callout */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  maxWidth: "800px",
+                  background: importMode === "create" ? "#f8fafc" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span>{importMode === "create" ? "ℹ️" : "🛡️"}</span>
+                <span>
+                  {importMode === "create"
+                    ? `Strict creation mode: Existing ${entityName.toLowerCase()} records remain untouched. Any duplicate rows will be reported.`
+                    : `Safe non-destructive update: Only columns with values in your uploaded file will update matching ${entityName.toLowerCase()} records. Empty columns are kept intact.`}
+                </span>
+              </div>
+            </div>
+
             {/* Import File Section */}
             <div style={{ marginBottom: "24px" }}>
               <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
@@ -1667,7 +1764,7 @@ export function MasterPage<T extends MasterRecord>({
                   boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
                 }}
               >
-                {importLoading ? "Parsing..." : "Next: Map Columns →"}
+                {importLoading ? "Parsing..." : importMode === "update" ? "Proceed with Update →" : "Next: Map Columns →"}
               </button>
             </div>
           </div>
@@ -1681,6 +1778,7 @@ export function MasterPage<T extends MasterRecord>({
               apiBase={apiBase}
               entityName={entityName}
               importHeaders={importHeaders}
+              initialMode={importMode}
               onClose={() => setWizardPending(null)}
               onComplete={(summary) => {
                 setWizardPending(null);

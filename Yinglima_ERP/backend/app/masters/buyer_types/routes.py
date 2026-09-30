@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from fastapi.responses import Response
 
 from app.audit.constants import AuditAction
@@ -121,19 +121,20 @@ async def export_buyer_types(
 async def import_buyer_types(
     request: Request,
     file: UploadFile = File(...),
+    update_existing: bool = Query(False, description="Update existing records matching name instead of skipping"),
     service: BuyerTypeService = Depends(get_buyer_type_service),
     current_user: CurrentUser = Depends(require_permission("buyertype.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     raw_bytes = await file.read()
-    summary = await service.import_file(file.filename or "import.csv", raw_bytes)
+    summary = await service.import_file(file.filename or "import.csv", raw_bytes, update_existing=update_existing)
     await _record_action(
         audit_service=audit_service,
         request=request,
         action=AuditAction.IMPORT,
         actor=current_user,
         entity_id="bulk",
-        description=f"Imported {summary.created} buyer types from {file.filename!r}.",
+        description=f"Imported buyer types: {summary.created} created, {summary.updated} updated, {summary.failed} failed.",
     )
     data = ImportSummaryRead.model_validate(summary).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="Import complete.")

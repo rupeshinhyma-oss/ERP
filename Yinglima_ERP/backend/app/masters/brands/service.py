@@ -20,6 +20,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 
 
@@ -129,13 +130,25 @@ class BrandService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import brands from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> Brand:
+        async def _create(field_values: dict[str, Any]) -> Brand | tuple[str, Brand]:
             name = field_values["name"]
             code = field_values.get("code")
+
+            existing_by_name = await self.repository.get_by_name(name)
+            existing_by_code = await self.repository.get_by_code(code) if code else None
+            existing = existing_by_name if existing_by_name is not None else existing_by_code
+
+            if update_existing and existing is not None:
+                has_changes, changes = update_record_fields(existing, field_values)
+                if has_changes:
+                    await self.repository.update(existing, **changes)
+                    return ("updated", existing)
+                return ("unchanged", existing)
+
             if not code:
                 clean_name = "".join(c.upper() for c in name if c.isalnum())[:10]
                 code = f"BR-{clean_name}" if clean_name else "BR-GEN"
@@ -146,12 +159,10 @@ class BrandService:
                     counter += 1
                 field_values["code"] = code
 
-            existing_by_name = await self.repository.get_by_name(name)
             if existing_by_name is not None:
                 raise ConflictException(
                     f"Brand name {name!r} already exists.", details={"existing": model_to_dict(existing_by_name)}
                 )
-            existing_by_code = await self.repository.get_by_code(code)
             if existing_by_code is not None:
                 raise ConflictException(
                     f"Brand code {code!r} already exists.", details={"existing": model_to_dict(existing_by_code)}

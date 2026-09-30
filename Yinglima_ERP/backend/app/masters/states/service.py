@@ -23,6 +23,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 from app.masters.states.constants import DROPDOWN_CACHE_NAME, EXPORT_HEADERS
 from app.masters.states.models import State
@@ -143,11 +144,11 @@ class StateService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import states from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> State:
+        async def _create(field_values: dict[str, Any]) -> State | tuple[str, State]:
             country_code = field_values.pop("country_code")
             country = await self.country_repository.get_by_code(country_code)
             if country is None:
@@ -157,6 +158,13 @@ class StateService:
             field_values["country_id"] = country.id
             name = field_values["name"]
             existing = await self.repository.get_by_name_in_country(country.id, name)
+            if update_existing and existing is not None:
+                has_changes, changes = update_record_fields(existing, field_values)
+                if has_changes:
+                    await self.repository.update(existing, **changes)
+                    return ("updated", existing)
+                return ("unchanged", existing)
+
             if existing is not None:
                 raise ConflictException(
                     f"State {name!r} already exists in country {country_code!r}.",

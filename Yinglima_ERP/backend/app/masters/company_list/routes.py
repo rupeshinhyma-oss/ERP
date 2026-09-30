@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from fastapi.responses import Response
 
 from app.auth.dependencies import get_current_user
@@ -108,12 +108,13 @@ async def export_companies(
 async def import_companies(
     request: Request,
     file: UploadFile = File(...),
+    update_existing: bool = Query(False, description="Update existing records matching name/code instead of skipping"),
     service: CompanyService = Depends(get_company_service),
     _current_user: CurrentUser = Depends(require_permission("organizationlist.import")),
 ) -> dict:
     """Import organizations/companies from an uploaded CSV/XLSX file, validating every row."""
     raw_bytes = await file.read()
-    summary = await service.import_file(file.filename or "import.csv", raw_bytes)
+    summary = await service.import_file(file.filename or "import.csv", raw_bytes, update_existing=update_existing)
     data = ImportSummaryRead(**summary.as_dict()).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
 

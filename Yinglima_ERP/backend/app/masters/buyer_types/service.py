@@ -16,6 +16,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 from app.masters.buyer_types.constants import DROPDOWN_CACHE_NAME, EXPORT_HEADERS
 from app.masters.buyer_types.models import BuyerType
@@ -112,12 +113,19 @@ class BuyerTypeService:
         await self.repository.delete(item)
         await self._invalidate_cache()
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> BuyerType:
+        async def _create(field_values: dict[str, Any]) -> BuyerType | tuple[str, BuyerType]:
             name = field_values["name"]
             existing = await self.repository.get_by_name(name)
+            if update_existing and existing is not None:
+                has_changes, changes = update_record_fields(existing, field_values)
+                if has_changes:
+                    await self.repository.update(existing, **changes)
+                    return ("updated", existing)
+                return ("unchanged", existing)
+
             if existing is not None:
                 raise ConflictException(
                     f"Buyer type name {name!r} already exists.", details={"existing": model_to_dict(existing)}

@@ -59,6 +59,52 @@ def model_to_dict(instance: Any) -> dict[str, Any]:
     return result
 
 
+def is_different(val1: Any, val2: Any) -> bool:
+    """Compare two values intelligently for import updates.
+
+    Handles None, empty strings, Enum values, floats/Decimals with rounding,
+    and string casing so that no false-positive diffs occur.
+    """
+    if val1 is None and val2 is None:
+        return False
+    if val1 is None or val2 is None:
+        return True
+    try:
+        f1 = float(val1)
+        f2 = float(val2)
+        return round(f1, 6) != round(f2, 6)
+    except (ValueError, TypeError):
+        pass
+    s1 = str(getattr(val1, "value", val1) or "").strip().lower()
+    s2 = str(getattr(val2, "value", val2) or "").strip().lower()
+    return s1 != s2
+
+
+def update_record_fields(
+    record: Any,
+    field_values: dict[str, Any],
+    skip_fields: set[str] | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    Given an existing ORM model and a dict of validated field values from an import row,
+    returns (has_changes, changes_dict) where only non-empty, changed fields are included.
+    Blank cells in Excel/CSV are ignored to guarantee zero data loss.
+    """
+    skip = {"id", "created_at", "updated_at", *(skip_fields or ())}
+    changes: dict[str, Any] = {}
+    for k, v in field_values.items():
+        if k in skip:
+            continue
+        if v is None:
+            continue
+        if isinstance(v, str) and v.strip() == "":
+            continue
+        cur_v = getattr(record, k, None)
+        if is_different(cur_v, v):
+            changes[k] = v
+    return bool(changes), changes
+
+
 @dataclass
 class ImportRowResult:
     """Outcome of validating a single imported row."""
@@ -83,6 +129,7 @@ class ImportSummary:
     total_rows: int = 0
     created: int = 0
     updated: int = 0
+    unchanged: int = 0
     failed: int = 0
     duplicate_count: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
@@ -100,6 +147,7 @@ class ImportSummary:
             "total_rows": self.total_rows,
             "created": self.created,
             "updated": self.updated,
+            "unchanged": self.unchanged,
             "failed": self.failed,
             "duplicate_count": self.duplicate_count,
             "errors": self.errors,
@@ -218,8 +266,12 @@ async def run_import(
             res = await row_creator(field_values)
             if isinstance(res, tuple) and len(res) == 2 and res[0] == "updated":
                 summary.updated += 1
+            elif isinstance(res, tuple) and len(res) == 2 and res[0] == "unchanged":
+                summary.unchanged += 1
             elif isinstance(res, dict) and res.get("action") == "updated":
                 summary.updated += 1
+            elif isinstance(res, dict) and res.get("action") == "unchanged":
+                summary.unchanged += 1
             else:
                 summary.created += 1
         except ConflictException as exc:

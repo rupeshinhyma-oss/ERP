@@ -622,6 +622,7 @@ class BuyerService:
             if update_existing and batch_key in existing_name_map:
                 target_buyer = existing_name_map[batch_key]
                 update_kwargs: dict[str, Any] = {}
+                has_changes = False
 
                 # Strict Buyer Type validation if provided
                 buyer_type_raw = field_values.get("buyer_type")
@@ -633,7 +634,9 @@ class BuyerService:
                         raise BadRequestException(
                             f"Buyer Type '{buyer_type_raw}' does not exist in Buyer Type Master. Must be one of: {valid_list_str}."
                         )
-                    update_kwargs["buyer_type"] = matched_bt
+                    if (target_buyer.buyer_type or "").strip().lower() != matched_bt.strip().lower():
+                        update_kwargs["buyer_type"] = matched_bt
+                        has_changes = True
 
                 # Strict Country validation if provided
                 if country_raw and country_raw.strip():
@@ -643,10 +646,13 @@ class BuyerService:
                     )
                     if matched_country is None:
                         raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
-                    update_kwargs["country_id"] = matched_country.id
+                    if target_buyer.country_id != matched_country.id:
+                        update_kwargs["country_id"] = matched_country.id
+                        has_changes = True
 
                 # Category validation if provided
                 category_ids: list[Any] | None = None
+                category_changed = False
                 if cat_names_raw and str(cat_names_raw).strip():
                     category_ids = []
                     for cn in cat_names_raw.split(","):
@@ -657,9 +663,14 @@ class BuyerService:
                         if not matched_cat:
                             raise BadRequestException(f"Product Category '{cn.strip()}' does not exist in Category Master.")
                         category_ids.append(matched_cat.id)
+                    curr_cat_ids = {link.category_id for link in getattr(target_buyer, "category_links", [])}
+                    if set(category_ids) != curr_cat_ids:
+                        category_changed = True
+                        has_changes = True
 
                 # Sub-Category validation if provided
                 sub_category_ids: list[Any] | None = None
+                sub_category_changed = False
                 if sub_cat_names_raw and str(sub_cat_names_raw).strip():
                     sub_category_ids = []
                     for scn in sub_cat_names_raw.split(","):
@@ -670,40 +681,56 @@ class BuyerService:
                         if not matched_sc:
                             raise BadRequestException(f"Product Sub Category '{scn.strip()}' does not exist in Sub Category Master.")
                         sub_category_ids.append(matched_sc.id)
+                    curr_sc_ids = {link.sub_category_id for link in getattr(target_buyer, "sub_category_links", [])}
+                    if set(sub_category_ids) != curr_sc_ids:
+                        sub_category_changed = True
+                        has_changes = True
 
-                # Calling number: only update if provided, and check no collision with OTHER buyers
+                # Calling number: only check collision if user is CHANGING it to a new number
                 clean_call = re.sub(r"\D", "", calling_num) if calling_num else ""
+                clean_cur_call = re.sub(r"\D", "", target_buyer.contact_calling_number or "")
                 if clean_call and len(clean_call) >= 6:
-                    if clean_call in existing_calling_map and existing_calling_map[clean_call].id != target_buyer.id:
-                        dup = existing_calling_map[clean_call]
-                        raise ConflictException(
-                            f"Calling number '{calling_num}' already exists in Buyer Master (used by '{dup.company_name}').",
-                            details={"existing": _serialize_buyer_for_compare(dup)},
-                        )
-                    if clean_call in existing_whatsapp_map and existing_whatsapp_map[clean_call].id != target_buyer.id:
-                        dup = existing_whatsapp_map[clean_call]
-                        raise ConflictException(
-                            f"Calling number '{calling_num}' already exists as WhatsApp number in Buyer Master (used by '{dup.company_name}').",
-                            details={"existing": _serialize_buyer_for_compare(dup)},
-                        )
-                    update_kwargs["contact_calling_number"] = calling_num
+                    if clean_call != clean_cur_call:
+                        if clean_call in existing_calling_map and existing_calling_map[clean_call].id != target_buyer.id:
+                            dup = existing_calling_map[clean_call]
+                            raise ConflictException(
+                                f"Calling number '{calling_num}' already exists in Buyer Master (used by '{dup.company_name}').",
+                                details={"existing": _serialize_buyer_for_compare(dup)},
+                            )
+                        if clean_call in existing_whatsapp_map and existing_whatsapp_map[clean_call].id != target_buyer.id:
+                            dup = existing_whatsapp_map[clean_call]
+                            raise ConflictException(
+                                f"Calling number '{calling_num}' already exists as WhatsApp number in Buyer Master (used by '{dup.company_name}').",
+                                details={"existing": _serialize_buyer_for_compare(dup)},
+                            )
+                        update_kwargs["contact_calling_number"] = calling_num
+                        has_changes = True
+                    elif str(getattr(target_buyer, "contact_calling_number", "") or "").strip() != str(calling_num).strip():
+                        update_kwargs["contact_calling_number"] = calling_num
+                        has_changes = True
 
-                # WhatsApp number: only update if provided, and check no collision with OTHER buyers
+                # WhatsApp number: only check collision if user is CHANGING it to a new number
                 clean_wa = re.sub(r"\D", "", wa_num) if wa_num else ""
+                clean_cur_wa = re.sub(r"\D", "", target_buyer.contact_whatsapp_number or "")
                 if clean_wa and len(clean_wa) >= 6:
-                    if clean_wa in existing_whatsapp_map and existing_whatsapp_map[clean_wa].id != target_buyer.id:
-                        dup = existing_whatsapp_map[clean_wa]
-                        raise ConflictException(
-                            f"WhatsApp number '{wa_num}' already exists in Buyer Master (used by '{dup.company_name}').",
-                            details={"existing": _serialize_buyer_for_compare(dup)},
-                        )
-                    if clean_wa in existing_calling_map and existing_calling_map[clean_wa].id != target_buyer.id:
-                        dup = existing_calling_map[clean_wa]
-                        raise ConflictException(
-                            f"WhatsApp number '{wa_num}' already exists as Calling number in Buyer Master (used by '{dup.company_name}').",
-                            details={"existing": _serialize_buyer_for_compare(dup)},
-                        )
-                    update_kwargs["contact_whatsapp_number"] = wa_num
+                    if clean_wa != clean_cur_wa:
+                        if clean_wa in existing_whatsapp_map and existing_whatsapp_map[clean_wa].id != target_buyer.id:
+                            dup = existing_whatsapp_map[clean_wa]
+                            raise ConflictException(
+                                f"WhatsApp number '{wa_num}' already exists in Buyer Master (used by '{dup.company_name}').",
+                                details={"existing": _serialize_buyer_for_compare(dup)},
+                            )
+                        if clean_wa in existing_calling_map and existing_calling_map[clean_wa].id != target_buyer.id:
+                            dup = existing_calling_map[clean_wa]
+                            raise ConflictException(
+                                f"WhatsApp number '{wa_num}' already exists as Calling number in Buyer Master (used by '{dup.company_name}').",
+                                details={"existing": _serialize_buyer_for_compare(dup)},
+                            )
+                        update_kwargs["contact_whatsapp_number"] = wa_num
+                        has_changes = True
+                    elif str(getattr(target_buyer, "contact_whatsapp_number", "") or "").strip() != str(wa_num).strip():
+                        update_kwargs["contact_whatsapp_number"] = wa_num
+                        has_changes = True
 
                 # Other direct fields: ONLY update if non-null and not empty/blank string
                 skip_fields = {
@@ -712,9 +739,13 @@ class BuyerService:
                     "emails",
                 }
                 for k, v in field_values.items():
-                    if k not in skip_fields:
-                        if v is not None and str(v).strip() != "":
+                    if k not in skip_fields and v is not None:
+                        cur_v = getattr(target_buyer, k, None)
+                        cur_s = str(cur_v.value if hasattr(cur_v, "value") else (cur_v if cur_v is not None else "")).strip().lower()
+                        new_s = str(v.value if hasattr(v, "value") else (v if v is not None else "")).strip().lower()
+                        if new_s != "" and cur_s != new_s:
                             update_kwargs[k] = v
+                            has_changes = True
 
                 # Validate potential_reason if potential is updated
                 if "potential" in update_kwargs:
@@ -722,30 +753,34 @@ class BuyerService:
                     pot_reason = update_kwargs.get("potential_reason", target_buyer.potential_reason)
                     self._validate_potential_reason(pot_val, pot_reason)
 
-                # Persist updates to target buyer (never blanking out any existing field)
-                if update_kwargs:
-                    await self.repository.update(target_buyer, **update_kwargs)
-                if category_ids is not None:
-                    await self.repository.replace_category_links(target_buyer.id, category_ids)
-                if sub_category_ids is not None:
-                    await self.repository.replace_sub_category_links(target_buyer.id, sub_category_ids)
+                # Emails check
+                emails_changed = False
                 if emails is not None and len(emails) > 0:
-                    await self.repository.replace_emails(target_buyer.id, emails)
+                    curr_emails = [e.email.strip().lower() for e in getattr(target_buyer, "emails", []) if getattr(e, "email", None)]
+                    new_emails = [e.strip().lower() for e in emails if e.strip()]
+                    if sorted(curr_emails) != sorted(new_emails):
+                        emails_changed = True
+                        has_changes = True
 
                 # Update primary contact if contact name was supplied in this row
                 contact_name = field_values.get("contact_full_name")
                 if contact_name and str(contact_name).strip():
                     primary_contact = next((c for c in getattr(target_buyer, "contacts", []) if c.is_primary), None)
                     if primary_contact:
-                        c_updates: dict[str, Any] = {"person_name": str(contact_name).strip()}
-                        if field_values.get("contact_designation"):
+                        c_updates: dict[str, Any] = {}
+                        if (primary_contact.person_name or "").strip() != str(contact_name).strip():
+                            c_updates["person_name"] = str(contact_name).strip()
+                        if field_values.get("contact_designation") and (primary_contact.designation or "").strip() != str(field_values["contact_designation"]).strip():
                             c_updates["designation"] = str(field_values["contact_designation"]).strip()
-                        if calling_num:
+                        if calling_num and (primary_contact.calling_number or "").strip() != str(calling_num).strip():
                             c_updates["calling_number"] = calling_num
-                        if wa_num:
+                        if wa_num and (primary_contact.whatsapp_number or "").strip() != str(wa_num).strip():
                             c_updates["whatsapp_number"] = wa_num
-                        await self.contact_repository.update(primary_contact, **c_updates)
+                        if c_updates:
+                            has_changes = True
+                            await self.contact_repository.update(primary_contact, **c_updates)
                     else:
+                        has_changes = True
                         await self.contact_repository.create(
                             buyer_id=target_buyer.id,
                             salutation=field_values.get("contact_salutation"),
@@ -758,11 +793,24 @@ class BuyerService:
                             is_primary=True,
                         )
 
+                # Persist updates to target buyer (never blanking out any existing field)
+                if update_kwargs:
+                    await self.repository.update(target_buyer, **update_kwargs)
+                if category_ids is not None and category_changed:
+                    await self.repository.replace_category_links(target_buyer.id, category_ids)
+                if sub_category_ids is not None and sub_category_changed:
+                    await self.repository.replace_sub_category_links(target_buyer.id, sub_category_ids)
+                if emails is not None and emails_changed:
+                    await self.repository.replace_emails(target_buyer.id, emails)
+
                 seen_in_batch.add(batch_key)
                 if clean_call and len(clean_call) >= 6:
                     existing_calling_map[clean_call] = target_buyer
                 if clean_wa and len(clean_wa) >= 6:
                     existing_whatsapp_map[clean_wa] = target_buyer
+
+                if not has_changes:
+                    return ("unchanged", target_buyer)
                 return ("updated", target_buyer)
 
             # ----------------------------------------------------------

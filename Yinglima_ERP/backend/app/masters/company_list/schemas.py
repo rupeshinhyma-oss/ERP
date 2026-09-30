@@ -69,6 +69,13 @@ class CompanyLookupRead(BaseModel):
 class ImportSummaryRead(BaseModel):
     """Summary response for bulk import operations."""
 
+    total_rows: int = 0
     created: int
+    updated: int = 0
+    unchanged: int = 0
     failed: int
-    errors: list[str] = []
+    duplicate_count: int = 0
+    errors: list[dict | str] = []
+    duplicates: list[dict] = []
+    in_file_duplicate_count: int = 0
+    in_file_duplicates: list[dict] = []

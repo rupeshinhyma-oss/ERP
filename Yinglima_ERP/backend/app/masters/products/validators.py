@@ -77,19 +77,20 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     cbm = _parse_optional_float_aliases(raw_row, "Pack. Unit CBM", "Packaging Unit CBM", "packaging_unit_cbm", "cbm", row_number=row_number)
     refund_vat = _parse_optional_float_aliases(raw_row, "Refund VAT %", "refund_vat_percent", "Refund VAT", row_number=row_number)
 
-    if pack_qty is None or pack_qty <= 0:
-        raise BadRequestException(f"Row {row_number}: Packaging Quantity (Pack. Qty) is required and must be greater than 0.")
+    if pack_qty is not None and pack_qty <= 0:
+        raise BadRequestException(f"Row {row_number}: Packaging Quantity (Pack. Qty) must be greater than 0.")
 
-    if gross_wt is None or gross_wt <= 0:
-        raise BadRequestException(f"Row {row_number}: Packaging Gross Weight (kg) is required and must be greater than 0.")
+    if gross_wt is not None and gross_wt < 0:
+        raise BadRequestException(f"Row {row_number}: Packaging Gross Weight (kg) cannot be negative.")
+    elif gross_wt is not None and gross_wt == 0:
+        gross_wt = None
 
-    if cbm is None or cbm <= 0:
-        if length and width and height and length > 0 and width > 0 and height > 0:
-            cbm = round((length * width * height) / 1000000.0, 6)
-        else:
-            raise BadRequestException(
-                f"Row {row_number}: Packaging Unit CBM is required (provide Length, Width, Height in cm to calculate automatically or provide Packaging Unit CBM directly)."
-            )
+    if length and width and height and length > 0 and width > 0 and height > 0:
+        calc_cbm = round((length * width * height) / 1000000.0, 6)
+        if cbm is None or cbm <= 0:
+            cbm = calc_cbm
+    elif cbm is not None and cbm <= 0:
+        cbm = None
 
     spec = _get_val(raw_row, "Specification", "specification", "Compliance & License Requirements", "Product Specification")
     desc = _get_val(raw_row, "Description", "description")
