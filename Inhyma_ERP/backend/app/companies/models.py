@@ -100,8 +100,18 @@ class Company(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     tax_id_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     town: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    pincode: Mapped[str | None] = mapped_column(String(50), nullable=True)
     primary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
     secondary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    company_category: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    product_manufacture_or_supply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    machines_buying_from: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spares_buying_from: Mapped[str | None] = mapped_column(Text, nullable=True)
+    products_interested: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gst_registration_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    age_of_company: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    social_media: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     company_grade: Mapped[CompanyGrade | None] = mapped_column(
         SAEnum(CompanyGrade, name="company_grade_enum", native_enum=False, length=5), nullable=True

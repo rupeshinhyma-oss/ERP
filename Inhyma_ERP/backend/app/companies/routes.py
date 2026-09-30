@@ -122,8 +122,17 @@ async def _to_company_read(service: CompanyService, company) -> dict:
         "tax_id_number": company.tax_id_number,
         "address": company.address,
         "town": company.town,
+        "pincode": company.pincode,
         "primary_website": company.primary_website,
         "secondary_website": company.secondary_website,
+        "company_category": company.company_category,
+        "product_manufacture_or_supply": company.product_manufacture_or_supply,
+        "machines_buying_from": company.machines_buying_from,
+        "spares_buying_from": company.spares_buying_from,
+        "products_interested": company.products_interested,
+        "gst_registration_date": company.gst_registration_date,
+        "age_of_company": company.age_of_company,
+        "social_media": company.social_media,
         "company_grade": company.company_grade,
         "current_status": company.current_status,
         "potential": company.potential,
@@ -304,6 +313,66 @@ async def list_sales_persons(
         for r in result.all()
     ]
     return build_success_response(data=users, request_id=request.state.request_id)
+
+
+@router.get("/lookup", summary="Lookup company names for autocomplete")
+async def lookup_companies(
+    request: Request,
+    q: str = "",
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db_session),
+    _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.create", "supplier.view", "supplier.create")),
+) -> dict:
+    """Return matching company names and details for typeahead autocomplete."""
+    from app.companies.models import Company
+    from sqlalchemy import select
+    stmt = (
+        select(
+            Company.id,
+            Company.company_name,
+            Company.company_type,
+            Company.tax_id_number,
+            Company.area,
+            Company.district,
+            Company.city_id,
+            Company.state_id,
+            Company.contact_salutation,
+            Company.contact_full_name,
+            Company.contact_designation,
+            Company.contact_calling_number,
+            Company.contact_whatsapp_number,
+            Company.contact_indiamart_number,
+            Company.primary_website,
+            Company.sales_person_id,
+        )
+        .where(Company.deleted_at.is_(None))
+    )
+    if q.strip():
+        term = f"%{q.strip()}%"
+        stmt = stmt.where(Company.company_name.ilike(term))
+    stmt = stmt.order_by(Company.company_name.asc()).limit(limit)
+    result = await db.execute(stmt)
+    records = []
+    for r in result.all():
+        records.append({
+            "id": str(r.id),
+            "company_name": r.company_name,
+            "company_type": r.company_type,
+            "tax_id_number": r.tax_id_number,
+            "area": r.area,
+            "district": r.district,
+            "city_id": str(r.city_id) if r.city_id else None,
+            "state_id": str(r.state_id) if r.state_id else None,
+            "contact_salutation": r.contact_salutation,
+            "contact_full_name": r.contact_full_name,
+            "contact_designation": r.contact_designation,
+            "contact_calling_number": r.contact_calling_number,
+            "contact_whatsapp_number": r.contact_whatsapp_number,
+            "contact_indiamart_number": r.contact_indiamart_number,
+            "primary_website": r.primary_website,
+            "sales_person_id": str(r.sales_person_id) if r.sales_person_id else None,
+        })
+    return build_success_response(data=records, request_id=request.state.request_id)
 
 
 @router.get("/{company_id}", summary="Get a company")

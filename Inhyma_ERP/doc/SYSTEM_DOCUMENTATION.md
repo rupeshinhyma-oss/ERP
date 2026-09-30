@@ -651,11 +651,11 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     - Remarks Callout & Dual Signatory Block: "Prepared By" and "Authorized Signatory" signature lines with official stamp boxes.
 
 ### 8.18. Contact: Companies & Multi-Contact Directory
-- **Files:** `backend/app/companies/routes.py`, `backend/app/companies/service.py`, `backend/app/companies/repository.py`, `backend/app/companies/schemas.py`, `backend/app/companies/models.py`, `frontend/src/pages/CompaniesPage.tsx`.
+- **Files:** `backend/app/companies/routes.py`, `backend/app/companies/service.py`, `backend/app/companies/repository.py`, `backend/app/companies/schemas.py`, `backend/app/companies/models.py`, `frontend/src/pages/Companies.tsx`.
 - **Endpoints:**
   - `GET /api/v1/companies`: Paginated list of enterprise companies with grade, potential, and search filters.
-  - `POST /api/v1/companies`: Create company account with primary contact and tax identifiers.
-  - `GET /api/v1/companies/{id}`: Retrieve detailed company profile, addresses, and contacts.
+  - `POST /api/v1/companies`: Create company account with primary contact, tax identifiers, and full B2B intelligence profile.
+  - `GET /api/v1/companies/{id}`: Retrieve detailed company profile, addresses, contacts, and extended intelligence.
   - `PATCH /api/v1/companies/{id}`: Update company information, credit terms, and status.
   - `DELETE /api/v1/companies/{id}`: Soft-delete company record and associated contacts.
   - `POST /api/v1/companies/{id}/contacts`: Add sub-contact person to company contact roster.
@@ -664,11 +664,26 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `POST /api/v1/companies/import`: Bulk spreadsheet import for company directories.
   - `GET /api/v1/companies/export`: Export company database to Excel / CSV.
   - Legacy Aliases: `/user/addEdit`, `/user/addedit`.
-- **Features:**
-  - B2B corporate directory tracking Legal Name, Trade Name, GSTIN, PAN, TAN, and IEC codes.
-  - Multi-tier company classifications, payment credit limits, and credit terms (Net 30, Net 60, Advance).
-  - Multi-address matrix supporting Billing Head Office, Factory/Plant, and Warehouse Delivery locations.
-  - Real-time WebSocket event dispatching (`company.created`, `company.updated`, `company.deleted`) on `module:companies`.
+- **Features & Data Architecture:**
+  - **Comprehensive Legal & Tax Identifiers:** B2B corporate directory tracking Legal Name, Trade Name, GSTIN, PAN, TAN, and IEC codes.
+  - **Commercial Terms & Rating:** Multi-tier company classifications, payment credit limits, credit terms (Net 30, Net 60, Advance), Grade (A-D), and Revenue Potential (High/Medium/Low).
+  - **Extended Corporate Intelligence (Release 2026-09-29):**
+    - `pincode`: 6-digit postal code for precision geographic indexing.
+    - `district_id`: Direct relational foreign key linkage to District master (`districts.id`).
+    - `company_category`: Corporate business role (Manufacturer, Trader, OEM, Service).
+    - `product_manufacture_or_supply`: In-depth goods manufactured or supplied.
+    - `machines_buying_from`: Competitor and vendor intelligence tracking for machinery.
+    - `spares_buying_from`: Intelligence tracking for spare parts and tooling.
+    - `products_interested`: Target demand and product interest areas.
+    - `gst_registration_date`: Tax authority registration timestamp.
+    - `age_of_company`: Operational tenure in years.
+    - `social_media`: Dynamic JSON matrix `[{"platform": "LinkedIn", "url": "https://..."}, ...]` managed via interactive frontend repeater.
+  - **Cascading Address Hierarchy:**
+    - Strict 3-level geographical cascade: State (`/masters/states/lookup`) ➔ District (`/masters/districts/lookup?state_id=...`) ➔ City (`/masters/cities/lookup?district_id=...&state_id=...`).
+    - Selecting State clears and filters District; selecting District clears and filters City.
+    - Dynamic City Addition: Adding a custom city persists the new entry in the City Master with both parent `state_id` and `district_id` references.
+  - **Multi-Address Matrix:** Supports Billing Head Office, Factory/Plant, and Warehouse Delivery locations with PIN/ZIP validation.
+  - **Real-Time Event Dispatching:** Dispatches WebSocket mutations (`company.created`, `company.updated`, `company.deleted`) on `module:companies` to synchronize active client sessions.
 
 ### 8.19. Task: Technical Tasks & Field Service Dispatch
 - **Files:** `backend/app/technical_tasks/routes.py`, `backend/app/technical_tasks/service.py`, `backend/app/technical_tasks/repository.py`, `backend/app/technical_tasks/schemas.py`, `backend/app/technical_tasks/models.py`, `frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx`.
@@ -1043,5 +1058,16 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Artifact Stripping**: Automatically strips leading and trailing spaces, tab characters (`\t`), newlines (`\n`), and non-breaking space characters (`\u00A0`) captured when copying cells from Excel, PDFs, or web tables.
 - **Native React State Dispatch**: Seamlessly triggers React's synthetic `onChange` and `input` events so form state updates immediately without manual backspacing. Excludes password and file upload inputs.
 
+### Global Autocomplete & Autofill Suppression System (`lib/autocompleteBlocker.ts`)
+- **System-Wide Overlay Defense**: Continuously enforces `autocomplete="off"`, `autocapitalize="off"`, `spellcheck="false"`, `data-lpignore="true"` (LastPass disabler), and `data-form-type="other"` (1Password/Bitwarden heuristic disabler) across all DOM `<form>`, `<input>`, `<textarea>`, and `<select>` elements.
+- **Dual-Defense Architecture**:
+  - Continuous DOM `MutationObserver` on `document.body` detecting dynamically mounted drawer inputs and popover dialogs.
+  - Document-level capture-phase `focusin` event interceptor immediately re-verifying and applying `autocomplete="off"` prior to browser layout engine suggestions popup rendering.
+- **Eliminates Browser Bubble Artifacts**: Permanently suppresses floating tooltip popover bubbles (e.g. historical name suggestions) from obscuring critical inputs.
+
+### Wheel Scroll Value Lockout & Spin-Button Elimination (`main.tsx` & `style.css`)
+- **Passive Mouse Wheel Listener**: Document-level listener detecting `wheel` events on `input[type="number"]` and immediately executing `target.blur()`, preventing inadvertent numeric increments or decrements during page scroll.
+- **Spin-Button Styling Suppression**: Universal CSS removal of `-webkit-outer-spin-button` and `-webkit-inner-spin-button` alongside `-moz-appearance: textfield` to maintain clean visual input boundaries.
+
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 4, 2026 (Enterprise Task Module V1.2 Release: Unlimited Escalation Chains, Stage-Level Subtask & Escalation Collaboration, File Attachments, HTML5 Voice Notes Recorder, and Rich Comment Composer).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 29, 2026 (Extended Company Profile Intelligence, Cascading Geographic Hierarchy, Global Autocomplete Blocker, and Wheel Scroll Protection).*

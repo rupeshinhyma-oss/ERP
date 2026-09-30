@@ -24,8 +24,9 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 
-async def _create_role(admin_client, *, role_key: str, permission_keys: list[str]):
+async def _create_role(admin_client, *, role_key: str, permission_keys: list[str] | None = None):
     """Create a role and grant it the given permissions (creating each permission if needed). Returns role dict."""
+    permission_keys = permission_keys or []
     role_resp = await admin_client.post(
         "/api/v1/global/authz/roles",
         json={"role_key": role_key, "display_name": role_key.title(), "description": "test role"},
@@ -350,8 +351,8 @@ async def test_global_user_without_permission_denied(client):
 
 
 async def test_global_user_with_permission_allowed(super_admin_client, client):
-    """A GlobalUser holding platform.system.manage globally CAN reach a platform_authz admin route."""
-    await _create_role(super_admin_client, role_key="TEST_MANAGER", permission_keys=["platform.system.manage"])
+    """A GlobalUser holding platform.user.read globally CAN reach a platform_authz admin route."""
+    await _create_role(super_admin_client, role_key="TEST_MANAGER", permission_keys=["platform.user.read"])
     user_id, token = await _register_global_user_and_login(client, email="hasperm1@example.com")
     await super_admin_client.post(
         f"/api/v1/global/authz/users/{user_id}/roles", json={"role_key": "TEST_MANAGER", "scope": "GLOBAL"}
@@ -369,13 +370,62 @@ async def test_unauthenticated_request_rejected(client):
 
 
 # --------------------------------------------------------------------
+# Regression: create_role's real permission gate (platform.system.manage)
+# --------------------------------------------------------------------
+#
+# platform_authz/routes.py's own module docstring always said role/
+# permission administration requires `platform.system.manage`, but the
+# `_MANAGE` constant actually enforced was `platform.user.update`, and
+# `platform.system.manage` didn't even exist in the seed catalog --
+# meaning no role, not even PLATFORM_SUPER_ADMIN, could ever hold it.
+# These tests pin the corrected, real behavior down explicitly so this
+# specific mismatch can't silently reappear.
+
+
+async def test_platform_user_update_alone_cannot_create_role(super_admin_client, client):
+    """
+    A GlobalUser holding ONLY platform.user.update (the OLD, incorrect
+    gate this route used to enforce) must NOT be able to create a
+    platform role -- role/permission administration requires the
+    separate, more specific platform.system.manage permission.
+    """
+    await _create_role(super_admin_client, role_key="TEST_USER_UPDATER", permission_keys=["platform.user.update"])
+    user_id, token = await _register_global_user_and_login(client, email="userupdateonly1@example.com")
+    await super_admin_client.post(
+        f"/api/v1/global/authz/users/{user_id}/roles", json={"role_key": "TEST_USER_UPDATER", "scope": "GLOBAL"}
+    )
+
+    client.headers["Authorization"] = f"Bearer {token}"
+    resp = await client.post(
+        "/api/v1/global/authz/roles", json={"role_key": "SHOULD_NOT_EXIST", "display_name": "Should Not Exist"}
+    )
+    assert resp.status_code == 403
+
+
+async def test_platform_system_manage_can_create_role(super_admin_client, client):
+    """A GlobalUser holding platform.system.manage (the correct, real gate) CAN create a platform role."""
+    await _create_role(super_admin_client, role_key="TEST_SYSTEM_MANAGER", permission_keys=["platform.system.manage"])
+    user_id, token = await _register_global_user_and_login(client, email="systemmanager1@example.com")
+    await super_admin_client.post(
+        f"/api/v1/global/authz/users/{user_id}/roles", json={"role_key": "TEST_SYSTEM_MANAGER", "scope": "GLOBAL"}
+    )
+
+    client.headers["Authorization"] = f"Bearer {token}"
+    resp = await client.post(
+        "/api/v1/global/authz/roles", json={"role_key": "CREATED_BY_SYSTEM_MANAGER", "display_name": "Created"}
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"]["role_key"] == "CREATED_BY_SYSTEM_MANAGER"
+
+
+# --------------------------------------------------------------------
 # Privilege escalation protection (Section 18/50)
 # --------------------------------------------------------------------
 
 
 async def test_viewer_cannot_manage_roles(super_admin_client, client):
     """A GlobalUser holding an unrelated, low-privilege permission cannot manage roles."""
-    await _create_role(super_admin_client, role_key="TEST_VIEWER_ONLY", permission_keys=["platform.audit.read"])
+    await _create_role(super_admin_client, role_key="TEST_VIEWER_ONLY", permission_keys=["platform.audit.view"])
     user_id, token = await _register_global_user_and_login(client, email="viewer1@example.com")
     await super_admin_client.post(
         f"/api/v1/global/authz/users/{user_id}/roles", json={"role_key": "TEST_VIEWER_ONLY", "scope": "GLOBAL"}
@@ -390,7 +440,7 @@ async def test_viewer_cannot_manage_roles(super_admin_client, client):
 
 async def test_erp_scoped_admin_cannot_manage_platform_wide(super_admin_client, client):
     """A role granted only for ERP A cannot be used to manage platform-wide (global-scope) resources."""
-    await _create_role(super_admin_client, role_key="TEST_ERP_ADMIN_ONLY", permission_keys=["platform.system.manage"])
+    await _create_role(super_admin_client, role_key="TEST_ERP_ADMIN_ONLY", permission_keys=["platform.user.read"])
     user_id, token = await _register_global_user_and_login(client, email="erpadmin1@example.com")
     erp_a = await _create_erp(super_admin_client, key="escalation_erp_a")
 
@@ -527,3 +577,25 @@ async def test_revoke_permission_from_role(super_admin_client):
     )
     assert del_resp2.status_code == 200
 
+
+async def test_delete_role_flexible_and_protected(super_admin_client):
+    """DELETE /global/authz/roles/{role_id} deletes flexible roles and protects fixed roles."""
+    # 1. Create fixed system roles and verify they cannot be deleted
+    super_admin_role = await _create_role(super_admin_client, role_key="PLATFORM_SUPER_ADMIN")
+    admin_role = await _create_role(super_admin_client, role_key="PLATFORM_ADMIN")
+
+    for r in (super_admin_role, admin_role):
+        del_resp = await super_admin_client.delete(f"/api/v1/global/authz/roles/{r['id']}")
+        assert del_resp.status_code == 409
+        assert "fixed system role" in del_resp.json()["message"].lower()
+
+    # 2. Create a custom flexible role and verify it can be deleted
+    custom_role = await _create_role(super_admin_client, role_key="TEMPORARY_TEST_ROLE")
+    role_id = custom_role["id"]
+
+    del_resp = await super_admin_client.delete(f"/api/v1/global/authz/roles/{role_id}")
+    assert del_resp.status_code == 200
+
+    # 3. Verify it's gone
+    get_resp = await super_admin_client.get(f"/api/v1/global/authz/roles/{role_id}")
+    assert get_resp.status_code == 404

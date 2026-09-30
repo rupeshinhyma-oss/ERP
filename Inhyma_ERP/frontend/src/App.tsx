@@ -31,6 +31,8 @@ import { RbacPage } from "@/pages/Rbac";
 import { EffectivePermissionsPage } from "@/pages/EffectivePermissions";
 import { PositionsPage } from "@/pages/org/Positions";
 import { CompaniesPage } from "@/pages/Companies";
+import { LeadsPage } from "@/pages/LeadsPage";
+import FollowUpsPage from "@/pages/FollowUpsPage";
 import { SuppliersPage } from "@/pages/Suppliers";
 import { ProformaInvoicesPage } from "@/pages/ProformaInvoicesPage";
 import { ProformaInvoicePdfPage } from "@/pages/ProformaInvoicePdfPage";
@@ -88,6 +90,7 @@ import { ProductGalleryPage } from "@/pages/ProductGallery";
 import { TrashPage } from "@/pages/Trash";
 import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
+import { initGlobalAutocompleteBlocker } from "@/lib/autocompleteBlocker";
 import { ComingSoonPage } from "@/components/ComingSoon";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ProductStockPage } from "@/pages/ProductStockPage";
@@ -121,6 +124,11 @@ export function App() {
     return initGlobalPasteSanitizer();
   }, []);
 
+  // Globally suppress intrusive browser autocomplete/autofill bubbles across all inputs
+  useEffect(() => {
+    return initGlobalAutocompleteBlocker();
+  }, []);
+
   // Let the API client bounce expired sessions through the router rather than
   // a full page load.
   useEffect(() => {
@@ -150,6 +158,7 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/403" element={<ForbiddenPage />} />
           <Route path="/organization" element={<OrganizationPage />} />
+          <Route path="/erp-settings" element={<OrganizationPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/trash" element={<TrashPage />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -160,6 +169,11 @@ export function App() {
           <Route path="/employees" element={<UsersPage />} />
           <Route path="/positions" element={<PositionsPage />} />
           <Route path="/companies" element={<CompaniesPage />} />
+          <Route path="/companies/add" element={<CompaniesPage defaultAdd={true} />} />
+          <Route path="/companies/addedit" element={<CompaniesPage defaultAdd={true} />} />
+          <Route path="/companies/addedit/:id" element={<CompaniesPage defaultAdd={true} />} />
+          <Route path="/user/addEdit" element={<CompaniesPage defaultAdd={true} />} />
+          <Route path="/user/addedit" element={<CompaniesPage defaultAdd={true} />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/supplier/list" element={<SuppliersPage />} />
           <Route path="/supplier" element={<SuppliersPage />} />
@@ -406,8 +420,19 @@ export function App() {
           <Route path="/call-type/list" element={<Navigate to="/masters/call-types" replace />} />
           <Route path="/calltype/list" element={<Navigate to="/masters/call-types" replace />} />
           <Route path="/call_types/list" element={<Navigate to="/masters/call-types" replace />} />
-          <Route path="/call-types/list" element={<Navigate to="/masters/call-types" replace />} />
-          <Route path="/call-logs/follow-up" element={<ComingSoonPage activeKey="call-logs-follow-up" title="Follow Up Logs" subtitle="View and track interaction logs and scheduled follow-ups" breadcrumbLabel="Follow Up Logs" featureName="Follow Up Logs" />} />
+          {/* Follow Up Logs Module (erp.inhymasolutions.com/follow-up/list) */}
+          <Route path="/follow-up/list" element={<FollowUpsPage />} />
+          <Route path="/follow-ups" element={<Navigate to="/follow-up/list" replace />} />
+          <Route path="/follow-up" element={<Navigate to="/follow-up/list" replace />} />
+          <Route path="/followups" element={<Navigate to="/follow-up/list" replace />} />
+          <Route path="/call-logs/follow-up" element={<Navigate to="/follow-up/list" replace />} />
+          <Route path="/call-logs/follow-ups" element={<Navigate to="/follow-up/list" replace />} />
+
+          {/* Leads Module (erp.inhymasolutions.com/lead/list) */}
+          <Route path="/lead/list" element={<LeadsPage />} />
+          <Route path="/leads" element={<Navigate to="/lead/list" replace />} />
+          <Route path="/lead" element={<Navigate to="/lead/list" replace />} />
+          <Route path="/leads/list" element={<Navigate to="/lead/list" replace />} />
 
           {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (
             <Route key={from} path={from} element={<Navigate to={to} replace />} />

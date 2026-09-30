@@ -15,7 +15,7 @@ class CityRepository(BaseRepository[City]):
 
     searchable_fields = ("name",)
     sortable_fields = ("name", "created_at", "updated_at")
-    filterable_fields = ("status", "country_id", "state_id")
+    filterable_fields = ("status", "country_id", "state_id", "district_id")
 
     def __init__(self, session: AsyncSession) -> None:
         """Bind to a DB session, operating on the ``City`` model."""
@@ -46,6 +46,23 @@ class CityRepository(BaseRepository[City]):
     async def list_all(self) -> list[City]:
         """Return every non-deleted city, ordered by name."""
         stmt = self._base_select().order_by(City.name)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_by_district(self, district_id: uuid.UUID) -> list[City]:
+        """Return every non-deleted city in a specific district, ordered by name."""
+        stmt = self._base_select().where(City.district_id == district_id).order_by(City.name)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_by_state(
+        self, state_id: uuid.UUID, district_id: uuid.UUID | None = None
+    ) -> list[City]:
+        """Return every non-deleted city in a specific state and optionally district, ordered by name."""
+        stmt = self._base_select().where(City.state_id == state_id)
+        if district_id is not None:
+            stmt = stmt.where(City.district_id == district_id)
+        stmt = stmt.order_by(City.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

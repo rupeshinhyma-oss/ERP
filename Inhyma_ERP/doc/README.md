@@ -1,26 +1,38 @@
-# System Documentation & Specifications Index
+# Inhyma_ERP — Documentation Index
 
-Welcome to the central documentation hub for the ERP System.
+Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distribution, Production Planning, B2B Companies & Field Service Tasks).
 
-## Documentation Contents
+---
 
-- 🌐 **[Master Multi-ERP Ecosystem Documentation](../../docs/MASTER_ERP_ECOSYSTEM_DOCUMENTATION.md)**:
-  - Unified multi-ERP architecture (`ERP_Main`, `Yinglima_ERP`, `Inhyma_ERP`).
-  - Supabase PostgreSQL connection pooling, budgeting, and disaster recovery.
-  - OpenID Connect (OIDC) federation, transactional outbox streaming, and global projections.
+## Technical Specifications & Guides
 
-- 📘 **[Complete System Architecture & Feature Manual](SYSTEM_DOCUMENTATION.md)**:
-  - High-level architecture, technology stack, and database entity relationships.
-  - Complete module-by-module breakdown (Auth, Users, RBAC/Departments, Masters, Products, Suppliers, Buyers, Inquiries, AI Quotation Extractor, Shipment Planning, Audit Trails, Trash/Recovery).
-  - Code mapping connecting frontend pages to backend services and models.
-  - Real-time WebSocket event synchronization architecture.
-  - Multi-tier caching specifications.
-  - API route and endpoint directory.
-  - Environment variable and deployment guide.
+- 🏛️ **[System Architecture & Design](SYSTEM_ARCHITECTURE_AND_DESIGN.md)**:
+  - System topology, architectural patterns, and directory layout.
+  - Extended B2B Company intelligence data model and social media matrix.
+  - Cascading geographic address resolution hierarchy (State ➔ District ➔ City).
+  - Inventory stock adjustments, A4 PDF engine, and technical tasks dispatch.
+  - Global autocomplete blocker and mouse wheel scroll value protection.
 
-## Legacy & Reference Requirement Files
-- `inquires.txt`: Original functional requirements for inquiries and quotation workflows.
-- `buyerclient.txt`: Buyer and client data specifications.
-- `supplierformrequiremnt.txt`: Vendor data structure and multi-contact specifications.
-- `productrequiremnt.txt`: Product specifications and dynamic attribute requirements.
-- `test_buyers_import.csv` / `.xlsx`: Sample datasets for testing spreadsheet import/export wizards.
+- 🔌 **[API Design & Endpoints](API_DESIGN_AND_ENDPOINTS.md)**:
+  - Complete endpoint reference for Companies, Masters, Geography, Inventory, and Tasks.
+  - Internal spoke deprovisioning endpoint specifications.
+
+- 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
+  - Chronological history of all functional updates, migrations, and bug fixes.
+  - Release September 29, 2026: Extended company profile intelligence, cascading address resolution, autocomplete suppression, and wheel lockout.
+  - Release September 26, 2026: Internal spoke deprovisioning, soft-delete filtering, and session synchronization.
+
+- 📘 **[Complete Living Technical Manual](SYSTEM_DOCUMENTATION.md)**:
+  - Exhaustive 15-section technical manual covering all modules, database schemas, frontend tokens, and developer guidelines.
+
+- 🛡️ **[Disaster Recovery & Operational Runbooks](DISASTER_RECOVERY_AND_RUNBOOKS.md)**:
+  - Database pooler failover and Supabase storage synchronization procedures.
+
+---
+
+## Legacy Requirement Files & Samples
+- `inquires.txt`: Legacy quotation specifications.
+- `buyerclient.txt`: Buyer data specifications.
+- `supplierformrequiremnt.txt`: Supplier specifications.
+- `productrequiremnt.txt`: Product attributes.
+- `test_buyers_import.csv` / `.xlsx`: Sample import files.

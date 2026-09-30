@@ -89,6 +89,9 @@ export interface ModalProps {
   variant?: "drawer" | "center";
   cardClassName?: string;
   cardStyle?: CSSProperties;
+  bodyClassName?: string;
+  bodyStyle?: CSSProperties;
+  footer?: ReactNode;
   backdropStyle?: CSSProperties;
   zIndex?: number;
   showHeader?: boolean;
@@ -106,6 +109,9 @@ export function Modal({
   variant = "drawer",
   cardClassName = "",
   cardStyle,
+  bodyClassName = "",
+  bodyStyle,
+  footer,
   backdropStyle,
   zIndex,
   showHeader = true,
@@ -164,7 +170,8 @@ export function Modal({
             </div>
           </div>
         )}
-        <div className="modal-body">{children}</div>
+        <div className={`modal-body ${bodyClassName}`.trim()} style={bodyStyle}>{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
       </div>
     </div>
   );

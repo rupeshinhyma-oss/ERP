@@ -104,7 +104,7 @@ export function GlobalUsers() {
         apiGet<GlobalUser[]>("/global/users?limit=250&offset=0"),
         apiGet<ErpInstance[]>("/global/erps").catch(() => []),
         apiGet<ErpMembership[]>("/global/memberships?limit=1000&offset=0").catch(() => []),
-        apiGet<any[]>("/global/identity/conflicts?status=PENDING_REVIEW").catch(() => []),
+        apiGet<any[]>("/global/identity/conflicts?status=PENDING").catch(() => []),
       ]);
       const usersList = Array.isArray(usersRes) ? usersRes : ((usersRes as any)?.data || []);
       const erpsList = Array.isArray(erpsRes) ? erpsRes : ((erpsRes as any)?.data || []);
@@ -753,6 +753,7 @@ export function GlobalUsers() {
               <input
                 type="text"
                 id="input-search-users"
+                autoComplete="off"
                 placeholder="Search by name, email or ID..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -1107,6 +1108,7 @@ export function GlobalUsers() {
               <input
                 type="text"
                 id="create-display-name"
+                autoComplete="off"
                 required
                 className="form-control"
                 placeholder="e.g. Eleanor Vance"
@@ -1122,6 +1124,7 @@ export function GlobalUsers() {
               <input
                 type="email"
                 id="create-email"
+                autoComplete="off"
                 required
                 className="form-control"
                 placeholder="e.g. eleanor.vance@company.com"
@@ -1141,6 +1144,7 @@ export function GlobalUsers() {
                 <input
                   type={showCreatePassword ? "text" : "password"}
                   id="create-password"
+                  autoComplete="new-password"
                   className="form-control"
                   placeholder="Enter initial password"
                   value={createPassword}
@@ -1265,6 +1269,7 @@ export function GlobalUsers() {
               <input
                 type="text"
                 id="edit-display-name"
+                autoComplete="off"
                 required
                 className="form-control"
                 value={editDisplayName}
@@ -1300,6 +1305,7 @@ export function GlobalUsers() {
                     <input
                       type="email"
                       id="edit-email"
+                      autoComplete="off"
                       readOnly
                       disabled
                       className="form-control"
@@ -1340,6 +1346,7 @@ export function GlobalUsers() {
                   <input
                     type="email"
                     id="edit-email"
+                    autoComplete="off"
                     required
                     className="form-control"
                     value={editEmail}
@@ -1361,6 +1368,7 @@ export function GlobalUsers() {
                 <input
                   type={showEditPassword ? "text" : "password"}
                   id="edit-password"
+                  autoComplete="new-password"
                   className="form-control"
                   placeholder="Enter user password"
                   value={editPassword}

@@ -33,6 +33,7 @@ Steps 16-18, 38, 46-48):
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -48,6 +49,8 @@ from app.global_users.models import GlobalUser
 from app.global_users.repository import GlobalUserRepository
 from app.identity_linking.adapters.registry import ErpAdapterRegistry, get_adapter_registry
 from app.platform_auth.models import PlatformAdmin
+
+logger = logging.getLogger(__name__)
 
 
 class ErpMembershipService:

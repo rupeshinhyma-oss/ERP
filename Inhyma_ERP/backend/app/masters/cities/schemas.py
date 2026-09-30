@@ -31,12 +31,14 @@ class CityUpdate(BaseModel):
 
 
 class CityLookupRead(BaseModel):
-    """Bare id/name pair, for the permission-free ``/lookup`` endpoint."""
+    """Bare id/name pair with state and district linkage, for the permission-free ``/lookup`` endpoint."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     name: str
+    state_id: uuid.UUID
+    district_id: uuid.UUID | None = None
 
 
 class CityRead(BaseModel):

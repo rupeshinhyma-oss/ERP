@@ -59,6 +59,7 @@ import { LocalPurchaseFormPage } from "@/pages/purchases/LocalPurchaseForm";
 import { SaleProcessListPage } from "@/pages/sales/SaleProcessList";
 import { SaleProcessFormPage } from "@/pages/sales/SaleProcessForm";
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
+import { initGlobalAutocompleteBlocker } from "@/lib/autocompleteBlocker";
 import { TrashPage } from "@/pages/Trash";
 import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
@@ -69,6 +70,11 @@ export function App() {
   // Initialize global paste auto-clean across all inputs and forms
   useEffect(() => {
     initGlobalPasteSanitizer();
+  }, []);
+
+  // Globally suppress intrusive browser autocomplete/autofill bubbles across all inputs
+  useEffect(() => {
+    return initGlobalAutocompleteBlocker();
   }, []);
 
 

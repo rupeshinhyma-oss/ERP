@@ -756,6 +756,7 @@ export interface Company {
   city_id?: string | null;
   area?: string | null;
   district?: string | null;
+  district_id?: string | null;
   sales_person_id?: string | null;
   contact_salutation?: string | null;
   contact_full_name?: string | null;
@@ -768,8 +769,17 @@ export interface Company {
   tax_id_number?: string | null;
   address?: string | null;
   town?: string | null;
+  pincode?: string | null;
   primary_website?: string | null;
   secondary_website?: string | null;
+  company_category?: string | null;
+  product_manufacture_or_supply?: string | null;
+  machines_buying_from?: string | null;
+  spares_buying_from?: string | null;
+  products_interested?: string | null;
+  gst_registration_date?: string | null;
+  age_of_company?: string | null;
+  social_media?: Array<{ platform: string; url: string }> | null;
   company_grade?: string | null;
   current_status?: string | null;
   potential?: string | null;
@@ -858,3 +868,33 @@ export interface UniversalSearchResponse {
   total_hits: number;
   results: SearchResultItem[];
 }
+
+/* ------------------------------------------------------------------ */
+/* Leads                                                              */
+/* ------------------------------------------------------------------ */
+
+export interface Lead {
+  id: string;
+  sr_no?: number | null;
+  company_name: string;
+  business_type?: string | null;
+  source?: string | null;
+  address?: string | null;
+  area?: string | null;
+  city?: string | null;
+  district?: string | null;
+  state?: string | null;
+  contact_person?: string | null;
+  designation?: string | null;
+  contact_phone?: string | null;
+  contact_email?: string | null;
+  priority?: string | null;
+  requirements?: string | null;
+  allotted_to?: string | null;
+  created_by?: string | null;
+  lead_status?: string | null;
+  notes?: string | null;
+  added_on?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}

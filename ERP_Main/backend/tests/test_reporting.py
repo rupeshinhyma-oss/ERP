@@ -310,12 +310,12 @@ async def test_export_requires_specific_permission(client):
     assert resp.status_code in (401, 403)
 
 
-async def test_dashboard_read_permission_does_not_grant_export(admin_client, client):
-    """Holding platform.dashboard.read (view access) does NOT imply platform.report.export (Section 26)."""
-    await _create_role(admin_client, role_key="DASH_VIEW_ONLY", permission_keys=["platform.dashboard.read"])
-    user_id, token = await _register_global_user_and_login(client, email="dashonly1@example.com")
+async def test_report_read_permission_does_not_grant_export(admin_client, client):
+    """Holding platform.report.read (view access) does NOT imply platform.report.export (Section 26)."""
+    await _create_role(admin_client, role_key="REPORT_VIEW_ONLY", permission_keys=["platform.report.read"])
+    user_id, token = await _register_global_user_and_login(client, email="reportonly1@example.com")
     await admin_client.post(
-        f"/api/v1/global/authz/users/{user_id}/roles", json={"role_key": "DASH_VIEW_ONLY", "scope": "GLOBAL"}
+        f"/api/v1/global/authz/users/{user_id}/roles", json={"role_key": "REPORT_VIEW_ONLY", "scope": "GLOBAL"}
     )
 
     client.headers["Authorization"] = f"Bearer {token}"

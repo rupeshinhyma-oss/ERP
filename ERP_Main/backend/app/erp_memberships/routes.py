@@ -71,7 +71,7 @@ async def create_membership(
     erp_id: uuid.UUID,
     payload: ErpMembershipCreate,
     principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.membership.create", erp_scope_param="erp_id")
+        require_platform_permission("platform.user.create", erp_scope_param="erp_id")
     ),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
@@ -95,9 +95,9 @@ async def list_user_memberships(
     """List every ERP membership held by a Global User (Phase 3 Step 34). Self-service permitted for own user_id."""
     is_self = principal.global_user is not None and principal.global_user.id == user_id
     if not (principal.is_platform_admin or is_self):
-        allowed = await authz_service.has_permission(principal.global_user.id, "platform.membership.read")
+        allowed = await authz_service.has_permission(principal.global_user.id, "platform.user.read")
         if not allowed:
-            raise ForbiddenException("This action requires the 'platform.membership.read' permission.")
+            raise ForbiddenException("This action requires the 'platform.user.read' permission.")
 
     memberships = await service.list_for_user(user_id)
     data = [ErpMembershipRead.model_validate(m).model_dump(mode="json") for m in memberships]
@@ -111,7 +111,7 @@ async def list_erp_members(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     _principal: AuthorizedPrincipal = Depends(
-        require_platform_permission("platform.membership.read", erp_scope_param="erp_id")
+        require_platform_permission("platform.user.read", erp_scope_param="erp_id")
     ),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
@@ -128,7 +128,7 @@ async def list_all_memberships(
     offset: int = Query(default=0, ge=0),
     erp_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
-    _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.read")),
+    _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.read")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
     """List ERP memberships with optional ERP and status filtering, paged."""
@@ -150,7 +150,7 @@ async def list_all_memberships(
 async def get_membership(
     request: Request,
     membership_id: uuid.UUID,
-    _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.read")),
+    _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.read")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
     """Fetch a single ERP Membership by its id."""
@@ -164,7 +164,7 @@ async def get_membership(
 async def verify_membership(
     request: Request,
     membership_id: uuid.UUID,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.update")),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.update")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
     """Mark a membership as verified against its local ERP account and set it ACTIVE."""
@@ -181,7 +181,7 @@ async def suspend_membership(
     request: Request,
     membership_id: uuid.UUID,
     payload: ErpMembershipStatusUpdate,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.update")),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.update")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
     """Suspend a membership. Reversible via `/restore`. Never affects the local ERP account."""
@@ -198,7 +198,7 @@ async def restore_membership(
     request: Request,
     membership_id: uuid.UUID,
     payload: ErpMembershipStatusUpdate,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.update")),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.update")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
     """Restore a suspended membership back to ACTIVE."""
@@ -215,7 +215,7 @@ async def revoke_membership(
     request: Request,
     membership_id: uuid.UUID,
     payload: ErpMembershipStatusUpdate,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.revoke")),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.update")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
     """Revoke a membership and deprovision the local spoke user."""
@@ -231,7 +231,7 @@ async def revoke_membership(
 async def delete_membership(
     request: Request,
     membership_id: uuid.UUID,
-    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.membership.revoke")),
+    principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.update")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
     """Delete a membership entirely and remove the local account from the spoke ERP."""

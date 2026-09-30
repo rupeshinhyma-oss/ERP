@@ -12,11 +12,12 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
-// Mock InventoryApi
+// Mock InventoryApi and apiGet
 vi.mock("@/lib/api", () => ({
   InventoryApi: {
     createStockAdjustment: vi.fn().mockResolvedValue({ success: true }),
   },
+  apiGet: vi.fn().mockResolvedValue({ success: true, data: [] }),
 }));
 
 describe("AddAdjustmentOrderPage", () => {
@@ -100,5 +101,34 @@ describe("AddAdjustmentOrderPage", () => {
     expect(screen.getByRole("columnheader", { name: "Action" })).toBeTruthy();
     expect(screen.getByText("Grand Total")).toBeTruthy();
     expect(screen.getByText("0.00")).toBeTruthy();
+  });
+
+  it("extracts and displays matching companies when typing letters in Client Name for Stock IN and Stock OUT", () => {
+    render(
+      <BrowserRouter>
+        <AddAdjustmentOrderPage />
+      </BrowserRouter>
+    );
+
+    const clientInput = screen.getByPlaceholderText("Enter Client Name") as HTMLInputElement;
+
+    // Focus opens dropdown with companies
+    fireEvent.focus(clientInput);
+    expect(screen.getByRole("option", { name: "Cirkla Technologies Pvt Ltd" })).toBeTruthy();
+
+    // Type letters to filter
+    fireEvent.change(clientInput, { target: { value: "Apex" } });
+    const suggestion = screen.getByRole("option", { name: "Apex Valves & Automation India Pvt Ltd" });
+    expect(suggestion).toBeTruthy();
+
+    // Click on suggestion to select
+    fireEvent.click(suggestion);
+    expect(clientInput.value).toBe("Apex Valves & Automation India Pvt Ltd");
+
+    // Change to Stock OUT and verify client name is retained and accessible
+    const adjTypeSelect = screen.getByLabelText("Adjustment Type") as HTMLSelectElement;
+    fireEvent.change(adjTypeSelect, { target: { value: "Stock OUT" } });
+    expect(adjTypeSelect.value).toBe("Stock OUT");
+    expect(clientInput.value).toBe("Apex Valves & Automation India Pvt Ltd");
   });
 });

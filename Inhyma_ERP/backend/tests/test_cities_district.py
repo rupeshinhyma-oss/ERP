@@ -37,3 +37,32 @@ def test_city_schemas_with_district_id():
     update_payload = CityUpdate(district_id=d_id, name="Updated City")
     assert update_payload.district_id == d_id
     assert update_payload.name == "Updated City"
+
+
+def test_city_lookup_schema_with_district_id():
+    """Verify CityLookupRead schema includes state_id and district_id."""
+    from app.masters.cities.schemas import CityLookupRead
+
+    c_id = uuid.uuid4()
+    s_id = uuid.uuid4()
+    d_id = uuid.uuid4()
+
+    lookup_data = CityLookupRead(
+        id=c_id,
+        name="Test City",
+        state_id=s_id,
+        district_id=d_id,
+    )
+    assert lookup_data.id == c_id
+    assert lookup_data.name == "Test City"
+    assert lookup_data.state_id == s_id
+    assert lookup_data.district_id == d_id
+
+    # Lookup without district_id
+    lookup_no_dist = CityLookupRead(
+        id=c_id,
+        name="Test City",
+        state_id=s_id,
+    )
+    assert lookup_no_dist.district_id is None
+

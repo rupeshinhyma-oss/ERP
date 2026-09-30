@@ -54,6 +54,17 @@
   box-sizing: border-box;
 }
 
+/* Disable accidental spin buttons and wheel jumps on numeric inputs */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 html,
 body {
   height: 100%;
@@ -1091,6 +1102,7 @@ select::-ms-expand {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
 }
 
 .modal-dialog-card .modal-header h2,
@@ -1105,6 +1117,16 @@ select::-ms-expand {
   letter-spacing: -0.01em;
 }
 
+.modal-dialog-card .modal-body,
+.modal-card-center .modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .modal-dialog-card form,
 .modal-card-center form {
   height: auto !important;
@@ -1115,6 +1137,14 @@ select::-ms-expand {
 .modal-dialog-card .modal-footer,
 .modal-card-center .modal-footer {
   border-radius: 0 0 12px 12px;
+  padding: 14px 24px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 /* ==========================================================================

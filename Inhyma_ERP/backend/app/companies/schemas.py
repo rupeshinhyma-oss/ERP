@@ -136,8 +136,17 @@ class CompanyCreate(BaseModel):
     tax_id_number: str | None = Field(default=None, max_length=100)
     address: str | None = None
     town: str | None = Field(default=None, max_length=150)
+    pincode: str | None = Field(default=None, max_length=50)
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
+    company_category: str | None = Field(default=None, max_length=150)
+    product_manufacture_or_supply: str | None = None
+    machines_buying_from: str | None = None
+    spares_buying_from: str | None = None
+    products_interested: str | None = None
+    gst_registration_date: str | None = Field(default=None, max_length=50)
+    age_of_company: str | None = Field(default=None, max_length=100)
+    social_media: list[dict[str, Any]] | None = None
     sub_category_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Key Strength Product Sub Category (multiple)."
     )
@@ -204,8 +213,17 @@ class CompanyUpdate(BaseModel):
     tax_id_number: str | None = Field(default=None, max_length=100)
     address: str | None = None
     town: str | None = Field(default=None, max_length=150)
+    pincode: str | None = Field(default=None, max_length=50)
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
+    company_category: str | None = Field(default=None, max_length=150)
+    product_manufacture_or_supply: str | None = None
+    machines_buying_from: str | None = None
+    spares_buying_from: str | None = None
+    products_interested: str | None = None
+    gst_registration_date: str | None = Field(default=None, max_length=50)
+    age_of_company: str | None = Field(default=None, max_length=100)
+    social_media: list[dict[str, Any]] | None = None
     sub_category_ids: list[uuid.UUID] | None = None
     product_ids: list[uuid.UUID] | None = None
     company_grade: CompanyGrade | None = None
@@ -286,8 +304,17 @@ class CompanyRead(BaseModel):
     tax_id_number: str | None
     address: str | None
     town: str | None
+    pincode: str | None = None
     primary_website: str | None
     secondary_website: str | None
+    company_category: str | None = None
+    product_manufacture_or_supply: str | None = None
+    machines_buying_from: str | None = None
+    spares_buying_from: str | None = None
+    products_interested: str | None = None
+    gst_registration_date: str | None = None
+    age_of_company: str | None = None
+    social_media: list[dict[str, Any]] | None = None
     company_grade: CompanyGrade | None
     current_status: CompanyCurrentStatus | None
     potential: CompanyPotential | None
@@ -321,6 +348,7 @@ class CompanyListItemRead(BaseModel):
     city_id: uuid.UUID | None = None
     area: str | None = None
     district: str | None = None
+    pincode: str | None = None
     sales_person_id: uuid.UUID | None = None
     tax_id_number: str | None = None
     contact_salutation: str | None = None
@@ -331,6 +359,14 @@ class CompanyListItemRead(BaseModel):
     contact_indiamart_number: str | None = None
     brand_description: str | None = None
     company_type: str | None = None
+    company_category: str | None = None
+    product_manufacture_or_supply: str | None = None
+    machines_buying_from: str | None = None
+    spares_buying_from: str | None = None
+    products_interested: str | None = None
+    gst_registration_date: str | None = None
+    age_of_company: str | None = None
+    social_media: list[dict[str, Any]] | None = None
     current_status: CompanyCurrentStatus | None = None
     company_grade: CompanyGrade | None = None
     potential: CompanyPotential | None = None
