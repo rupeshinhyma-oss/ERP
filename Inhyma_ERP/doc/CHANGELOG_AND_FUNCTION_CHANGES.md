@@ -5,6 +5,18 @@
 
 ---
 
+## [Release 2026-09-29] — Renamed Organization Settings to ERP Settings
+
+### 1. Sidebar & Navigation Update
+- **Sidebar & Title Rename**: Renamed `"Organization Settings"` to `"ERP Settings"` in sidebar items, navigation configuration, and document title helper.
+- **Route Alias**: Added `/erp-settings` route alias alongside `/organization` in [App.tsx](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/App.tsx) for backward and forward URL compatibility.
+- **Page Header & Breadcrumbs**: Updated heading to `ERP Settings` and breadcrumb trail to `["Settings", "ERP Settings"]` in [Organization.tsx](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Organization.tsx).
+- **Files Modified**:
+  - Frontend: [`nav.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/nav.ts), [`Organization.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Organization.tsx), [`App.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/App.tsx), [`index.html`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/index.html), [`brand.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/brand.ts), [`icons.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/icons.tsx), [`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css).
+  - Documentation: [`MODULES_AND_FEATURES_TEST_MANUAL.md`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/MODULES_AND_FEATURES_TEST_MANUAL.md).
+
+---
+
 ## [Release 2026-09-29] — Extended Company Intelligence, Cascading Geography & Form Hardening
 
 ### 1. Extended Company Profile Intelligence
@@ -118,7 +130,40 @@
     * Quick Add Drawer `State *` (`#quick_state_id`), `District` (`#quick_district`), and `City` (`#quick_city_id`).
     * Add New Full Modal/Drawer `State *` (`#state_id`), `District` (`#district_id`), and `City` (`#city_id`).
 - **Automated Tests:**
-  - Added dedicated cascading tests in [`LeadsPage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/LeadsPage.test.tsx) and [`CompaniesCascadingAddress.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/CompaniesCascadingAddress.test.tsx). Full test suite (338/338 tests across 44 files) passing 100% green.
+  - Added dedicated cascading tests in [`LeadsPage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/LeadsPage.test.tsx) and [`CompaniesCascadingAddress.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/CompaniesCascadingAddress.test.tsx). Full test suite passing 100% green.
+
+### 9. Follow Ups Management (`/follow-up/list`) & Companies UI Design Alignment
+- **Overview:** Implemented the complete Follow Ups telecalling logs and inquiry management module matching the production ERP reference at `erp.inhymasolutions.com/follow-up/list` and fully aligned with the **Companies and Leads visual design system and architecture**. Includes interaction logging, client follow-up classifications, scheduled inquiry logs, 12-control responsive 4x3 filter panel, 13-column interactive table with 3-state sorting, shimmer skeleton loading, SideDrawer profile inspector, and Add/Edit drawer with client typeahead autocomplete and strict State ➔ District ➔ City cascading comboboxes.
+- **Frontend Implementation (`FollowUpsPage.tsx`):**
+  - **Page Layout & Header:** Built inside `<AppShell activeKey="call-logs-follow-up">` with `<Breadcrumb trail={["Follow Ups"]} />`, `.page-header` with title "Follow Ups" and subtitle "Telecalling interaction logs, client follow-up classifications, and scheduled inquiry logs."
+  - **Action Buttons:**
+    * **Filter Toggle Button:** `#btn-toggle-filter`, `#0061f2` blue square button with funnel icon to toggle the 12-field filter card.
+    * **Add New Button:** `#btn-add-follow-up`, `#0061f2` button with `+ ADD NEW` to slide open the Follow Up creation drawer.
+    * **Bulk Delete Button:** `#btn-bulk-delete`, emerald green `#10b981` button displaying dynamic selected count `DELETE (N)` with trash can icon.
+  - **4x3 Responsive Filter Card (12 Controls):**
+    * Controls: `Added Date` (date picker), `Call Type` (dropdown), `Marketing Person` (dropdown), `Business Type` (dropdown), `State` (dropdown), `District` (dropdown), `City` (dropdown), `Current Status` (dropdown), `Category` (dropdown), `Client Grade` (dropdown), `Potential Type` (dropdown), `Business Category` (dropdown).
+    * Action Bar: Right-aligned `Reset` (`#64748b` gray) and `Search` (`#f59e0b` amber/gold) buttons.
+  - **13 Table Columns:**
+    * `Checkbox`, `Sr. No.`, `Company Name`, `Contact Person`, `Type / Grade`, `Area / City`, `District / State`, `Current Status`, `Feedback`, `Call Category`, `Followup Date`, `Added On`, `Action`.
+  - **Skeleton Shimmer Loading:**
+    * `<FollowUpsTableSkeletonRows count={8} />` rendering 8 animated shimmer rows matching the exact 13-column layout during data fetching.
+  - **3-State Column Sorting:**
+    * Clicking any header toggles: Ascending `▲` ➔ Descending `▼` ➔ Reset default order.
+  - **SideDrawer Profile Inspector:**
+    * Clicking any `Company Name` slides out the right-side `<SideDrawer>` displaying company details, interaction summary, classification badges, address hierarchy, and quick edit action.
+  - **Add / Edit Follow Up Drawer:**
+    * Integrates `ClientNameAutocomplete` with letter extraction and prefill.
+    * Masters cascading address resolution: State ➔ District ➔ City with typable `Combobox` controls and auto-reset of child selections when parent changes.
+- **Backend Architecture (`app/follow_ups`):**
+  - **Database Model:** `FollowUp` table in [`models.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/follow_ups/models.py) with full audit columns (`created_at`, `updated_at`, `deleted_at`).
+  - **Schemas & DTOs:** [`schemas.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/follow_ups/schemas.py) for Create, Update, Read, and Filter parameters.
+  - **Repository & Service:** [`repository.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/follow_ups/repository.py) and [`service.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/follow_ups/service.py) with soft-delete filtering and pagination.
+  - **API Endpoints:** Registered under `/api/v1/follow-ups` and `/api/v1/follow-up` in [`routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/follow_ups/routes.py).
+- **Automated Verification:**
+  - 12 comprehensive unit and integration tests in [`FollowUpsPage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/FollowUpsPage.test.tsx) passing 100%.
+  - 11 backend tests in [`test_follow_ups.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/tests/test_follow_ups.py) and related suites passing 100%.
+  - All 350 frontend tests across 45 files passing 100%.
+  - Clean production build (`tsc -b && vite build`) with zero TypeScript errors.
 
 ---
 

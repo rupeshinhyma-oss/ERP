@@ -150,7 +150,7 @@ export const NAV_SECTIONS: NavSection[] = [
       },
       { key: "masters-countries", label: "Countries", path: "/masters/countries", icon: "globe", permission: "country.view" },
       { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", icon: "coins", permission: "currency.view" },
-      { key: "organization", label: "Organization Settings", path: "/organization", icon: "settings", permission: "organization.manage" },
+      { key: "organization", label: "ERP Settings", path: "/organization", icon: "settings", permission: "organization.manage" },
       { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", icon: "building", permission: "organizationlist.view" },
       { key: "audit", label: "Audit Log", path: "/audit", icon: "clock", permission: "audit.view" },
       { key: "trash", label: "Trash", path: "/trash", icon: "trash", permission: "trash.view" },
@@ -159,7 +159,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "CALL LOG",
     items: [
-      { key: "call-logs-follow-up", label: "Follow Up Logs", path: "/call-logs/follow-up", icon: "fileText" },
+      { key: "call-logs-follow-up", label: "Follow Up Logs", path: "/follow-up/list", icon: "phone" },
     ],
   },
   {
@@ -194,7 +194,8 @@ export const PAGE_TITLES: Record<string, string> = {
   inventory: "Inventory & Stock",
   manufacturing: "Manufacturing",
   finance: "Finance & Accounts",
-  organization: "Organization Settings",
+  organization: "ERP Settings",
+  "erp-settings": "ERP Settings",
   users: "Users",
   employees: "Employees",
   positions: "Positions & Designations",
@@ -247,6 +248,9 @@ export const PAGE_TITLES: Record<string, string> = {
   "masters-adjustment-purpose": "Adjustment Purpose",
   "masters-call-types": "Call Types",
   "call-logs-follow-up": "Follow Up Logs",
+  "follow-ups": "Follow Ups",
+  "follow-up": "Follow Ups",
+  "follow-up-list": "Follow Ups",
   "hrms-attendance": "Attendance",
   "hrms-leave": "Leave",
   "hrms-expenses": "Expense Management",

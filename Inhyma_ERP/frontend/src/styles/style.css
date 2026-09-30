@@ -189,7 +189,7 @@ svg {
      the viewport on scaled displays, and the shell is rebuilt on every
      page load, so any correction to scrollTop was animating in front of
      the user -- the sidebar visibly sliding up on its own after landing on
-     Audit Log or Organization Settings. Positioning is handled once, up
+     Audit Log or ERP Settings. Positioning is handled once, up
      front, by positionNavScroll() in nav.js; it must land instantly. */
   overflow-anchor: none;
   /* Hide the scrollbar visually while keeping the region scrollable.

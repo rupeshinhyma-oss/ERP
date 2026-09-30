@@ -2,7 +2,7 @@
  * Company brand name shown as the sidebar title and in document.title.
  *
  * Cached in sessionStorage so the sidebar doesn't flicker through the default
- * on every navigation. Organization Settings calls invalidateBrandNameCache()
+ * on every navigation. ERP Settings calls invalidateBrandNameCache()
  * after a rename so the new name appears immediately, here and on every other
  * open tab's next navigation.
  */
@@ -44,7 +44,7 @@ export function invalidateBrandNameCache(): void {
 }
 
 export async function resolveBrandName(): Promise<string> {
-  // Directly fetch company name from Organization Settings
+  // Directly fetch company name from ERP Settings
   try {
     const { data } = await apiGet<Organization>("/organizations");
     if (data?.company_name) {

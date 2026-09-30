@@ -32,6 +32,8 @@ export function Combobox({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const prevValueRef = useRef(value);
+
   // Clean options to eliminate any dummy 'Select' placeholders from the dropdown menu
   const cleanOptions = useMemo(() => {
     return options.filter(
@@ -39,12 +41,23 @@ export function Combobox({
     );
   }, [options]);
 
-  // Sync internal query when value changes externally while not typing
+  // Sync internal query when value changes externally or when disabled
   useEffect(() => {
-    if (!isTyping) {
+    if (disabled) {
+      setIsTyping(false);
+      setIsOpen(false);
+      setQuery(value === "Select" ? "" : (value || ""));
+      prevValueRef.current = value;
+      return;
+    }
+    if (prevValueRef.current !== value) {
+      prevValueRef.current = value;
+      setIsTyping(false);
+      setQuery(value === "Select" ? "" : (value || ""));
+    } else if (!isTyping) {
       setQuery(value === "Select" ? "" : (value || ""));
     }
-  }, [value, isTyping]);
+  }, [value, isTyping, disabled]);
 
   // Filter options based on typed query when actively typing; show all clean options when browsing
   const filteredOptions = useMemo(() => {

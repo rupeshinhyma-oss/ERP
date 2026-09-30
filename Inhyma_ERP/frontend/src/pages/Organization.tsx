@@ -1,5 +1,5 @@
 /**
- * Organization Settings. Ported from organization.html.
+ * ERP Settings. Ported from organization.html.
  *
  * Shows a read-only detail card by default and swaps to the form on Edit. If no
  * organization record exists yet the API answers 404 and the page opens straight
@@ -183,10 +183,10 @@ export function OrganizationPage() {
   return (
     <AppShell activeKey="organization">
       <main className="page">
-        <Breadcrumb trail={["Settings", "Organization"]} />
+        <Breadcrumb trail={["Settings", "ERP Settings"]} />
         <div className="page-header">
           <div>
-            <h1>Organization Settings</h1>
+            <h1>ERP Settings</h1>
             <div className="page-subtitle">
               Your company's profile, used throughout the ERP and shown as the sidebar's brand
               name.

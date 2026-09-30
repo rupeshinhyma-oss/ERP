@@ -29,7 +29,7 @@
 18. [CONFIGURATIONS: Geography Masters (Countries, Provinces, Cities)](#18-configurations-geography-masters-countries-provinces-cities)
 19. [CONFIGURATIONS: Currencies Master Module](#19-configurations-currencies-master-module)
 20. [CONFIGURATIONS: Units of Measurement (UOM) Master Module](#20-configurations-units-of-measurement-uom-master-module)
-21. [CONFIGURATIONS: Organization Settings & Company List](#21-configurations-organization-settings--company-list)
+21. [CONFIGURATIONS: ERP Settings & Company List](#21-configurations-erp-settings--company-list)
 22. [GOVERNANCE: Audit Log Module](#22-governance-audit-log-module)
 23. [GOVERNANCE: Trash & Recovery (Recycle Bin) Module](#23-governance-trash--recovery-recycle-bin-module)
 24. [USER ACCOUNT: Profile, Security & Active Sessions](#24-user-account-profile-security--active-sessions)
@@ -49,6 +49,10 @@
 38. [INVENTORY: Stock Adjustment & Order PDF Module](#38-inventory-stock-adjustment--order-pdf-module)
 39. [TASK: Technical Tasks Module](#39-task-technical-tasks-module)
 40. [GLOBAL PLATFORM HARDENING: Autocomplete Suppression & Wheel Lockout](#40-global-platform-hardening-autocomplete-suppression--wheel-lockout)
+41. [AUTOCOMPLETE: Typeahead Company Extraction & Prefill](#41-autocomplete-typeahead-company-extraction--prefill)
+42. [INVENTORY: Client Name Autocomplete in Stock Adjustment](#42-inventory-client-name-autocomplete-in-stock-adjustment)
+43. [LEADS: Lead Inquiries Management & Sales Pipeline](#43-leads-module-lead-inquiries-management--sales-pipeline)
+44. [CALL LOG: Follow Ups Management & Inquiries Tracking](#44-call-log-follow-ups-management--inquiries-tracking)
 
 ---
 
@@ -102,7 +106,7 @@
 | **CONFIGURATIONS** | Warehouses | `/masters/warehouses` | `masters-warehouses` | `home` | `warehouse.view` |
 | **CONFIGURATIONS** | Billing Company | `/masters/billing-company` | `masters-billing-company` | `building` | `billingcompany.view` |
 | **CONFIGURATIONS** | Technicians | `/masters/technicians` | `masters-technicians` | `user` | `technician.view` |
-| **CONFIGURATIONS** | Organization Settings | `/organization` | `organization` | `settings` | `organization.manage` |
+| **CONFIGURATIONS** | ERP Settings | `/organization` | `organization` | `settings` | `organization.manage` |
 | **CONFIGURATIONS** | Organization List | `/masters/company-list` | `masters-company-list` | `building` | `organizationlist.view` |
 | **CONFIGURATIONS** | Audit Log | `/audit` | `audit` | `clock` | `audit.view` |
 | **CONFIGURATIONS** | Trash | `/trash` | `trash` | `trash` | `trash.view` |
@@ -121,7 +125,7 @@
    - Notification Bell Icon (`🔔`)
    - User Profile Badge with initials (e.g. `AD Admin ⌵`) displaying dropdown with:
      - 👤 **My Profile** (`/profile`)
-     - ⚙️ **Organization Settings** (`/organization`)
+     - ⚙️ **ERP Settings** (`/organization`)
      - 🚪 **Logout** (`POST /api/v1/auth/logout` $\rightarrow$ redirects to `/login`)
 
 ### Test Cases
@@ -896,9 +900,9 @@ Manage complete vendor team directory:
 
 ---
 
-## 21. CONFIGURATIONS: Organization Settings & Company List
+## 21. CONFIGURATIONS: ERP Settings & Company List
 
-### 21.1. Organization Settings (`/organization`)
+### 21.1. ERP Settings (`/organization`)
 - **Single-Tenant Corporate Profile Fields:**
   - Company Legal Name, Trade Name, Official Email, Phone, Website.
   - Tax Registration Number (GST / PAN / VAT / TIN).
@@ -1964,4 +1968,93 @@ Checklist to execute:
 - [ ] Verify bulk selection and clicking `DELETE` calls `POST /api/v1/leads/bulk-delete` with soft-deletion.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 29, 2026 (Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, and Typable Cascading Address Comboboxes).*
+
+## 44. CALL LOG: Follow Ups Management & Inquiries Tracking
+
+- **Files:**
+  - Frontend: `frontend/src/pages/FollowUpsPage.tsx`, `frontend/src/App.tsx`, `frontend/src/lib/nav.ts`, `frontend/src/components/icons.tsx`, `frontend/src/pages/__tests__/FollowUpsPage.test.tsx`
+  - Backend: `backend/app/follow_ups/models.py`, `backend/app/follow_ups/schemas.py`, `backend/app/follow_ups/repository.py`, `backend/app/follow_ups/service.py`, `backend/app/follow_ups/routes.py`, `backend/app/api/v1/router.py`, `backend/tests/test_follow_ups.py`
+- **Scope:** Inhyma ERP — Follow Up Logs (`/follow-up/list`), Legacy aliases (`/follow-ups`, `/follow-up`, `/call-logs/follow-up`), Navigation Menu `CALL LOG` > `Follow Up Logs`.
+- **Reference URL & UI:** `erp.inhymasolutions.com/follow-up/list`
+- **Purpose:** Full lifecycle telecalling interaction logging, client follow-up classifications, inquiry schedules, call feedback notes, and conversion pipeline management.
+
+### Visual & Behavioral Specifications (Companies Module UI Design Alignment)
+1. **Sidebar Navigation & Routing:**
+   - Positioned in sidebar under `CALL LOG` section with phone receiver icon (`IconPhoneCall`).
+   - Active route: `/follow-up/list` (with backward compatibility redirects for `/follow-ups`, `/follow-up`, `/call-logs/follow-up`).
+   - Page container uses `AppShell activeKey="call-logs-follow-up"` and `main.page` with breadcrumbs `Dashboard / Follow Ups`.
+   - Header bar uses `.page-header` with `h1` ("Follow Ups") and `.page-subtitle` ("Telecalling interaction logs, client follow-up classifications, and scheduled inquiry logs.").
+2. **Top Action Controls (Exact Reference Match):**
+   - **Filter Button:** Styled button with funnel icon (`#0061f2`) toggling the 12-control filter card (expanded by default).
+   - **+ ADD NEW Button:** Bright blue action button (`#0061f2`) opening the Add Follow Up Drawer.
+   - **DELETE Button:** Emerald green (`#10b981`) button with trash can icon displaying dynamic count `DELETE (N)` when rows are selected, disabled when no rows selected.
+3. **12-Field Responsive 4x3 Filter Card:**
+   - 4 rows x 3 columns balanced grid with 16px gaps and 38px standardized control heights:
+     * Row 1: `Added Date` (date picker), `Call Type` (dropdown), `Marketing Person` (dropdown).
+     * Row 2: `Business Type` (dropdown), `State` (dropdown), `District` (dropdown).
+     * Row 3: `City` (dropdown), `Current Status` (dropdown), `Category` (dropdown).
+     * Row 4: `Client Grade` (dropdown), `Potential Type` (dropdown), `Business Category` (dropdown).
+   - Right-aligned action footer with `Reset` (`#64748b`) and `Search` (`#f59e0b` amber/gold) buttons.
+4. **Interactive Data Table (13 Columns):**
+   - **Columns:**
+     1. `Checkbox`: Select all header checkbox and per-row checkbox.
+     2. `Sr. No.`: Auto-indexed sequential numbering across pagination.
+     3. `Company Name`: Interactive clickable text button opening the `<SideDrawer>` profile inspector.
+     4. `Contact Person`: Bold person name with phone number subtitle (`📞 9824056789`).
+     5. `Type / Grade`: Formatted string `Business Type / Client Grade`.
+     6. `Area / City`: Combined geographic area and city name.
+     7. `District / State`: Combined district and state name.
+     8. `Current Status`: High-contrast pill badge with color coding (Existing: green `#166534`, Hot Lead: red `#991b1b`, Cold: slate `#475569`, New/In Progress: blue `#0369a1`).
+     9. `Feedback`: Interaction notes with ellipsis text-truncation and full tooltip preview.
+     10. `Call Category`: Call classification (`Follow Up`, `Quotation Discussion`, `Payment Follow-up`, etc.).
+     11. `Followup Date`: Next scheduled interaction date.
+     12. `Added On`: Date record was created.
+     13. `Action`: Edit (`✏️`) and Single Delete (`🗑️`) action buttons.
+   - **Shimmer Skeleton Loading:** 8 pulsating shimmer skeleton rows across all 13 columns while fetching data.
+   - **3-State Column Sorting:** Clicking any table header cycles: Ascending `▲` ➔ Descending `▼` ➔ Default reset.
+5. **SideDrawer Profile Inspector:**
+   - Clicking any `Company Name` slides out the right-side detail drawer with `<DetailFieldGrid>` displaying:
+     * Call Summary Highlight box (`#eff6ff` light blue background with feedback notes).
+     * Interaction Details: Call Type, Call Category, Marketing Person, Status, Followup Date, Added On.
+     * Classification & Profile: Business Type, Client Grade, Potential Type, Business Category, Category.
+     * Geographic Location: Address, Area, City, District, State.
+     * Contact Information: Contact Person, Designation, Contact Number, Email.
+     * Direct `✏️ Edit Log` action in header.
+6. **Add / Edit Call Log Drawer (Exact Reference Match):**
+   - Header: `Add Call Log` (or `Edit Call Log`) with close button `✕`.
+   - Fields matching production reference screenshot:
+     1. `Call Type *`: Standard selection dropdown with "Telecall" as default option (`#call-log-call-type`).
+     2. `Company Name *`: Powered by `ClientNameAutocomplete` with placeholder "Search for Company Name" (`#call-log-company-name`). Selecting an existing company auto-populates Contact Person and Phone Number.
+     3. `Contact Person`: Text input with placeholder "Contact Person" (`#call-log-contact-person`).
+     4. `Phone Number`: Text input for contact phone (`#call-log-phone-number`).
+     5. `Feedback`: Multiline textarea for conversation feedback, status, or inquiry details (`#call-log-feedback`).
+     6. `Follow Up Date` & `Status`: 2-column balanced grid (`1fr 1fr`):
+        - `Follow Up Date`: Date picker (`#call-log-followup-date`).
+        - `Status`: Select dropdown with options `Active`, `Inactive`, `Hot Lead`, `Cold`, `Pending`, `Completed` (`#call-log-status`). Default: "Active".
+   - Footer: Full-width bright blue "Submit" action button (`#btn-submit-followup`, `#0061f2`).
+
+### Test Cases
+- [ ] Verify navigating to `/follow-up/list` displays page heading "Follow Ups", subtitle, and active sidebar item `Follow Up Logs`.
+- [ ] Verify the Filter Options panel is collapsed (OFF) by default on initial page load.
+- [ ] Verify clicking Filter toggle button reveals the 12-control Filter Card, and clicking again hides it.
+- [ ] Verify the table contains all 13 columns matching reference screenshot.
+- [ ] Verify skeleton shimmer rows render during data loading across all 13 columns.
+- [ ] Verify free-text search filters records by company name, contact person, or city.
+- [ ] Verify 3-state column sorting works across all columns (Ascending `▲` ➔ Descending `▼` ➔ Reset).
+- [ ] Verify clicking on any Company Name opens the `<SideDrawer>` profile inspector with feedback notes and classification metadata.
+- [ ] Verify clicking `+ ADD NEW` opens the "Add Call Log" drawer with exact fields matching reference screenshot:
+  - `Call Type *` with default value "Telecall"
+  - `Company Name *` with placeholder "Search for Company Name" and letter typeahead autocomplete
+  - `Contact Person` with placeholder "Contact Person"
+  - `Phone Number`
+  - `Feedback` textarea
+  - `Follow Up Date` date picker and `Status` dropdown with default "Active"
+  - Full-width blue "Submit" button
+- [ ] Verify selecting an existing company from `ClientNameAutocomplete` populates Contact Person and Phone Number automatically.
+- [ ] Verify clicking "Submit" validates required fields (`Call Type *`, `Company Name *`) and creates the call log.
+- [ ] Verify row selection checkbox enables the green `DELETE` button with selected count.
+- [ ] Verify single soft delete and bulk soft delete remove items from the table with confirmation modal.
+- [ ] Verify all 12 tests in `FollowUpsPage.test.tsx` pass 100%.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 29, 2026 (Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, and Follow Ups Module).*

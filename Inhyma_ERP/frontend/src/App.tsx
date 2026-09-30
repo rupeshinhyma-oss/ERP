@@ -32,6 +32,7 @@ import { EffectivePermissionsPage } from "@/pages/EffectivePermissions";
 import { PositionsPage } from "@/pages/org/Positions";
 import { CompaniesPage } from "@/pages/Companies";
 import { LeadsPage } from "@/pages/LeadsPage";
+import FollowUpsPage from "@/pages/FollowUpsPage";
 import { SuppliersPage } from "@/pages/Suppliers";
 import { ProformaInvoicesPage } from "@/pages/ProformaInvoicesPage";
 import { ProformaInvoicePdfPage } from "@/pages/ProformaInvoicePdfPage";
@@ -157,6 +158,7 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/403" element={<ForbiddenPage />} />
           <Route path="/organization" element={<OrganizationPage />} />
+          <Route path="/erp-settings" element={<OrganizationPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/trash" element={<TrashPage />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -418,8 +420,13 @@ export function App() {
           <Route path="/call-type/list" element={<Navigate to="/masters/call-types" replace />} />
           <Route path="/calltype/list" element={<Navigate to="/masters/call-types" replace />} />
           <Route path="/call_types/list" element={<Navigate to="/masters/call-types" replace />} />
-          <Route path="/call-types/list" element={<Navigate to="/masters/call-types" replace />} />
-          <Route path="/call-logs/follow-up" element={<ComingSoonPage activeKey="call-logs-follow-up" title="Follow Up Logs" subtitle="View and track interaction logs and scheduled follow-ups" breadcrumbLabel="Follow Up Logs" featureName="Follow Up Logs" />} />
+          {/* Follow Up Logs Module (erp.inhymasolutions.com/follow-up/list) */}
+          <Route path="/follow-up/list" element={<FollowUpsPage />} />
+          <Route path="/follow-ups" element={<Navigate to="/follow-up/list" replace />} />
+          <Route path="/follow-up" element={<Navigate to="/follow-up/list" replace />} />
+          <Route path="/followups" element={<Navigate to="/follow-up/list" replace />} />
+          <Route path="/call-logs/follow-up" element={<Navigate to="/follow-up/list" replace />} />
+          <Route path="/call-logs/follow-ups" element={<Navigate to="/follow-up/list" replace />} />
 
           {/* Leads Module (erp.inhymasolutions.com/lead/list) */}
           <Route path="/lead/list" element={<LeadsPage />} />
