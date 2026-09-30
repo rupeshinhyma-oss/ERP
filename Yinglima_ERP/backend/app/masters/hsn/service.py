@@ -20,6 +20,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 
 
@@ -115,13 +116,20 @@ class HsnService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import HSN codes from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> HsnCode:
+        async def _create(field_values: dict[str, Any]) -> HsnCode | tuple[str, HsnCode]:
             code = field_values["code"]
             existing = await self.repository.get_by_code(code)
+            if update_existing and existing is not None:
+                has_changes, changes = update_record_fields(existing, field_values)
+                if has_changes:
+                    await self.repository.update(existing, **changes)
+                    return ("updated", existing)
+                return ("unchanged", existing)
+
             if existing is not None:
                 raise ConflictException(
                     f"HSN code {code!r} already exists.", details={"existing": model_to_dict(existing)}

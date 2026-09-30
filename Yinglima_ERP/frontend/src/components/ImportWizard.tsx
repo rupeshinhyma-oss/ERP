@@ -227,6 +227,7 @@ function mergeSummaries(
   target.total_rows += chunkSummary.total_rows || 0;
   target.created += chunkSummary.created || 0;
   target.updated = (target.updated || 0) + (chunkSummary.updated || 0);
+  target.unchanged = (target.unchanged || 0) + (chunkSummary.unchanged || 0);
   target.failed += chunkSummary.failed || 0;
   target.duplicate_count += chunkSummary.duplicate_count || 0;
   // Row numbers inside each chunk's summary are 1-indexed *within that chunk's
@@ -630,6 +631,12 @@ export function ImportSummaryPanel({
               <span className="muted">Updated</span>
             </div>
           )}
+          {Boolean(summary.unchanged) && (
+            <div className="import-stat">
+              <b style={{ color: "#64748b" }}>{summary.unchanged}</b>
+              <span className="muted">Unchanged</span>
+            </div>
+          )}
           <div className="import-stat">
             <b style={{ color: "var(--color-danger)" }}>{summary.failed}</b>
             <span className="muted">Failed</span>
@@ -813,6 +820,7 @@ export function WizardModal({
         total_rows: rows.length,
         created: 0,
         updated: 0,
+        unchanged: 0,
         failed: inFileDuplicates.length,
         duplicate_count: 0,
         errors: [],
@@ -952,7 +960,7 @@ export function WizardModal({
           }}
         >
           {/* Mode Switcher (Shown only for modules supporting safe update) */}
-          {["/buyers", "/suppliers", "/masters/products"].some((p) => apiBase.startsWith(p)) && (
+          {["/buyers", "/suppliers", "/masters"].some((p) => apiBase.startsWith(p)) && (
             <div
               style={{
                 background: "var(--color-bg-subtle, #f8fafc)",

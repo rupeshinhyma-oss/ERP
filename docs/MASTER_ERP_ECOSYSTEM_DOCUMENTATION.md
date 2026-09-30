@@ -281,7 +281,12 @@ To eliminate the risk of database connection exhaustion:
 
 ### 5.3 Buyer & Supplier Management
 - **Buyer Directory:** Buyer profiles, credit tiers, buyer types, soft-delete lifecycles, and contact trees.
-- **Supplier Directory:** Factory auditing, vendor tiers, certifications, products supplied, and payment terms.
+- **Supplier Directory & Advanced Capabilities:**
+  - **Company Name Typeahead & Duplicate Prevention:** Powered by `SearchableDropdown`. As the user types, suggestions are dynamically grouped under `EXISTING SIMILAR SUPPLIERS` with type badges (`manufacturer`, `dealer / trader`) to prevent accidental duplicate entries. Dynamically renders `Use "<Typed>" (New)` with `↵ Enter` badge. Pressing `Enter` or clicking immediately accepts the custom name and closes suggestions. Exact duplicates are strictly blocked (`⛔ Supplier already exists in Supplier Master! Cannot save duplicate.`).
+  - **Factory Video & Inspection Folder Multi-Link Input:** Powered by `VideoTagInput` for `visit_media`. Supports comma-separated URLs with smart icon detection (YouTube `▶️`, Google Drive `📁`, OneDrive `📂`, Video `🎥`) and interactive clickable pills that open external targets in new tabs (`target="_blank"`).
+  - **Dual-Mode Import & Smart Diff:** Excel/CSV import supporting Mode 1 (Add New Records Only) and Mode 2 (Update Existing Records with zero overwrite on blank cells and smart diff detection).
+  - **Media & Photo Deletion Persistence:** Photo deletions in Product Gallery and Supplier visit media commit directly to PostgreSQL without triggering unrelated master reference validation errors, persisting across browser refreshes.
+
 
 ### 5.4 Master Data Management
 - Normalized relational masters: Countries, States, Cities, Ports, Currencies, Units of Measure (UOM), Harmonized System Codes (HSN), and Brands.

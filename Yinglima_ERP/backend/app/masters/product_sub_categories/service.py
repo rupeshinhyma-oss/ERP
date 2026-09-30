@@ -23,6 +23,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.constants import DROPDOWN_CACHE_NAME, EXPORT_HEADERS
@@ -191,11 +192,11 @@ class ProductSubCategoryService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import sub-categories from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> ProductSubCategory:
+        async def _create(field_values: dict[str, Any]) -> ProductSubCategory | tuple[str, ProductSubCategory]:
             category_code = field_values.pop("category_code")
             category = await self.category_repository.get_by_code(category_code)
             if category is None:
@@ -207,6 +208,18 @@ class ProductSubCategoryService:
             name = str(field_values.get("name") or "").strip()
             code_raw = field_values.get("code")
             code_val: str = str(code_raw).strip() if code_raw else ""
+
+            existing_by_name = await self.repository.get_by_name_in_category(category.id, name)
+            existing_by_code = await self.repository.get_by_code(code_val) if code_val else None
+            existing = existing_by_name if existing_by_name is not None else existing_by_code
+
+            if update_existing and existing is not None:
+                has_changes, changes = update_record_fields(existing, field_values)
+                if has_changes:
+                    await self.repository.update(existing, **changes)
+                    return ("updated", existing)
+                return ("unchanged", existing)
+
             if not code_val and name:
                 clean_name = "".join(c if c.isalnum() else "-" for c in name.upper())
                 base_code = "-".join(filter(None, clean_name.split("-")))[:45] or "SUB-CAT"
@@ -218,13 +231,11 @@ class ProductSubCategoryService:
                 field_values["code"] = code_val
 
             if code_val:
-                existing_by_code = await self.repository.get_by_code(code_val)
                 if existing_by_code is not None:
                     raise ConflictException(
                         f"Sub-category code {code_val!r} already exists.",
                         details={"existing": model_to_dict(existing_by_code)},
                     )
-            existing_by_name = await self.repository.get_by_name_in_category(category.id, name)
             if existing_by_name is not None:
                 raise ConflictException(
                     f"Sub-category {name!r} already exists in category '{category.name}'.",

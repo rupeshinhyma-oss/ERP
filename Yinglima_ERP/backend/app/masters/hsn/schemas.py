@@ -56,6 +56,8 @@ class ImportSummaryRead(BaseModel):
 
     total_rows: int
     created: int
+    updated: int = 0
+    unchanged: int = 0
     failed: int
     duplicate_count: int = 0
     errors: list[dict]

@@ -118,3 +118,25 @@ Detailed technical documentation available in [SYSTEM_CHANGES_AND_FEATURES_DOCUM
    - Updated SSO token handover generation to preserve authenticated user identities (`alice@example.com`) rather than defaulting to `admin`.
 5. **Spoke User Actions Cleanup:**
    - Removed redundant password reset and forced logout actions from spoke ERP user tables, centralizing credential and status governance in `ERP_Main`.
+
+---
+
+## 6. September 29, 2026: Yinglima ERP Supplier Video Links, Company Name Typeahead & Gallery Fixes
+
+### Summary of Changes:
+1. **Supplier Factory Video & Inspection Folder Multi-Link Input (`visit_media`):**
+   - Implemented `VideoTagInput` in `fields.tsx` and integrated into `Suppliers.tsx`.
+   - Supports multiple links (comma/Enter separated) with smart icon pills (YouTube `▶️`, Google Drive `📁`, OneDrive `📂`, Video `🎥`).
+   - Clickable pills open directly in a new tab (`target="_blank"`).
+2. **Company Name Typeahead, Suggestion & Enter Key Support:**
+   - Enhanced `SearchableDropdown.tsx` with `sublabel` support to show supplier types (`manufacturer`, `dealer / trader`) next to suggestions.
+   - Suggestions cleanly grouped under `EXISTING SIMILAR SUPPLIERS`.
+   - Dynamic `Use "<Typed>" (New)` option with `↵ Enter` keyboard badge.
+   - Full keyboard navigation: pressing `Enter` or clicking immediately accepts custom name and closes dropdown.
+   - Replaced stuck floating popup with non-blocking inline helper `ℹ️ Similar in Master:`.
+   - Exact duplicate prevention (`⛔ Supplier already exists`) strictly enforced.
+3. **Product Gallery & Media Deletion Persistence:**
+   - Isolated Supabase `HTTP 402 Payment Required` root cause for broken gallery images.
+   - Fixed photo deletion persistence in PostgreSQL without cascade or reference validation errors.
+   - Added image error fallbacks for unavailable cloud storage.
+

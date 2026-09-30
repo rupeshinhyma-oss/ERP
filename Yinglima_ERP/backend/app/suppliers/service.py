@@ -16,6 +16,7 @@ Profile" specification document's Notes section:
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -382,7 +383,7 @@ class SupplierService:
         if "current_status" in field_values:
             self._validate_status_transition(supplier.current_status, field_values["current_status"])
 
-        changes = {k: v for k, v in field_values.items() if v is not None}
+        changes = dict(field_values)
         if changes:
             await self.repository.update(supplier, **changes)
 
@@ -609,6 +610,7 @@ class SupplierService:
             if update_existing and batch_key in existing_map:
                 target_supplier = existing_map[batch_key]
                 update_kwargs: dict[str, Any] = {}
+                has_changes = False
 
                 # 1. Country validation if provided
                 target_country_id = target_supplier.country_id
@@ -619,7 +621,9 @@ class SupplierService:
                     )
                     if c_match is None:
                         raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
-                    update_kwargs["country_id"] = c_match.id
+                    if target_supplier.country_id != c_match.id:
+                        update_kwargs["country_id"] = c_match.id
+                        has_changes = True
                     target_country_id = c_match.id
 
                 # 2. State validation if provided
@@ -633,7 +637,9 @@ class SupplierService:
                         s_match = next((s for s in all_states if s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower())), None)
                     if s_match is None:
                         raise BadRequestException(f"State '{state_raw}' does not exist in State Master.")
-                    update_kwargs["state_id"] = s_match.id
+                    if target_supplier.state_id != s_match.id:
+                        update_kwargs["state_id"] = s_match.id
+                        has_changes = True
                     target_state_id = s_match.id
 
                 # 3. City validation if provided
@@ -646,7 +652,9 @@ class SupplierService:
                         ct_match = next((ct for ct in all_cities if ct.name.lower() == city_raw.lower()), None)
                     if ct_match is None:
                         raise BadRequestException(f"City '{city_raw}' does not exist in City Master.")
-                    update_kwargs["city_id"] = ct_match.id
+                    if target_supplier.city_id != ct_match.id:
+                        update_kwargs["city_id"] = ct_match.id
+                        has_changes = True
 
                 # 4. Category validation if provided
                 if cat_names_raw and str(cat_names_raw).strip():
@@ -659,7 +667,10 @@ class SupplierService:
                         if not matched_cat:
                             raise BadRequestException(f"Product Category '{cn.strip()}' does not exist in Category Master.")
                         cat_ids.append(matched_cat.id)
-                    await self.repository.replace_category_links(target_supplier.id, cat_ids)
+                    curr_cat_ids = {link.category_id for link in getattr(target_supplier, "category_links", [])}
+                    if set(cat_ids) != curr_cat_ids:
+                        has_changes = True
+                        await self.repository.replace_category_links(target_supplier.id, cat_ids)
 
                 # 5. Sub-Category validation if provided
                 if sub_cat_names_raw and str(sub_cat_names_raw).strip():
@@ -672,41 +683,81 @@ class SupplierService:
                         if not matched_sc:
                             raise BadRequestException(f"Product Sub Category '{scn.strip()}' does not exist in Sub Category Master.")
                         sub_ids.append(matched_sc.id)
-                    await self.repository.replace_sub_category_links(target_supplier.id, sub_ids)
+                    curr_sub_ids = {link.sub_category_id for link in getattr(target_supplier, "sub_category_links", [])}
+                    if set(sub_ids) != curr_sub_ids:
+                        has_changes = True
+                        await self.repository.replace_sub_category_links(target_supplier.id, sub_ids)
 
-                # Only non-empty / non-blank fields update
-                skip_fields = {"company_name", "country_id", "state_id", "city_id", "category_ids", "sub_category_ids"}
+                # Direct field comparison: exclude relations and composite fields handled separately
+                skip_fields = {
+                    "company_name", "country_id", "state_id", "city_id", "category_ids", "sub_category_ids",
+                    "category_names_raw", "sub_category_names_raw", "product_names_raw", "country_code",
+                    "state_name", "city_name", "product_names", "email", "contact_full_name", "contact_designation",
+                    "contact_salutation", "contact_calling_number", "contact_whatsapp_number", "contact_wechat_number",
+                }
                 for k, v in field_values.items():
-                    if k not in skip_fields and v is not None and str(v).strip() != "":
-                        update_kwargs[k] = v
+                    if k not in skip_fields and v is not None:
+                        cur_v = getattr(target_supplier, k, None)
+                        cur_s = str(cur_v.value if hasattr(cur_v, "value") else (cur_v if cur_v is not None else "")).strip().lower()
+                        new_s = str(v.value if hasattr(v, "value") else (v if v is not None else "")).strip().lower()
+                        if new_s != "" and cur_s != new_s:
+                            update_kwargs[k] = v
+                            has_changes = True
 
                 if contact_call and str(contact_call).strip():
-                    update_kwargs["contact_calling_number"] = str(contact_call).strip()
+                    clean_call = re.sub(r"\D", "", contact_call)
+                    clean_cur = re.sub(r"\D", "", getattr(target_supplier, "contact_calling_number", "") or "")
+                    if clean_call != clean_cur:
+                        update_kwargs["contact_calling_number"] = str(contact_call).strip()
+                        has_changes = True
                 if contact_wa and str(contact_wa).strip():
-                    update_kwargs["contact_whatsapp_number"] = str(contact_wa).strip()
+                    clean_wa = re.sub(r"\D", "", contact_wa)
+                    clean_cur_wa = re.sub(r"\D", "", getattr(target_supplier, "contact_whatsapp_number", "") or "")
+                    if clean_wa != clean_cur_wa:
+                        update_kwargs["contact_whatsapp_number"] = str(contact_wa).strip()
+                        has_changes = True
                 if contact_wc and str(contact_wc).strip():
-                    update_kwargs["contact_wechat_number"] = str(contact_wc).strip()
+                    clean_wc = str(contact_wc).strip()
+                    clean_cur_wc = str(getattr(target_supplier, "contact_wechat_number", "") or "").strip()
+                    if clean_wc != clean_cur_wc:
+                        update_kwargs["contact_wechat_number"] = clean_wc
+                        has_changes = True
 
                 if update_kwargs:
                     await self.repository.update(target_supplier, **update_kwargs)
 
                 if email and str(email).strip():
-                    await self.repository.replace_emails(target_supplier.id, [str(email).strip()])
+                    curr_emails = [e.email.strip().lower() for e in getattr(target_supplier, "emails", []) if getattr(e, "email", None)]
+                    new_emails = [e.strip().lower() for e in email.split(",") if e.strip()]
+                    if sorted(curr_emails) != sorted(new_emails):
+                        has_changes = True
+                        await self.repository.replace_emails(target_supplier.id, [e.strip() for e in email.split(",") if e.strip()])
 
                 if contact_name and str(contact_name).strip():
                     primary_c = next((c for c in getattr(target_supplier, "contacts", []) if c.is_primary), None)
                     if primary_c:
-                        c_up: dict[str, Any] = {"person_name": str(contact_name).strip()}
-                        if contact_desig:
+                        c_up: dict[str, Any] = {}
+                        if (primary_c.person_name or "").strip() != str(contact_name).strip():
+                            c_up["person_name"] = str(contact_name).strip()
+                        if contact_desig and (primary_c.designation or "").strip() != str(contact_desig).strip():
                             c_up["designation"] = str(contact_desig).strip()
                         if contact_call:
-                            c_up["calling_number"] = str(contact_call).strip()
+                            call_clean = re.sub(r"\D", "", contact_call)
+                            cur_c_call = re.sub(r"\D", "", primary_c.calling_number or "")
+                            if call_clean != cur_c_call:
+                                c_up["calling_number"] = str(contact_call).strip()
                         if contact_wa:
-                            c_up["whatsapp_number"] = str(contact_wa).strip()
-                        if contact_wc:
+                            wa_clean = re.sub(r"\D", "", contact_wa)
+                            cur_c_wa = re.sub(r"\D", "", primary_c.whatsapp_number or "")
+                            if wa_clean != cur_c_wa:
+                                c_up["whatsapp_number"] = str(contact_wa).strip()
+                        if contact_wc and (primary_c.wechat_number or "").strip() != str(contact_wc).strip():
                             c_up["wechat_number"] = str(contact_wc).strip()
-                        await self.contact_repository.update(primary_c, **c_up)
+                        if c_up:
+                            has_changes = True
+                            await self.contact_repository.update(primary_c, **c_up)
                     else:
+                        has_changes = True
                         await self.contact_repository.create(
                             supplier_id=target_supplier.id,
                             salutation=None,
@@ -722,6 +773,8 @@ class SupplierService:
                         )
 
                 seen_in_batch.add(batch_key)
+                if not has_changes:
+                    return ("unchanged", target_supplier)
                 return ("updated", target_supplier)
 
             # ----------------------------------------------------------

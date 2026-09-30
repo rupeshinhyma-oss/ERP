@@ -26,6 +26,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
@@ -416,14 +417,32 @@ class ProductService:
             field_values["category_id"] = category.id
 
             if sub_category_code:
-                sub_category = await self.sub_category_repository.get_by_code(sub_category_code)
+                sub_cats = await self.sub_category_repository.list(limit=1000)
+                # First match under this category
+                sub_category = next(
+                    (sc for sc in sub_cats if sc.category_id == category.id and (sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower())),
+                    None
+                )
                 if sub_category is None:
-                    sub_cats = await self.sub_category_repository.list(limit=1000)
-                    sub_category = next((sc for sc in sub_cats if sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower()), None)
+                    # Fallback to any subcategory by code or name
+                    sub_category = await self.sub_category_repository.get_by_code(sub_category_code)
+                    if sub_category is None:
+                        sub_category = next((sc for sc in sub_cats if sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower()), None)
                 if sub_category is None:
                     raise BadRequestException(f"Sub Category '{sub_category_code}' does not exist in Sub Category Master.")
                 if sub_category.category_id != category.id:
-                    raise BadRequestException(f"Sub Category '{sub_category.name}' does not belong to Category '{category.name}'.")
+                    existing_sub_under_cat = next(
+                        (sc for sc in sub_cats if sc.category_id == category.id and sc.name.lower() == sub_category.name.lower()),
+                        None
+                    )
+                    if existing_sub_under_cat is not None:
+                        sub_category = existing_sub_under_cat
+                    else:
+                        sub_category = await self.sub_category_repository.create(
+                            name=sub_category.name,
+                            category_id=category.id,
+                            status=RecordStatus.ACTIVE,
+                        )
                 field_values["sub_category_id"] = sub_category.id
 
             if brand_code:
@@ -485,17 +504,21 @@ class ProductService:
                 existing_dup = res_dup.scalars().first()
 
             # UPDATE EXISTING MODE:
-            if update_existing and (existing_code or existing_dup):
-                target_prod = existing_code or existing_dup
-                update_kwargs: dict[str, Any] = {}
-                for k, v in field_values.items():
-                    if k not in ("product_code",) and v is not None and str(v).strip() != "":
-                        update_kwargs[k] = v
-                if update_kwargs:
+            target_prod = existing_code if existing_code is not None else existing_dup
+            if update_existing and target_prod is not None:
+                skip_keys = set()
+                if raw_product_code and raw_product_code.startswith("AUTO-"):
+                    skip_keys.add("product_code")
+                has_changes, update_kwargs = update_record_fields(target_prod, field_values, skip_fields=skip_keys)
+                if has_changes and update_kwargs:
                     await self.repository.update(target_prod, **update_kwargs)
+                    await notify_source_record_changed("product", target_prod.id)
+                    await refresh_planning_cells_for_record(self.repository.session, "product", target_prod.id)
                 seen_names.add(clean_name_key)
                 if clean_code_key:
                     seen_codes.add(clean_code_key)
+                if not has_changes:
+                    return ("unchanged", target_prod)
                 return ("updated", target_prod)
 
             if existing_dup is not None:
@@ -509,6 +532,15 @@ class ProductService:
                     f"Product Code '{raw_product_code}' already exists in Product Master (used by '{existing_code.product_name_tally or existing_code.product_name}') — duplicate skipped.",
                     details={"existing": _serialize_for_compare(existing_code)},
                 )
+
+            if not field_values.get("packaging_quantity"):
+                field_values["packaging_quantity"] = 1
+            if not field_values.get("packaging_gross_weight"):
+                field_values["packaging_gross_weight"] = 1.0
+            if not field_values.get("weight"):
+                field_values["weight"] = field_values["packaging_gross_weight"]
+            if not field_values.get("packaging_unit_cbm"):
+                field_values["packaging_unit_cbm"] = 0.001
 
             created_prod = await self.repository.create(**field_values)
             seen_names.add(clean_name_key)

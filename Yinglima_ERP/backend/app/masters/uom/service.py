@@ -16,6 +16,7 @@ from app.masters.import_export import (
     model_to_dict,
     parse_rows_from_file,
     run_import,
+    update_record_fields,
 )
 from app.masters.uom.constants import DROPDOWN_CACHE_NAME, EXPORT_HEADERS
 from app.masters.uom.models import UnitOfMeasurement
@@ -119,26 +120,35 @@ class UomService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import UOMs from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> UnitOfMeasurement:
+        async def _create(field_values: dict[str, Any]) -> UnitOfMeasurement | tuple[str, UnitOfMeasurement]:
             name = field_values["name"]
             code = field_values["code"]
             existing_by_name = await self.repository.get_by_name(name)
+            existing_by_code = await self.repository.get_by_code(code)
+
+            if update_existing and (existing_by_name is not None or existing_by_code is not None):
+                target = existing_by_name or existing_by_code
+                has_changes, changes = update_record_fields(target, field_values)
+                if has_changes:
+                    await self.repository.update(target, **changes)
+                    return ("updated", target)
+                return ("unchanged", target)
+
             if existing_by_name is not None:
                 raise ConflictException(
                     f"UOM name {name!r} already exists.", details={"existing": model_to_dict(existing_by_name)}
                 )
-            existing_by_code = await self.repository.get_by_code(code)
             if existing_by_code is not None:
                 raise ConflictException(
                     f"UOM code {code!r} already exists.", details={"existing": model_to_dict(existing_by_code)}
                 )
             return await self.repository.create(**field_values)
 
-        summary = await run_import(rows, row_validator=validate_uom_row, row_creator=_create, dedupe_keys=("name",))
+        summary = await run_import(rows, row_validator=validate_uom_row, row_creator=_create, dedupe_keys=("name", "code"))
         await self._invalidate_cache()
         return summary
 

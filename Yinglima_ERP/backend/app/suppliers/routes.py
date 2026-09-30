@@ -355,7 +355,7 @@ async def update_supplier(
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing supplier profile."""
-    supplier = await service.update(supplier_id, **payload.model_dump())
+    supplier = await service.update(supplier_id, **payload.model_dump(exclude_unset=True))
     data = await _to_supplier_read(service, supplier)
     changes = payload.model_dump(exclude_none=True, exclude={"version"}, mode="json")
     await _record_action(

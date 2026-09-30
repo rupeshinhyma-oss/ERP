@@ -517,6 +517,65 @@ export function ProductGalleryPage() {
     );
   };
 
+  const [brokenMediaMap, setBrokenMediaMap] = useState<Record<string, boolean>>({});
+
+  const handleQuickRemoveProductImage = async (prod: Product, imgUrl: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm(`Permanently remove broken image from "${prod.product_name_tally || prod.product_name || "product"}"?`)) {
+      return;
+    }
+    const rawImages = Array.isArray(prod.images) && prod.images.length > 0
+      ? prod.images
+      : (prod.image_url ? [prod.image_url] : []);
+    const updatedImages = rawImages.filter((u) => u !== imgUrl);
+    const updatedPayload = {
+      images: updatedImages,
+      image_url: updatedImages[0] || null,
+    };
+
+    setProducts((prev) =>
+      prev.map((p) => (p.id === prod.id ? { ...p, ...updatedPayload } : p))
+    );
+    setSelectedProduct((prev) =>
+      prev && prev.id === prod.id ? { ...prev, ...updatedPayload } : prev
+    );
+
+    try {
+      await apiPatch<Product>(`/masters/products/${prod.id}`, updatedPayload);
+    } catch (err) {
+      console.error("Failed to remove broken image:", err);
+      alert("Failed to remove image from database. Please try again.");
+      fetchGalleryData();
+    }
+  };
+
+  const handleQuickRemoveSupplierImage = async (supp: Supplier, mediaUrl: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm(`Permanently remove broken visit photo from "${supp.company_name}"?`)) {
+      return;
+    }
+    const suppMedia = getSupplierMedia(supp);
+    const updatedRaw = suppMedia.filter((u) => u !== mediaUrl);
+    const updatedPayload = {
+      visit_media: updatedRaw.length ? updatedRaw : null,
+    };
+
+    setSuppliers((prev) =>
+      prev.map((s) => (s.id === supp.id ? { ...s, visit_media: updatedRaw.length ? updatedRaw : undefined } : s))
+    );
+    setSelectedSupplier((prev) =>
+      prev && prev.id === supp.id ? { ...prev, visit_media: updatedRaw.length ? updatedRaw : undefined } : prev
+    );
+
+    try {
+      await apiPatch<Supplier>(`/suppliers/${supp.id}`, updatedPayload);
+    } catch (err) {
+      console.error("Failed to remove broken visit media:", err);
+      alert("Failed to remove visit photo from database. Please try again.");
+      fetchGalleryData();
+    }
+  };
+
   return (
     <AppShell activeKey="product-gallery">
       <main className="page">
@@ -775,10 +834,53 @@ export function ProductGalleryPage() {
                             playsInline
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
+                        ) : brokenMediaMap[img] ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              height: "100%",
+                              width: "100%",
+                              background: "#fff1f2",
+                              padding: "12px",
+                              textAlign: "center",
+                              color: "#be123c",
+                            }}
+                          >
+                            <div style={{ fontSize: "28px", marginBottom: "2px" }}>⚠️</div>
+                            <div style={{ fontSize: "11.5px", fontWeight: 700 }}>Image Unavailable</div>
+                            <div style={{ fontSize: "10px", color: "#9f1239", opacity: 0.85, marginTop: "2px" }}>
+                              Storage Suspended (402)
+                            </div>
+                            {canDeleteProductMedia && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleQuickRemoveProductImage(prod, img, e)}
+                                style={{
+                                  marginTop: "8px",
+                                  background: "#e11d48",
+                                  color: "#ffffff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  padding: "3px 8px",
+                                  fontSize: "10.5px",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                                }}
+                                title="Permanently remove this broken image link from product"
+                              >
+                                🗑️ Remove Image
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <img
                             src={resolveImageUrl(img)}
                             alt={prod.product_name_tally || prod.product_name || "Product Photo"}
+                            onError={() => setBrokenMediaMap((prev) => ({ ...prev, [img]: true }))}
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
                         )
@@ -964,10 +1066,53 @@ export function ProductGalleryPage() {
                             playsInline
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
+                        ) : brokenMediaMap[firstImg] ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              height: "100%",
+                              width: "100%",
+                              background: "#fff1f2",
+                              padding: "12px",
+                              textAlign: "center",
+                              color: "#be123c",
+                            }}
+                          >
+                            <div style={{ fontSize: "28px", marginBottom: "2px" }}>⚠️</div>
+                            <div style={{ fontSize: "11.5px", fontWeight: 700 }}>Photo Unavailable</div>
+                            <div style={{ fontSize: "10px", color: "#9f1239", opacity: 0.85, marginTop: "2px" }}>
+                              Storage Suspended (402)
+                            </div>
+                            {canDeleteSupplierMedia && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleQuickRemoveSupplierImage(supp, firstImg, e)}
+                                style={{
+                                  marginTop: "8px",
+                                  background: "#e11d48",
+                                  color: "#ffffff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  padding: "3px 8px",
+                                  fontSize: "10.5px",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                                }}
+                                title="Permanently remove this broken visit photo from supplier"
+                              >
+                                🗑️ Remove Photo
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <img
                             src={resolveImageUrl(firstImg)}
                             alt={supp.company_name}
+                            onError={() => setBrokenMediaMap((prev) => ({ ...prev, [firstImg]: true }))}
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
                         )
@@ -1329,10 +1474,41 @@ export function ProductGalleryPage() {
                           boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
                         }}
                       />
+                    ) : brokenMediaMap[activeMedia] ? (
+                      <div style={{ padding: "30px 16px", background: "#fff1f2", border: "1px solid #fecdd3", borderRadius: "8px", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+                        <div style={{ fontSize: "36px" }}>⚠️</div>
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#9f1239" }}>Image Unavailable</div>
+                        <div style={{ fontSize: "12px", color: "#be123c", textAlign: "center", maxWidth: "340px" }}>
+                          Storage provider returned <strong>HTTP 402: Payment Required</strong>. The image file cannot be accessed.
+                        </div>
+                        {canDeleteProductMedia && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePhoto([selectedImageIndex])}
+                            style={{
+                              marginTop: "8px",
+                              background: "#dc2626",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "6px",
+                              padding: "6px 14px",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            🗑️ Delete This Broken Photo
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <img
                         src={resolveImageUrl(activeMedia)}
                         alt="Product Primary Photo"
+                        onError={() => setBrokenMediaMap((prev) => ({ ...prev, [activeMedia]: true }))}
                         style={{
                           maxHeight: "260px",
                           maxWidth: "100%",
@@ -1539,16 +1715,18 @@ export function ProductGalleryPage() {
                                   src={resolveImageUrl(imgUri)}
                                   alt={`Thumbnail ${idx + 1}`}
                                   onClick={() => setSelectedImageIndex(idx)}
+                                  onError={() => setBrokenMediaMap((prev) => ({ ...prev, [imgUri]: true }))}
                                   style={{
                                     width: "56px",
                                     height: "56px",
                                     borderRadius: "6px",
                                     objectFit: "cover",
                                     cursor: "pointer",
-                                    border: idx === selectedImageIndex ? "2.5px solid #2563eb" : "1px solid #cbd5e0",
+                                    border: idx === selectedImageIndex ? "2.5px solid #2563eb" : brokenMediaMap[imgUri] ? "1.5px solid #f87171" : "1px solid #cbd5e0",
                                     boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(37,99,235,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
                                     transform: idx === selectedImageIndex ? "scale(1.06)" : "scale(1)",
                                     transition: "all 0.15s ease",
+                                    opacity: brokenMediaMap[imgUri] ? 0.7 : 1,
                                   }}
                                 />
                               )}
@@ -1648,10 +1826,38 @@ export function ProductGalleryPage() {
                           boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
                         }}
                       />
+                    ) : brokenMediaMap[activeSuppMedia] ? (
+                      <div style={{ padding: "30px 16px", background: "#fff1f2", border: "1px solid #fecdd3", borderRadius: "8px", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+                        <div style={{ fontSize: "36px" }}>⚠️</div>
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#9f1239" }}>Visit Photo Unavailable</div>
+                        <div style={{ fontSize: "12px", color: "#be123c", textAlign: "center", maxWidth: "340px" }}>
+                          Storage provider returned <strong>HTTP 402: Payment Required</strong>.
+                        </div>
+                        {canDeleteSupplierMedia && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSupplierPhotos([selectedImageIndex])}
+                            style={{
+                              marginTop: "8px",
+                              background: "#dc2626",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "6px",
+                              padding: "6px 14px",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            🗑️ Delete Broken Photo
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <img
                         src={resolveImageUrl(activeSuppMedia)}
                         alt="Supplier Visit Photo"
+                        onError={() => setBrokenMediaMap((prev) => ({ ...prev, [activeSuppMedia]: true }))}
                         style={{
                           maxHeight: "260px",
                           maxWidth: "100%",
@@ -1858,16 +2064,18 @@ export function ProductGalleryPage() {
                                   src={resolveImageUrl(imgUri)}
                                   alt={`Thumbnail ${idx + 1}`}
                                   onClick={() => setSelectedImageIndex(idx)}
+                                  onError={() => setBrokenMediaMap((prev) => ({ ...prev, [imgUri]: true }))}
                                   style={{
                                     width: "56px",
                                     height: "56px",
                                     borderRadius: "6px",
                                     objectFit: "cover",
                                     cursor: "pointer",
-                                    border: idx === selectedImageIndex ? "2.5px solid #0284c7" : "1px solid #bae6fd",
+                                    border: idx === selectedImageIndex ? "2.5px solid #0284c7" : brokenMediaMap[imgUri] ? "1.5px solid #f87171" : "1px solid #bae6fd",
                                     boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(2,132,199,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
                                     transform: idx === selectedImageIndex ? "scale(1.06)" : "scale(1)",
                                     transition: "all 0.15s ease",
+                                    opacity: brokenMediaMap[imgUri] ? 0.7 : 1,
                                   }}
                                 />
                               )}

@@ -30,8 +30,8 @@ import {
   SearchableDropdownMultiPanel,
   type DropdownOption,
 } from "@/components/SearchableDropdown";
-import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteField, autoTitleCase } from "@/components/fields";
-import { useLookup } from "@/lib/lookups";
+import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteField, VideoTagInput, autoTitleCase } from "@/components/fields";
+import { useLookup, useLookupNames } from "@/lib/lookups";
 import { useBodyScrollLock } from "@/lib/hooks";
 import { useLiveModule } from "@/lib/live/useLive";
 
@@ -693,6 +693,9 @@ export function SuppliersPage() {
   const existingSuppliers = useLookup<Supplier>("/suppliers", 500);
   const categoriesLookup = useLookup<ProductCategory>("/masters/product-categories", 500);
   const subCategoriesLookup = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
+  const categoryNamesFallback = useLookupNames("/masters/product-categories");
+  const subCategoryNamesFallback = useLookupNames("/masters/product-sub-categories");
+  const productsLookup = useLookup<Product>("/masters/products", 500);
 
   async function resolveCountryPhoneCode(countryId: string | null): Promise<string> {
     if (!countryId) return "+86";
@@ -1047,7 +1050,12 @@ export function SuppliersPage() {
         "/suppliers" + toQueryString({ search: term, page: 1, page_size: 20 }),
         { signal }
       );
-      return data.map((d) => ({ value: d.company_name, label: d.company_name }));
+      return (data || []).map((d) => ({
+        value: d.company_name,
+        label: d.company_name,
+        sublabel: d.supplier_type || "Supplier",
+        group: "Existing Similar Suppliers",
+      }));
     },
     []
   );
@@ -1375,12 +1383,39 @@ export function SuppliersPage() {
     icon = "🏷️"
   ) {
     if (!ids || !ids.length) return <span className="muted">—</span>;
-    const names = ids.map((id) => resolver.get(tableKey, id) || id);
-    const hasUnresolved = names.some((n) => !n || n === "…");
+    const resolvedNames = ids.map((id) => {
+      const fromResolver = resolver.get(tableKey, id);
+      if (fromResolver) return fromResolver;
+      if (tableKey === "categories") {
+        const fb = categoryNamesFallback.items.find((c) => c.id === id)?.name || categoriesLookup.items.find((c) => c.id === id)?.name;
+        if (fb) {
+          resolver.set(tableKey, id, fb);
+          return fb;
+        }
+      }
+      if (tableKey === "subCategories") {
+        const fb = subCategoryNamesFallback.items.find((sc) => sc.id === id)?.name || subCategoriesLookup.items.find((sc) => sc.id === id)?.name;
+        if (fb) {
+          resolver.set(tableKey, id, fb);
+          return fb;
+        }
+      }
+      if (tableKey === "products") {
+        const fb = productsLookup.items.find((p) => p.id === id)?.product_name;
+        if (fb) {
+          resolver.set(tableKey, id, fb);
+          return fb;
+        }
+      }
+      return null;
+    });
+
+    const hasUnresolved = resolvedNames.some((n) => !n);
     if (hasUnresolved) {
       void resolver.resolve(tableKey, ids).then(() => setNamesVersion((n) => n + 1));
     }
-    const cleanNames = names.filter(Boolean);
+
+    const cleanNames = resolvedNames.map((n, idx) => n || ids[idx]).filter(Boolean);
 
     return (
       <ItemPopoverCell
@@ -1434,7 +1469,7 @@ export function SuppliersPage() {
         visited_factory_office: String(supplier.visited_factory_office),
         visit_remarks: supplier.visit_remarks || "",
         visit_media_input: (supplier.visit_media || []).filter((u) => !u.startsWith("http") || u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) || u.includes("/storage/v1/object/public/")).join(", "),
-        visit_video_url: (supplier.visit_media || []).find((u) => u.startsWith("http") && !u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) && !u.includes("/storage/v1/object/public/")) || "",
+        visit_video_url: (supplier.visit_media || []).filter((u) => u.startsWith("http") && !u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) && !u.includes("/storage/v1/object/public/")).join(", "),
         overall_remarks: supplier.overall_remarks || "",
         is_active: String(supplier.is_active),
       });
@@ -1497,8 +1532,10 @@ export function SuppliersPage() {
         .map((v) => v.trim())
         .filter(Boolean)
       : [];
-    const visitVideo = isVisited && form.visit_video_url ? form.visit_video_url.trim() : "";
-    const visitMedia = visitVideo ? [...visitPhotos, visitVideo] : visitPhotos;
+    const videoLinks = isVisited && form.visit_video_url
+      ? form.visit_video_url.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    const visitMedia = [...visitPhotos, ...videoLinks];
 
     return {
       company_name: form.company_name.trim(),
@@ -2545,19 +2582,33 @@ export function SuppliersPage() {
                               </div>
                             )}
                             {matches.length > 0 && !exact && (
-                              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#ffffff", border: "1px solid #cbd5e0", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", maxHeight: "160px", overflowY: "auto", marginTop: "2px" }}>
-                                <div style={{ padding: "6px 12px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
-                                  Existing Similar Suppliers:
-                                </div>
-                                {matches.map((s) => (
-                                  <div
+                              <div style={{ marginTop: "6px", fontSize: "12px", color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", padding: "6px 10px", borderRadius: "6px", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                <span style={{ fontWeight: 600, color: "#0f172a" }}>ℹ️ Similar in Master:</span>
+                                {matches.slice(0, 4).map((s) => (
+                                  <button
                                     key={s.id}
-                                    style={{ padding: "8px 12px", fontSize: "12.5px", cursor: "pointer", borderBottom: "1px solid #f8fafc", display: "flex", justifyContent: "space-between", background: "#fff" }}
+                                    type="button"
                                     onClick={() => setField("company_name", s.company_name)}
+                                    style={{
+                                      background: "#ffffff",
+                                      border: "1px solid #cbd5e1",
+                                      borderRadius: "4px",
+                                      padding: "2px 8px",
+                                      fontSize: "11.5px",
+                                      cursor: "pointer",
+                                      color: "#1e293b",
+                                      fontWeight: 500,
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                    title="Click to select this existing supplier"
                                   >
-                                    <span style={{ fontWeight: 600, color: "#1e293b" }}>{s.company_name}</span>
-                                    <span style={{ color: "#64748b", fontSize: "11.5px" }}>{s.supplier_type || "Supplier"}</span>
-                                  </div>
+                                    <span>{s.company_name}</span>
+                                    {s.supplier_type && (
+                                      <span style={{ fontSize: "10.5px", color: "#64748b" }}>({s.supplier_type})</span>
+                                    )}
+                                  </button>
                                 ))}
                               </div>
                             )}
@@ -3103,10 +3154,10 @@ export function SuppliersPage() {
                         </div>
 
                         <div>
-                          <TextField
+                          <VideoTagInput
                             id="visit_video_url"
                             label="Factory Video / Inspection Folder Link (Optional)"
-                            placeholder="https://... (e.g. OneDrive, SharePoint, Google Drive, or Video URL)"
+                            placeholder="Paste YouTube, Drive or OneDrive links and press Enter or comma..."
                             value={form.visit_video_url}
                             onChange={(v) => setField("visit_video_url", v)}
                           />
