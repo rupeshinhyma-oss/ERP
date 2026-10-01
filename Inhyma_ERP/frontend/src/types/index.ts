@@ -773,6 +773,7 @@ export interface Company {
   primary_website?: string | null;
   secondary_website?: string | null;
   company_category?: string | null;
+  sector?: string | null;
   product_manufacture_or_supply?: string | null;
   machines_buying_from?: string | null;
   spares_buying_from?: string | null;

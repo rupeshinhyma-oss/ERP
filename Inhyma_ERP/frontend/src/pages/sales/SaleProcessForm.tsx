@@ -33,6 +33,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Combobox } from "@/components/Combobox";
 import { DatePicker } from "@/components/DatePicker";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder } from "@/types/saleProcess";
 import { numberToIndianWords } from "@/utils/text";
@@ -133,12 +134,47 @@ export function SaleProcessFormPage() {
   const toast = useToast();
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
+  const { profile } = useAuth();
+  const loggedInUserName = useMemo(() => {
+    if (!profile) return "Admin";
+    return (
+      profile.full_name ||
+      (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username))
+    );
+  }, [profile]);
+
+  const [salesPersonOptions, setSalesPersonOptions] = useState<string[]>(SALES_PERSON_OPTIONS);
+
+  useEffect(() => {
+    void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
+      .then((res) => {
+        if (res?.data && res.data.length > 0) {
+          const names = res.data.map((u) => u.full_name || u.username);
+          setSalesPersonOptions(names);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // General Details State
   const [warehouse, setWarehouse] = useState("");
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(getTodayFormatted());
   const [paymentTerms, setPaymentTerms] = useState("");
-  const [salesPerson, setSalesPerson] = useState("Rupesh Malia");
+  const [salesPerson, setSalesPerson] = useState(loggedInUserName);
+
+  useEffect(() => {
+    if (!isEdit && loggedInUserName) {
+      setSalesPerson((prev) => (!prev || prev === "Rupesh Malia" ? loggedInUserName : prev));
+    }
+  }, [isEdit, loggedInUserName]);
+
+  const effectiveSalesPersonOptions = useMemo(() => {
+    const set = new Set<string>();
+    if (loggedInUserName) set.add(loggedInUserName);
+    salesPersonOptions.forEach((n) => set.add(n));
+    if (salesPerson && salesPerson.trim()) set.add(salesPerson.trim());
+    return Array.from(set);
+  }, [loggedInUserName, salesPersonOptions, salesPerson]);
 
   const [transportName, setTransportName] = useState("");
   const [thirdPartyDelivery, setThirdPartyDelivery] = useState("No");
@@ -707,7 +743,7 @@ export function SaleProcessFormPage() {
                   ariaLabel="Sales Person"
                   value={salesPerson}
                   onChange={setSalesPerson}
-                  options={SALES_PERSON_OPTIONS}
+                  options={effectiveSalesPersonOptions}
                   placeholder="Select"
                 />
                 {errors.sales_person && (

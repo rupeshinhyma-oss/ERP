@@ -21,8 +21,9 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
-import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
+import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
+import { DateRangePicker } from "@/components/DateRangePicker";
 import {
   SearchableDropdown,
   type DropdownOption,
@@ -45,7 +46,6 @@ import type {
   ImportHeader,
   ImportSummary,
   PaginationMeta,
-  Product,
   Company,
   CompanyContact,
 } from "@/types";
@@ -82,6 +82,24 @@ const COMPANY_IMPORT_HEADERS: ImportHeader[] = [
   { key: "Visit Remarks", label: "Visit Remarks" },
   { key: "Overall Remarks", label: "Overall Remarks" },
   { key: "Status", label: "Status" },
+];
+
+const COMPANY_SECTORS = [
+  "Automobile",
+  "Bakery",
+  "Beverage",
+  "Chemical",
+  "Confectionary",
+  "Dairy",
+  "Electrical",
+  "Electronics",
+  "Hardware",
+  "Mechanical Items",
+  "Other Food",
+  "Others (Misc.)",
+  "Pharmaceutical",
+  "Snacks",
+  "Textile",
 ];
 
 
@@ -222,6 +240,98 @@ function StatusPill({ value }: { value?: string | null }) {
 
 
 
+export const COMPANY_TABLE_COLUMNS = [
+  "Checkbox",
+  "Sr. No.",
+  "Company",
+  "Name / Designation",
+  "Contact (Direct)",
+  "Area / City",
+  "Dist. / State",
+  "Curr. Status",
+  "Bus. Type",
+  "Grade",
+  "Potential",
+  "Mac. Buying From",
+  "P1 To Buy From Us",
+  "Sales Per. / Added On",
+  "Action",
+];
+
+function formatDateDMY(dStr: string | Date | null | undefined): string {
+  if (!dStr) return "—";
+  const d = new Date(dStr);
+  if (isNaN(d.getTime())) return String(dStr);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+function parseDateRange(rangeStr: string): { created_after?: string; created_before?: string } {
+  if (!rangeStr || !rangeStr.trim()) return {};
+  const separator = rangeStr.includes(" - ")
+    ? " - "
+    : rangeStr.includes(" to ")
+    ? " to "
+    : rangeStr.includes("-") && !rangeStr.includes("/")
+    ? "-"
+    : " - ";
+  const parts = rangeStr.split(separator).map((s) => s.trim());
+  const startStr = parts[0];
+  const endStr = parts[1] || parts[0];
+
+  const parseSingleDate = (s: string, isEnd: boolean): Date | null => {
+    if (!s) return null;
+    if (s.includes("/")) {
+      const p = s.split("/");
+      if (p.length === 3) {
+        const m = parseInt(p[0], 10) - 1;
+        const d = parseInt(p[1], 10);
+        const y = parseInt(p[2], 10);
+        if (!isNaN(m) && !isNaN(d) && !isNaN(y)) {
+          return new Date(y, m, d, isEnd ? 23 : 0, isEnd ? 59 : 0, isEnd ? 59 : 0, isEnd ? 999 : 0);
+        }
+      }
+    }
+    if (s.includes("-")) {
+      const p = s.split("-");
+      if (p.length === 3) {
+        if (p[0].length === 4) {
+          const y = parseInt(p[0], 10);
+          const m = parseInt(p[1], 10) - 1;
+          const d = parseInt(p[2], 10);
+          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+            return new Date(y, m, d, isEnd ? 23 : 0, isEnd ? 59 : 0, isEnd ? 59 : 0, isEnd ? 999 : 0);
+          }
+        } else {
+          const d = parseInt(p[0], 10);
+          const m = parseInt(p[1], 10) - 1;
+          const y = parseInt(p[2], 10);
+          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+            return new Date(y, m, d, isEnd ? 23 : 0, isEnd ? 59 : 0, isEnd ? 59 : 0, isEnd ? 999 : 0);
+          }
+        }
+      }
+    }
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      if (isEnd) d.setHours(23, 59, 59, 999);
+      else d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    return null;
+  };
+
+  const startDate = parseSingleDate(startStr, false);
+  const endDate = parseSingleDate(endStr, true);
+
+  const res: { created_after?: string; created_before?: string } = {};
+  if (startDate) res.created_after = startDate.toISOString();
+  if (endDate) res.created_before = endDate.toISOString();
+  return res;
+}
+
 function CompanySkeletonRows({
   count = 8,
   displayOrder,
@@ -232,8 +342,6 @@ function CompanySkeletonRows({
   getFreezeStyle: (colIdx: number, isHeader?: boolean) => React.CSSProperties;
 }) {
   const rowIndexes = Array.from({ length: count }, (_, i) => i);
-  const nameWidths = ["72%", "86%", "64%", "80%", "92%", "68%", "76%", "84%"];
-  const catWidths = ["80px", "65px", "90px", "75px", "85px", "70px", "82px", "68px"];
 
   return (
     <>
@@ -250,129 +358,94 @@ function CompanySkeletonRows({
                   />
                 );
                 break;
-              case 1:
+              case 1: // Sr. No.
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
+                    style={{ width: "30px", height: "14px", borderRadius: "3px", margin: "0 auto" }}
                   />
                 );
                 break;
-              case 2:
+              case 2: // Company
                 content = (
-                  <div
-                    className="skeleton-line"
-                    style={{
-                      width: nameWidths[rowIndex % nameWidths.length],
-                      height: "15px",
-                      borderRadius: "4px",
-                    }}
-                  />
-                );
-                break;
-              case 3:
-                content = (
-                  <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
-                    <div
-                      className="skeleton-line"
-                      style={{
-                        width: catWidths[rowIndex % catWidths.length],
-                        height: "20px",
-                        borderRadius: "10px",
-                      }}
-                    />
-                    <div
-                      className="skeleton-line"
-                      style={{ width: "32px", height: "20px", borderRadius: "10px" }}
-                    />
+                  <div>
+                    <div className="skeleton-line" style={{ width: "130px", height: "14px", borderRadius: "4px", marginBottom: "4px" }} />
+                    <div className="skeleton-line" style={{ width: "95px", height: "11px", borderRadius: "3px" }} />
                   </div>
                 );
                 break;
-              case 4:
+              case 3: // Name / Designation
+                content = (
+                  <div>
+                    <div className="skeleton-line" style={{ width: "120px", height: "13px", borderRadius: "4px", marginBottom: "4px" }} />
+                    <div className="skeleton-line" style={{ width: "70px", height: "11px", borderRadius: "3px" }} />
+                  </div>
+                );
+                break;
+              case 4: // Contact (Direct)
+                content = (
+                  <div>
+                    <div className="skeleton-line" style={{ width: "95px", height: "12px", borderRadius: "3px", marginBottom: "4px" }} />
+                    <div className="skeleton-line" style={{ width: "95px", height: "12px", borderRadius: "3px" }} />
+                  </div>
+                );
+                break;
+              case 5: // Area / City
+              case 6: // Dist. / State
+                content = (
+                  <div>
+                    <div className="skeleton-line" style={{ width: "80px", height: "12px", borderRadius: "3px", marginBottom: "4px" }} />
+                    <div className="skeleton-line" style={{ width: "70px", height: "11px", borderRadius: "3px" }} />
+                  </div>
+                );
+                break;
+              case 7: // Curr. Status
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "60px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "55px", height: "20px", borderRadius: "10px", margin: "0 auto" }}
                   />
                 );
                 break;
-              case 5:
+              case 8: // Bus. Type
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "55px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "40px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
                   />
                 );
                 break;
-              case 6:
+              case 9: // Grade
+              case 10: // Potential
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "70px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "65px", height: "24px", borderRadius: "4px", margin: "0 auto" }}
                   />
                 );
                 break;
-              case 7:
+              case 11: // Mac. Buying From
+              case 12: // P1 To Buy From Us
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "48px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "30px", height: "12px", borderRadius: "3px", margin: "0 auto" }}
                   />
                 );
                 break;
-              case 8:
+              case 13: // Sales Per. / Added On
                 content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "85px", height: "14px", borderRadius: "4px" }}
-                  />
+                  <div>
+                    <div className="skeleton-line" style={{ width: "95px", height: "13px", borderRadius: "4px", marginBottom: "4px" }} />
+                    <div className="skeleton-line" style={{ width: "75px", height: "11px", borderRadius: "3px" }} />
+                  </div>
                 );
                 break;
-              case 9:
+              case 14: // Action
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "50px", height: "14px", borderRadius: "4px" }}
-                  />
-                );
-                break;
-              case 10:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "75px", height: "14px", borderRadius: "4px" }}
-                  />
-                );
-                break;
-              case 11:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "60px", height: "20px", borderRadius: "12px" }}
-                  />
-                );
-                break;
-              case 12:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "42px", height: "22px", borderRadius: "4px" }}
-                  />
-                );
-                break;
-              case 13:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "50px", height: "20px", borderRadius: "12px" }}
-                  />
-                );
-                break;
-              case 14:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "32px", height: "26px", borderRadius: "4px", margin: "0 auto" }}
+                    style={{ width: "28px", height: "28px", borderRadius: "4px", margin: "0 auto" }}
                   />
                 );
                 break;
@@ -386,10 +459,10 @@ function CompanySkeletonRows({
                 style={{
                   padding: "10px 12px",
                   verticalAlign: "middle",
-                  width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
-                  minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
-                  maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
-                  textAlign: colIdx === 0 || colIdx === 1 || colIdx === 14 ? "center" : "left",
+                  width: colIdx === 0 ? "40px" : colIdx === 13 ? "60px" : undefined,
+                  minWidth: colIdx === 0 ? "40px" : colIdx === 13 ? "60px" : undefined,
+                  maxWidth: colIdx === 0 ? "45px" : undefined,
+                  textAlign: colIdx === 0 || colIdx === 6 || colIdx === 7 || colIdx === 8 || colIdx === 9 || colIdx === 10 || colIdx === 11 || colIdx === 13 ? "center" : "left",
                   ...getFreezeStyle(colIdx, false),
                 }}
               >
@@ -1071,7 +1144,7 @@ function CompanyNameAutocomplete({
   );
 }
 
-export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
+export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defaultAdd?: boolean; defaultFilterOpen?: boolean } = {}) {
   const { profile, hasPermission } = useAuth();
   const canCreate = hasPermission("company.create") || hasPermission("supplier.create");
   const canUpdate = hasPermission("company.update") || hasPermission("supplier.update");
@@ -1104,33 +1177,136 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
   /* Status Tab (Active vs Inactive) */
   const [statusTab, setStatusTab] = useState<"active" | "inactive">("active");
 
-  /* Filters */
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  /* Filters - matching ERP Companies Filter Panel */
+  const [filterOpen, setFilterOpen] = useState(defaultFilterOpen);
+  const [filterDateRange, setFilterDateRange] = useState("");
+  const [companyTypeFilter, setCompanyTypeFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [stateFilter, setStateFilter] = useState<string>("");
+  const [cityFilter, setCityFilter] = useState<string>("");
+  const [districtFilter, setDistrictFilter] = useState<string>("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [gradeFilter, setGradeFilter] = useState("");
+  const [potentialFilter, setPotentialFilter] = useState("");
+  const [businessCategoryFilter, setBusinessCategoryFilter] = useState("");
+  const [sectorFilter, setSectorFilter] = useState("");
+  const [salesPersonFilter, setSalesPersonFilter] = useState("");
+
+  // Master option lists for filter dropdowns
+  const [filterStates, setFilterStates] = useState<Array<{ id: string; name: string }>>([]);
+  const [filterDistricts, setFilterDistricts] = useState<Array<{ id: string; name: string; state_id?: string }>>([]);
+  const [filterCities, setFilterCities] = useState<Array<{ id: string; name: string; state_id?: string; district_id?: string }>>([]);
+  const [filterCategories, setFilterCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [filterSalesPersons, setFilterSalesPersons] = useState<Array<{ id: string; full_name: string; username: string }>>([]);
+  const [salesPersons, setSalesPersons] = useState<Array<{ id: string; full_name: string; username: string }>>([]);
+  const [filterBusinessTypes] = useState<Array<{ value: string; label: string }>>([
+    { value: "", label: "All" },
+    { value: "B2B", label: "B2B" },
+    { value: "B2C", label: "B2C" },
+    { value: "blank", label: "Blank" },
+  ]);
+
+  // Legacy/auxiliary filters
+  const [countryFilter, setCountryFilter] = useState<string | null>(null);
   const [subCategoryFilter, setSubCategoryFilter] = useState<string | null>(null);
   const [productFilter, setProductFilter] = useState<string | null>(null);
-  const [countryFilter, setCountryFilter] = useState<string | null>(null);
-  const [stateFilter, setStateFilter] = useState<string | null>(null);
-  const [cityFilter, setCityFilter] = useState<string | null>(null);
-  const [companyTypeFilter, setCompanyTypeFilter] = useState("");
-  const [gradeFilter, setGradeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [potentialFilter, setPotentialFilter] = useState("");
   const [visitedFilter, setVisitedFilter] = useState("");
 
+  // Load master data for filter dropdowns on mount
+  useEffect(() => {
+    void apiGet<Array<{ id: string; name: string }>>("/masters/states?page_size=250&status=active")
+      .then((res) => {
+        if (res?.data) {
+          setFilterStates([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      })
+      .catch(() => {});
+
+    void apiGet<Array<{ id: string; name: string }>>("/masters/product-categories?page_size=250&status=active")
+      .then((res) => {
+        if (res?.data) {
+          setFilterCategories([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      })
+      .catch(() => {});
+
+
+    void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
+      .then((res) => {
+        if (res?.data && res.data.length > 0) {
+          setFilterSalesPersons(res.data);
+          setSalesPersons(res.data);
+        }
+      })
+      .catch(() => {});
+
+  }, []);
+
+  // Cascading: state -> districts and cities
+  useEffect(() => {
+    if (!stateFilter) {
+      setFilterDistricts([]);
+      setFilterCities([]);
+      return;
+    }
+    void apiGet<Array<{ id: string; name: string }>>(
+      `/masters/districts/lookup?state_id=${stateFilter}`
+    )
+      .then((res) => {
+        if (res?.data) {
+          setFilterDistricts([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      })
+      .catch(() => setFilterDistricts([]));
+
+    void apiGet<Array<{ id: string; name: string; district_id?: string }>>(
+      `/masters/cities?state_id=${stateFilter}&page_size=250&status=active`
+    )
+      .then((res) => {
+        if (res?.data) {
+          setFilterCities([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      })
+      .catch(() => setFilterCities([]));
+  }, [stateFilter]);
+
+  // Available cities filtered by selected district if present
+  const availableCities = useMemo(() => {
+    if (!districtFilter) return filterCities;
+    const matchedDist = filterDistricts.find(
+      (d) => d.name.toLowerCase() === districtFilter.toLowerCase() || d.id === districtFilter
+    );
+    if (!matchedDist) return filterCities;
+    const filtered = filterCities.filter(
+      (c: any) => c.district_id === matchedDist.id || c.district === districtFilter
+    );
+    return filtered.length > 0 ? filtered : filterCities;
+  }, [filterCities, districtFilter, filterDistricts]);
+
   const handleResetFilters = () => {
-    setCategoryFilter(null);
+    setFilterDateRange("");
+    setCompanyTypeFilter("");
+    setStatusFilter("");
+    setStateFilter("");
+    setCityFilter("");
+    setDistrictFilter("");
+    setCategoryFilter("");
+    setGradeFilter("");
+    setPotentialFilter("");
+    setBusinessCategoryFilter("");
+    setSectorFilter("");
+    setSalesPersonFilter("");
+    setCountryFilter(null);
     setSubCategoryFilter(null);
     setProductFilter(null);
-    setCountryFilter(null);
-    setStateFilter(null);
-    setCityFilter(null);
-    setCompanyTypeFilter("");
-    setGradeFilter("");
-    setStatusFilter("");
-    setPotentialFilter("");
     setVisitedFilter("");
     setCurrentPage(1);
+    setReloadCounter((n) => n + 1);
+  };
+
+  const handleSearchFilters = () => {
+    setCurrentPage(1);
+    setReloadCounter((n) => n + 1);
   };
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
@@ -1151,7 +1327,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerCompany, setDrawerCompany] = useState<Company | null>(null);
   const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
-    const saved = localStorage.getItem("suppliers_pinned_cols");
+    const saved = localStorage.getItem("companies_pinned_cols");
     if (saved !== null) {
       try {
         return JSON.parse(saved);
@@ -1159,11 +1335,11 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
         // fallback
       }
     }
-    return { 0: "left", 1: "left", 2: "left" };
+    return { 0: "left" };
   });
 
   useEffect(() => {
-    localStorage.setItem("suppliers_pinned_cols", JSON.stringify(pinnedCols));
+    localStorage.setItem("companies_pinned_cols", JSON.stringify(pinnedCols));
   }, [pinnedCols]);
 
   const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
@@ -1191,7 +1367,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
       if (next[colIdx]) {
         delete next[colIdx];
       } else {
-        if (colIdx >= 13) {
+        if (colIdx >= 14) {
           next[colIdx] = "right";
         } else {
           next[colIdx] = "left";
@@ -1202,7 +1378,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
   }, []);
 
   const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: 15 }, (_, i) => i);
+    const allIndices = Array.from({ length: COMPANY_TABLE_COLUMNS.length }, (_, i) => i);
     const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
     const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
     const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
@@ -1336,7 +1512,6 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
   const [quickStates, setQuickStates] = useState<Array<{ id: string; name: string }>>([]);
   const [quickDistricts, setQuickDistricts] = useState<Array<{ id: string; name: string }>>([]);
   const [quickCities, setQuickCities] = useState<Array<{ id: string; name: string }>>([]);
-  const [salesPersons, setSalesPersons] = useState<Array<{ id: string; full_name: string; username: string }>>([]);
   const [quickGstFetching, setQuickGstFetching] = useState(false);
   const [quickSaving, setQuickSaving] = useState(false);
   const [quickErrors, setQuickErrors] = useState<Record<string, string>>({});
@@ -1344,15 +1519,56 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
 
   useModalHistorySync(quickDrawerOpen, () => setQuickDrawerOpen(false));
 
+  const getLoggedInSalesPersonId = useCallback((): string => {
+    if (!profile) return "";
+    const pId = profile.id ? String(profile.id).toLowerCase() : "";
+    const pUser = (profile.username || "").toLowerCase();
+    const pFull = (profile.full_name || `${profile.first_name || ""} ${profile.last_name || ""}`).trim().toLowerCase();
+
+    const match = salesPersons.find((u) => {
+      const uId = String(u.id).toLowerCase();
+      const uUser = (u.username || "").toLowerCase();
+      const uFull = (u.full_name || "").toLowerCase();
+      return (
+        (pId && uId === pId) ||
+        (pUser && (uUser === pUser || uFull === pUser)) ||
+        (pFull && (uFull === pFull || uUser === pFull))
+      );
+    });
+    return match?.id || profile.id || "";
+  }, [salesPersons, profile]);
+
+  const effectiveSalesPersons = useMemo(() => {
+    const list = [...salesPersons];
+    if (profile) {
+      const pId = profile.id ? String(profile.id).toLowerCase() : "";
+      const pUser = (profile.username || "").toLowerCase();
+      const exists = list.some((u) => {
+        const uId = String(u.id).toLowerCase();
+        const uUser = (u.username || "").toLowerCase();
+        return (pId && uId === pId) || (pUser && uUser === pUser);
+      });
+      if (!exists && profile.id) {
+        list.unshift({
+          id: profile.id,
+          username: profile.username || "admin",
+          full_name: profile.full_name || (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username)),
+        });
+      }
+    }
+    return list;
+  }, [salesPersons, profile]);
+
   const openQuickAdd = useCallback(() => {
+    const defaultSpId = getLoggedInSalesPersonId();
     setQuickForm({
       ...EMPTY_QUICK_FORM,
-      sales_person_id: salesPersons.find((u) => u.id === profile?.id || u.username === profile?.username)?.id || "",
+      sales_person_id: defaultSpId,
     });
     setQuickErrors({});
     setQuickAlert(null);
     setQuickDrawerOpen(true);
-  }, [salesPersons, profile]);
+  }, [getLoggedInSalesPersonId]);
 
   const [defaultIndiaId, setDefaultIndiaId] = useState<string>("bf5a75c1-34e6-48ab-8a52-b537806107e0");
 
@@ -1381,25 +1597,15 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
         })
         .catch(() => {});
 
-      void apiGet<Array<{ id: string; name: string }>>("/masters/company-categories?page_size=250&status=active")
-        .then((res) => {
-          if (res?.data) {
-            setCompanyCategories([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
-          }
-        })
-        .catch(() => {});
 
       void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
         .then((res) => {
           if (res?.data && res.data.length > 0) {
             setSalesPersons(res.data);
-            setQuickForm((prev) => {
-              if (!prev.sales_person_id && profile) {
-                const match = res.data.find((u) => u.id === profile.id || u.username === profile.username);
-                if (match) return { ...prev, sales_person_id: match.id };
-              }
-              return prev;
-            });
+            const defaultSpId = getLoggedInSalesPersonId();
+            if (defaultSpId) {
+              setQuickForm((prev) => (!prev.sales_person_id ? { ...prev, sales_person_id: defaultSpId } : prev));
+            }
           }
         })
         .catch(() => {
@@ -1417,7 +1623,16 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
             .catch(() => {});
         });
     }
-  }, [quickDrawerOpen, profile]);
+  }, [quickDrawerOpen, modalOpen, profile, getLoggedInSalesPersonId]);
+
+  useEffect(() => {
+    if (profile && quickDrawerOpen && !quickForm.sales_person_id) {
+      const defaultSpId = getLoggedInSalesPersonId();
+      if (defaultSpId) {
+        setQuickForm((prev) => (!prev.sales_person_id ? { ...prev, sales_person_id: defaultSpId } : prev));
+      }
+    }
+  }, [quickDrawerOpen, profile, getLoggedInSalesPersonId, quickForm.sales_person_id]);
 
   useEffect(() => {
     if (!quickForm.state_id) {
@@ -1656,13 +1871,24 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
   }, [deepLinkCompanyId, setSearchParams]);
   const [modalMode, setModalMode] = useState<"quick" | "full">("full");
   const [currentCompanyId, setCurrentCompanyId] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_SUPPLIER_FORM);
+  const [form, setForm] = useState(() => ({
+    ...EMPTY_SUPPLIER_FORM,
+    sales_person_id: getLoggedInSalesPersonId(),
+  }));
   const [formDistricts, setFormDistricts] = useState<Array<{ id: string; name: string }>>([]);
   const [formCities, setFormCities] = useState<Array<{ id: string; name: string }>>([]);
   const [productCategories, setProductCategories] = useState<Array<{ id: string; name: string }>>([]);
-  const [companyCategories, setCompanyCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [gstFetching, setGstFetching] = useState(false);
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
+
+  useEffect(() => {
+    if (profile && modalOpen && !currentCompanyId && !form.sales_person_id) {
+      const defaultSpId = getLoggedInSalesPersonId();
+      if (defaultSpId) {
+        setForm((prev) => (!prev.sales_person_id ? { ...prev, sales_person_id: defaultSpId } : prev));
+      }
+    }
+  }, [modalOpen, currentCompanyId, profile, getLoggedInSalesPersonId, form.sales_person_id]);
 
   // Full Form Cascading: When form.state_id changes -> Fetch districts for that state
   useEffect(() => {
@@ -2119,27 +2345,6 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
 // companyNameFetcher removed
 
 
-  const productFetcher = useCallback(
-    async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
-      const { data } = await apiGet<Product[]>(
-        "/masters/products" +
-        toQueryString({
-          search: term,
-          page: 1,
-          page_size: 20,
-          sort_order: "asc",
-          status: "active",
-        }),
-        { signal }
-      );
-      return data.map((d) => ({
-        value: d.id,
-        label: `${d.product_code} — ${d.product_name}`,
-      }));
-    },
-    []
-  );
-
   const fetchNameLabel = useCallback(
     (apiBase: string) => async (id: string) => {
       try {
@@ -2151,11 +2356,6 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
     },
     []
   );
-
-  const fetchProductLabel = useCallback(async (id: string) => {
-    const { data } = await apiGet<Product>(`/masters/products/${id}`);
-    return `${data.product_code} — ${data.product_name}`;
-  }, []);
 
   const [sortColIndex, setSortColIndex] = useState<number | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -2184,59 +2384,60 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
       let valA: string | number = "";
       let valB: string | number = "";
       switch (sortColIndex) {
-        case 1: {
+        case 1: { // Sr. No.
           const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
           const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
           return sortDirection === "asc" ? tA - tB : tB - tA;
         }
-        case 2:
+        case 2: // Company
           valA = a.company_name || "";
           valB = b.company_name || "";
           break;
-        case 3:
-          valA = (a.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ");
-          valB = (b.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ");
+        case 3: // Name / Designation
+          valA = a.contact_full_name || (a.contacts && a.contacts[0]?.person_name) || "";
+          valB = b.contact_full_name || (b.contacts && b.contacts[0]?.person_name) || "";
           break;
-        case 4:
-          valA = (a.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ");
-          valB = (b.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ");
+        case 4: // Contact (Direct)
+          valA = a.contact_calling_number || (a.contacts && a.contacts[0]?.calling_number) || "";
+          valB = b.contact_calling_number || (b.contacts && b.contacts[0]?.calling_number) || "";
           break;
-        case 5:
-          valA = (a.product_ids || []).map((id) => resolver.get("products", id) || "").filter(Boolean).join(", ");
-          valB = (b.product_ids || []).map((id) => resolver.get("products", id) || "").filter(Boolean).join(", ");
+        case 5: // Area / City
+          valA = `${a.area || ""} ${resolver.get("cities", a.city_id) || ""}`;
+          valB = `${b.area || ""} ${resolver.get("cities", b.city_id) || ""}`;
           break;
-        case 6:
-          valA = a.secondary_products_description || "";
-          valB = b.secondary_products_description || "";
+        case 6: // Dist. / State
+          valA = `${a.district || ""} ${resolver.get("states", a.state_id) || ""}`;
+          valB = `${b.district || ""} ${resolver.get("states", b.state_id) || ""}`;
           break;
-        case 7:
-          valA = resolver.get("countries", a.country_id) || "";
-          valB = resolver.get("countries", b.country_id) || "";
-          break;
-        case 8:
-          valA = `${resolver.get("cities", a.city_id) || ""}, ${resolver.get("states", a.state_id) || ""}`;
-          valB = `${resolver.get("cities", b.city_id) || ""}, ${resolver.get("states", b.state_id) || ""}`;
-          break;
-        case 9:
-          valA = a.brand_description || "";
-          valB = b.brand_description || "";
-          break;
-        case 10:
-          valA = a.company_type || "";
-          valB = b.company_type || "";
-          break;
-        case 11:
+        case 7: // Curr. Status
           valA = a.current_status || "";
           valB = b.current_status || "";
           break;
-        case 12:
+        case 8: // Bus. Type
+          valA = a.company_type || "";
+          valB = b.company_type || "";
+          break;
+        case 9: // Grade
           valA = a.company_grade || "";
           valB = b.company_grade || "";
           break;
-        case 13:
+        case 10: // Potential
           valA = a.potential || "";
           valB = b.potential || "";
           break;
+        case 11: // Mac. Buying From
+          valA = a.machines_buying_from || "";
+          valB = b.machines_buying_from || "";
+          break;
+        case 12: // P1 To Buy From Us
+          valA = a.products_interested || a.product_manufacture_or_supply || "";
+          valB = b.products_interested || b.product_manufacture_or_supply || "";
+          break;
+        case 13: { // Sales Per. / Added On
+          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+          return sortDirection === "asc" ? tA - tB : tB - tA;
+        }
         default:
           return 0;
       }
@@ -2275,6 +2476,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      const { created_after, created_before } = parseDateRange(filterDateRange);
       const params = {
         page: currentPage,
         page_size: pageSize,
@@ -2284,14 +2486,20 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
         country_id: countryFilter || "",
         state_id: stateFilter || "",
         city_id: cityFilter || "",
-        company_type: companyTypeFilter,
-        company_grade: gradeFilter,
-        current_status: statusFilter,
-        potential: potentialFilter,
-        visited_factory_office: visitedFilter,
+        district: districtFilter || "",
+        company_type: companyTypeFilter || "",
+        company_grade: gradeFilter || "",
+        current_status: statusFilter || "",
+        potential: potentialFilter || "",
+        company_category: businessCategoryFilter || "",
+        sector: sectorFilter || "",
+        sales_person_id: salesPersonFilter || "",
+        visited_factory_office: visitedFilter || "",
         category_id: categoryFilter || "",
         sub_category_id: subCategoryFilter || "",
         product_id: productFilter || "",
+        created_after: created_after || "",
+        created_before: created_before || "",
       };
       try {
         const { data, meta } = await apiGet<Company[]>("/companies" + toQueryString(params));
@@ -2339,14 +2547,19 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
     countryFilter,
     stateFilter,
     cityFilter,
+    districtFilter,
     companyTypeFilter,
     gradeFilter,
     statusFilter,
     potentialFilter,
+    businessCategoryFilter,
+    sectorFilter,
+    salesPersonFilter,
     visitedFilter,
     categoryFilter,
     subCategoryFilter,
     productFilter,
+    filterDateRange,
     reloadCounter,
     resolver,
   ]);
@@ -2385,16 +2598,21 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
    */
   const hasActiveCompanyFilterOrSearch =
     Boolean(effectiveSearch) ||
-    Boolean(categoryFilter) ||
-    Boolean(subCategoryFilter) ||
-    Boolean(productFilter) ||
-    Boolean(countryFilter) ||
+    Boolean(filterDateRange) ||
+    Boolean(companyTypeFilter) ||
+    Boolean(statusFilter) ||
     Boolean(stateFilter) ||
     Boolean(cityFilter) ||
-    Boolean(companyTypeFilter) ||
+    Boolean(districtFilter) ||
+    Boolean(categoryFilter) ||
     Boolean(gradeFilter) ||
-    Boolean(statusFilter) ||
     Boolean(potentialFilter) ||
+    Boolean(businessCategoryFilter) ||
+    Boolean(sectorFilter) ||
+    Boolean(salesPersonFilter) ||
+    Boolean(countryFilter) ||
+    Boolean(subCategoryFilter) ||
+    Boolean(productFilter) ||
     Boolean(visitedFilter);
 
   useLiveList<Company>({
@@ -2439,18 +2657,6 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
     }
   }, [liveConnectionStatus]);
 
-  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details", icon = "📍") {
-    return (
-      <TextPopoverCell
-        text={text}
-        maxLen={maxLen}
-        title={modalTitle}
-        icon={icon}
-        maxWidth="150px"
-        emptyText="—"
-      />
-    );
-  }
 
   function chipList(
     ids: string[] | undefined,
@@ -2543,7 +2749,11 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
       setFormCategoryIds(supplier.category_ids || []);
       setContacts(supplier.contacts || []);
     } else {
-      setForm(EMPTY_SUPPLIER_FORM);
+      const defaultSpId = getLoggedInSalesPersonId();
+      setForm({
+        ...EMPTY_SUPPLIER_FORM,
+        sales_person_id: defaultSpId,
+      });
       setFormStateId(null);
       setFormDistricts([]);
       setFormCities([]);
@@ -3547,14 +3757,22 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                       <select
                         id="current_status"
                         style={selectStyle}
-                        value={form.current_status}
+                        value={
+                          form.current_status?.toLowerCase() === "existing"
+                            ? "Existing"
+                            : form.current_status?.toLowerCase() === "new"
+                            ? "New"
+                            : form.current_status || ""
+                        }
                         onChange={(e) => setField("current_status", e.target.value)}
                       >
                         <option value="">Select</option>
-                        <option value="new">New</option>
-                        <option value="existing">Existing</option>
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
+                        <option value="Existing">Existing</option>
+                        <option value="New">New</option>
+                        {form.current_status &&
+                          !["existing", "new", ""].includes(form.current_status.toLowerCase()) && (
+                            <option value={form.current_status}>{form.current_status}</option>
+                          )}
                       </select>
                     </div>
 
@@ -3567,13 +3785,12 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                         onChange={(e) => setField("company_type", e.target.value)}
                       >
                         <option value="">Select</option>
-                        <option value="Manufacturer">Manufacturer</option>
-                        <option value="Trader">Trader</option>
-                        <option value="Dealer">Dealer</option>
-                        <option value="Agent">Agent</option>
-                        <option value="Exporter">Exporter</option>
-                        <option value="Wholesaler">Wholesaler</option>
-                        <option value="Distributor">Distributor</option>
+                        <option value="B2B">B2B</option>
+                        <option value="B2C">B2C</option>
+                        {form.company_type &&
+                          !["B2B", "B2C"].includes(form.company_type) && (
+                            <option value={form.company_type}>{form.company_type}</option>
+                          )}
                       </select>
                     </div>
 
@@ -3603,9 +3820,13 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                         onChange={(e) => setField("company_grade", e.target.value)}
                       >
                         <option value="">Select</option>
-                        <option value="Grade A">Grade A</option>
-                        <option value="Grade B">Grade B</option>
-                        <option value="Grade C">Grade C</option>
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        {form.company_grade &&
+                          !["A", "B", "C"].includes(form.company_grade) && (
+                            <option value={form.company_grade}>{form.company_grade}</option>
+                          )}
                       </select>
                     </div>
 
@@ -3632,12 +3853,14 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                         value={form.company_category}
                         onChange={(e) => setField("company_category", e.target.value)}
                       >
-                        <option value="">Select Business Category</option>
-                        {companyCategories.map((cc) => (
-                          <option key={cc.id} value={cc.name}>
-                            {cc.name}
-                          </option>
-                        ))}
+                        <option value="">Select</option>
+                        <option value="Manufacturer">Manufacturer</option>
+                        <option value="Trader">Trader</option>
+                        {form.company_category &&
+                          form.company_category !== "Manufacturer" &&
+                          form.company_category !== "Trader" && (
+                            <option value={form.company_category}>{form.company_category}</option>
+                          )}
                       </select>
                     </div>
 
@@ -3835,7 +4058,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                       onChange={(e) => setField("sales_person_id", e.target.value)}
                     >
                       <option value="">Select Sales Person</option>
-                      {salesPersons.map((sp) => (
+                      {effectiveSalesPersons.map((sp) => (
                         <option key={sp.id} value={sp.id}>
                           {sp.full_name || sp.username}
                         </option>
@@ -4491,20 +4714,17 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
         </main>
       ) : (
         <main className="page">
-          <Breadcrumb trail={["Company Profiles"]} />
+          <Breadcrumb trail={["Companies"]} />
           <div className="page-header">
             <div>
-              <h1>Company Profiles</h1>
-              <div className="page-subtitle">
-                Company directory, contacts, product categories, and sourcing status.
-              </div>
+              <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Companies</h1>
             </div>
             <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <button
                 type="button"
                 className="btn"
                 style={{
-                  background: filterOpen ? "#0061f2" : "#475569",
+                  background: "#556987",
                   color: "#ffffff",
                   padding: "8px 14px",
                   borderRadius: "6px",
@@ -4568,197 +4788,357 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
               className="card"
               style={{
                 background: "#ffffff",
-                padding: "20px",
+                padding: "20px 24px",
                 borderRadius: "10px",
                 border: "1px solid #cbd5e1",
                 marginBottom: "16px",
-                boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
+                boxShadow: "0 2px 6px rgba(0, 0, 0, 0.04)",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-                <div style={{ fontWeight: 600, fontSize: "14px", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-                  </svg>
-                  Filter Options
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: 600 }}
-                  onClick={handleResetFilters}
-                >
-                  Reset Filters
-                </button>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "14px" }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, 1fr)",
+                  columnGap: "24px",
+                  rowGap: "16px",
+                }}
+              >
+                {/* Row 1 */}
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category</label>
-                  <SearchableDropdown
-                    value={categoryFilter}
-                    onChange={(v) => {
-                      setCurrentPage(1);
-                      setCategoryFilter(v);
-                    }}
-                    placeholder="Filter: Product Category"
-                    fetchOptions={searchFetcher("/masters/product-categories")}
-                    fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Key Strength Sub Category</label>
-                  <SearchableDropdown
-                    value={subCategoryFilter}
-                    onChange={(v) => {
-                      setCurrentPage(1);
-                      setSubCategoryFilter(v);
-                    }}
-                    placeholder="Filter: Sub Category"
-                    fetchOptions={searchFetcher("/masters/product-sub-categories")}
-                    fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Supplied</label>
-                  <SearchableDropdown
-                    value={productFilter}
-                    onChange={(v) => {
-                      setCurrentPage(1);
-                      setProductFilter(v);
-                    }}
-                    placeholder="Filter: Product"
-                    fetchOptions={productFetcher}
-                    fetchLabelForValue={fetchProductLabel}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Country</label>
-                  <SearchableDropdown
-                    value={countryFilter}
-                    onChange={(v) => {
-                      setCountryFilter(v);
-                      setStateFilter(null);
-                      setCityFilter(null);
-                      setCurrentPage(1);
-                    }}
-                    placeholder="Filter: Country"
-                    fetchOptions={searchFetcher("/masters/countries")}
-                    fetchLabelForValue={fetchNameLabel("/masters/countries")}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Province / State</label>
-                  <SearchableDropdown
-                    value={stateFilter}
-                    onChange={(v) => {
-                      setStateFilter(v);
-                      setCityFilter(null);
-                      setCurrentPage(1);
-                    }}
-                    placeholder="Filter: Province"
-                    fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
-                      countryFilter ? { country_id: countryFilter } : {}
-                    )}
-                    fetchLabelForValue={fetchNameLabel("/masters/states")}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>City</label>
-                  <SearchableDropdown
-                    value={cityFilter}
-                    onChange={(v) => {
-                      setCityFilter(v);
-                      setCurrentPage(1);
-                    }}
-                    placeholder="Filter: City"
-                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
-                      if (stateFilter) return { state_id: stateFilter };
-                      if (countryFilter) return { country_id: countryFilter };
-                      return {};
-                    })}
-                    fetchLabelForValue={fetchNameLabel("/masters/cities")}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Company Type</label>
-                  <SearchableDropdown
-                    value={companyTypeFilter || null}
-                    onChange={(_v, label) => {
-                      setCurrentPage(1);
-                      setCompanyTypeFilter(label || _v || "");
-                    }}
-                    allowCustomText={true}
-                    onTextChange={(text) => {
-                      setCurrentPage(1);
-                      setCompanyTypeFilter(text);
-                    }}
-                    placeholder="Filter: Company Type"
-                    fetchOptions={searchFetcher("/masters/supplier-types")}
-                    fetchLabelForValue={async (val) => val}
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Date / Date Range
+                  </label>
+                  <DateRangePicker
+                    value={filterDateRange}
+                    onChange={setFilterDateRange}
+                    placeholder="Date / Date Range"
                   />
                 </div>
 
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Company's Grade</label>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Business Type
+                  </label>
                   <select
-                    value={gradeFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setGradeFilter(e.target.value);
+                    value={companyTypeFilter}
+                    onChange={(e) => setCompanyTypeFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: companyTypeFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
                     }}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
                   >
-                    <option value="">Grade: All</option>
-                    <option value="A">Grade A</option>
-                    <option value="B">Grade B</option>
-                    <option value="C">Grade C</option>
+                    {filterBusinessTypes.map((opt) => (
+                      <option key={opt.label} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
+
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Current Status</label>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Current Status
+                  </label>
                   <select
                     value={statusFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setStatusFilter(e.target.value);
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: statusFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
                     }}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
                   >
-                    <option value="">Current Status: All</option>
-                    <option value="new">New</option>
+                    <option value="">All</option>
                     <option value="existing">Existing</option>
+                    <option value="new">New</option>
+                    <option value="blank">Blank</option>
                   </select>
                 </div>
+
+                {/* Row 2 */}
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Potential</label>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    State
+                  </label>
+                  <select
+                    value={stateFilter}
+                    onChange={(e) => {
+                      setStateFilter(e.target.value);
+                      setDistrictFilter("");
+                      setCityFilter("");
+                    }}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: stateFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    {filterStates.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    City
+                  </label>
+                  <select
+                    value={cityFilter}
+                    onChange={(e) => setCityFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: cityFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    {availableCities.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    District
+                  </label>
+                  <select
+                    value={districtFilter}
+                    onChange={(e) => {
+                      setDistrictFilter(e.target.value);
+                      setCityFilter("");
+                    }}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: districtFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    {filterDistricts.map((d) => (
+                      <option key={d.id || d.name} value={d.name}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Row 3 */}
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Category
+                  </label>
+                  <select
+                    value={categoryFilter}
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: categoryFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    <option value="blank">Blank</option>
+                    {filterCategories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Client Grade
+                  </label>
+                  <select
+                    value={gradeFilter}
+                    onChange={(e) => setGradeFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: gradeFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                    <option value="blank">Blank</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Potential
+                  </label>
                   <select
                     value={potentialFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setPotentialFilter(e.target.value);
+                    onChange={(e) => setPotentialFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: potentialFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
                     }}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
                   >
-                    <option value="">Potential: All</option>
+                    <option value="">All</option>
                     <option value="yes">Yes</option>
                     <option value="no">No</option>
                   </select>
                 </div>
+
+                {/* Row 4 */}
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Visited Factory/Office?</label>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Business Category
+                  </label>
                   <select
-                    value={visitedFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setVisitedFilter(e.target.value);
+                    value={businessCategoryFilter}
+                    onChange={(e) => setBusinessCategoryFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: businessCategoryFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
                     }}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
                   >
-                    <option value="">Visited Factory/Office: All</option>
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
+                    <option value="">All</option>
+                    <option value="Manufacturer">Manufacturer</option>
+                    <option value="Trader">Trader</option>
+                    <option value="blank">Blank</option>
                   </select>
                 </div>
+
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Sector
+                  </label>
+                  <select
+                    value={sectorFilter}
+                    onChange={(e) => setSectorFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: sectorFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    {COMPANY_SECTORS.map((sec) => (
+                      <option key={sec} value={sec}>
+                        {sec}
+                      </option>
+                    ))}
+                    <option value="blank">Blank</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Sales Person
+                  </label>
+                  <select
+                    value={salesPersonFilter}
+                    onChange={(e) => setSalesPersonFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: salesPersonFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    {filterSalesPersons.map((sp) => (
+                      <option key={sp.id} value={sp.id}>{sp.full_name || sp.username}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  style={{
+                    background: "#556987",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    padding: "8px 24px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSearchFilters}
+                  style={{
+                    background: "#f59e0b",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    padding: "8px 24px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Search
+                </button>
               </div>
             </div>
           )}
@@ -4870,12 +5250,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                         Toggle Frozen Columns
                       </div>
                       <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
-                        {[
-                          "Checkbox", "Sr. No.", "Company Name", "Product Category",
-                          "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
-                          "Country", "City, Province", "Brand", "Company Type",
-                          "Current Status", "Grade", "Potential", "Action"
-                        ].map((label, idx) => {
+                        {COMPANY_TABLE_COLUMNS.map((label, idx) => {
                           const isPinned = Boolean(pinnedCols[idx]);
                           return (
                             <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
@@ -4912,7 +5287,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
               <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
                 <input
                   type="text"
-                  placeholder="Search company, country, contact, city, phone..."
+                  placeholder="Search..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
@@ -4963,21 +5338,20 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                           </th>
                         );
                       }
-                      const label = [
-                        "Checkbox", "Sr. No.", "Company Name", "Product Category",
-                        "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
-                        "Country", "City, Province", "Brand", "Company Type",
-                        "Current Status", "Grade", "Potential", "Action"
-                      ][idx];
+                      const label = COMPANY_TABLE_COLUMNS[idx];
                       const isPinned = Boolean(pinnedCols[idx]);
-                      const isSrNo = idx === 1;
                       const isAction = idx === 14;
+                      const isSrNo = idx === 1;
                       const isSorted = sortColIndex === idx;
                       return (
                         <th
                           key={`col-${idx}-${label}`}
                           style={{
-                            ...(isSrNo ? { width: "75px", minWidth: "75px", maxWidth: "85px", textAlign: "center" } : isAction ? { textAlign: "center" } : {}),
+                            ...(isAction
+                              ? { width: "70px", minWidth: "70px", textAlign: "center" }
+                              : isSrNo
+                              ? { width: "70px", minWidth: "70px", maxWidth: "80px", textAlign: "center" }
+                              : {}),
                             ...getFreezeStyle(idx, true),
                           }}
                         >
@@ -5060,7 +5434,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                   {loading ? (
                     <CompanySkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : sortedRows.length === 0 ? (
-                    <TableMessageRow colSpan={15}>No companies found.</TableMessageRow>
+                    <TableMessageRow colSpan={COMPANY_TABLE_COLUMNS.length}>No companies found.</TableMessageRow>
                   ) : (
                     sortedRows.map((s, index) => (
                       <tr key={s.id}>
@@ -5081,13 +5455,25 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                                   />
                                 </td>
                               );
-                            case 1:
+                            case 1: // Sr. No.
                               return (
-                                <td key="cell-1" className="cell-srno" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...getFreezeStyle(1, false) }}>
+                                <td
+                                  key="cell-1"
+                                  className="cell-srno"
+                                  style={{
+                                    width: "65px",
+                                    minWidth: "65px",
+                                    maxWidth: "75px",
+                                    textAlign: "center",
+                                    fontWeight: 600,
+                                    color: "#475569",
+                                    ...getFreezeStyle(1, false),
+                                  }}
+                                >
                                   {startSrNo + index}
                                 </td>
                               );
-                            case 2:
+                            case 2: // Company
                               return (
                                 <td key="cell-2" style={getFreezeStyle(2, false)}>
                                   <a
@@ -5096,45 +5482,133 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                                       e.preventDefault();
                                       setDrawerCompany(s);
                                     }}
+                                    style={{
+                                      fontWeight: 600,
+                                      color: "#0061f2",
+                                      textDecoration: "none",
+                                      textTransform: "uppercase",
+                                      fontSize: "13px",
+                                      display: "block",
+                                    }}
                                   >
                                     {s.company_name}
                                   </a>
+                                  <div style={{ fontSize: "11.5px", color: "#0284c7", fontWeight: 500, marginTop: "2px" }}>
+                                    {s.tax_id_number || <span style={{ color: "#94a3b8" }}>—</span>}
+                                  </div>
                                 </td>
                               );
-                            case 3:
-                              return <td key="cell-3" style={getFreezeStyle(3, false)}>{chipList(s.category_ids, "categories", "Product Categories")}</td>;
-                            case 4:
-                              return <td key="cell-4" style={getFreezeStyle(4, false)}>{chipList(s.sub_category_ids, "subCategories", "Sub-Categories")}</td>;
-                            case 5:
-                              return <td key="cell-5" style={getFreezeStyle(5, false)}>{chipList(s.product_ids, "products", "Products Supplied")}</td>;
-                            case 6:
-                              return <td key="cell-6" style={getFreezeStyle(6, false)}>{renderTruncatedText(s.secondary_products_description, 20, "Secondary Products")}</td>;
-                            case 7:
-                              return <td key="cell-7" style={getFreezeStyle(7, false)}>{resolver.get("countries", s.country_id) || "…"}</td>;
-                            case 8:
+                            case 3: // Name / Designation
                               return (
-                                <td key="cell-8" style={getFreezeStyle(8, false)}>
-                                  {resolver.get("cities", s.city_id) || "…"},{" "}
-                                  {resolver.get("states", s.state_id) || "…"}
+                                <td key="cell-3" style={getFreezeStyle(3, false)}>
+                                  {(() => {
+                                    const salutation = s.contact_salutation
+                                      ? s.contact_salutation.trim().replace(/\.+$/, "") + ". "
+                                      : "";
+                                    const name = s.contact_full_name || (s.contacts && s.contacts[0]?.person_name);
+                                    const designation = s.contact_designation || (s.contacts && s.contacts[0]?.designation);
+                                    return (
+                                      <div>
+                                        <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "12.5px", textTransform: "uppercase" }}>
+                                          {name ? `${salutation}${name}`.trim() : "—"}
+                                        </div>
+                                        <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px", textTransform: "uppercase" }}>
+                                          {designation || "—"}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
                               );
-                            case 9:
-                              return <td key="cell-9" style={getFreezeStyle(9, false)}>{renderTruncatedText(s.brand_description, 20, "Brand Description")}</td>;
-                            case 10:
+                            case 4: // Contact (Direct)
                               return (
-                                <td key="cell-10" style={getFreezeStyle(10, false)}>
-                                  {s.company_type ? s.company_type : <span className="muted">—</span>}
+                                <td key="cell-4" style={getFreezeStyle(4, false)}>
+                                  {(() => {
+                                    const phone = s.contact_calling_number || (s.contacts && s.contacts[0]?.calling_number);
+                                    const wa = s.contact_whatsapp_number || (s.contacts && (s.contacts[0]?.whatsapp_number || s.contacts[0]?.calling_number));
+                                    return (
+                                      <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                                        {phone ? (
+                                          <a
+                                            href={`tel:${phone}`}
+                                            style={{
+                                              color: "#0284c7",
+                                              textDecoration: "none",
+                                              fontSize: "12px",
+                                              fontWeight: 600,
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              gap: "4px",
+                                            }}
+                                          >
+                                            <span style={{ fontSize: "11px" }}>📞</span> {phone}
+                                          </a>
+                                        ) : null}
+                                        {wa ? (
+                                          <a
+                                            href={`https://wa.me/${wa.replace(/[^0-9]/g, "")}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            style={{
+                                              color: "#16a34a",
+                                              textDecoration: "none",
+                                              fontSize: "12px",
+                                              fontWeight: 600,
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              gap: "4px",
+                                            }}
+                                          >
+                                            <span style={{ fontSize: "11px" }}>🟢</span> {wa}
+                                          </a>
+                                        ) : null}
+                                        {!phone && !wa && <span style={{ color: "#94a3b8" }}>—</span>}
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
                               );
-                            case 11:
+                            case 5: // Area / City
                               return (
-                                <td key="cell-11" style={getFreezeStyle(11, false)}>
+                                <td key="cell-5" style={getFreezeStyle(5, false)}>
+                                  <div>
+                                    <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "12.5px" }}>
+                                      {s.area || "—"}
+                                    </div>
+                                    <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                                      {resolver.get("cities", s.city_id) || "—"}
+                                    </div>
+                                  </div>
+                                </td>
+                              );
+                            case 6: // Dist. / State
+                              return (
+                                <td key="cell-6" style={getFreezeStyle(6, false)}>
+                                  <div>
+                                    <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "12.5px" }}>
+                                      {s.district || "—"}
+                                    </div>
+                                    <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
+                                      {resolver.get("states", s.state_id) || "—"}
+                                    </div>
+                                  </div>
+                                </td>
+                              );
+                            case 7: // Curr. Status
+                              return (
+                                <td key="cell-7" style={getFreezeStyle(7, false)}>
                                   <StatusPill value={s.current_status} />
                                 </td>
                               );
-                            case 12:
+                            case 8: // Bus. Type
                               return (
-                                <td key="cell-12" style={getFreezeStyle(12, false)}>
+                                <td key="cell-8" style={getFreezeStyle(8, false)}>
+                                  {s.company_type ? s.company_type : <span className="muted">—</span>}
+                                </td>
+                              );
+                            case 9: // Grade
+                              return (
+                                <td key="cell-9" style={getFreezeStyle(9, false)}>
                                   {canEditGrade ? (
                                     <select
                                       className="inline-select"
@@ -5144,6 +5618,14 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                                           company_grade: e.target.value || null,
                                         })
                                       }
+                                      style={{
+                                        padding: "4px 8px",
+                                        borderRadius: "5px",
+                                        border: "1px solid #cbd5e1",
+                                        fontSize: "12px",
+                                        background: "#ffffff",
+                                        cursor: "pointer",
+                                      }}
                                     >
                                       <option value="">Select</option>
                                       <option value="A">A</option>
@@ -5155,29 +5637,68 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                                   )}
                                 </td>
                               );
-                            case 13:
+                            case 10: // Potential
                               return (
-                                <td key="cell-13" style={getFreezeStyle(13, false)}>
+                                <td key="cell-10" style={getFreezeStyle(10, false)}>
                                   {canEditPotential ? (
                                     <select
                                       className="inline-select"
-                                      value={s.potential || ""}
+                                      value={s.potential ? s.potential.toLowerCase() : ""}
                                       onChange={(e) =>
                                         handleInlineUpdate(s.id, `/companies/${s.id}/potential`, {
                                           potential: e.target.value || null,
                                         })
                                       }
+                                      style={{
+                                        padding: "4px 8px",
+                                        borderRadius: "5px",
+                                        border: "1px solid #cbd5e1",
+                                        fontSize: "12px",
+                                        background: "#ffffff",
+                                        cursor: "pointer",
+                                      }}
                                     >
                                       <option value="">Select</option>
                                       <option value="yes">Yes</option>
                                       <option value="no">No</option>
                                     </select>
                                   ) : (
-                                    <span>{s.potential ? s.potential.toUpperCase() : "—"}</span>
+                                    <span>{s.potential ? (s.potential.toLowerCase() === "yes" ? "Yes" : s.potential.toLowerCase() === "no" ? "No" : s.potential) : "—"}</span>
                                   )}
                                 </td>
                               );
-                            case 14:
+                            case 11: // Mac. Buying From
+                              return (
+                                <td key="cell-11" style={getFreezeStyle(11, false)}>
+                                  {s.machines_buying_from || <span className="muted">—</span>}
+                                </td>
+                              );
+                            case 12: // P1 To Buy From Us
+                              return (
+                                <td key="cell-12" style={getFreezeStyle(12, false)}>
+                                  {s.products_interested || s.product_manufacture_or_supply || <span className="muted">—</span>}
+                                </td>
+                              );
+                            case 13: // Sales Per. / Added On
+                              return (
+                                <td key="cell-13" style={getFreezeStyle(13, false)}>
+                                  {(() => {
+                                    const sp = filterSalesPersons.find((u) => u.id === s.sales_person_id) || salesPersons.find((u) => u.id === s.sales_person_id);
+                                    const spName = sp ? (sp.full_name || sp.username) : (s.sales_person_id ? "Assigned" : "—");
+                                    return (
+                                      <div>
+                                        <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "12px" }}>
+                                          {spName}
+                                        </div>
+                                        <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px" }}>
+                                          {formatDateDMY((s as any).created_at)}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+                                </td>
+                              );
+                            case 14: // Action
                               return (
                                 <td key="cell-14" className="actions" style={{ textAlign: "center", ...getFreezeStyle(14, false) }}>
                                   <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
@@ -5188,7 +5709,7 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                                         style={{
                                           background: "#0061f2",
                                           color: "#ffffff",
-                                          padding: "6px 9px",
+                                          padding: "6px 8px",
                                           borderRadius: "4px",
                                           border: "none",
                                           cursor: "pointer",
@@ -5209,32 +5730,28 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
                                       const isEligibleForDelete =
                                         (!s.current_status || s.current_status.toLowerCase() === "new") &&
                                         (!s.potential || s.potential.toLowerCase() === "no");
+                                      if (!isEligibleForDelete) return null;
                                       return (
                                         <button
                                           type="button"
                                           className="btn"
-                                          disabled={!isEligibleForDelete || isRowActionPending(`delete:${s.id}`)}
+                                          disabled={isRowActionPending(`delete:${s.id}`)}
                                           style={{
-                                            background: isEligibleForDelete ? "#ef4444" : "#94a3b8",
+                                            background: "#ef4444",
                                             color: "#ffffff",
-                                            padding: "6px 9px",
+                                            padding: "6px 8px",
                                             borderRadius: "4px",
                                             border: "none",
-                                            cursor: !isEligibleForDelete ? "not-allowed" : (isRowActionPending(`delete:${s.id}`) ? "default" : "pointer"),
-                                            opacity: !isEligibleForDelete ? 0.45 : (isRowActionPending(`delete:${s.id}`) ? 0.6 : 1),
+                                            cursor: isRowActionPending(`delete:${s.id}`) ? "default" : "pointer",
+                                            opacity: isRowActionPending(`delete:${s.id}`) ? 0.6 : 1,
                                             display: "inline-flex",
                                             alignItems: "center",
                                             justifyContent: "center",
                                           }}
                                           onClick={() => {
-                                            if (!isEligibleForDelete) return;
                                             void handleRowDelete(s.id);
                                           }}
-                                          title={
-                                            !isEligibleForDelete
-                                              ? "Cannot delete Existing or Potential suppliers; set to Inactive instead."
-                                              : "Delete Company"
-                                          }
+                                          title="Delete Company"
                                         >
                                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                             <polyline points="3 6 5 6 21 6" />
@@ -5825,8 +6342,8 @@ export function CompaniesPage({ defaultAdd }: { defaultAdd?: boolean } = {}) {
               <SelectWithSearch
                 id="quick_sales_person"
                 value={quickForm.sales_person_id}
-                placeholder="Select"
-                options={salesPersons.map((u) => ({ value: u.id, label: u.full_name || u.username }))}
+                placeholder="Select Sales Person"
+                options={effectiveSalesPersons.map((u) => ({ value: u.id, label: u.full_name || u.username }))}
                 onChange={(val) => setQuickForm((p) => ({ ...p, sales_person_id: val }))}
               />
             </div>

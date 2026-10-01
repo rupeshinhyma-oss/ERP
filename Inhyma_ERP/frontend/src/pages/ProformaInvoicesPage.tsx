@@ -19,6 +19,7 @@ import { Combobox } from "@/components/Combobox";
 import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import type { PaginationMeta, ProformaInvoice, ProformaTabCounts } from "@/types";
 import { numberToIndianWords } from "@/utils/text";
 import "@/styles/stockAdjustment.css";
@@ -448,12 +449,35 @@ export function ProformaInvoicesPage({
   const [isFormOpen, setIsFormOpen] = useState(defaultAdd);
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const { profile } = useAuth();
+  const loggedInUserName = useMemo(() => {
+    if (!profile) return "Admin";
+    return (
+      profile.full_name ||
+      (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username))
+    );
+  }, [profile]);
+
+  const [salesPersonOptions, setSalesPersonOptions] = useState<string[]>(SALES_PERSON_OPTIONS);
+
+  useEffect(() => {
+    void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
+      .then((res) => {
+        if (res?.data && res.data.length > 0) {
+          const names = res.data.map((u) => u.full_name || u.username);
+          setSalesPersonOptions(names);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const [formState, setFormState] = useState({
     proforma_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
     expected_delivery_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
     warehouse: "",
     payment_terms: "",
-    sales_person: "Rupesh Malla",
+    sales_person: loggedInUserName,
     transport_name: "",
     third_party_delivery: "No",
     lead_source: "",
@@ -471,6 +495,20 @@ export function ProformaInvoicesPage({
     terms_and_conditions: "Make all cheque payable to USER",
     remarks: "",
   });
+
+  useEffect(() => {
+    if (loggedInUserName) {
+      setFormState((prev) => (!prev.sales_person || prev.sales_person === "Rupesh Malla" ? { ...prev, sales_person: loggedInUserName } : prev));
+    }
+  }, [loggedInUserName]);
+
+  const effectiveSalesPersonOptions = useMemo(() => {
+    const set = new Set<string>();
+    if (loggedInUserName) set.add(loggedInUserName);
+    salesPersonOptions.forEach((n) => set.add(n));
+    if (formState.sales_person && formState.sales_person.trim()) set.add(formState.sales_person.trim());
+    return Array.from(set);
+  }, [loggedInUserName, salesPersonOptions, formState.sales_person]);
   const [formLineItems, setFormLineItems] = useState<any[]>([
     {
       id: "charge-1",
@@ -749,7 +787,7 @@ export function ProformaInvoicesPage({
       expected_delivery_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
       warehouse: "",
       payment_terms: "",
-      sales_person: "Rupesh Malla",
+      sales_person: loggedInUserName,
       transport_name: "",
       third_party_delivery: "No",
       lead_source: "",
@@ -1038,7 +1076,7 @@ export function ProformaInvoicesPage({
                     ariaLabel="Sales Person"
                     value={formState.sales_person}
                     onChange={(val) => setFormState({ ...formState, sales_person: val })}
-                    options={SALES_PERSON_OPTIONS}
+                    options={effectiveSalesPersonOptions}
                     placeholder="Select Sales Person"
                   />
                 </div>

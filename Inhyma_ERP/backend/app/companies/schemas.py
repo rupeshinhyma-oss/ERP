@@ -140,6 +140,7 @@ class CompanyCreate(BaseModel):
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
     company_category: str | None = Field(default=None, max_length=150)
+    sector: str | None = Field(default=None, max_length=150)
     product_manufacture_or_supply: str | None = None
     machines_buying_from: str | None = None
     spares_buying_from: str | None = None
@@ -217,6 +218,7 @@ class CompanyUpdate(BaseModel):
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
     company_category: str | None = Field(default=None, max_length=150)
+    sector: str | None = Field(default=None, max_length=150)
     product_manufacture_or_supply: str | None = None
     machines_buying_from: str | None = None
     spares_buying_from: str | None = None
@@ -308,6 +310,7 @@ class CompanyRead(BaseModel):
     primary_website: str | None
     secondary_website: str | None
     company_category: str | None = None
+    sector: str | None = None
     product_manufacture_or_supply: str | None = None
     machines_buying_from: str | None = None
     spares_buying_from: str | None = None
@@ -360,6 +363,7 @@ class CompanyListItemRead(BaseModel):
     brand_description: str | None = None
     company_type: str | None = None
     company_category: str | None = None
+    sector: str | None = None
     product_manufacture_or_supply: str | None = None
     machines_buying_from: str | None = None
     spares_buying_from: str | None = None
