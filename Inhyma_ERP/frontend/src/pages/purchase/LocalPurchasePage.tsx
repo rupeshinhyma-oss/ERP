@@ -438,6 +438,29 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
 
+  // Import states
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importRows, setImportRows] = useState<
+    Array<{
+      invoice_no: string;
+      invoice_date: string;
+      supplier_name: string;
+      warehouse: string;
+      invoice_total: number;
+      created_by: string;
+      added_on: string;
+      status: "Pending" | "Confirmed" | "Cancelled";
+      raw: Record<string, any>;
+    }>
+  >([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [isParsing, setIsParsing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [importDuplicateAction, setImportDuplicateAction] = useState<"skip" | "update">("skip");
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
   const handleResetFilters = () => {
     setFilterSupplier("");
     setFilterWarehouse("");
@@ -721,6 +744,306 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleDownloadSampleCsv = () => {
+    const sampleHeaders = [
+      "Invoice No",
+      "Invoice Date",
+      "Supplier",
+      "Warehouse",
+      "Invoice Total Value (INR)",
+      "Created By",
+      "Added On",
+      "Status",
+    ];
+    const sampleRows = [
+      ["2026-27/SO/1535", "22-09-2026", "S B Inks & Packaging Co.", "Mumbai", "125000.00", "Akshata Wadekar", "22-09-2026", "Pending"],
+      ["755/26-27", "21-09-2026", "Darsh Impex India LLP Mumbai", "Mumbai", "18500.00", "Akshata Wadekar", "21-09-2026", "Confirmed"],
+      ["GST-440/26-27", "20-09-2026", "GLOBAL IMPEX MACHINERY", "Ahmedabad", "45000.00", "Akshata Wadekar", "20-09-2026", "Confirmed"],
+    ];
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [sampleHeaders.join(","), ...sampleRows.map((r) => r.map((c) => `"${c}"`).join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "local_purchase_sample_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDownloadSampleExcel = async () => {
+    try {
+      const XLSX = await import("xlsx");
+      const sampleData = [
+        {
+          "Invoice No": "2026-27/SO/1535",
+          "Invoice Date": "22-09-2026",
+          "Supplier": "S B Inks & Packaging Co.",
+          "Warehouse": "Mumbai",
+          "Invoice Total Value (INR)": 125000.0,
+          "Created By": "Akshata Wadekar",
+          "Added On": "22-09-2026",
+          "Status": "Pending",
+        },
+        {
+          "Invoice No": "755/26-27",
+          "Invoice Date": "21-09-2026",
+          "Supplier": "Darsh Impex India LLP Mumbai",
+          "Warehouse": "Mumbai",
+          "Invoice Total Value (INR)": 18500.0,
+          "Created By": "Akshata Wadekar",
+          "Added On": "21-09-2026",
+          "Status": "Confirmed",
+        },
+        {
+          "Invoice No": "GST-440/26-27",
+          "Invoice Date": "20-09-2026",
+          "Supplier": "GLOBAL IMPEX MACHINERY",
+          "Warehouse": "Ahmedabad",
+          "Invoice Total Value (INR)": 45000.0,
+          "Created By": "Akshata Wadekar",
+          "Added On": "20-09-2026",
+          "Status": "Confirmed",
+        },
+      ];
+      const ws = XLSX.utils.json_to_sheet(sampleData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Local Purchases");
+      XLSX.writeFile(wb, "local_purchase_sample_template.xlsx");
+    } catch {
+      handleDownloadSampleCsv();
+    }
+  };
+
+  const handleProcessImportFile = async (file: File) => {
+    setImportFile(file);
+    setIsParsing(true);
+    setImportErrors([]);
+    setImportRows([]);
+
+    try {
+      let rawRows: Array<Record<string, any>> = [];
+      const lowerName = file.name.toLowerCase();
+
+      if (lowerName.endsWith(".csv")) {
+        const { default: Papa } = await import("papaparse");
+        rawRows = await new Promise((resolve, reject) => {
+          Papa.parse(file, {
+            header: true,
+            skipEmptyLines: "greedy",
+            complete: (results) => resolve(results.data as Array<Record<string, any>>),
+            error: (err) => reject(err),
+          });
+        });
+      } else if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+        const XLSX = await import("xlsx");
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: "array" });
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+      } else {
+        throw new Error("Unsupported format. Please select a .csv, .xlsx, or .xls file.");
+      }
+
+      if (!rawRows || rawRows.length === 0) {
+        throw new Error("The selected file contains no data rows.");
+      }
+
+      const findVal = (row: Record<string, any>, candidates: string[]) => {
+        const keys = Object.keys(row);
+        for (const cand of candidates) {
+          const matched = keys.find(
+            (k) => k.trim().toLowerCase().replace(/[^a-z0-9]/g, "") === cand.replace(/[^a-z0-9]/g, "")
+          );
+          if (matched && row[matched] !== undefined && String(row[matched]).trim() !== "") {
+            return String(row[matched]).trim();
+          }
+        }
+        return "";
+      };
+
+      const parsed: Array<{
+        invoice_no: string;
+        invoice_date: string;
+        supplier_name: string;
+        warehouse: string;
+        invoice_total: number;
+        created_by: string;
+        added_on: string;
+        status: "Pending" | "Confirmed" | "Cancelled";
+        raw: Record<string, any>;
+      }> = [];
+      const errors: string[] = [];
+
+      rawRows.forEach((row, idx) => {
+        const invoice_no = findVal(row, [
+          "invoiceno",
+          "invoicenumber",
+          "invoice",
+          "billno",
+          "billnumber",
+        ]);
+        const supplier_name = findVal(row, [
+          "supplier",
+          "suppliername",
+          "vendor",
+          "vendorname",
+          "party",
+          "partyname",
+        ]);
+        const invoice_date =
+          findVal(row, ["invoicedate", "date", "billdate"]) ||
+          new Date().toISOString().slice(0, 10);
+        const warehouse = findVal(row, ["warehouse", "location", "branch"]) || "Mumbai";
+        const totalStr = findVal(row, [
+          "invoicetotalvalueinr",
+          "invoicetotalvalue",
+          "invoicetotal",
+          "totalvalue",
+          "total",
+          "amount",
+          "totalamount",
+          "grandtotal",
+        ]);
+        const rawTotal = parseFloat(totalStr.replace(/[^0-9.-]/g, ""));
+        const invoice_total = !isNaN(rawTotal) ? rawTotal : 0;
+        const created_by =
+          findVal(row, ["createdby", "created_by", "addedby", "user"]) || "Akshata Wadekar";
+        const added_on =
+          findVal(row, ["addedon", "added_on", "date"]) ||
+          new Date().toISOString().slice(0, 10);
+        const statusRaw = findVal(row, ["status", "orderstatus"]).toLowerCase();
+        let status: "Pending" | "Confirmed" | "Cancelled" = "Pending";
+        if (statusRaw.includes("confirm")) status = "Confirmed";
+        else if (statusRaw.includes("cancel")) status = "Cancelled";
+
+        if (!invoice_no && !supplier_name) {
+          return;
+        }
+
+        if (!invoice_no) {
+          errors.push(`Row ${idx + 2}: Missing Invoice No`);
+        } else if (!supplier_name) {
+          errors.push(`Row ${idx + 2} (${invoice_no}): Missing Supplier Name`);
+        }
+
+        parsed.push({
+          invoice_no: invoice_no || `INV-${Date.now()}-${idx + 1}`,
+          invoice_date,
+          supplier_name: supplier_name || "Unknown Supplier",
+          warehouse,
+          invoice_total,
+          created_by,
+          added_on,
+          status,
+          raw: row,
+        });
+      });
+
+      if (parsed.length === 0) {
+        throw new Error("No valid data rows found in the uploaded file.");
+      }
+
+      setImportRows(parsed);
+      setImportErrors(errors);
+    } catch (err: any) {
+      setImportErrors([err.message || "Failed to parse file."]);
+      setImportRows([]);
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleExecuteImport = () => {
+    if (importRows.length === 0) return;
+    setIsImporting(true);
+
+    try {
+      const existingMap = new Map<string, PurchaseOrderRecord>();
+      orders.forEach((o) => {
+        existingMap.set(o.invoice_no.toLowerCase().trim(), o);
+      });
+
+      const newOrders: PurchaseOrderRecord[] = [];
+      let updatedCount = 0;
+      let skippedCount = 0;
+      let insertedCount = 0;
+
+      const brand = getCachedBrandName().toUpperCase();
+
+      importRows.forEach((row, idx) => {
+        const key = row.invoice_no.toLowerCase().trim();
+        const exists = existingMap.get(key);
+
+        if (exists) {
+          if (importDuplicateAction === "skip") {
+            skippedCount++;
+            return;
+          } else {
+            updatedCount++;
+            existingMap.set(key, {
+              ...exists,
+              invoice_date: row.invoice_date || exists.invoice_date,
+              supplier_name: row.supplier_name || exists.supplier_name,
+              warehouse: row.warehouse || exists.warehouse,
+              invoice_total: row.invoice_total || exists.invoice_total,
+              status: row.status || exists.status,
+            });
+            return;
+          }
+        }
+
+        insertedCount++;
+        const newRecord: PurchaseOrderRecord = {
+          id: `po-import-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+          invoice_no: row.invoice_no,
+          invoice_date: row.invoice_date,
+          supplier_name: row.supplier_name,
+          warehouse: row.warehouse,
+          basic_amount: row.invoice_total,
+          invoice_total: row.invoice_total,
+          created_by: row.created_by,
+          added_on: row.added_on,
+          status: row.status,
+          to_name: `${brand} (M)`,
+          items: [],
+        };
+        newOrders.push(newRecord);
+      });
+
+      let finalOrders: PurchaseOrderRecord[];
+      if (importDuplicateAction === "update") {
+        const updatedExisting = orders.map((o) => {
+          const key = o.invoice_no.toLowerCase().trim();
+          return existingMap.get(key) || o;
+        });
+        finalOrders = [...newOrders, ...updatedExisting];
+      } else {
+        finalOrders = [...newOrders, ...orders];
+      }
+
+      setOrders(finalOrders);
+      setCurrentPage(1);
+
+      toast(
+        `Import complete: ${insertedCount} added${
+          updatedCount > 0 ? `, ${updatedCount} updated` : ""
+        }${skippedCount > 0 ? `, ${skippedCount} skipped` : ""}!`,
+        "success"
+      );
+
+      setIsImportModalOpen(false);
+      setImportFile(null);
+      setImportRows([]);
+      setImportErrors([]);
+    } catch (err: any) {
+      toast(err.message || "Failed to import orders.", "error");
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const handleOpenCreate = () => {
@@ -1709,6 +2032,49 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
               }}
             >
               Export
+            </button>
+
+            {/* Import Button */}
+            <button
+              type="button"
+              className="btn btn-import"
+              data-testid="btn-import"
+              onClick={() => {
+                setImportFile(null);
+                setImportRows([]);
+                setImportErrors([]);
+                setIsImportModalOpen(true);
+              }}
+              style={{
+                background: "#0284c7",
+                color: "#ffffff",
+                padding: "8px 16px",
+                borderRadius: "6px",
+                fontWeight: 600,
+                fontSize: "13px",
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(2,132,199,0.2)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Import
             </button>
 
             {/* Bulk Actions Button */}
@@ -3065,6 +3431,440 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
             </div>
           );
         })()}
+
+        {/* Local Purchase Import Modal */}
+        {isImportModalOpen && (
+          <div
+            data-testid="local-purchase-import-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-modal-title"
+            style={{
+              position: "fixed",
+              inset: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.55)",
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "20px",
+              backdropFilter: "blur(2px)",
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setIsImportModalOpen(false);
+              }
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "8px",
+                width: "100%",
+                maxWidth: "760px",
+                maxHeight: "90vh",
+                overflowY: "auto",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+                border: "1px solid #cbd5e1",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {/* Modal Header */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "16px 22px",
+                  borderBottom: "1px solid #e2e8f0",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      width: "36px",
+                      height: "36px",
+                      borderRadius: "8px",
+                      background: "#e0f2fe",
+                      color: "#0284c7",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "18px",
+                    }}
+                  >
+                    📥
+                  </div>
+                  <div>
+                    <h2
+                      id="import-modal-title"
+                      style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1e293b" }}
+                    >
+                      Import Local Purchase Orders
+                    </h2>
+                    <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>
+                      Upload CSV or Excel files (.csv, .xlsx, .xls) to batch import orders
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  data-testid="btn-close-import-modal"
+                  onClick={() => setIsImportModalOpen(false)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "20px",
+                    color: "#94a3b8",
+                    cursor: "pointer",
+                    padding: "4px 8px",
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: "18px" }}>
+                {/* Step 1: Download Sample Templates */}
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "14px 16px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                      Need a sample file to get started?
+                    </div>
+                    <div style={{ fontSize: "11.5px", color: "#64748b" }}>
+                      Download the template with sample headers and data rows.
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={handleDownloadSampleCsv}
+                      data-testid="btn-download-sample-csv"
+                      style={{
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        color: "#334155",
+                        padding: "6px 12px",
+                        borderRadius: "5px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      📄 Sample CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadSampleExcel}
+                      data-testid="btn-download-sample-excel"
+                      style={{
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        color: "#166534",
+                        padding: "6px 12px",
+                        borderRadius: "5px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      📊 Sample Excel (.xlsx)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Step 2: Dropzone / Upload Area */}
+                <div
+                  data-testid="import-dropzone"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) handleProcessImportFile(file);
+                  }}
+                  onClick={() => importFileInputRef.current?.click()}
+                  style={{
+                    border: `2px dashed ${isDragging ? "#0284c7" : "#cbd5e1"}`,
+                    backgroundColor: isDragging ? "#f0f9ff" : "#fcfcfd",
+                    borderRadius: "8px",
+                    padding: "28px 20px",
+                    textAlign: "center",
+                    cursor: "pointer",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    data-testid="file-import-input"
+                    accept=".csv, .xlsx, .xls"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleProcessImportFile(file);
+                    }}
+                  />
+                  <div
+                    style={{
+                      width: "48px",
+                      height: "48px",
+                      borderRadius: "50%",
+                      background: isDragging ? "#e0f2fe" : "#f1f5f9",
+                      color: isDragging ? "#0284c7" : "#64748b",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      margin: "0 auto 12px",
+                      fontSize: "22px",
+                    }}
+                  >
+                    📁
+                  </div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "4px" }}>
+                    {importFile ? importFile.name : "Click to select a file or drag & drop here"}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b" }}>
+                    {importFile
+                      ? `${(importFile.size / 1024).toFixed(1)} KB — Click to change file`
+                      : "Supports CSV, XLSX, and XLS formats"}
+                  </div>
+                </div>
+
+                {/* Parsing indicator */}
+                {isParsing && (
+                  <div style={{ textAlign: "center", padding: "12px", color: "#0284c7", fontSize: "13px", fontWeight: 600 }}>
+                    Parsing file, please wait...
+                  </div>
+                )}
+
+                {/* Errors display */}
+                {importErrors.length > 0 && (
+                  <div
+                    data-testid="import-errors-box"
+                    style={{
+                      background: "#fef2f2",
+                      border: "1px solid #fecaca",
+                      borderRadius: "6px",
+                      padding: "12px 16px",
+                      fontSize: "12px",
+                      color: "#991b1b",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: "4px" }}>
+                      ⚠️ Please check the following warnings/errors:
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: "18px" }}>
+                      {importErrors.map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Data preview table if rows parsed */}
+                {importRows.length > 0 && (
+                  <div data-testid="import-preview-section">
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                        Preview ({importRows.length} order{importRows.length === 1 ? "" : "s"} found)
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px" }}>
+                        <span style={{ color: "#475569" }}>Duplicate invoices:</span>
+                        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                          <input
+                            type="radio"
+                            name="dupAction"
+                            checked={importDuplicateAction === "skip"}
+                            onChange={() => setImportDuplicateAction("skip")}
+                          />
+                          Skip
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                          <input
+                            type="radio"
+                            name="dupAction"
+                            checked={importDuplicateAction === "update"}
+                            onChange={() => setImportDuplicateAction("update")}
+                          />
+                          Update
+                        </label>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        maxHeight: "220px",
+                        overflowY: "auto",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "6px",
+                      }}
+                    >
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                        <thead>
+                          <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left", color: "#475569" }}>
+                            <th style={{ padding: "8px 10px" }}>Invoice No</th>
+                            <th style={{ padding: "8px 10px" }}>Date</th>
+                            <th style={{ padding: "8px 10px" }}>Supplier</th>
+                            <th style={{ padding: "8px 10px" }}>Warehouse</th>
+                            <th style={{ padding: "8px 10px" }}>Total (INR)</th>
+                            <th style={{ padding: "8px 10px" }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importRows.map((r, i) => (
+                            <tr
+                              key={i}
+                              style={{
+                                borderBottom: "1px solid #f1f5f9",
+                                background: i % 2 === 0 ? "#ffffff" : "#fcfcfd",
+                              }}
+                            >
+                              <td style={{ padding: "8px 10px", fontWeight: 600, color: "#0061f2" }}>{r.invoice_no}</td>
+                              <td style={{ padding: "8px 10px", color: "#475569" }}>{r.invoice_date}</td>
+                              <td style={{ padding: "8px 10px", color: "#1e293b" }}>{r.supplier_name}</td>
+                              <td style={{ padding: "8px 10px", color: "#475569" }}>{r.warehouse}</td>
+                              <td style={{ padding: "8px 10px", fontWeight: 600, color: "#1e293b" }}>
+                                ₹ {Number(r.invoice_total || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ padding: "8px 10px" }}>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "2px 8px",
+                                    borderRadius: "12px",
+                                    fontSize: "11px",
+                                    fontWeight: 600,
+                                    background: r.status === "Confirmed" ? "#dcfce7" : r.status === "Cancelled" ? "#fee2e2" : "#fef9c3",
+                                    color: r.status === "Confirmed" ? "#15803d" : r.status === "Cancelled" ? "#b91c1c" : "#854d0e",
+                                  }}
+                                >
+                                  {r.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "14px 22px",
+                  borderTop: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                  borderRadius: "0 0 8px 8px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsImportModalOpen(false);
+                    setImportFile(null);
+                    setImportRows([]);
+                    setImportErrors([]);
+                  }}
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #cbd5e1",
+                    color: "#475569",
+                    padding: "8px 16px",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <div style={{ display: "flex", gap: "10px" }}>
+                  {importRows.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportFile(null);
+                        setImportRows([]);
+                        setImportErrors([]);
+                      }}
+                      style={{
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        color: "#64748b",
+                        padding: "8px 14px",
+                        borderRadius: "6px",
+                        fontSize: "13px",
+                        fontWeight: 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Clear File
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="btn-confirm-import"
+                    disabled={importRows.length === 0 || isImporting}
+                    onClick={handleExecuteImport}
+                    style={{
+                      background: importRows.length === 0 || isImporting ? "#94a3b8" : "#0284c7",
+                      color: "#ffffff",
+                      border: "none",
+                      padding: "8px 20px",
+                      borderRadius: "6px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: importRows.length === 0 || isImporting ? "not-allowed" : "pointer",
+                      boxShadow: importRows.length === 0 ? "none" : "0 2px 4px rgba(2, 132, 199, 0.2)",
+                    }}
+                  >
+                    {isImporting ? "Importing..." : `Import ${importRows.length > 0 ? `${importRows.length} ` : ""}Orders`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </AppShell>
   );
