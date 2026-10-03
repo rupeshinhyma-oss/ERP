@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import type { ImportPurchaseRecord } from "@/pages/purchase/ImportPurchasePage";
+import { getCachedBrandName } from "@/lib/brand";
 
 export function formatIndianCurrency(amount: number): string {
   return "₹ " + (amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -38,7 +39,7 @@ export function generateImportPurchaseBillPdf(
   doc.setProperties({
     title: `Import Bill File: ${consignmentNo}`,
     subject: "Import Purchase Bill / Customs Tax Invoice",
-    author: "Inhyma Solutions LLP",
+    author: getCachedBrandName(),
   });
 
   doc.setDrawColor(203, 213, 225);
@@ -105,7 +106,7 @@ export function generateImportPurchaseBillPdf(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text("INHYMA SOLUTIONS LLP (MUMBAI HUB)", rightX + 4, currentY + 11.5);
+  doc.text(order.to_name || `${getCachedBrandName().toUpperCase()} (MUMBAI HUB)`, rightX + 4, currentY + 11.5);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
@@ -367,7 +368,7 @@ export function generateImportPurchaseBillPdf(
 
   const sigRightX = margin + sigBoxW + 10;
   doc.line(sigRightX, currentY + 10, sigRightX + sigBoxW, currentY + 10);
-  doc.text("For INHYMA SOLUTIONS LLP (Authorized Importer)", sigRightX, currentY + 14);
+  doc.text(`For ${getCachedBrandName().toUpperCase()} (Authorized Importer)`, sigRightX, currentY + 14);
 
   // Output options
   if (options?.saveFile) {

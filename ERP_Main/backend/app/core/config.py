@@ -305,11 +305,11 @@ class Settings(BaseSettings):
         for backward compatibility if configured.
         """
         key_norm = (erp_key or "").strip().lower()
-        if key_norm in ("yinglima", "yinglima_erp"):
+        if key_norm in ("yinglima", "yinglima_erp", "erp-02"):
             cred = self.ERP_MAIN_TO_YINGLIMA_SERVICE_CREDENTIAL
             if cred and "CHANGE-ME" not in cred:
                 return cred
-        elif key_norm in ("inhyma", "inhyma_erp"):
+        elif key_norm in ("inhyma", "inhyma_erp", "erp-01"):
             cred = self.ERP_MAIN_TO_INHYMA_SERVICE_CREDENTIAL
             if cred and "CHANGE-ME" not in cred:
                 return cred

@@ -49,9 +49,9 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         if ":5174" in base:
             return "http://127.0.0.1:8002"
         if not base or "localhost" in base or "127.0.0.1" in base:
-            if erp.key == "yinglima":
+            if erp.key in ("yinglima", "erp-02"):
                 return "http://127.0.0.1:8001"
-            if erp.key == "inhyma":
+            if erp.key in ("inhyma", "erp-01"):
                 return "http://127.0.0.1:8002"
         return base
 

@@ -3,6 +3,18 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-03] — Machine Identifier Routing (erp-01/erp-02) & Dynamic Multi-ERP Company Display
+
+### 1. Machine Identifier Routing & Secret Validation
+- **Machine Identification Protocol:** Extended [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/core/config.py) `get_service_credential_for_erp()` to recognize unique machine identifiers `erp-01` (Inhyma port 8002) and `erp-02` (Yinglima port 8001) alongside legacy keys.
+- **RPC Routing Adapter:** Updated [`http_adapter.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/adapters/http_adapter.py) to resolve target base URLs via `erp.key in ("yinglima", "erp-02")` and `erp.key in ("inhyma", "erp-01")`.
+- **Dependency Health Monitoring:** Updated [`health/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/health/routes.py) reporting `erp-01` and `erp-02` credential status.
+
+### 2. Dynamic Spoke Company Display & Peer Switcher
+- **Ecosystem Switcher Dynamic Resolution:** Updated [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/EcosystemSwitcher.tsx) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ssoBridge.ts) to query connected spoke apps' `/organizations/public` endpoints, caching dynamic company names locally and rendering `{isCurrent ? displayName : (peerNames[erp.key] || erp.name)}`.
+- **Global User Access Grants:** Updated [`GlobalUsers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/GlobalUsers.tsx) to resolve spoke instances by `erp-01` / `erp-02` and display live `{erp.name || erp.display_name}` instead of hardcoded strings in access checkboxes.
+- **Generic Onboarding Messages:** Updated [`Dashboard.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/Dashboard.tsx) empty state to be completely generic.
+
 ---
 
 ## [Release 2026-09-29] — Global Autocomplete Blocker & UI Hardening

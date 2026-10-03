@@ -32,6 +32,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { apiGet, apiPatch } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { getCachedBrandName } from "@/lib/brand";
 
 export interface DiscountOrderRecord {
   id: string;
@@ -2302,7 +2303,7 @@ export function DiscountPaymentsPage({
               <div style={{ padding: "18px", overflowY: "auto", flex: 1 }}>
                 <div style={{ textAlign: "center", marginBottom: "16px" }}>
                   <div style={{ fontSize: "18px", fontWeight: 700, color: "#1e293b" }}>Sales Order</div>
-                  <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px" }}>INHYMA SOLUTIONS LLP</div>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px" }}>{getCachedBrandName().toUpperCase()}</div>
                 </div>
 
                 {/* Info Grid */}

@@ -66,7 +66,46 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
     organizationName ||
     (currentKey === "control-plane"
       ? "ERP Dashboard"
-      : (brandName || currentErp?.name || "Yinglima ERP"));
+      : (brandName || currentErp?.name || "ERP"));
+
+  // Dynamic peer ERP company names resolved from ERP Settings
+  const [peerNames, setPeerNames] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const erp of ECOSYSTEM_ERPS) {
+      if (erp.key === currentKey) {
+        initial[erp.key] = displayName;
+      } else if (erp.key === "control-plane") {
+        initial[erp.key] = "ERP Dashboard";
+      } else {
+        const cached = localStorage.getItem(`erp_peer_name_${erp.key}`);
+        initial[erp.key] = cached || erp.name;
+      }
+    }
+    return initial;
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    ECOSYSTEM_ERPS.forEach(async (erp) => {
+      if (erp.key === currentKey || erp.key === "control-plane" || !erp.apiUrl) return;
+      try {
+        const resp = await fetch(`${erp.apiUrl}/organizations/public`);
+        if (resp.ok) {
+          const body = await resp.json();
+          const compName = body?.data?.company_name;
+          if (compName && !cancelled) {
+            localStorage.setItem(`erp_peer_name_${erp.key}`, compName);
+            setPeerNames((prev) => ({ ...prev, [erp.key]: compName }));
+          }
+        }
+      } catch {
+        /* peer may be offline; retain cached name */
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentKey]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -220,7 +259,9 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
                 }}
               >
                 <div>
-                  <div style={{ fontSize: "13px", fontWeight: isCurrent ? 600 : 700 }}>{erp.name}</div>
+                  <div style={{ fontSize: "13px", fontWeight: isCurrent ? 600 : 700 }}>
+                    {isCurrent ? displayName : (peerNames[erp.key] || erp.name)}
+                  </div>
                   <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace" }}>
                     {erp.hostUrl.replace(/^https?:\/\//, "")}
                   </div>

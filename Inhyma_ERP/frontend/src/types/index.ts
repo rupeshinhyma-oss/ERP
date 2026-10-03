@@ -405,13 +405,8 @@ export interface ProformaStatusCounts {
   amount: number;
 }
 
-export interface ProformaTabCounts {
-  all: ProformaStatusCounts;
-  pending: ProformaStatusCounts;
-  admin_approved: ProformaStatusCounts;
-  confirmed: ProformaStatusCounts;
-  cancelled: ProformaStatusCounts;
-}
+/** Per-status counts keyed by the status values defined in the `proforma.status` option list. */
+export type ProformaTabCounts = Record<string, ProformaStatusCounts>;
 
 /* ------------------------------------------------------------------ */
 /* Organization                                                       */
@@ -898,4 +893,4 @@ export interface Lead {
   added_on?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-}
+}

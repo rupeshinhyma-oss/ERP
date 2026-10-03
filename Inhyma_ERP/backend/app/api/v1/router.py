@@ -49,6 +49,7 @@ from app.masters.payment_terms.routes import router as payment_terms_router
 from app.masters.lead_sources.routes import router as lead_sources_router
 from app.masters.adjustment_purposes.routes import router as adjustment_purposes_router
 from app.masters.call_types.routes import router as call_types_router
+from app.masters.option_lists.routes import router as option_lists_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.dependencies import get_organization_service
 from app.organizations.routes import router as organizations_router
@@ -56,7 +57,6 @@ from app.organizations.service import OrganizationService
 from app.org_structure.leadership_routes import router as leadership_router
 from app.org_structure.position_routes import router as positions_router
 from app.org_structure.reporting_routes import router as reporting_router
-from app.planning.routes import router as planning_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
 from app.search.routes import router as search_router
@@ -151,6 +151,7 @@ api_router.include_router(call_types_router, prefix="/masters/call-types")
 api_router.include_router(call_types_router, prefix="/masters/call_types")
 api_router.include_router(call_types_router, prefix="/masters/call-type")
 api_router.include_router(call_types_router, prefix="/masters/call_type")
+api_router.include_router(option_lists_router, prefix="/masters/options")
 
 # Companies Management.
 api_router.include_router(companies_router)
@@ -161,9 +162,6 @@ api_router.include_router(suppliers_router)
 # Inquiries (Requirement) workflow -- two-layer consignment planning.
 api_router.include_router(inquiries_router)
 api_router.include_router(public_quotes_router)
-
-# Shipment Planning: dynamic branch-sheet grid (Mum Branch, MP Branch, ...).
-api_router.include_router(planning_router)
 
 # Phase 1 (Live Events): generic real-time WebSocket infrastructure --
 # see app/events/ and doc/EVENTS_ARCHITECTURE.md. Not module-specific;

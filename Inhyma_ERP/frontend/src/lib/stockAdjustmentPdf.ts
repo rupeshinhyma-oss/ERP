@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import type { StockAdjustmentItem } from "@/pages/StockAdjustmentPage";
+import { getCachedBrandName } from "@/lib/brand";
 
 /**
  * Generates an official Stock Adjustment PDF document matching the
@@ -37,7 +38,7 @@ export function generateStockAdjustmentPdf(
   doc.setProperties({
     title: `Adjustment No: ${adjNo}`,
     subject: "Stock Adjustment Order",
-    author: "Inhyma Solutions ERP",
+    author: getCachedBrandName(),
   });
 
   // 1. Title bar with double horizontal rules

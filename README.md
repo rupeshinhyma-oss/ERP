@@ -13,14 +13,17 @@ The ecosystem comprises three autonomous systems:
    - FastAPI Backend (Port `8000`), React + TypeScript SPA Frontend (Port `5170`)
    - OIDC Federation Authority, Global ERP Registry, Platform RBAC, Event Inbox, Real-Time Projections, Multi-Entity Search, Secure CSV/XLSX Export Engine.
 
-2. **`Yinglima_ERP` (`/Yinglima_ERP`)**
+2. **`Yinglima_ERP` (`/Yinglima_ERP`) — Spoke Machine ID `erp-02`**
    - Autonomous Procurement & Sourcing ERP (China Export / Factory Sourcing)
    - FastAPI Backend (Port `8001`), React + TypeScript SPA Frontend (Port `5173`)
+   - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
    - Local Argon2id Auth, Buyers, Suppliers, Master Data, Inquiries/RFQs, Vendor Quotations, Planning Sheets with MUM group tracking, Transactional Outbox, Relying-Party SSO Client, Standalone Background Queue Worker.
 
-3. **`Inhyma_ERP` (`/Inhyma_ERP`)**
+3. **`Inhyma_ERP` (`/Inhyma_ERP`) — Spoke Machine ID `erp-01`**
    - Autonomous Production Planning & Distribution ERP (India Domestic Distribution)
    - FastAPI Backend (Port `8002`), React + TypeScript SPA Frontend (Port `5174`)
+   - Complete visual uniqueness across all 39 sidebar routes with dedicated SVG icons.
+   - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
    - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, escalations, holds), Master Data, Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker.
 
 ---

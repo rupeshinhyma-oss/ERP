@@ -113,9 +113,13 @@ ERP_Main/
 
 ---
 
-## 4. Key Architectural Invariants & Guarantees
+## 5. Spoke Machine Identifiers vs. Dynamic Human Branding
 
-1. **Decoupled Database Autonomy:** `ERP_Main` connects to its own database schema (`erp_main`). It never directly queries or modifies spoke ERP tables, enforcing loose coupling via authenticated REST APIs.
-2. **Bootstrap Root Protection:** Platform root admin (`admin@example.com` / `admin`) is permanently protected from deprovisioning, deletion, or permission revocation.
-3. **Idempotent Deprovisioning:** Multiple consecutive deprovisioning requests safely return HTTP 200 without database corruption.
-4. **Zero Push Guarantee:** All development, testing, and modifications remain 100% local without invoking remote git pushes or pulls.
+1. **Unique Machine Identifier Protocol (`erp-01` and `erp-02`):**
+   - The central control plane addresses and syncs spoke instances using unique, stable machine IDs (`erp-01` for port 8002 and `erp-02` for port 8001).
+   - Configured in [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/core/config.py) and mapped in [`http_adapter.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/adapters/http_adapter.py).
+
+2. **Decoupled Human-Facing Spoke Names:**
+   - Display labels and company titles are never hardcoded.
+   - The topbar [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/EcosystemSwitcher.tsx) dynamically queries spoke `/organizations/public` endpoints to render the real company name as configured in that spoke's **ERP Settings -> Company Name**.
+   - User provisioning grant checkboxes in [`GlobalUsers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/GlobalUsers.tsx) dynamically display `{erp.name || erp.display_name}`.

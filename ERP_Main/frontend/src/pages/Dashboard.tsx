@@ -66,7 +66,7 @@ export function Dashboard() {
             </h2>
             <p style={{ fontSize: "14px", color: "#64748b", lineHeight: 1.6, marginBottom: 0 }}>
               Your account has been created in the ERP Dashboard. You currently do not have access to any individual ERP applications.
-              Please contact your platform administrator to grant access to Yinglima ERP or Inhyma ERP. Once access is granted, you will be able to access the assigned ERP directly.
+              Please contact your platform administrator to grant access to an ERP application. Once access is granted, you will be able to access the assigned ERP directly.
             </p>
           </div>
         ) : null}

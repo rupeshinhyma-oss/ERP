@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import type { SaleOrder, SaleOrderItem } from "@/types/saleProcess";
+import { getCachedBrandName } from "@/lib/brand";
 
 /**
  * Format currency matching legacy ERP Sales Order PDF:
@@ -62,7 +63,7 @@ export function generateSalesOrderPdf(
   doc.setProperties({
     title: `Sale No: ${orderNo}`,
     subject: "Sales Order",
-    author: "Inhyma Solutions LLP",
+    author: getCachedBrandName(),
   });
 
   doc.setDrawColor(0, 0, 0);
@@ -90,10 +91,11 @@ export function generateSalesOrderPdf(
 
   // Left Brand Block
   const brandX = margin + 5;
+  const brandName = getCachedBrandName();
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
-  doc.setTextColor(0, 97, 242); // Inhyma brand blue
-  doc.text("INHYMA", brandX, currentY + 11);
+  doc.setTextColor(0, 97, 242); // Brand accent blue
+  doc.text(brandName.toUpperCase(), brandX, currentY + 11);
   doc.setFontSize(10);
   doc.text("SOLUTIONS LLP  ▶", brandX, currentY + 16.5);
   doc.setFontSize(6.5);
@@ -105,7 +107,7 @@ export function generateSalesOrderPdf(
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "bold");
-  doc.text("INHYMA SOLUTIONS LLP (M)", compInfoX, currentY + 6.5);
+  doc.text(brandName.toUpperCase(), compInfoX, currentY + 6.5);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
@@ -470,7 +472,7 @@ export function generateSalesOrderPdf(
   doc.setFontSize(7);
   doc.text("A/c Holder's Name :", margin + 4, currentY + 10.5);
   doc.setFont("helvetica", "normal");
-  doc.text("INHYMA SOLUTIONS LLP (MUMBAI)", margin + 35, currentY + 10.5);
+  doc.text(brandName.toUpperCase(), margin + 35, currentY + 10.5);
 
   doc.setFont("helvetica", "bold");
   doc.text("Bank Name :", margin + 4, currentY + 14.5);
