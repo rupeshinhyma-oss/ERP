@@ -3,6 +3,22 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-03] — Unique Navigation Icons, Machine Identifiers & Dynamic Company Branding from ERP Settings
+
+### 1. Unique Navigation Icons across All 39 Sidebar Routes
+- **Complete Visual Icon Differentiation:** Every navigation entry across all 7 sidebar sections (`DASHBOARD`, `OPERATIONS`, `LOGISTICS`, `PROCUREMENT & SOURCING`, `MASTERS`, `ADMINISTRATION`, `SETTINGS`) was upgraded to use a dedicated, semantically matched SVG icon in [`icons.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/icons.tsx) and mapped in [`nav.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/nav.ts). Zero icons are duplicated or shared.
+- **Automated Regression Guard:** Added [`NavIconsUniqueness.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/NavIconsUniqueness.test.tsx) asserting 100% unique icon keys across all top-level and sub-navigation routes.
+
+### 2. Backend Machine Identifiers (`erp-01` and `erp-02`)
+- **Machine Identification Contract:** Added `ERP_INSTANCE_ID = "erp-01"` in [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/core/config.py) for backend routing, heartbeat checks, and machine-to-machine federation, eliminating reliance on hardcoded human company names.
+- **Public Branding Endpoint (`GET /organizations/public`):** Added in [`organizations/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/organizations/routes.py) returning `{ company_name, legal_name, logo_url, erp_id }` without requiring user authentication.
+
+### 3. Dynamic Human-Facing Branding from ERP Settings
+- **Dynamic Brand Resolver:** Updated [`brand.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/brand.ts) and [`nav.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/nav.ts) to default to generic `"ERP"` and dynamically resolve the active company name from `GET /organizations/public`, persisting to `localStorage` (`erp_org_company_name`) for 0ms flicker-free hydration.
+- **Document & PDF Generation:** Updated all official document generators ([`localPurchasePdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/localPurchasePdf.ts), [`importPurchasePdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/importPurchasePdf.ts), [`proformaInvoicePdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/proformaInvoicePdf.ts), [`salesOrderPdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/salesOrderPdf.ts), [`stockTransferPdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/stockTransferPdf.ts), [`stockAdjustmentPdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/stockAdjustmentPdf.ts)) to call `getCachedBrandName()`, ensuring company name changes made in **ERP Settings -> Company Name** instantly reflect on generated PDFs.
+- **Cross-ERP Switcher:** Updated [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/EcosystemSwitcher.tsx) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts) to dynamically resolve peer ERP company names from peer `/organizations/public` endpoints.
+- **Automated Regression Suite:** Added [`brandResolution.test.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/__tests__/brandResolution.test.ts) covering public resolution, reactivity, subscriber notification, and machine ID mappings.
+
 ---
 
 ## [Release 2026-09-29] — Renamed Organization Settings to ERP Settings

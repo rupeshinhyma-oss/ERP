@@ -27,6 +27,8 @@ export interface SsoHandoverPayload {
 const SSO_SIGNATURE = "ihm_erp_sso_v1";
 const SSO_VALIDITY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
+const getHost = () => (typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1");
+
 export interface EcosystemErpEntry {
   key: string;
   id: string;
