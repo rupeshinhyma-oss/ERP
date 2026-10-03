@@ -31,6 +31,8 @@ describe("LocalPurchasePage (/purchase-order/list and /purchase-order/addedit)",
     return render(
       <MemoryRouter initialEntries={[initialRoute]}>
         <Routes>
+          <Route path="/purchase/localpurchase" element={<LocalPurchasePage defaultAdd={false} />} />
+          <Route path="/purchase/localpurchase/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/list" element={<LocalPurchasePage defaultAdd={false} />} />
           <Route path="/purchase-order/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
@@ -68,12 +70,12 @@ describe("LocalPurchasePage (/purchase-order/list and /purchase-order/addedit)",
   it("renders exact table header columns matching the production screenshot", () => {
     renderPurchasePage();
 
-    expect(screen.getByRole("columnheader", { name: /^Invoice ⇅/ })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: /^Supplier ⇅/ })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: /^Warehouse ⇅/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Invoice [↕⇅]/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Supplier [↕⇅]/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Warehouse [↕⇅]/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: /^Invoice Total Value/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Created By" })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: /^Added On ⇅/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Added On [↕⇅]/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: /^Status/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Action" })).toBeTruthy();
   });
@@ -452,5 +454,34 @@ describe("LocalPurchasePage (/purchase-order/list and /purchase-order/addedit)",
     fireEvent.mouseDown(document.body);
 
     expect(screen.queryByTestId("action-menu-po-1")).toBeNull();
+  });
+
+  it("handles clicking sortable headers: toggles asc/desc indicators and sorts rows accordingly", () => {
+    renderPurchasePage();
+
+    // Initially Status is sorted asc
+    const statusHeader = screen.getByRole("columnheader", { name: /^Status/ });
+    expect(statusHeader).toBeTruthy();
+
+    // Click Invoice column header (strictly match 'Invoice' column, not 'Invoice Total Value')
+    const invoiceHeader = screen.getByRole("columnheader", { name: /^Invoice\s+[▲▼↕⇅]/ });
+    fireEvent.click(invoiceHeader);
+
+    // Invoice is now sorted ascending (▲)
+    expect(invoiceHeader.textContent).toContain("▲");
+
+    // Click Invoice column header again
+    fireEvent.click(invoiceHeader);
+
+    // Invoice is now sorted descending (▼)
+    expect(invoiceHeader.textContent).toContain("▼");
+
+    // Click Supplier column header
+    const supplierHeader = screen.getByRole("columnheader", { name: /^Supplier/ });
+    fireEvent.click(supplierHeader);
+
+    // Supplier is sorted ascending (▲), and Invoice resets to ↕
+    expect(supplierHeader.textContent).toContain("▲");
+    expect(invoiceHeader.textContent).toMatch(/[↕⇅]/);
   });
 });

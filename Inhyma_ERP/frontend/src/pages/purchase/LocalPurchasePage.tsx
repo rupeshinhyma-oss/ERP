@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { DatePicker } from "@/components/DatePicker";
 import { useToast } from "@/lib/toast";
 import { apiPost } from "@/lib/api";
@@ -37,7 +38,7 @@ export interface PurchaseOrderRecord {
   bill_file?: string;
   created_by: string;
   added_on: string;
-  status: "Pending" | "Confirmed";
+  status: "Pending" | "Confirmed" | "Cancelled";
   packing_forwarding?: number;
   transport_expense?: number;
   offloading_expense?: number;
@@ -361,9 +362,16 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAddRoute =
+    location.pathname.includes("/purchase/localpurchase/add") ||
+    location.pathname.includes("/purchase/local-purchase/add") ||
     location.pathname.includes("/purchase-order/add") ||
     location.pathname.includes("/purchase/local/add");
   const isListRoute =
+    location.pathname === "/purchase/localpurchase" ||
+    location.pathname === "/purchase/localpurchase/" ||
+    location.pathname === "/purchase/local-purchase" ||
+    location.pathname === "/purchase/local-purchase/" ||
+    location.pathname.includes("/purchase/localpurchase/list") ||
     location.pathname.includes("/purchase-order/list") ||
     location.pathname.includes("/purchase/local/list");
 
@@ -420,18 +428,63 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const [currentPage, setCurrentPage] = useState(1);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
+  // Companies-matching list UI state: Filters, Bulk selection
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [filterSupplier, setFilterSupplier] = useState("");
+  const [filterWarehouse, setFilterWarehouse] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
+
+  const handleResetFilters = () => {
+    setFilterSupplier("");
+    setFilterWarehouse("");
+    setFilterStatus("");
+    setFilterDate("");
+    setSearchTerm("");
+    setCurrentPage(1);
+  };
+
+  const handleBulkConfirm = () => {
+    if (selectedIds.length === 0) return;
+    setOrders((prev) =>
+      prev.map((o) => (selectedIds.includes(o.id) ? { ...o, status: "Confirmed" as const } : o))
+    );
+    toast(`${selectedIds.length} purchase order(s) confirmed`, "success");
+    setSelectedIds([]);
+    setBulkMenuOpen(false);
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected orders?`)) {
+      setOrders((prev) => {
+        const updated = prev.filter((o) => !selectedIds.includes(o.id));
+        try {
+          localStorage.setItem("inhyma_local_purchase_orders", JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      toast(`${selectedIds.length} purchase order(s) deleted`, "success");
+      setSelectedIds([]);
+      setBulkMenuOpen(false);
+    }
+  };
+
   useEffect(() => {
     const handleDocumentClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest("[data-action-menu-container]")) {
         setActiveMenuId(null);
       }
+      if (!target.closest("[data-bulk-menu-container]")) {
+        setBulkMenuOpen(false);
+      }
     };
-    if (activeMenuId) {
-      document.addEventListener("mousedown", handleDocumentClick);
-    }
+    document.addEventListener("mousedown", handleDocumentClick);
     return () => document.removeEventListener("mousedown", handleDocumentClick);
-  }, [activeMenuId]);
+  }, []);
 
   // Sorting
   const [sortField, setSortField] = useState<"invoice_no" | "invoice_date" | "supplier_name" | "warehouse" | "invoice_total" | "added_on" | "status">("status");
@@ -516,6 +569,18 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   // Filtering and Sorting for List View
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
+      if (filterSupplier && !o.supplier_name.toLowerCase().includes(filterSupplier.toLowerCase())) {
+        return false;
+      }
+      if (filterWarehouse && !o.warehouse.toLowerCase().includes(filterWarehouse.toLowerCase())) {
+        return false;
+      }
+      if (filterStatus && o.status !== filterStatus) {
+        return false;
+      }
+      if (filterDate && !o.added_on.includes(filterDate) && !o.invoice_date.includes(filterDate)) {
+        return false;
+      }
       if (!searchTerm.trim()) return true;
       const q = searchTerm.toLowerCase();
       return (
@@ -528,7 +593,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
         o.added_on.toLowerCase().includes(q)
       );
     });
-  }, [orders, searchTerm]);
+  }, [orders, searchTerm, filterSupplier, filterWarehouse, filterStatus, filterDate]);
 
   const sortedOrders = useMemo(() => {
     return [...filteredOrders].sort((a, b) => {
@@ -536,13 +601,29 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
       let bVal: any = b[sortField] || "";
 
       if (sortField === "invoice_total") {
-        aVal = a.invoice_total;
-        bVal = b.invoice_total;
+        const aNum = Number(a.invoice_total) || 0;
+        const bNum = Number(b.invoice_total) || 0;
+        return sortOrder === "asc" ? aNum - bNum : bNum - aNum;
       }
 
-      if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
-      if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
-      return 0;
+      if (sortField === "added_on" || sortField === "invoice_date") {
+        const parseDate = (dStr: string) => {
+          if (!dStr) return 0;
+          const parts = dStr.split("-");
+          if (parts.length === 3) {
+            return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10)).getTime();
+          }
+          return new Date(dStr).getTime() || 0;
+        };
+        const aTime = parseDate(aVal);
+        const bTime = parseDate(bVal);
+        return sortOrder === "asc" ? aTime - bTime : bTime - aTime;
+      }
+
+      const aStr = String(aVal).trim();
+      const bStr = String(bVal).trim();
+      const cmp = aStr.localeCompare(bStr, undefined, { numeric: true, sensitivity: "base" });
+      return sortOrder === "asc" ? cmp : -cmp;
     });
   }, [filteredOrders, sortField, sortOrder]);
 
@@ -563,6 +644,49 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
       setSortField(field);
       setSortOrder("asc");
     }
+  };
+
+  const renderSortIndicator = (field: typeof sortField) => {
+    const isSorted = sortField === field;
+    if (isSorted) {
+      return (
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#0284c7",
+            fontSize: "10px",
+            fontWeight: 800,
+            background: "#e0f2fe",
+            padding: "1px 5px",
+            borderRadius: "3px",
+            border: "1px solid #bae6fd",
+            lineHeight: 1,
+            marginLeft: "5px",
+            verticalAlign: "middle",
+            flexShrink: 0,
+          }}
+        >
+          {sortOrder === "asc" ? "▲" : "▼"}
+        </span>
+      );
+    }
+    return (
+      <span
+        style={{
+          fontSize: "10px",
+          color: "#94a3b8",
+          opacity: 0.45,
+          lineHeight: 1,
+          marginLeft: "4px",
+          verticalAlign: "middle",
+          flexShrink: 0,
+        }}
+      >
+        ↕
+      </span>
+    );
   };
 
   const handleExport = () => {
@@ -684,7 +808,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const handleBack = () => {
     setEditingOrderId(null);
     setIsFormOpen(false);
-    navigate("/purchase-order/list");
+    navigate("/purchase/localpurchase");
   };
 
   const handleOpenBillPdf = (order: PurchaseOrderRecord) => {
@@ -823,7 +947,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
       toast("Local purchase order updated successfully", "success");
       setEditingOrderId(null);
       setIsFormOpen(false);
-      navigate("/purchase-order/list");
+      navigate("/purchase/localpurchase");
       return;
     }
 
@@ -852,7 +976,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     apiPost("/purchase/orders", newOrder).catch(() => {});
     toast("Local purchase order created successfully", "success");
     setIsFormOpen(false);
-    navigate("/purchase-order/list");
+    navigate("/purchase/localpurchase");
   };
 
   // ==========================================
@@ -862,6 +986,9 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     return (
       <AppShell activeKey="local-purchases">
         <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
+          <div style={{ marginBottom: "12px" }}>
+            <Breadcrumb trail={["Purchase", "Local Purchase", editingOrderId ? "Edit Local Purchase" : "Add Local Purchase"]} />
+          </div>
           {/* Header matching Screenshot: Add Local Purchase + BACK button */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
@@ -1506,90 +1633,348 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   return (
     <AppShell activeKey="local-purchases">
       <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
-        {/* Top Header matching Screenshot */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
+        <div style={{ marginBottom: "12px" }}>
+          <Breadcrumb trail={["Purchase", "Local Purchase"]} />
+        </div>
+        {/* Top Header matching Companies */}
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
             Local Purchase
           </h1>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {/* Toggle Filter Button */}
             <button
               type="button"
+              className="btn"
+              data-testid="btn-filter-toggle"
+              style={{
+                background: isFilterOpen ? "#0061f2" : "#556987",
+                color: "#ffffff",
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
+              onClick={() => setIsFilterOpen((v) => !v)}
+              title="Toggle Filter Options"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+            </button>
+
+            {/* ADD NEW Button */}
+            <button
+              type="button"
+              className="btn btn-add-new"
               data-testid="btn-add-new"
               onClick={handleOpenCreate}
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
                 background: "#0061f2",
                 color: "#ffffff",
-                border: "none",
-                borderRadius: "4px",
                 padding: "8px 16px",
-                fontSize: "12.5px",
-                fontWeight: 700,
+                borderRadius: "6px",
+                fontWeight: 600,
+                fontSize: "13px",
+                border: "none",
                 cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0, 97, 242, 0.2)",
-                textTransform: "uppercase",
+                boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
               }}
             >
               + ADD NEW
             </button>
 
+            {/* Export Button */}
             <button
               type="button"
+              className="btn btn-export"
               data-testid="btn-export"
               onClick={handleExport}
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
                 background: "#f59e0b",
                 color: "#ffffff",
-                border: "none",
-                borderRadius: "4px",
                 padding: "8px 16px",
-                fontSize: "12.5px",
-                fontWeight: 700,
+                borderRadius: "6px",
+                fontWeight: 600,
+                fontSize: "13px",
+                border: "none",
                 cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(245, 158, 11, 0.2)",
+                boxShadow: "0 2px 4px rgba(245,158,11,0.2)",
               }}
             >
               Export
             </button>
+
+            {/* Bulk Actions Button */}
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="btn btn-bulk-action"
+                disabled={selectedIds.length === 0}
+                onClick={() => setBulkMenuOpen((v) => !v)}
+                style={{
+                  background: selectedIds.length > 0 ? "#198754" : "#94a3b8",
+                  color: "#ffffff",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  border: "none",
+                  cursor: selectedIds.length > 0 ? "pointer" : "not-allowed",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                Bulk Actions {selectedIds.length > 0 ? `(${selectedIds.length})` : ""} ▼
+              </button>
+              {bulkMenuOpen && selectedIds.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    right: 0,
+                    top: "calc(100% + 4px)",
+                    background: "#ffffff",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                    zIndex: 100,
+                    minWidth: "160px",
+                    padding: "4px 0",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={handleBulkConfirm}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "8px 14px",
+                      background: "none",
+                      border: "none",
+                      fontSize: "13px",
+                      color: "#1e293b",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    Confirm Selected
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBulkDelete}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "8px 14px",
+                      background: "none",
+                      border: "none",
+                      fontSize: "13px",
+                      color: "#dc2626",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    Delete Selected
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
+        {/* TOGGLABLE TOP FILTER PANEL matching Companies */}
+        {isFilterOpen && (
+          <div
+            className="card"
+            data-testid="filter-panel"
+            style={{
+              background: "#ffffff",
+              padding: "20px 24px",
+              borderRadius: "10px",
+              border: "1px solid #cbd5e1",
+              marginBottom: "16px",
+              boxShadow: "0 2px 6px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 1fr)",
+                columnGap: "20px",
+                rowGap: "16px",
+              }}
+            >
+              <div>
+                <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                  Supplier
+                </label>
+                <input
+                  type="text"
+                  placeholder="Filter by supplier..."
+                  value={filterSupplier}
+                  onChange={(e) => {
+                    setFilterSupplier(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    background: "#ffffff",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                  Warehouse
+                </label>
+                <input
+                  type="text"
+                  placeholder="Filter by warehouse..."
+                  value={filterWarehouse}
+                  onChange={(e) => {
+                    setFilterWarehouse(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    background: "#ffffff",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                  Status
+                </label>
+                <select
+                  value={filterStatus}
+                  onChange={(e) => {
+                    setFilterStatus(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    color: filterStatus ? "#0f172a" : "#64748b",
+                    background: "#ffffff",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Confirmed">Confirmed</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                  Date
+                </label>
+                <input
+                  type="text"
+                  placeholder="DD-MM-YYYY"
+                  value={filterDate}
+                  onChange={(e) => {
+                    setFilterDate(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    background: "#ffffff",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                style={{
+                  background: "#64748b",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "8px 24px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Table Container Card */}
         <div
+          className="card"
           style={{
             background: "#ffffff",
             border: "1px solid #e2e8f0",
-            borderRadius: "6px",
+            borderRadius: "8px",
             boxShadow: "0 1px 3px rgba(0, 0, 0, 0.02)",
             overflow: "hidden",
           }}
         >
-          {/* Toolbar: Items/Page and Search */}
+          {/* Toolbar: Items/Page and Search matching Companies */}
           <div
+            className="toolbar"
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              padding: "14px 16px",
+              padding: "10px 16px",
               borderBottom: "1px solid #f1f5f9",
             }}
           >
-            <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <select
                 aria-label="Items per page"
                 value={perPage}
-                onChange={(e) => setPerPage(Number(e.target.value))}
+                onChange={(e) => {
+                  setPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
                 style={{
-                  height: "32px",
+                  height: "34px",
                   padding: "0 10px",
                   border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
+                  borderRadius: "6px",
                   fontSize: "13px",
                   background: "#ffffff",
                   color: "#334155",
@@ -1601,29 +1986,54 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                 <option value={50}>50</option>
                 <option value={100}>100</option>
               </select>
-              <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px", fontWeight: 500 }}>
+              <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>
                 Items/Page
-              </div>
+              </span>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
               <input
                 type="text"
                 aria-label="Search Local Purchases"
                 placeholder="Search..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
                 style={{
-                  height: "32px",
-                  width: "200px",
+                  height: "34px",
+                  width: "240px",
                   border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  padding: "0 10px",
+                  borderRadius: "6px",
+                  padding: "0 32px 0 12px",
                   fontSize: "13px",
                   outline: "none",
                   color: "#334155",
                 }}
               />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  title="Clear search"
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                    lineHeight: 1,
+                    padding: "0 2px",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  ×
+                </button>
+              )}
             </div>
           </div>
 
@@ -1631,47 +2041,140 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
               <thead>
-                <tr style={{ borderBottom: "1px solid #cbd5e1", background: "#ffffff" }}>
+                <tr style={{ borderBottom: "1px solid #cbd5e1", background: "#f8fafc" }}>
+                  <th style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", padding: "10px 14px" }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all orders"
+                      checked={paginatedOrders.length > 0 && paginatedOrders.every((o) => selectedIds.includes(o.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIds(paginatedOrders.map((o) => o.id));
+                        } else {
+                          setSelectedIds([]);
+                        }
+                      }}
+                      style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                    />
+                  </th>
                   <th
                     onClick={() => handleSort("invoice_no")}
-                    style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    title={
+                      sortField === "invoice_no"
+                        ? `Sorted by Invoice (${sortOrder === "asc" ? "Ascending — click for Descending" : "Descending — click for Ascending"})`
+                        : "Click to sort by Invoice"
+                    }
+                    style={{
+                      padding: "10px 14px",
+                      fontSize: "12.5px",
+                      fontWeight: 700,
+                      color: sortField === "invoice_no" ? "#0f172a" : "#475569",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    Invoice <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "invoice_no" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
+                    Invoice {renderSortIndicator("invoice_no")}
                   </th>
                   <th
                     onClick={() => handleSort("supplier_name")}
-                    style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    title={
+                      sortField === "supplier_name"
+                        ? `Sorted by Supplier (${sortOrder === "asc" ? "Ascending — click for Descending" : "Descending — click for Ascending"})`
+                        : "Click to sort by Supplier"
+                    }
+                    style={{
+                      padding: "10px 14px",
+                      fontSize: "12.5px",
+                      fontWeight: 700,
+                      color: sortField === "supplier_name" ? "#0f172a" : "#475569",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    Supplier <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "supplier_name" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
+                    Supplier {renderSortIndicator("supplier_name")}
                   </th>
                   <th
                     onClick={() => handleSort("warehouse")}
-                    style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    title={
+                      sortField === "warehouse"
+                        ? `Sorted by Warehouse (${sortOrder === "asc" ? "Ascending — click for Descending" : "Descending — click for Ascending"})`
+                        : "Click to sort by Warehouse"
+                    }
+                    style={{
+                      padding: "10px 14px",
+                      fontSize: "12.5px",
+                      fontWeight: 700,
+                      color: sortField === "warehouse" ? "#0f172a" : "#475569",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    Warehouse <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "warehouse" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
+                    Warehouse {renderSortIndicator("warehouse")}
                   </th>
                   <th
                     onClick={() => handleSort("invoice_total")}
-                    style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    title={
+                      sortField === "invoice_total"
+                        ? `Sorted by Invoice Total Value (${sortOrder === "asc" ? "Ascending — click for Descending" : "Descending — click for Ascending"})`
+                        : "Click to sort by Invoice Total Value"
+                    }
+                    style={{
+                      padding: "10px 14px",
+                      fontSize: "12.5px",
+                      fontWeight: 700,
+                      color: sortField === "invoice_total" ? "#0f172a" : "#475569",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    Invoice Total Value (INR) (Including GST) <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "invoice_total" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
+                    Invoice Total Value (INR) (Including GST) {renderSortIndicator("invoice_total")}
                   </th>
-                  <th style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
+                  <th style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#475569", whiteSpace: "nowrap" }}>
                     Created By
                   </th>
                   <th
                     onClick={() => handleSort("added_on")}
-                    style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    title={
+                      sortField === "added_on"
+                        ? `Sorted by Added On (${sortOrder === "asc" ? "Ascending — click for Descending" : "Descending — click for Ascending"})`
+                        : "Click to sort by Added On"
+                    }
+                    style={{
+                      padding: "10px 14px",
+                      fontSize: "12.5px",
+                      fontWeight: 700,
+                      color: sortField === "added_on" ? "#0f172a" : "#475569",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    Added On <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "added_on" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
+                    Added On {renderSortIndicator("added_on")}
                   </th>
                   <th
                     onClick={() => handleSort("status")}
-                    style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    title={
+                      sortField === "status"
+                        ? `Sorted by Status (${sortOrder === "asc" ? "Ascending — click for Descending" : "Descending — click for Ascending"})`
+                        : "Click to sort by Status"
+                    }
+                    style={{
+                      padding: "10px 14px",
+                      fontSize: "12.5px",
+                      fontWeight: 700,
+                      color: sortField === "status" ? "#0f172a" : "#475569",
+                      cursor: "pointer",
+                      userSelect: "none",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    Status <span style={{ color: "#0284c7", fontSize: "11px" }}>{sortField === "status" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
+                    Status {renderSortIndicator("status")}
                   </th>
-                  <th style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#334155", textAlign: "center", width: "70px" }}>
+                  <th style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#475569", textAlign: "center", width: "70px", whiteSpace: "nowrap" }}>
                     Action
                   </th>
                 </tr>
@@ -1679,7 +2182,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
               <tbody>
                 {paginatedOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "13.5px", background: "#f8fafc" }}>
+                    <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "13.5px", background: "#f8fafc" }}>
                       No Data Available In Table
                     </td>
                   </tr>
@@ -1689,12 +2192,36 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                       key={order.id}
                       style={{
                         borderBottom: "1px solid #f1f5f9",
-                        background: idx % 2 === 1 ? "#fafbfd" : "#ffffff",
+                        background: selectedIds.includes(order.id) ? "#eff6ff" : idx % 2 === 1 ? "#fafbfd" : "#ffffff",
                         transition: "background 0.15s ease",
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = idx % 2 === 1 ? "#fafbfd" : "#ffffff")}
+                      onMouseEnter={(e) => {
+                        if (!selectedIds.includes(order.id)) {
+                          e.currentTarget.style.background = "#f1f5f9";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!selectedIds.includes(order.id)) {
+                          e.currentTarget.style.background = idx % 2 === 1 ? "#fafbfd" : "#ffffff";
+                        }
+                      }}
                     >
+                      <td style={{ textAlign: "center", padding: "10px 14px" }}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select order ${order.invoice_no}`}
+                          checked={selectedIds.includes(order.id)}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            if (e.target.checked) {
+                              setSelectedIds((prev) => [...prev, order.id]);
+                            } else {
+                              setSelectedIds((prev) => prev.filter((id) => id !== order.id));
+                            }
+                          }}
+                          style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                        />
+                      </td>
                       <td style={{ padding: "10px 14px" }}>
                         <button
                           type="button"
@@ -2036,8 +2563,9 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
             </table>
           </div>
 
-          {/* Footer matching Screenshot */}
+          {/* Footer matching Companies pagination */}
           <div
+            className="pagination"
             style={{
               display: "flex",
               justifyContent: "space-between",

@@ -24,6 +24,7 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { TableMessageRow } from "@/components/ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { useOptions, optionValues } from "@/lib/options";
 import {
   ClientNameAutocomplete,
   type CompanyAutocompleteItem,
@@ -31,36 +32,7 @@ import {
 import { Combobox } from "@/components/Combobox";
 import type { Lead } from "@/types";
 
-const BUSINESS_TYPES = [
-  "Manufacturer",
-  "Trader",
-  "B2B",
-  "Retailer",
-  "OEM",
-  "Distributor",
-  "Service Provider",
-  "Corporate",
-  "Exporter",
-  "Other",
-];
-
-const DEFAULT_SOURCES = [
-  "IndiaMart",
-  "Website",
-  "Exhibition",
-  "Cold Call",
-  "Referral",
-  "TradeIndia",
-  "Direct Visit",
-  "WhatsApp",
-  "Social Media",
-  "Phone Call",
-  "Other",
-];
-
-const PRIORITIES = ["Urgent", "High", "Medium", "Low"];
-
-const STATUSES = ["New", "Contacted", "In Discussion", "Qualified", "Won", "Lost"];
+const LEAD_OPTION_GROUPS = ["lead.business_type", "lead.priority", "lead.status"] as const;
 
 interface LeadFormData {
   company_name: string;
@@ -103,38 +75,6 @@ const EMPTY_FORM: LeadFormData = {
   lead_status: "New",
   notes: "",
 };
-
-const DEFAULT_INDIAN_STATES = [
-  "Andhra Pradesh",
-  "Arunachal Pradesh",
-  "Assam",
-  "Bihar",
-  "Chhattisgarh",
-  "Delhi",
-  "Goa",
-  "Gujarat",
-  "Haryana",
-  "Himachal Pradesh",
-  "Jharkhand",
-  "Karnataka",
-  "Kerala",
-  "Madhya Pradesh",
-  "Maharashtra",
-  "Manipur",
-  "Meghalaya",
-  "Mizoram",
-  "Nagaland",
-  "Odisha",
-  "Punjab",
-  "Rajasthan",
-  "Sikkim",
-  "Tamil Nadu",
-  "Telangana",
-  "Tripura",
-  "Uttar Pradesh",
-  "Uttarakhand",
-  "West Bengal",
-];
 
 // Shimmer Skeleton Rows for Leads Table loading state
 function LeadsTableSkeletonRows({ count = 8 }: { count?: number }) {
@@ -333,7 +273,13 @@ export function LeadsPage() {
   const [deleteLoading, setDeleteLoading] = useState<boolean>(false);
 
   // Master Lead Sources
-  const [sourceOptions, setSourceOptions] = useState<string[]>(DEFAULT_SOURCES);
+  const [sourceOptions, setSourceOptions] = useState<string[]>([]);
+
+  // Fixed-choice lists come from the database (option_lists)
+  const { options: optionGroups } = useOptions(LEAD_OPTION_GROUPS);
+  const BUSINESS_TYPES = useMemo(() => optionValues(optionGroups, "lead.business_type"), [optionGroups]);
+  const PRIORITIES = useMemo(() => optionValues(optionGroups, "lead.priority"), [optionGroups]);
+  const STATUSES = useMemo(() => optionValues(optionGroups, "lead.status"), [optionGroups]);
 
   // States, Districts, and Cities master lists for Add/Edit drawer cascading
   const [stateMasterList, setStateMasterList] = useState<Array<{ id: string; name: string }>>([]);
@@ -345,14 +291,12 @@ export function LeadsPage() {
     let active = true;
     apiGet<any[]>("/masters/lead-sources")
       .then((res) => {
-        if (active && Array.isArray(res.data) && res.data.length > 0) {
-          const names = res.data.map((item) => item.name).filter(Boolean);
-          const combined = Array.from(new Set([...names, ...DEFAULT_SOURCES]));
-          setSourceOptions(combined);
+        if (active && Array.isArray(res.data)) {
+          setSourceOptions(Array.from(new Set(res.data.map((item) => item.name).filter(Boolean))));
         }
       })
       .catch(() => {
-        // Fall back to DEFAULT_SOURCES
+        setSourceOptions([]);
       });
     return () => {
       active = false;
@@ -368,13 +312,11 @@ export function LeadsPage() {
           const sorted = [...res.data].sort((a, b) => a.name.localeCompare(b.name));
           setStateMasterList(sorted);
         } else if (active) {
-          setStateMasterList(DEFAULT_INDIAN_STATES.map((name) => ({ id: name, name })));
+          setStateMasterList([]);
         }
       })
       .catch(() => {
-        if (active) {
-          setStateMasterList(DEFAULT_INDIAN_STATES.map((name) => ({ id: name, name })));
-        }
+        if (active) setStateMasterList([]);
       });
     return () => {
       active = false;
@@ -525,7 +467,7 @@ export function LeadsPage() {
     });
     BUSINESS_TYPES.forEach((b) => set.add(b));
     return Array.from(set).sort();
-  }, [leads]);
+  }, [leads, BUSINESS_TYPES]);
 
   // 3. State: extracted from distinct state values in leads
   const extractedStates = useMemo(() => {
@@ -565,9 +507,6 @@ export function LeadsPage() {
   const drawerStateOptions = useMemo(() => {
     const set = new Set<string>();
     stateMasterList.forEach((s) => set.add(s.name));
-    if (set.size === 0) {
-      DEFAULT_INDIAN_STATES.forEach((s) => set.add(s));
-    }
     if (formData.state && formData.state.trim()) set.add(formData.state.trim());
     return Array.from(set).sort();
   }, [stateMasterList, formData.state]);
@@ -614,7 +553,7 @@ export function LeadsPage() {
       if (l.lead_status && l.lead_status.trim()) set.add(l.lead_status.trim());
     });
     return Array.from(set).sort();
-  }, [leads]);
+  }, [leads, STATUSES]);
 
   /* -------------------------------------------------------------------------- */
   /* Real-Time Filter Execution on Data                                         */

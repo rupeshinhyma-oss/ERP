@@ -490,11 +490,32 @@ export function IconUserPlus(props: IconProps) {
   );
 }
 
+export function IconShoppingCart(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <circle cx="8" cy="21" r="1" />
+      <circle cx="19" cy="21" r="1" />
+      <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
+    </NavSvg>
+  );
+}
+
+export function IconDatabase(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+      <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+    </NavSvg>
+  );
+}
+
 /** Icon lookup by the string keys the nav config uses. */
 export const ICONS = {
   dashboard: IconDashboard,
   factory: IconFactory,
   shoppingBag: IconShoppingBag,
+  shoppingCart: IconShoppingCart,
   box: IconBox,
   image: IconImage,
   layers: IconLayers,
@@ -517,10 +538,11 @@ export const ICONS = {
   building: IconBuilding,
   clock: IconClock,
   trash: IconTrash,
+  database: IconDatabase,
   chevronDown: IconChevronDown,
   chevronRight: IconChevronRight,
   userPlus: IconUserPlus,
-  masters: IconUserPlus,
+  masters: IconDatabase,
   // legacy aliases for backward compatibility
   tag: IconTag,
   briefcase: IconBriefcase,

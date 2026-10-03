@@ -641,65 +641,211 @@ export function IconPhoneCall(props: IconProps) {
   );
 }
 
+/** Stock Adjustment (Horizontal fader tracks with adjust knobs) */
+export function IconSliders(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <line x1="21" y1="4" x2="14" y2="4" />
+      <line x1="10" y1="4" x2="3" y2="4" />
+      <line x1="21" y1="12" x2="12" y2="12" />
+      <line x1="8" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="20" x2="16" y2="20" />
+      <line x1="12" y1="20" x2="3" y2="20" />
+      <line x1="14" y1="2" x2="14" y2="6" />
+      <line x1="8" y1="10" x2="8" y2="14" />
+      <line x1="16" y1="18" x2="16" y2="22" />
+    </NavSvg>
+  );
+}
+
+/** Stock Transfer (Bidirectional transfer exchange arrows) */
+export function IconTransfer(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="m16 3 5 5-5 5" />
+      <path d="M4 8h17" />
+      <path d="m8 21-5-5 5-5" />
+      <path d="M20 16H3" />
+    </NavSvg>
+  );
+}
+
+/** Import Purchase (Ocean container cargo vessel) */
+export function IconShip(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M2 20a2.4 2.4 0 0 0 2 1 2.4 2.4 0 0 0 2-1 2.4 2.4 0 0 1 2-1 2.4 2.4 0 0 1 2 1 2.4 2.4 0 0 0 2 1 2.4 2.4 0 0 0 2-1 2.4 2.4 0 0 1 2-1 2.4 2.4 0 0 1 2 1 2.4 2.4 0 0 0 2 1 2.4 2.4 0 0 0 2-1" />
+      <path d="M4 17 2 11h20l-2 6" />
+      <path d="M6 11V6a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5" />
+      <line x1="12" y1="2" x2="12" y2="5" />
+    </NavSvg>
+  );
+}
+
+/** Re-Order (Inventory restock with repeat cycle arrows) */
+export function IconReorder(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="m17 2 4 4-4 4" />
+      <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+      <path d="m7 22-4-4 4-4" />
+      <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+      <rect x="8.5" y="8.5" width="7" height="7" rx="1.5" />
+    </NavSvg>
+  );
+}
+
+/** Deleted / Cancelled Orders (Order document with cross mark) */
+export function IconFileX(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="9.5" y1="12.5" x2="14.5" y2="17.5" />
+      <line x1="14.5" y1="12.5" x2="9.5" y2="17.5" />
+    </NavSvg>
+  );
+}
+
+/** General Reports / Analytics (Pie chart with detached slice) */
+export function IconPieChart(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+      <path d="M22 12A10 10 0 0 0 12 2v10z" />
+    </NavSvg>
+  );
+}
+
+/** Attendance (Clocked-in employee with verified checkmark) */
+export function IconUserCheck(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <polyline points="16 11 18 13 22 9" />
+    </NavSvg>
+  );
+}
+
+/** Expense Management (Jagged expense voucher / receipt) */
+export function IconReceipt(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1 2-1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1-2-1Z" />
+      <path d="M8 7h8" />
+      <path d="M8 11h8" />
+      <path d="M8 15h5" />
+    </NavSvg>
+  );
+}
+
+/** HRMS Setup (Personnel / HR configuration settings) */
+export function IconUserCog(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M14 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="8" cy="7" r="4" />
+      <circle cx="19" cy="11" r="2" />
+      <path d="M19 7.5v1.2M19 13.3v1.2M15.5 11h1.2M21.3 11h1.2M16.5 8.5l.9.9M20.6 12.6l.9.9M16.5 13.5l.9-.9M20.6 9.4l.9-.9" />
+    </NavSvg>
+  );
+}
+
+/** Effective Permissions (Access control authorization key) */
+export function IconKey(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <circle cx="7.5" cy="15.5" r="4.5" />
+      <path d="m10.7 12.3 8.3-8.3" />
+      <path d="m16 7 2.5 2.5" />
+      <path d="m18 5 2.5 2.5" />
+    </NavSvg>
+  );
+}
+
+/** Masters (Master Data Management / database storage cylinder stack) */
+export function IconDatabase(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+      <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+    </NavSvg>
+  );
+}
+
 /** Icon lookup by the string keys the nav config uses. */
 export const ICONS = {
-  phone: IconPhoneCall,
-  phoneCall: IconPhoneCall,
-  "phone-call": IconPhoneCall,
-  stock: IconStock,
-  filter: IconFilter,
-  download: IconDownload,
+  // Core Navigation Icons
   dashboard: IconDashboard,
-  factory: IconFactory,
-  shoppingBag: IconShoppingBag,
-  shoppingCart: IconShoppingCart,
-  creditCard: IconCreditCard,
-  quote: IconQuote,
+  task: IconTask,
+  wrench: IconWrench,
+  messageSquare: IconMessageSquare,
+  building: IconBuilding,
+  stock: IconStock,
+  sliders: IconSliders,
+  transfer: IconTransfer,
   box: IconBox,
   image: IconImage,
   layers: IconLayers,
   folderTree: IconFolderTree,
   award: IconAward,
-  network: IconNetwork,
-  idCard: IconIdCard,
   fileText: IconFileText,
-  truck: IconTruck,
-  user: IconUser,
-  users: IconUsers,
-  shield: IconShield,
-  barcode: IconBarcode,
-  globe: IconGlobe,
+  shoppingCart: IconShoppingCart,
+  creditCard: IconCreditCard,
+  shoppingBag: IconShoppingBag,
+  ship: IconShip,
+  factory: IconFactory,
+  reorder: IconReorder,
+  refresh: IconRefresh,
+  fileX: IconFileX,
+  pieChart: IconPieChart,
+  userCheck: IconUserCheck,
+  calendar: IconCalendar,
+  receipt: IconReceipt,
   map: IconMap,
-  pin: IconPin,
   coins: IconCoins,
-  ruler: IconRuler,
+  userCog: IconUserCog,
+  user: IconUser,
+  briefcase: IconBriefcase,
+  shield: IconShield,
+  key: IconKey,
+  database: IconDatabase,
   settings: IconSettings,
-  building: IconBuilding,
   clock: IconClock,
   trash: IconTrash,
+  phone: IconPhoneCall,
+  phoneCall: IconPhoneCall,
+  "phone-call": IconPhoneCall,
+  clipboard: IconClipboard,
+  lead: IconClipboard,
+
+  // Additional support icons & aliases
+  filter: IconFilter,
+  download: IconDownload,
+  quote: IconQuote,
+  network: IconNetwork,
+  idCard: IconIdCard,
+  truck: IconTruck,
+  users: IconUsers,
+  barcode: IconBarcode,
+  globe: IconGlobe,
+  pin: IconPin,
+  ruler: IconRuler,
   chevronDown: IconChevronDown,
   chevronRight: IconChevronRight,
   userPlus: IconUserPlus,
-  masters: IconUserPlus,
-  // Work Management
-  calendar: IconCalendar,
+  masters: IconDatabase,
   kanban: IconKanban,
   checkSquare: IconCheckSquare,
-  // legacy aliases for backward compatibility
   tag: IconTag,
-  briefcase: IconBriefcase,
   orgChart: IconOrgChart,
   "org-chart": IconOrgChart,
   sitemap: IconOrgChart,
-  task: IconTask,
-  wrench: IconWrench,
-  messageSquare: IconMessageSquare,
   grid: IconImage,
   folder: IconLayers,
-  sliders: IconSettings,
-  refresh: IconClock,
-  clipboard: IconClipboard,
-  lead: IconClipboard,
 } as const;
 
 export type IconKey = keyof typeof ICONS;
+

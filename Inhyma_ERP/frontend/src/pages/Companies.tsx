@@ -1762,10 +1762,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
 
   function handleCopyPrimary() {
     const direct = quickForm.contact_calling_number.trim();
-    const indiamart = quickForm.contact_indiamart_number.trim();
-    const val = direct || indiamart;
-    if (val) {
-      setQuickForm((prev) => ({ ...prev, contact_whatsapp_number: val }));
+    if (direct) {
+      setQuickForm((prev) => ({ ...prev, contact_whatsapp_number: direct }));
     }
   }
 
@@ -1941,10 +1939,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
 
   function handleCopyPrimaryFull() {
     const direct = (form.contact_calling_number || "").trim();
-    const indiamart = (form.contact_indiamart_number || "").trim();
-    const val = direct || indiamart;
-    if (val) {
-      setForm((prev) => ({ ...prev, contact_whatsapp_number: val }));
+    if (direct) {
+      setForm((prev) => ({ ...prev, contact_whatsapp_number: direct }));
     }
   }
 
@@ -3525,28 +3521,16 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       )}
                     </div>
 
-                    {/* Row 2: Contact Number (Direct), Contact Number (IndiaMart), WhatsApp Number, Company Website */}
+                    {/* Row 2: Contact Number, WhatsApp Number, Company Website */}
                     <div>
-                      <label style={fieldLabelStyle}>Contact Number (Direct)</label>
+                      <label style={fieldLabelStyle}>Contact Number</label>
                       <input
                         id="contact_calling_number"
                         type="text"
                         style={inputStyle}
-                        placeholder="Enter direct number"
+                        placeholder="Enter contact number"
                         value={form.contact_calling_number}
                         onChange={(e) => setField("contact_calling_number", e.target.value)}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={fieldLabelStyle}>Contact Number (IndiaMart)</label>
-                      <input
-                        id="contact_indiamart_number"
-                        type="text"
-                        style={inputStyle}
-                        placeholder="Enter IndiaMart number"
-                        value={form.contact_indiamart_number}
-                        onChange={(e) => setField("contact_indiamart_number", e.target.value)}
                       />
                     </div>
 
@@ -3580,7 +3564,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       />
                     </div>
 
-                    <div>
+                    <div style={{ gridColumn: "span 2" }}>
                       <label style={fieldLabelStyle}>Company Website</label>
                       <input
                         id="primary_website"
@@ -5852,8 +5836,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     value: `${drawerCompany.contact_salutation || ""} ${drawerCompany.contact_full_name || ""}`.trim() || "—",
                   },
                   { label: "Designation", value: drawerCompany.contact_designation || "—" },
-                  { label: "Calling Number (Direct)", value: drawerCompany.contact_calling_number || "—" },
-                  { label: "Contact Number (IndiaMart)", value: drawerCompany.contact_indiamart_number || "—" },
+                  { label: "Calling Number", value: drawerCompany.contact_calling_number || "—" },
                   { label: "WhatsApp Number", value: drawerCompany.contact_whatsapp_number || "—" },
                   { label: "WeChat Number", value: drawerCompany.contact_wechat_number || "—" },
                   { label: "Email Addresses", value: drawerCompany.emails && drawerCompany.emails.length ? drawerCompany.emails.join(", ") : "—", fullWidth: true },
@@ -6224,37 +6207,16 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               />
             </div>
 
-            {/* 10. Contact Number(IndiaMart) */}
-            <div style={{ minWidth: 0 }}>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "5px" }}>
-                Contact Number<em>(IndiaMart)</em>
-              </label>
-              <input
-                type="text"
-                autoComplete="off"
-                style={{
-                  width: "100%",
-                  height: "36px",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  padding: "0 10px",
-                  fontSize: "13.5px",
-                  boxSizing: "border-box",
-                  outline: "none",
-                }}
-                value={quickForm.contact_indiamart_number}
-                onChange={(e) => setQuickForm((p) => ({ ...p, contact_indiamart_number: e.target.value }))}
-              />
-            </div>
 
-            {/* 11. Contact Number(Direct) */}
+            {/* 11. Contact Number */}
             <div style={{ minWidth: 0 }}>
               <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "5px" }}>
-                Contact Number<em>(Direct)</em>
+                Contact Number
               </label>
               <input
                 type="text"
                 autoComplete="off"
+                placeholder="Enter contact number"
                 style={{
                   width: "100%",
                   height: "36px",

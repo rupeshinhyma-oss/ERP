@@ -101,7 +101,7 @@ export function ImportPurchasePdfPage() {
         return;
       }
     } catch {}
-    navigate("/purchase-order/import-purchase-list");
+    navigate("/purchase/importpurchase");
   };
 
   return (

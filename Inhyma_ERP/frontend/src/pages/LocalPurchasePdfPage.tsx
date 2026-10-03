@@ -107,7 +107,7 @@ export function LocalPurchasePdfPage() {
     } catch {
       // Ignore if browser restricts window.close
     }
-    navigate("/purchase-order/list");
+    navigate("/purchase/localpurchase");
   };
 
   return (

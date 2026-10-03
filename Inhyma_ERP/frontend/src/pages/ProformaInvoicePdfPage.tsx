@@ -1,6 +1,5 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { INITIAL_PROFORMA_ITEMS } from "@/pages/ProformaInvoicesPage";
 import { generateProformaInvoicePdf } from "@/lib/proformaInvoicePdf";
 import type { ProformaInvoice } from "@/types";
 import { apiGet } from "@/lib/api";
@@ -10,21 +9,9 @@ export function ProformaInvoicePdfPage() {
   const navigate = useNavigate();
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [liveItem, setLiveItem] = useState<ProformaInvoice | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Find item from static INITIAL_PROFORMA_ITEMS
-  const staticItem = useMemo(() => {
-    if (!id) return INITIAL_PROFORMA_ITEMS[0];
-    const found = INITIAL_PROFORMA_ITEMS.find(
-      (item) =>
-        item.id === id ||
-        item.proforma_no === id ||
-        item.proforma_no.includes(id) ||
-        item.id === `pi-${id}`
-    );
-    return found || INITIAL_PROFORMA_ITEMS[0];
-  }, [id]);
-
-  // Also attempt to fetch live from API if exists
+  // Load the proforma invoice from the API
   useEffect(() => {
     let cancelled = false;
     if (id) {
@@ -35,7 +22,7 @@ export function ProformaInvoicePdfPage() {
           }
         })
         .catch(() => {
-          // Fallback to static item
+          if (!cancelled) setLoadError("Could not load this proforma invoice.");
         });
     }
     return () => {
@@ -43,8 +30,8 @@ export function ProformaInvoicePdfPage() {
     };
   }, [id]);
 
-  const currentItem = liveItem || staticItem;
-  const piNo = currentItem?.proforma_no || "PI-MH/26-27/1714";
+  const currentItem = liveItem;
+  const piNo = currentItem?.proforma_no || "";
 
   useEffect(() => {
     if (currentItem) {
@@ -190,7 +177,7 @@ export function ProformaInvoicePdfPage() {
           />
         ) : (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#ffffff", fontSize: "14px" }}>
-            Generating Proforma Invoice PDF…
+            {loadError || (id ? "Generating Proforma Invoice PDF…" : "No proforma invoice selected.")}
           </div>
         )}
       </div>

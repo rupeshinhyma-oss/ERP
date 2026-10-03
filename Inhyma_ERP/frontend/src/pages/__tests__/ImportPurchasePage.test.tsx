@@ -31,6 +31,8 @@ describe("ImportPurchasePage (/purchase-order/import-purchase-list)", () => {
     return render(
       <MemoryRouter initialEntries={[initialRoute]}>
         <Routes>
+          <Route path="/purchase/importpurchase" element={<ImportPurchasePage defaultAdd={false} />} />
+          <Route path="/purchase/importpurchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/import-purchase-list" element={<ImportPurchasePage defaultAdd={false} />} />
           <Route path="/purchase-order/import-purchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/import-purchase/addedit/:id" element={<ImportPurchasePage defaultAdd={true} />} />
