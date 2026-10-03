@@ -36,6 +36,7 @@ export const MODULE_NAMES: Record<string, string> = {
   audit: "System Audit Logs",
   trash: "Trash",
   roles_permissions: "Departments & Permissions",
+  hrms: "HRMS & Workforce",
 };
 
 const ACTION_LABELS: Record<string, string> = {

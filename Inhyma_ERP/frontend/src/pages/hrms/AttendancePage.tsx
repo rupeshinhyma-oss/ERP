@@ -119,6 +119,8 @@ interface CalendarDay {
   regularization_status: string;
   can_regularize: boolean;
   attendance_id: string | null;
+  holiday_name?: string | null;
+  leave_type_name?: string | null;
 }
 
 interface RegularizationItem {
@@ -1479,6 +1481,7 @@ export function AttendancePage() {
                     else if (day.status === "WEEKEND") badgeClass = "status-weekend";
                     else if (day.status === "ABSENT") badgeClass = "status-absent";
                     else if (day.status === "HOLIDAY") badgeClass = "status-holiday";
+                    else if (day.status === "LEAVE" || day.status === "APPROVED_LEAVE") badgeClass = "status-leave";
 
                     if (day.regularization_status === "PENDING") {
                       badgeClass = "status-pending";
@@ -1516,11 +1519,15 @@ export function AttendancePage() {
                         {/* Middle: Status badge */}
                         <div className="hrms-cal-day-middle">
                           {day.status !== "FUTURE" && day.status !== "NOT_PUNCHED" ? (
-                            <span className={`hrms-cal-status-badge ${badgeClass}`}>
+                            <span className={`hrms-cal-status-badge ${badgeClass}`} title={day.status === "HOLIDAY" && day.holiday_name ? day.holiday_name : (day.leave_type_name || "")}>
                               {day.regularization_status === "PENDING"
                                 ? "Pending Regularization"
                                 : day.regularization_status === "APPROVED"
                                 ? "APPROVED"
+                                : day.status === "HOLIDAY"
+                                ? (day.holiday_name ? `HOLIDAY: ${day.holiday_name}` : "HOLIDAY")
+                                : (day.status === "LEAVE" || day.status === "APPROVED_LEAVE")
+                                ? (day.leave_type_name || "LEAVE")
                                 : day.status === "HALF_DAY"
                                 ? "Half Day"
                                 : day.status === "MISSING_PUNCH"

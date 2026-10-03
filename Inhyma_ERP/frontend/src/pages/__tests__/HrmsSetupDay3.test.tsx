@@ -175,7 +175,8 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
     expect(screen.getByText("Geofence Status")).toBeDefined();
 
     // Calendar
-    expect(screen.getByText("September 2026")).toBeDefined();
+    const expectedMonthYear = new Date().toLocaleString("en-US", { month: "long", year: "numeric" });
+    expect(screen.getByText(expectedMonthYear)).toBeDefined();
   });
 
   // -------------------------------------------------------------------------

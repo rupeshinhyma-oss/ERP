@@ -90,11 +90,45 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.database.base import Base
         from app.leads.models import Lead
         from app.follow_ups.models import FollowUp
+        from app.hrms.models import (
+            HrmsLeavePlan,
+            HrmsLeavePlanType,
+            HrmsHoliday,
+            HrmsEmployeeLeaveBalance,
+            HrmsLeaveAdjustment,
+            HrmsLeaveRequest,
+        )
         async with engine.begin() as conn:
-            await conn.execute(text("ALTER TABLE products ADD COLUMN organization_ids JSON;"))
-            await conn.run_sync(Base.metadata.create_all, tables=[Lead.__table__, FollowUp.__table__])
-    except Exception:
-        pass
+            await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS organization_ids JSON;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS carry_forward_allowed BOOLEAN DEFAULT false;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS description TEXT;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS accrual_amount FLOAT DEFAULT 1.0;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_notice_days INTEGER DEFAULT 0;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS allow_half_day BOOLEAN DEFAULT true;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS allow_backdated BOOLEAN DEFAULT false;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS require_attachment BOOLEAN DEFAULT false;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_accrual BOOLEAN DEFAULT false;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_condition VARCHAR(100) DEFAULT 'FULL_MONTH_PRESENT';"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_reward FLOAT DEFAULT 1.0;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_departments VARCHAR(500) DEFAULT 'ALL';"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_attendance_percentage FLOAT;"))
+            await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_working_days INTEGER;"))
+            await conn.execute(text("ALTER TABLE hrms_holidays ADD COLUMN IF NOT EXISTS department_scope VARCHAR(255) DEFAULT 'ALL';"))
+            await conn.run_sync(
+                Base.metadata.create_all,
+                tables=[
+                    Lead.__table__,
+                    FollowUp.__table__,
+                    HrmsLeavePlan.__table__,
+                    HrmsLeavePlanType.__table__,
+                    HrmsHoliday.__table__,
+                    HrmsEmployeeLeaveBalance.__table__,
+                    HrmsLeaveAdjustment.__table__,
+                    HrmsLeaveRequest.__table__,
+                ],
+            )
+    except Exception as e:
+        logger.warning(f"Startup schema initialization notice: {e}")
 
     # Start the background queue worker (Phase 4).
     worker = get_worker()

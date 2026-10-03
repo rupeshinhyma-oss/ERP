@@ -30,6 +30,9 @@ from app.hrms.models import (
     HrmsAttendancePolicy,
     HrmsAttendanceRegularization,
     HrmsEmployeeLocation,
+    HrmsHoliday,
+    HrmsLeaveRequest,
+    HrmsLeaveType,
     HrmsLocation,
 )
 from app.hrms.schemas import (
@@ -727,7 +730,69 @@ class HrmsAttendanceService:
         start_date = date(year, month, 1)
         end_date = date(year, month, num_days)
 
-        # Query all records for this employee in the month
+        # 1. Resolve employee's branch and department
+        loc_res = await self.db.execute(
+            select(HrmsLocation.name)
+            .join(HrmsEmployeeLocation, HrmsEmployeeLocation.location_id == HrmsLocation.id)
+            .where(
+                HrmsEmployeeLocation.user_id == user_id,
+                HrmsLocation.deleted_at.is_(None),
+            )
+            .order_by(HrmsEmployeeLocation.is_primary.desc())
+            .limit(1)
+        )
+        emp_branch = loc_res.scalar_one_or_none() or "Thane"
+
+        from app.rbac.models import Role, UserRole
+        role_res = await self.db.execute(
+            select(Role.name)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+            .order_by(UserRole.is_primary.desc())
+            .limit(1)
+        )
+        emp_dept = role_res.scalar_one_or_none() or "General"
+
+        # 2. Centralized active holidays in month (Priority 1)
+        holidays_res = await self.db.execute(
+            select(HrmsHoliday).where(
+                HrmsHoliday.deleted_at.is_(None),
+                HrmsHoliday.is_active.is_(True),
+                HrmsHoliday.holiday_date >= start_date,
+                HrmsHoliday.holiday_date <= end_date,
+            )
+        )
+        holidays = holidays_res.scalars().all()
+        holiday_map: dict[date, HrmsHoliday] = {}
+        for h in holidays:
+            app_b = (h.branch_applicability or "All Branches").lower()
+            app_d = (getattr(h, "department_scope", None) or "All Departments").lower()
+            b_match = "all" in app_b or emp_branch.lower() in app_b
+            d_match = "all" in app_d or emp_dept.lower() in app_d
+            if b_match and d_match:
+                holiday_map[h.holiday_date] = h
+
+        # 3. Approved leave requests for employee in month (Priority 3)
+        leaves_res = await self.db.execute(
+            select(HrmsLeaveRequest, HrmsLeaveType.name).join(
+                HrmsLeaveType, HrmsLeaveType.id == HrmsLeaveRequest.leave_type_id
+            ).where(
+                HrmsLeaveRequest.employee_id == user_id,
+                HrmsLeaveRequest.approval_status == "APPROVED",
+                HrmsLeaveRequest.from_date <= end_date,
+                HrmsLeaveRequest.to_date >= start_date,
+            )
+        )
+        leaves = leaves_res.all()
+        leave_map: dict[date, str] = {}
+        for req, lt_name in leaves:
+            cur = max(req.from_date, start_date)
+            req_end = min(req.to_date, end_date)
+            while cur <= req_end:
+                leave_map[cur] = lt_name
+                cur += timedelta(days=1)
+
+        # 4. Attendance records for this employee in month
         res = await self.db.execute(
             select(HrmsAttendance).where(
                 HrmsAttendance.employee_id == user_id,
@@ -739,25 +804,71 @@ class HrmsAttendanceService:
         record_map = {r.attendance_date: r for r in records}
 
         days_list: List[CalendarDayRead] = []
-
         day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-        # Policy-driven Weekly Off (no hardcoded weekend detection, defaults to Sunday only)
+        # Policy-driven Weekly Off (Priority 2)
         policy = await self.get_policy()
         weekly_off_raw = (policy.weekly_off or "Sunday").strip()
         weekly_off_days = {d.strip().capitalize() for d in weekly_off_raw.split(",") if d.strip()}
         if not weekly_off_days:
             weekly_off_days = {"Sunday"}
 
+        # Strict priority evaluation:
+        # 1. Holiday -> 2. Weekly Off -> 3. Approved Leave -> 4. Present/Late/Half Day -> 5. Absent
         for d_num in range(1, num_days + 1):
             cur_date = date(year, month, d_num)
             weekday_idx = cur_date.weekday()
             day_full_name = cur_date.strftime("%A")
             is_weekend = day_full_name in weekly_off_days
-
             rec = record_map.get(cur_date)
 
-            if rec:
+            is_holiday = cur_date in holiday_map
+            is_leave = cur_date in leave_map
+
+            # Priority 1: Holiday
+            if is_holiday:
+                h_name = holiday_map[cur_date].name
+                days_list.append(
+                    CalendarDayRead(
+                        date=cur_date.isoformat(),
+                        day_number=d_num,
+                        day_name=day_names[weekday_idx],
+                        status="HOLIDAY",
+                        holiday_name=h_name,
+                        punch_in=format_time_ist(rec.punch_in) if rec else None,
+                        punch_out=format_time_ist(rec.punch_out) if rec else None,
+                        working_minutes=rec.working_minutes if rec else None,
+                        late_minutes=0,
+                        early_exit_minutes=0,
+                        is_irregular=False,
+                        regularization_status="NONE",
+                        can_regularize=False,
+                        attendance_id=rec.id if rec else None,
+                    )
+                )
+            # Priority 2: Approved Leave
+            elif is_leave:
+                lt_name = leave_map[cur_date]
+                days_list.append(
+                    CalendarDayRead(
+                        date=cur_date.isoformat(),
+                        day_number=d_num,
+                        day_name=day_names[weekday_idx],
+                        status="LEAVE",
+                        leave_type_name=lt_name,
+                        punch_in=format_time_ist(rec.punch_in) if rec else None,
+                        punch_out=format_time_ist(rec.punch_out) if rec else None,
+                        working_minutes=rec.working_minutes if rec else None,
+                        late_minutes=0,
+                        early_exit_minutes=0,
+                        is_irregular=False,
+                        regularization_status="NONE",
+                        can_regularize=False,
+                        attendance_id=rec.id if rec else None,
+                    )
+                )
+            # Priority 3: Actual Punch / Attendance Activity (including worked weekends)
+            elif rec and (rec.punch_in or rec.status in ("PRESENT", "LATE", "HALF_DAY", "IN_PROGRESS", "MISSING_PUNCH") or rec.regularization_status in ("PENDING", "APPROVED")):
                 status = rec.status
                 if cur_date == today and rec.punch_in and not rec.punch_out and rec.status == "PRESENT":
                     status = "IN_PROGRESS"
@@ -781,12 +892,53 @@ class HrmsAttendanceService:
                         attendance_id=rec.id,
                     )
                 )
+            # Priority 4: Weekly Off
+            elif is_weekend:
+                days_list.append(
+                    CalendarDayRead(
+                        date=cur_date.isoformat(),
+                        day_number=d_num,
+                        day_name=day_names[weekday_idx],
+                        status="WEEKEND",
+                        punch_in=format_time_ist(rec.punch_in) if rec else None,
+                        punch_out=format_time_ist(rec.punch_out) if rec else None,
+                        working_minutes=rec.working_minutes if rec else None,
+                        late_minutes=0,
+                        early_exit_minutes=0,
+                        is_irregular=False,
+                        regularization_status="NONE",
+                        can_regularize=False,
+                        attendance_id=rec.id if rec else None,
+                    )
+                )
+            # Priority 5: Other existing record
+            elif rec:
+                status = rec.status
+                if cur_date == today and rec.punch_in and not rec.punch_out and rec.status == "PRESENT":
+                    status = "IN_PROGRESS"
+
+                can_regularize = self._can_regularize_record(rec) if status != "IN_PROGRESS" else False
+
+                days_list.append(
+                    CalendarDayRead(
+                        date=cur_date.isoformat(),
+                        day_number=d_num,
+                        day_name=day_names[weekday_idx],
+                        status=status,
+                        punch_in=format_time_ist(rec.punch_in),
+                        punch_out=format_time_ist(rec.punch_out),
+                        working_minutes=rec.working_minutes,
+                        late_minutes=rec.late_minutes,
+                        early_exit_minutes=rec.early_exit_minutes,
+                        is_irregular=rec.is_irregular,
+                        regularization_status=rec.regularization_status,
+                        can_regularize=can_regularize,
+                        attendance_id=rec.id,
+                    )
+                )
+            # Priority 5: Absent / Not Punched / Future
             else:
-                if is_weekend:
-                    status = "WEEKEND"
-                    can_regularize = False
-                    is_irregular = False
-                elif cur_date < today:
+                if cur_date < today:
                     status = "ABSENT"
                     can_regularize = True
                     is_irregular = False
@@ -839,6 +991,29 @@ class HrmsAttendanceService:
         working_mins = None
         if punch_in_dt and punch_out_dt and punch_out_dt > punch_in_dt:
             working_mins = int((punch_out_dt - punch_in_dt).total_seconds() // 60)
+
+        # Block regularization on holidays
+        holiday_res = await self.db.execute(
+            select(HrmsHoliday).where(
+                HrmsHoliday.deleted_at.is_(None),
+                HrmsHoliday.is_active.is_(True),
+                HrmsHoliday.holiday_date == req_date,
+            )
+        )
+        if holiday_res.scalar_one_or_none():
+            raise BadRequestException("Attendance cannot be regularized for holidays.")
+
+        # Block regularization on approved leave dates
+        leave_res = await self.db.execute(
+            select(HrmsLeaveRequest).where(
+                HrmsLeaveRequest.employee_id == user_id,
+                HrmsLeaveRequest.approval_status == "APPROVED",
+                HrmsLeaveRequest.from_date <= req_date,
+                HrmsLeaveRequest.to_date >= req_date,
+            )
+        )
+        if leave_res.scalar_one_or_none():
+            raise BadRequestException("Attendance cannot be regularized for approved leave days.")
 
         # 1. Query or create attendance record in the same atomic transaction
         query = select(HrmsAttendance).where(

@@ -58,6 +58,12 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("user.view", "user", "users", "view", "ALL", "View user accounts; use search and the Active/Inactive tabs."),
     ("user.create", "user", "users", "create", "ALL", "Create user accounts."),
     ("user.action", "user", "users", "manage", "ALL", "Use the Actions menu on a user row: view details, edit profile, reset password, assign role, permission overrides, activate/deactivate, suspend/unsuspend, unlock, force logout, and delete."),
+    # HRMS Module
+    ("hrms.view", "hrms", "hrms", "view", "ALL", "View HRMS modules: Attendance, Leave, Expenses, Site Visit, Payroll, Setup."),
+    ("hrms.create", "hrms", "hrms", "create", "ALL", "Create leave requests, regularization requests, and HRMS records."),
+    ("hrms.update", "hrms", "hrms", "update", "ALL", "Edit HRMS records, leave types, holidays, and policies."),
+    ("hrms.approve", "hrms", "hrms", "approve", "ALL", "Approve or reject leave requests and attendance regularizations."),
+    ("hrms.manage", "hrms", "hrms", "manage", "ALL", "Full administrative control over HRMS setup, leave types, adjustments, and approvals."),
     # Employee was merged into User (Organization/Employee/IAM upgrade,
     # merge phase) -- there is no separate employee.* permission family
     # anymore. Managing "the employee directory" now means managing users

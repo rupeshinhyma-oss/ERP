@@ -39,12 +39,23 @@ interface HrmsLeaveType {
   id: string;
   name: string;
   code?: string;
+  description?: string;
   leave_type: string;
   is_paid: boolean;
   annual_balance: number;
+  carry_forward_allowed?: boolean;
   carry_forward_days: number;
   max_consecutive_days: number;
   monthly_accrual: boolean;
+  accrual_amount?: number;
+  min_notice_days?: number;
+  allow_half_day?: boolean;
+  allow_backdated?: boolean;
+  require_attachment?: boolean;
+  attendance_based_accrual?: boolean;
+  attendance_based_condition?: string;
+  attendance_based_reward?: number;
+  attendance_based_departments?: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -106,16 +117,30 @@ export function SetupPage() {
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
   const [editingLeave, setEditingLeave] = useState<HrmsLeaveType | null>(null);
 
-  const [leaveForm, setLeaveForm] = useState({
+  const defaultLeaveForm = {
     name: "",
+    code: "",
+    description: "",
     leave_type: "REGULAR",
     is_paid: true,
     annual_balance: 12,
-    carry_forward_days: 0,
-    max_consecutive_days: 5,
     monthly_accrual: false,
+    accrual_amount: 1,
+    max_consecutive_days: 5,
+    min_notice_days: 0,
+    allow_half_day: true,
+    allow_backdated: false,
+    require_attachment: false,
+    carry_forward_allowed: false,
+    carry_forward_days: 0,
+    attendance_based_accrual: false,
+    attendance_based_condition: "Full Month Present",
+    attendance_based_reward: 1,
+    attendance_based_departments: "All Departments",
     is_active: true,
-  });
+  };
+
+  const [leaveForm, setLeaveForm] = useState(defaultLeaveForm);
 
   const fetchLeaveTypes = async () => {
     setLoadingLeaves(true);
@@ -131,16 +156,7 @@ export function SetupPage() {
 
   const openAddLeaveModal = () => {
     setEditingLeave(null);
-    setLeaveForm({
-      name: "",
-      leave_type: "REGULAR",
-      is_paid: true,
-      annual_balance: 12,
-      carry_forward_days: 0,
-      max_consecutive_days: 5,
-      monthly_accrual: false,
-      is_active: true,
-    });
+    setLeaveForm(defaultLeaveForm);
     setLeaveModalOpen(true);
   };
 
@@ -148,12 +164,24 @@ export function SetupPage() {
     setEditingLeave(item);
     setLeaveForm({
       name: item.name,
-      leave_type: item.leave_type,
+      code: item.code || "",
+      description: item.description || "",
+      leave_type: item.leave_type || "REGULAR",
       is_paid: item.is_paid,
-      annual_balance: item.annual_balance,
-      carry_forward_days: item.carry_forward_days,
-      max_consecutive_days: item.max_consecutive_days,
-      monthly_accrual: item.monthly_accrual,
+      annual_balance: item.annual_balance ?? 12,
+      monthly_accrual: Boolean(item.monthly_accrual),
+      accrual_amount: item.accrual_amount ?? 1,
+      max_consecutive_days: item.max_consecutive_days ?? 5,
+      min_notice_days: item.min_notice_days ?? 0,
+      allow_half_day: item.allow_half_day ?? true,
+      allow_backdated: item.allow_backdated ?? false,
+      require_attachment: item.require_attachment ?? false,
+      carry_forward_allowed: Boolean(item.carry_forward_allowed || (item.carry_forward_days && item.carry_forward_days > 0)),
+      carry_forward_days: item.carry_forward_days ?? 0,
+      attendance_based_accrual: Boolean(item.attendance_based_accrual),
+      attendance_based_condition: item.attendance_based_condition || "Full Month Present",
+      attendance_based_reward: item.attendance_based_reward ?? 1,
+      attendance_based_departments: item.attendance_based_departments || "All Departments",
       is_active: item.is_active,
     });
     setLeaveModalOpen(true);
@@ -772,11 +800,11 @@ export function SetupPage() {
                     <thead>
                       <tr>
                         <th>Leave Name</th>
-                        <th>Leave Type</th>
-                        <th>Paid / Unpaid</th>
+                        <th>Code</th>
+                        <th>Category</th>
                         <th>Annual Balance</th>
-                        <th>Carry Forward</th>
                         <th>Max Consecutive</th>
+                        <th>Carry Forward</th>
                         <th>Status</th>
                         <th style={{ textAlign: "right" }}>Actions</th>
                       </tr>
@@ -786,7 +814,12 @@ export function SetupPage() {
                         <tr key={item.id}>
                           <td style={{ fontWeight: 600 }}>{item.name}</td>
                           <td>
-                            <span className="hrms-badge hrms-badge-info">{item.leave_type}</span>
+                            <span className="hrms-badge hrms-badge-info" style={{ fontFamily: "monospace" }}>
+                              {item.code || "—"}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="hrms-badge hrms-badge-neutral">{item.leave_type}</span>
                           </td>
                           <td>
                             {item.is_paid ? (
@@ -795,9 +828,25 @@ export function SetupPage() {
                               <span className="hrms-badge hrms-badge-neutral">Unpaid</span>
                             )}
                           </td>
-                          <td>{item.annual_balance} days</td>
+                          <td>
+                            <div>
+                              <strong>{item.annual_balance} days</strong>
+                              {item.monthly_accrual && (
+                                <span style={{ fontSize: 11, color: "var(--color-muted)", display: "block" }}>
+                                  ({item.accrual_amount ?? 1}d/mo)
+                                </span>
+                              )}
+                              {item.attendance_based_accrual && (
+                                <span style={{ fontSize: 10, background: "#e0f2fe", color: "#0369a1", padding: "1px 5px", borderRadius: 4, display: "inline-block", marginTop: 2 }}>
+                                  +{item.attendance_based_reward ?? 1}d Attn Reward
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <strong>{item.max_consecutive_days}</strong> days
+                          </td>
                           <td>{item.carry_forward_days > 0 ? `${item.carry_forward_days} days` : "No"}</td>
-                          <td>{item.max_consecutive_days} days</td>
                           <td>
                             {item.is_active ? (
                               <span className="hrms-badge hrms-badge-success">Active</span>
@@ -1312,111 +1361,278 @@ export function SetupPage() {
               </div>
 
               <form onSubmit={handleSaveLeave} className="hrms-modal-form">
-                <div className="hrms-modal-body">
-                  <div className="hrms-form-group">
-                    <label>Leave Name *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Casual Leave, Sick Leave, Paternity Leave"
-                      value={leaveForm.name}
-                      onChange={(e) => setLeaveForm({ ...leaveForm, name: e.target.value })}
-                    />
-                  </div>
+                <div className="hrms-modal-body" style={{ maxHeight: "72vh", overflowY: "auto", paddingRight: 8 }}>
+                  {/* Section 1: Basic Information */}
+                  <div style={{ marginBottom: 16 }}>
+                    <h4 style={{ margin: "0 0 10px 0", fontSize: 13, fontWeight: 700, color: "var(--color-primary, #0284c7)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      Basic Information
+                    </h4>
+                    <div className="hrms-form-row">
+                      <div className="hrms-form-group" style={{ flex: 2 }}>
+                        <label>Leave Name *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Casual Leave, Sick Leave, Earned Leave"
+                          value={leaveForm.name}
+                          onChange={(e) => setLeaveForm({ ...leaveForm, name: e.target.value })}
+                        />
+                      </div>
+                      <div className="hrms-form-group" style={{ flex: 1 }}>
+                        <label>Leave Code</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. CL, SL, EL"
+                          value={leaveForm.code}
+                          onChange={(e) => setLeaveForm({ ...leaveForm, code: e.target.value })}
+                        />
+                      </div>
+                    </div>
 
-                  <div className="hrms-form-row">
-                    <div className="hrms-form-group">
-                      <label>Leave Type Category</label>
-                      <select
-                        value={leaveForm.leave_type}
-                        onChange={(e) => setLeaveForm({ ...leaveForm, leave_type: e.target.value })}
-                      >
-                        <option value="REGULAR">Regular</option>
-                        <option value="MEDICAL">Medical / Sick</option>
-                        <option value="EARNED">Earned / Privilege</option>
-                        <option value="SPECIAL">Special / Maternity</option>
-                      </select>
+                    <div className="hrms-form-row">
+                      <div className="hrms-form-group">
+                        <label>Category</label>
+                        <select
+                          value={leaveForm.leave_type}
+                          onChange={(e) => setLeaveForm({ ...leaveForm, leave_type: e.target.value })}
+                        >
+                          <option value="REGULAR">Regular</option>
+                          <option value="MEDICAL">Medical / Sick</option>
+                          <option value="EARNED">Earned / Privilege</option>
+                          <option value="SPECIAL">Special / Maternity</option>
+                        </select>
+                      </div>
+                      <div className="hrms-form-group">
+                        <label>Compensation</label>
+                        <select
+                          value={leaveForm.is_paid ? "paid" : "unpaid"}
+                          onChange={(e) => setLeaveForm({ ...leaveForm, is_paid: e.target.value === "paid" })}
+                        >
+                          <option value="paid">Paid Leave</option>
+                          <option value="unpaid">Unpaid Leave</option>
+                        </select>
+                      </div>
                     </div>
 
                     <div className="hrms-form-group">
-                      <label>Compensation</label>
-                      <select
-                        value={leaveForm.is_paid ? "paid" : "unpaid"}
-                        onChange={(e) => setLeaveForm({ ...leaveForm, is_paid: e.target.value === "paid" })}
-                      >
-                        <option value="paid">Paid Leave</option>
-                        <option value="unpaid">Unpaid Leave</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="hrms-form-row">
-                    <div className="hrms-form-group">
-                      <label>Annual Balance (Days) *</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        required
-                        value={leaveForm.annual_balance}
-                        onChange={(e) =>
-                          setLeaveForm({ ...leaveForm, annual_balance: Number(e.target.value) })
-                        }
-                      />
-                    </div>
-
-                    <div className="hrms-form-group">
-                      <label>Carry Forward Limit (Days)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={leaveForm.carry_forward_days}
-                        onChange={(e) =>
-                          setLeaveForm({ ...leaveForm, carry_forward_days: Number(e.target.value) })
-                        }
+                      <label>Description</label>
+                      <textarea
+                        rows={2}
+                        placeholder="Purpose, policy context, or notes for employees..."
+                        value={leaveForm.description}
+                        onChange={(e) => setLeaveForm({ ...leaveForm, description: e.target.value })}
                       />
                     </div>
                   </div>
 
-                  <div className="hrms-form-row">
-                    <div className="hrms-form-group">
-                      <label>Max Consecutive Days</label>
+                  {/* Section 2: Entitlement & Accrual */}
+                  <div style={{ marginBottom: 16, borderTop: "1px solid var(--color-border, #e2e8f0)", paddingTop: 14 }}>
+                    <h4 style={{ margin: "0 0 10px 0", fontSize: 13, fontWeight: 700, color: "var(--color-primary, #0284c7)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      Entitlement & Accrual
+                    </h4>
+                    <div className="hrms-form-row">
+                      <div className="hrms-form-group">
+                        <label>Annual Quota (Days) *</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          required
+                          value={leaveForm.annual_balance}
+                          onChange={(e) =>
+                            setLeaveForm({ ...leaveForm, annual_balance: Number(e.target.value) })
+                          }
+                        />
+                      </div>
+                      <div className="hrms-form-group">
+                        <label>Monthly Accrual Amount (Days/mo)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          disabled={!leaveForm.monthly_accrual}
+                          value={leaveForm.accrual_amount}
+                          onChange={(e) =>
+                            setLeaveForm({ ...leaveForm, accrual_amount: Number(e.target.value) })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", marginBottom: 6 }}>
                       <input
-                        type="number"
-                        min="1"
-                        value={leaveForm.max_consecutive_days}
-                        onChange={(e) =>
-                          setLeaveForm({ ...leaveForm, max_consecutive_days: Number(e.target.value) })
-                        }
+                        type="checkbox"
+                        checked={leaveForm.monthly_accrual}
+                        onChange={(e) => setLeaveForm({ ...leaveForm, monthly_accrual: e.target.checked })}
+                        style={{ width: "16px", height: "16px" }}
                       />
+                      <span style={{ fontSize: "13px", fontWeight: 500 }}>
+                        Enable Monthly Accrual (Distribute quota monthly rather than lump-sum)
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Section 3: Rules & Policy Constraints */}
+                  <div style={{ marginBottom: 16, borderTop: "1px solid var(--color-border, #e2e8f0)", paddingTop: 14 }}>
+                    <h4 style={{ margin: "0 0 10px 0", fontSize: 13, fontWeight: 700, color: "var(--color-primary, #0284c7)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      Rules & Application Constraints
+                    </h4>
+                    <div className="hrms-form-row">
+                      <div className="hrms-form-group">
+                        <label>Maximum Consecutive Days *</label>
+                        <input
+                          type="number"
+                          min="1"
+                          required
+                          placeholder="e.g. 3, 5, 15, 30"
+                          value={leaveForm.max_consecutive_days}
+                          onChange={(e) =>
+                            setLeaveForm({ ...leaveForm, max_consecutive_days: Number(e.target.value) })
+                          }
+                        />
+                        <span style={{ fontSize: 11, color: "var(--color-muted)" }}>Fully configurable limit per leave type</span>
+                      </div>
+                      <div className="hrms-form-group">
+                        <label>Minimum Notice Days</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={leaveForm.min_notice_days}
+                          onChange={(e) =>
+                            setLeaveForm({ ...leaveForm, min_notice_days: Number(e.target.value) })
+                          }
+                        />
+                        <span style={{ fontSize: 11, color: "var(--color-muted)" }}>Days before leave start date</span>
+                      </div>
                     </div>
 
-                    <div className="hrms-form-group">
-                      <label>Status</label>
-                      <select
-                        value={leaveForm.is_active ? "active" : "inactive"}
-                        onChange={(e) =>
-                          setLeaveForm({ ...leaveForm, is_active: e.target.value === "active" })
-                        }
-                      >
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
-                      </select>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={leaveForm.allow_half_day}
+                          onChange={(e) => setLeaveForm({ ...leaveForm, allow_half_day: e.target.checked })}
+                          style={{ width: "16px", height: "16px" }}
+                        />
+                        <span style={{ fontSize: "13px" }}>Allow Half Day</span>
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={leaveForm.allow_backdated}
+                          onChange={(e) => setLeaveForm({ ...leaveForm, allow_backdated: e.target.checked })}
+                          style={{ width: "16px", height: "16px" }}
+                        />
+                        <span style={{ fontSize: "13px" }}>Allow Backdated Leave</span>
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={leaveForm.require_attachment}
+                          onChange={(e) => setLeaveForm({ ...leaveForm, require_attachment: e.target.checked })}
+                          style={{ width: "16px", height: "16px" }}
+                        />
+                        <span style={{ fontSize: "13px" }}>Require Attachment / Proof</span>
+                      </label>
                     </div>
                   </div>
 
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={leaveForm.monthly_accrual}
-                      onChange={(e) => setLeaveForm({ ...leaveForm, monthly_accrual: e.target.checked })}
-                      style={{ width: "16px", height: "16px" }}
-                    />
-                    <span style={{ fontSize: "13px", fontWeight: 500 }}>
-                      Monthly Accrual (Distribute balance progressively across 12 months)
-                    </span>
-                  </label>
+                  {/* Section 4: Carry Forward */}
+                  <div style={{ marginBottom: 16, borderTop: "1px solid var(--color-border, #e2e8f0)", paddingTop: 14 }}>
+                    <h4 style={{ margin: "0 0 10px 0", fontSize: 13, fontWeight: 700, color: "var(--color-primary, #0284c7)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      Carry Forward
+                    </h4>
+                    <div className="hrms-form-row" style={{ alignItems: "center" }}>
+                      <div className="hrms-form-group">
+                        <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={leaveForm.carry_forward_allowed}
+                            onChange={(e) => setLeaveForm({ ...leaveForm, carry_forward_allowed: e.target.checked })}
+                            style={{ width: "16px", height: "16px" }}
+                          />
+                          <span style={{ fontSize: "13px", fontWeight: 600 }}>Allow Carry Forward to Next Year</span>
+                        </label>
+                      </div>
+                      <div className="hrms-form-group">
+                        <label>Max Carry Forward Days</label>
+                        <input
+                          type="number"
+                          min="0"
+                          disabled={!leaveForm.carry_forward_allowed}
+                          value={leaveForm.carry_forward_days}
+                          onChange={(e) =>
+                            setLeaveForm({ ...leaveForm, carry_forward_days: Number(e.target.value) })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 5: Attendance-Based Extra Leave Accrual (Requirement 8) */}
+                  <div style={{ marginBottom: 16, borderTop: "1px solid var(--color-border, #e2e8f0)", paddingTop: 14, background: "#f8fafc", padding: "12px 14px", borderRadius: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <h4 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "#0369a1", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                        Attendance-Based Extra Leave Accrual
+                      </h4>
+                      <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={leaveForm.attendance_based_accrual}
+                          onChange={(e) => setLeaveForm({ ...leaveForm, attendance_based_accrual: e.target.checked })}
+                          style={{ width: "16px", height: "16px" }}
+                        />
+                        <span style={{ fontSize: "12px", fontWeight: 700, color: leaveForm.attendance_based_accrual ? "#059669" : "var(--color-muted)" }}>
+                          {leaveForm.attendance_based_accrual ? "ENABLED" : "DISABLED"}
+                        </span>
+                      </label>
+                    </div>
+                    {leaveForm.attendance_based_accrual && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 8 }}>
+                        <div className="hrms-form-group">
+                          <label style={{ fontSize: 11 }}>Eligibility Condition</label>
+                          <input
+                            type="text"
+                            placeholder="Full Month Present"
+                            value={leaveForm.attendance_based_condition}
+                            onChange={(e) => setLeaveForm({ ...leaveForm, attendance_based_condition: e.target.value })}
+                          />
+                        </div>
+                        <div className="hrms-form-group">
+                          <label style={{ fontSize: 11 }}>Reward (Days)</label>
+                          <input
+                            type="number"
+                            min="0.5"
+                            step="0.5"
+                            value={leaveForm.attendance_based_reward}
+                            onChange={(e) => setLeaveForm({ ...leaveForm, attendance_based_reward: Number(e.target.value) })}
+                          />
+                        </div>
+                        <div className="hrms-form-group">
+                          <label style={{ fontSize: 11 }}>Applicable Departments</label>
+                          <input
+                            type="text"
+                            placeholder="All Departments or Technical, Operations"
+                            value={leaveForm.attendance_based_departments}
+                            onChange={(e) => setLeaveForm({ ...leaveForm, attendance_based_departments: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Section 6: Status */}
+                  <div className="hrms-form-group" style={{ borderTop: "1px solid var(--color-border, #e2e8f0)", paddingTop: 14 }}>
+                    <label>Status</label>
+                    <select
+                      value={leaveForm.is_active ? "active" : "inactive"}
+                      onChange={(e) =>
+                        setLeaveForm({ ...leaveForm, is_active: e.target.value === "active" })
+                      }
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="hrms-modal-footer">

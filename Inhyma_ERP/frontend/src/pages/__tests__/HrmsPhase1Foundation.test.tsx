@@ -137,12 +137,9 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
       expect(shell.getAttribute("data-active-key")).toBe("hrms-leave");
 
       expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Leave");
-      expect(screen.getByText("Leave Balance")).toBeDefined();
-      expect(screen.getByText("Leave Balance Overview")).toBeDefined();
-      expect(screen.getByText("Apply Leave")).toBeDefined();
-      expect(screen.getByText("Leave Application Form")).toBeDefined();
-      expect(screen.getByText("Leave History")).toBeDefined();
-      expect(screen.getByText("No Leave History")).toBeDefined();
+      expect(screen.getByText("Available Leave Balances")).toBeDefined();
+      expect(screen.getByText("+ Request Leave")).toBeDefined();
+      expect(screen.getByText("Leave Requests")).toBeDefined();
     });
   });
 

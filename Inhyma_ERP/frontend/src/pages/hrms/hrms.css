@@ -646,6 +646,7 @@
 .status-pending { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
 .status-absent { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .status-holiday { background: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe; }
+.status-leave { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
 
 .hrms-cal-day-bottom {
   margin-top: auto;
@@ -1275,17 +1276,24 @@
   border-radius: var(--radius, 10px);
 }
 
-/* Modal Confirmation for Approval Manager Remarks */
-.hrms-modal-backdrop {
+/* Modal Confirmation for Approval Manager Remarks & Actions */
+.hrms-modal-backdrop,
+.hrms-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(4px);
-  z-index: 1000;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(3px);
+  z-index: 2000;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 16px;
+  animation: hrmsBackdropFadeIn 0.15s ease forwards;
+}
+
+@keyframes hrmsBackdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .hrms-action-modal-card {
@@ -1293,10 +1301,24 @@
   border-radius: 12px;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   width: 100%;
-  max-width: 480px;
+  max-width: 540px;
+  max-height: 90vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--color-border, #e2e8f0);
+  animation: hrmsModalScaleIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes hrmsModalScaleIn {
+  from {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .hrms-action-modal-header {
@@ -1305,6 +1327,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: #ffffff;
 }
 
 .hrms-action-modal-body {
@@ -1312,6 +1335,8 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow-y: auto;
+  max-height: calc(90vh - 140px);
 }
 
 .hrms-action-modal-footer {
@@ -1323,5 +1348,289 @@
   justify-content: flex-end;
   gap: 10px;
 }
+
+@media (max-width: 640px) {
+  .hrms-action-modal-card {
+    max-width: 100% !important;
+    max-height: 94vh;
+    margin: 8px;
+    border-radius: 10px;
+  }
+}
+
+/* ==========================================================================
+   HRMS Leave Management — Phase 1 Styles
+   ========================================================================== */
+
+.hrms-leave-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.hrms-leave-stat-card {
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius, 10px);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hrms-leave-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.hrms-leave-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, #1e293b);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hrms-leave-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  text-align: center;
+  background: var(--color-bg, #f8fafc);
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.hrms-metric-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.hrms-metric-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text, #0f172a);
+}
+
+.hrms-metric-val.available {
+  color: #059669;
+}
+
+.hrms-metric-val.consumed {
+  color: #d97706;
+}
+
+.hrms-metric-lbl {
+  font-size: 10.5px;
+  color: var(--color-muted, #64748b);
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* Leave Filters Bar */
+.hrms-leave-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius, 8px);
+  margin-bottom: 16px;
+}
+
+/* Adjustment Matrix Table with Sticky Columns */
+.hrms-matrix-wrapper {
+  position: relative;
+  overflow-x: auto;
+  max-width: 100%;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius, 8px);
+  background: var(--color-surface, #ffffff);
+}
+
+.hrms-matrix-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.hrms-matrix-table th,
+.hrms-matrix-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border, #f1f5f9);
+  white-space: nowrap;
+}
+
+.hrms-matrix-table thead tr:first-child th {
+  background: var(--color-bg, #f8fafc);
+  font-weight: 700;
+  color: var(--color-text, #1e293b);
+  border-bottom: 2px solid var(--color-border, #e2e8f0);
+  text-align: center;
+}
+
+.hrms-matrix-table thead tr:last-child th {
+  background: #f1f5f9;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-muted, #64748b);
+  border-bottom: 1px solid var(--color-border, #cbd5e1);
+  text-align: center;
+}
+
+.hrms-sticky-left {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--color-surface, #ffffff) !important;
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.05);
+}
+
+thead .hrms-sticky-left {
+  background: var(--color-bg, #f8fafc) !important;
+  z-index: 6;
+}
+
+.hrms-sticky-right {
+  position: sticky;
+  right: 0;
+  z-index: 5;
+  background: var(--color-surface, #ffffff) !important;
+  box-shadow: -2px 0 6px rgba(0, 0, 0, 0.05);
+  text-align: center;
+}
+
+thead .hrms-sticky-right {
+  background: var(--color-bg, #f8fafc) !important;
+  z-index: 6;
+}
+
+.hrms-matrix-table tbody tr:hover td {
+  background-color: #f8fafc;
+}
+
+.hrms-matrix-table tbody tr:hover .hrms-sticky-left,
+.hrms-matrix-table tbody tr:hover .hrms-sticky-right {
+  background-color: #f8fafc !important;
+}
+
+.hrms-matrix-num {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.hrms-matrix-num.available {
+  color: #059669;
+  font-weight: 600;
+}
+
+.hrms-matrix-num.consumed {
+  color: #b45309;
+}
+
+/* Status Badges */
+.hrms-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.hrms-badge-pending {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.hrms-badge-approved {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.hrms-badge-rejected {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.hrms-badge-cancelled {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.hrms-badge-reversed {
+  background: #f3e8ff;
+  color: #6b21a8;
+  border: 1px solid #e9d5ff;
+}
+
+.hrms-badge-active {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.hrms-badge-inactive {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
+/* Live Adjustment Preview Box */
+.hrms-calc-preview {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  margin-top: 10px;
+  margin-bottom: 12px;
+}
+
+.hrms-calc-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hrms-calc-step-lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: #166534;
+  text-transform: uppercase;
+}
+
+.hrms-calc-step-val {
+  font-size: 18px;
+  font-weight: 800;
+  color: #14532d;
+  margin-top: 2px;
+}
+
+.hrms-calc-operator {
+  font-size: 20px;
+  font-weight: 700;
+  color: #15803d;
+}
+
 
 

@@ -59,12 +59,33 @@ class LocationRead(LocationBase):
 class LeaveTypeBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Leave name e.g. Casual Leave")
     code: str | None = Field(default=None, max_length=50)
+    description: str | None = None
     leave_type: str = Field(default="REGULAR", max_length=50)
     is_paid: bool = Field(default=True, description="True for paid, False for unpaid")
     annual_balance: float = Field(default=12.0, ge=0)
+    carry_forward_allowed: bool = Field(default=False)
     carry_forward_days: float = Field(default=0.0, ge=0)
-    max_consecutive_days: int = Field(default=5, ge=1)
+    max_consecutive_days: int = Field(default=5, ge=0, description="0 = No Limit")
     monthly_accrual: bool = Field(default=False)
+    accrual_amount: float = Field(default=1.0, ge=0)
+    min_notice_days: int = Field(default=0, ge=0)
+    allow_half_day: bool = Field(default=True)
+    allow_backdated: bool = Field(default=True)
+    require_attachment: bool = Field(default=False)
+    attendance_based_accrual: bool = Field(default=False)
+    attendance_based_condition: str | None = Field(default="FULL_MONTH_PRESENT")
+    attendance_based_reward: float = Field(default=1.0, ge=0)
+    attendance_based_departments: str | None = Field(default="ALL")
+    min_attendance_percentage: float | None = None
+    min_working_days: int | None = None
+    allocation_unit: str = Field(default="DAYS", max_length=20)
+    accrual_frequency: str = Field(default="MONTHLY", max_length=20)
+    applicable_to: str = Field(default="ALL", max_length=50)
+    applicable_departments: str | None = Field(default="ALL")
+    applicable_branches: str | None = Field(default="ALL")
+    count_weekends_as_leave: bool = Field(default=False)
+    count_holidays_as_leave: bool = Field(default=False)
+    allow_negative_balance: bool = Field(default=False)
     is_active: bool = Field(default=True)
 
 
@@ -75,12 +96,33 @@ class LeaveTypeCreate(LeaveTypeBase):
 class LeaveTypeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     code: str | None = None
+    description: str | None = None
     leave_type: str | None = None
     is_paid: bool | None = None
     annual_balance: float | None = Field(default=None, ge=0)
+    carry_forward_allowed: bool | None = None
     carry_forward_days: float | None = Field(default=None, ge=0)
-    max_consecutive_days: int | None = Field(default=None, ge=1)
+    max_consecutive_days: int | None = Field(default=None, ge=0)
     monthly_accrual: bool | None = None
+    accrual_amount: float | None = Field(default=None, ge=0)
+    min_notice_days: int | None = Field(default=None, ge=0)
+    allow_half_day: bool | None = None
+    allow_backdated: bool | None = None
+    require_attachment: bool | None = None
+    attendance_based_accrual: bool | None = None
+    attendance_based_condition: str | None = None
+    attendance_based_reward: float | None = Field(default=None, ge=0)
+    attendance_based_departments: str | None = None
+    min_attendance_percentage: float | None = None
+    min_working_days: int | None = None
+    allocation_unit: str | None = None
+    accrual_frequency: str | None = None
+    applicable_to: str | None = None
+    applicable_departments: str | None = None
+    applicable_branches: str | None = None
+    count_weekends_as_leave: bool | None = None
+    count_holidays_as_leave: bool | None = None
+    allow_negative_balance: bool | None = None
     is_active: bool | None = None
 
 
@@ -343,6 +385,8 @@ class CalendarDayRead(BaseModel):
     day_number: int
     day_name: str
     status: str  # PRESENT, LATE, HALF_DAY, MISSING_PUNCH, IN_PROGRESS, WEEKEND, HOLIDAY, LEAVE
+    holiday_name: str | None = None
+    leave_type_name: str | None = None
     punch_in: str | None = None
     punch_out: str | None = None
     working_minutes: int | None = None
@@ -408,4 +452,220 @@ class RegularizationRead(BaseModel):
     action_taken: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Leave Plan Schemas
+# ---------------------------------------------------------------------------
+
+class LeavePlanCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=150, description="Plan name e.g. Corporate Standard Plan")
+    effective_from: date
+    effective_to: date
+    branch: str = Field(default="All Branches", max_length=100)
+    department: str = Field(default="All Departments", max_length=100)
+    leave_type_ids: list[uuid.UUID] = Field(default_factory=list)
+    is_active: bool = Field(default=True)
+
+
+class LeavePlanUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=150)
+    effective_from: date | None = None
+    effective_to: date | None = None
+    branch: str | None = None
+    department: str | None = None
+    leave_type_ids: list[uuid.UUID] | None = None
+    is_active: bool | None = None
+
+
+class LeavePlanStatusUpdate(BaseModel):
+    is_active: bool
+
+
+class LeavePlanRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    effective_from: date
+    effective_to: date
+    branch: str
+    department: str
+    is_active: bool
+    leave_type_ids: list[uuid.UUID] = Field(default_factory=list)
+    leave_types: list[LeaveTypeRead] = Field(default_factory=list)
+    created_by: uuid.UUID | None = None
+    created_by_name: str | None = None
+    updated_by: uuid.UUID | None = None
+    updated_by_name: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    version: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Holiday Schemas
+# ---------------------------------------------------------------------------
+
+class HolidayCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=150, description="Holiday name e.g. Diwali")
+    holiday_date: date
+    number_of_days: int = Field(default=1, ge=1)
+    branch_applicability: str = Field(default="All Branches", max_length=255)
+    department_scope: str | None = Field(default="ALL", max_length=255)
+    is_active: bool = Field(default=True)
+
+
+class HolidayUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=150)
+    holiday_date: date | None = None
+    number_of_days: int | None = Field(default=None, ge=1)
+    branch_applicability: str | None = None
+    department_scope: str | None = None
+    is_active: bool | None = None
+
+
+class HolidayRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    holiday_date: date
+    number_of_days: int
+    branch_applicability: str
+    department_scope: str | None = "ALL"
+    is_active: bool
+    created_by: uuid.UUID | None = None
+    created_by_name: str | None = None
+    updated_by: uuid.UUID | None = None
+    updated_by_name: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    version: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Leave Balance & Adjustment Schemas
+# ---------------------------------------------------------------------------
+
+class EmployeeLeaveBalanceRead(BaseModel):
+    id: uuid.UUID
+    employee_id: uuid.UUID
+    employee_name: str
+    employee_code: str | None = None
+    branch: str | None = None
+    department: str | None = None
+    leave_type_id: uuid.UUID
+    leave_type_name: str
+    leave_type_code: str | None = None
+    year: int
+    allocated: float
+    consumed: float
+    adjusted: float
+    available: float
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LeaveBalanceSummary(BaseModel):
+    allocated: float
+    consumed: float
+    adjusted: float
+    available: float
+    total_leave: float
+
+
+class EmployeeLeaveAdjustmentRow(BaseModel):
+    employee_id: uuid.UUID
+    employee_name: str
+    employee_code: str | None = None
+    branch: str | None = None
+    department: str | None = None
+    balances: dict[str, LeaveBalanceSummary] = Field(default_factory=dict)
+
+
+class LeaveAdjustmentCreate(BaseModel):
+    employee_id: uuid.UUID
+    leave_type_id: uuid.UUID
+    adjustment_type: str = Field(..., description="ADD, DEDUCT, or CORRECTION")
+    amount: float = Field(..., description="Amount or target value")
+    reason: str = Field(..., min_length=1, description="Audit reason for manual balance change")
+    year: int = Field(default=2026)
+
+
+class LeaveAdjustmentHistoryRead(BaseModel):
+    id: uuid.UUID
+    employee_id: uuid.UUID
+    employee_name: str | None = None
+    leave_type_id: uuid.UUID
+    leave_type_name: str | None = None
+    adjustment_type: str
+    amount: float
+    previous_balance: float
+    new_balance: float
+    reason: str
+    adjusted_by: uuid.UUID | None = None
+    adjusted_by_name: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Leave Request & Approval Schemas
+# ---------------------------------------------------------------------------
+
+class LeaveRequestCreate(BaseModel):
+    leave_type_id: uuid.UUID
+    from_date: date
+    to_date: date
+    reason: str = Field(..., min_length=1, description="Reason for leave")
+    attachment: str | None = None
+
+
+class LeaveApprovalAction(BaseModel):
+    approval_remarks: str | None = None
+
+
+class LeaveRequestRead(BaseModel):
+    id: uuid.UUID
+    employee_id: uuid.UUID
+    employee_name: str
+    employee_code: str | None = None
+    branch: str | None = None
+    department: str | None = None
+    leave_type_id: uuid.UUID
+    leave_type_name: str
+    leave_type_code: str | None = None
+    from_date: date
+    to_date: date
+    number_of_days: float
+    reason: str
+    attachment: str | None = None
+    status: str
+    approval_status: str
+    created_by: uuid.UUID | None = None
+    created_by_name: str | None = None
+    updated_by: uuid.UUID | None = None
+    updated_by_name: str | None = None
+    approved_by: uuid.UUID | None = None
+    approved_by_name: str | None = None
+    approval_remarks: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LeaveDayCalculationRead(BaseModel):
+    from_date: date
+    to_date: date
+    number_of_days: float
+    total_calendar_days: int
+    weekly_off_days: int
+    holiday_days: int
+    holiday_names: list[str] = Field(default_factory=list)
+
 

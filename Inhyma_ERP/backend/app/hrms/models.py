@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import uuid
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import (
     Base,
@@ -73,10 +73,41 @@ class HrmsLeaveType(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, 
     leave_type: Mapped[str] = mapped_column(String(50), default="REGULAR", nullable=False)
     is_paid: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     annual_balance: Mapped[float] = mapped_column(Float, default=12.0, nullable=False)
+    carry_forward_allowed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     carry_forward_days: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     max_consecutive_days: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     monthly_accrual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    accrual_amount: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    min_notice_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    allow_half_day: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    allow_backdated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    require_attachment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    attendance_based_accrual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    attendance_based_condition: Mapped[str | None] = mapped_column(String(100), default="FULL_MONTH_PRESENT", nullable=True)
+    attendance_based_reward: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    attendance_based_departments: Mapped[str | None] = mapped_column(String(500), default="ALL", nullable=True)
+    min_attendance_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    min_working_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    allocation_unit: Mapped[str] = mapped_column(String(20), default="DAYS", nullable=False)
+    accrual_frequency: Mapped[str] = mapped_column(String(20), default="MONTHLY", nullable=False)
+    applicable_to: Mapped[str] = mapped_column(String(50), default="ALL", nullable=False)
+    applicable_departments: Mapped[str | None] = mapped_column(String(500), default="ALL", nullable=True)
+    applicable_branches: Mapped[str | None] = mapped_column(String(500), default="ALL", nullable=True)
+    count_weekends_as_leave: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    count_holidays_as_leave: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    allow_negative_balance: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    @property
+    def annual_entitlement(self) -> float:
+        return self.annual_balance
+
+    @property
+    def max_carry_forward(self) -> float:
+        return self.carry_forward_days
 
 
 class HrmsExpenseCategory(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin):
@@ -229,5 +260,163 @@ class HrmsAttendanceRegularization(Base, UUIDPrimaryKeyMixin, TimestampMixin, Ve
     )
     manager_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     action_taken: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+# ===========================================================================
+# HRMS Leave Management (Phase 1: Foundation & Master Data)
+# ===========================================================================
+
+class HrmsLeavePlan(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin):
+    """
+    Corporate Leave Plans determining applicable leave types by branch and department.
+    """
+
+    __tablename__ = "hrms_leave_plans"
+
+    name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date] = mapped_column(Date, nullable=False)
+    branch: Mapped[str] = mapped_column(String(100), default="All Branches", nullable=False)
+    department: Mapped[str] = mapped_column(String(100), default="All Departments", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    leave_types: Mapped[list["HrmsLeaveType"]] = relationship(
+        "HrmsLeaveType",
+        secondary="hrms_leave_plan_types",
+        backref="leave_plans",
+        lazy="selectin",
+    )
+
+
+class HrmsLeavePlanType(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Many-to-many junction table between Leave Plans and assigned Leave Types.
+    """
+
+    __tablename__ = "hrms_leave_plan_types"
+
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("hrms_leave_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    leave_type_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("hrms_leave_types.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("plan_id", "leave_type_id", name="uq_hrms_leave_plan_types_plan_leave"),
+    )
+
+
+class HrmsHoliday(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin):
+    """
+    Corporate Holiday master with branch-specific or global applicability.
+    """
+
+    __tablename__ = "hrms_holidays"
+
+    name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
+    holiday_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    number_of_days: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    branch_applicability: Mapped[str] = mapped_column(String(255), default="All Branches", nullable=False)
+    department_scope: Mapped[str | None] = mapped_column(String(255), default="ALL", nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class HrmsEmployeeLeaveBalance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Employee leave quotas, consumption, adjustments, and available balances.
+    available = allocated + adjusted - consumed
+    """
+
+    __tablename__ = "hrms_employee_leave_balances"
+
+    employee_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    leave_type_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("hrms_leave_types.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    year: Mapped[int] = mapped_column(Integer, default=2026, nullable=False, index=True)
+    allocated: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    consumed: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    adjusted: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "leave_type_id", "year", name="uq_hrms_emp_leave_balance_year"),
+    )
+
+    @property
+    def available(self) -> float:
+        return round(self.allocated + self.adjusted - self.consumed, 2)
+
+
+class HrmsLeaveAdjustment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Audit log / transaction history for manual balance adjustments.
+    """
+
+    __tablename__ = "hrms_leave_adjustments"
+
+    employee_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    leave_type_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("hrms_leave_types.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    adjustment_type: Mapped[str] = mapped_column(String(20), nullable=False)  # ADD, DEDUCT, CORRECTION
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    previous_balance: Mapped[float] = mapped_column(Float, nullable=False)
+    new_balance: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    adjusted_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class HrmsLeaveRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Employee leave requests, approvals, and workflow state.
+    """
+
+    __tablename__ = "hrms_leave_requests"
+
+    employee_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    leave_type_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("hrms_leave_types.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    from_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    to_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    number_of_days: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="PENDING", nullable=False, index=True)
+    approval_status: Mapped[str] = mapped_column(String(50), default="PENDING", nullable=False, index=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    approval_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    leave_type: Mapped["HrmsLeaveType"] = relationship("HrmsLeaveType", lazy="selectin")
+
 
 

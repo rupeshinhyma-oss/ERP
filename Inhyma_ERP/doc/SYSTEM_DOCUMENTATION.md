@@ -37,6 +37,7 @@
    - 8.17. [Inventory: Stock Adjustment & Order PDF Generation](#817-inventory-stock-adjustment--order-pdf-generation)
    - 8.18. [Contact: Companies & Multi-Contact Directory](#818-contact-companies--multi-contact-directory)
    - 8.19. [Task: Technical Tasks & Field Service Dispatch](#819-task-technical-tasks--field-service-dispatch)
+   - 8.20. [HRMS: Leave Management Foundation & Master Data Architecture (Phase 1)](#820-hrms-leave-management-foundation--master-data-architecture-phase-1)
 
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
@@ -703,6 +704,54 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Call Type Classifications: `Installation`, `Preventive Maintenance`, `Breakdown Service`, `Warranty Inspection`, `Post-Warranty Overhaul`.
   - Service Modes: `On-Site Client Visit`, `Remote Diagnostic Support`, `Workshop Repair`.
   - Technician Allotment: Searchable technician assignment linked to employee directory with scheduled service visit dates.
+
+### 8.20. HRMS: Leave Management Foundation & Master Data Architecture (Phase 1)
+- **Files:**
+  - Backend: `backend/app/hrms/models.py`, `backend/app/hrms/leave_service.py`, `backend/app/hrms/leave_routes.py`, `backend/app/hrms/schemas.py`, `backend/app/hrms/service.py`.
+  - Frontend: `frontend/src/pages/hrms/LeavePage.tsx`, `frontend/src/pages/hrms/hrms.css`.
+  - Migrations: `backend/alembic/versions/i1a2b3c4d5eb_create_hrms_leave_phase1_tables.py`.
+- **Endpoints (`/api/v1/hrms/leave`):**
+  - **Leave Types Master:**
+    - `GET /types`: List all leave types with active/inactive status.
+    - `POST /types`: Create leave type (name, code, paid/unpaid, annual quota, carry-forward, max consecutive days, monthly accrual).
+    - `PUT /types/{id}`: Update leave type configuration.
+    - `DELETE /types/{id}`: Deactivate/soft-delete leave type.
+  - **Leave Plans Master:**
+    - `GET /plans`: List leave plans with associated types, branch, and department scope.
+    - `POST /plans`: Create leave plan linking multiple leave types to branch/department.
+    - `PUT /plans/{id}`: Update leave plan and type mappings.
+    - `DELETE /plans/{id}`: Deactivate leave plan.
+  - **Holidays Master:**
+    - `GET /holidays`: List company holidays filtered by branch and year.
+    - `POST /holidays`: Register holiday with date, number of days, and applicable branch IDs.
+    - `PUT /holidays/{id}`: Update holiday details.
+    - `DELETE /holidays/{id}`: Delete holiday record.
+  - **Employee Balances & Matrix:**
+    - `GET /balances`: Retrieve employee leave balances by year (`applicable_period`).
+    - `GET /balances/matrix`: High-density pivot matrix mapping each employee to all active leave types (`consumed`, `available`, `total_leave`).
+  - **Leave Adjustments & Audit Trail:**
+    - `POST /adjustments`: Perform manual positive, negative, or corrective balance adjustments with mandatory reason logging.
+    - `GET /adjustments/history`: Immutable audit trail showing previous balance, adjustment amount, resulting balance, reason, and admin actor.
+  - **Leave Requests Workflow:**
+    - `GET /requests`: List leave requests with employee, type, and status filtering.
+    - `POST /requests`: Submit leave application with automated day calculation (excluding branch holidays and weekly offs), overlap validation, and balance checks.
+    - `POST /requests/{id}/cancel`: Cancel leave request; restores consumed balance if previously approved.
+  - **Leave Approvals Queue:**
+    - `GET /approvals`: Filter pending and processed approvals for authorized managers.
+    - `PATCH /approvals/{id}/approve`: Approve leave request; increments consumed balance and decrements available balance. Blocks self-approval.
+    - `PATCH /approvals/{id}/reject`: Reject leave request with mandatory remarks; balance remains unchanged. Blocks self-approval.
+- **Data Models:**
+  - `HrmsLeaveType`: Master leave categories (`Casual Leave`, `Compensatory Off`, `Earned Leave`, `Leave Without Pay`, `Maternity Leave`, `Paternity Leave`, `Sabbatical Leave`, `Sick Leave`).
+  - `HrmsLeavePlan` & `HrmsLeavePlanType`: Policy containers defining multi-type entitlements applicable by Branch and Department.
+  - `HrmsHoliday`: Calendar holidays scoped to specific organizational branches.
+  - `HrmsEmployeeLeaveBalance`: Year-wise employee quotas tracking `allocated`, `consumed`, `adjusted`, and `applicable_period`. Available balance is strictly derived:
+    $$\text{Available} = \text{Allocated} + \text{Adjusted} - \text{Consumed}$$
+  - `HrmsLeaveAdjustment`: Immutable audit records tracking every manual adjustment (+/-), previous balance, new balance, reason, and administrator user.
+  - `HrmsLeaveRequest`: Employee applications tracking date span, days count, reason, attachment, review workflow status (`PENDING`, `APPROVED`, `REJECTED`, `CANCELLED`), reviewer remarks, and timestamps.
+- **Frontend Architecture & UX:**
+  - 6 dedicated tabs: `My Leaves`, `Leave Approvals`, `Holiday`, `Leave Adjustment`, `Leave Plans`, `Leave Types`.
+  - Matrix table features sticky left columns (`Employee`) and sticky right columns (`Action`) for frictionless horizontal scrolling across dense leave types.
+  - Real-time adjustment drawer preview dynamically calculating resulting balances before commit.
 
 ---
 
