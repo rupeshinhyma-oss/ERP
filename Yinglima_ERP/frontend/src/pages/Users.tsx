@@ -961,7 +961,7 @@ export function UsersPage() {
           <div>
             <h1>User Accounts &amp; Passwords</h1>
             <div className="page-subtitle">
-              Viewing users provisioned for Yinglima ERP. User accounts, access provisioning, and active/disabled status are governed centrally from the ERP_Main Global Control Panel.
+              Viewing users provisioned for this ERP application. User accounts, access provisioning, and active/disabled status are governed centrally from the ERP_Main Global Control Panel.
             </div>
           </div>
           <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>

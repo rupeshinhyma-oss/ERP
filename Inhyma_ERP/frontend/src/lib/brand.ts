@@ -44,16 +44,25 @@ export function invalidateBrandNameCache(): void {
 }
 
 export async function resolveBrandName(): Promise<string> {
-  // Directly fetch company name from ERP Settings
+  // Directly fetch company name from ERP Settings (public or authenticated)
   try {
-    const { data } = await apiGet<Organization>("/organizations");
+    const { data } = await apiGet<{ company_name?: string }>("/organizations/public");
     if (data?.company_name) {
       const name = data.company_name.trim();
       setBrandName(name);
       return name;
     }
   } catch {
-    // Non-blocking fallback to cached or default
+    try {
+      const { data } = await apiGet<Organization>("/organizations");
+      if (data?.company_name) {
+        const name = data.company_name.trim();
+        setBrandName(name);
+        return name;
+      }
+    } catch {
+      // Non-blocking fallback to cached or default
+    }
   }
 
   const fallback = getCachedBrandName();

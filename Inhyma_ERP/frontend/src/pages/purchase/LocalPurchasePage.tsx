@@ -5,6 +5,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { DatePicker } from "@/components/DatePicker";
 import { useToast } from "@/lib/toast";
 import { apiPost } from "@/lib/api";
+import { getCachedBrandName } from "@/lib/brand";
 
 export interface LocalPurchaseItem {
   id: string;
@@ -102,7 +103,7 @@ export const INITIAL_PURCHASE_ORDERS: PurchaseOrderRecord[] = [
     supplier_email: "8799513908",
     supplier_phone: "",
     supplier_gst: "24ACSF51727J1ZB",
-    to_name: "INHYMA SOLUTIONS LLP (M)",
+    to_name: `${getCachedBrandName().toUpperCase()} (M)`,
     to_address:
       "4th Floor, Office No 421, Supremus - [I, Road No- 22, Near Passport Office, Wagle Estate",
     to_email: "Payment.Darsh@Gmail.Com",
@@ -312,7 +313,7 @@ function getOrderDisplayDetails(order: PurchaseOrderRecord) {
       ? "24AABCG5566K1Z9"
       : "27AAECK9988P1Z4");
 
-  const toName = order.to_name || "INHYMA SOLUTIONS LLP (M)";
+  const toName = order.to_name || `${getCachedBrandName().toUpperCase()} (M)`;
   const toAddress =
     order.to_address ||
     "4th Floor, Office No 421, Supremus - [I, Road No- 22, Near Passport Office, Wagle Estate";

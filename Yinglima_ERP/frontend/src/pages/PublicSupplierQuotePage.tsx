@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { getCachedBrandName, resolveBrandName } from "@/lib/brand";
 
 interface RFQDetails {
   item_id: string;
@@ -60,6 +61,11 @@ export default function PublicSupplierQuotePage() {
   const [remarks, setRemarks] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submittedData, setSubmittedData] = useState<any | null>(null);
+  const [brandName, setBrandName] = useState(() => getCachedBrandName());
+
+  useEffect(() => {
+    resolveBrandName().then(setBrandName);
+  }, []);
 
   useEffect(() => {
     if (!token) {
@@ -173,7 +179,7 @@ export default function PublicSupplierQuotePage() {
         <div style={{ background: "#ffffff", padding: "20px 24px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: "18px", fontWeight: 800, color: "#0061f2", display: "flex", alignItems: "center", gap: "6px" }}>
-              <span>⚡</span> Yinglima ERP
+              <span>⚡</span> {brandName || "ERP"}
             </div>
             <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Request For Quotation (RFQ) Portal</div>
           </div>
@@ -444,7 +450,7 @@ export default function PublicSupplierQuotePage() {
 
         {/* Footer */}
         <div style={{ textAlign: "center", fontSize: "11.5px", color: "#94a3b8", marginTop: "24px" }}>
-          Powered by Yinglima Enterprise Resource Planning • Secure Supplier Network
+          Powered by {brandName || "Enterprise Resource Planning"} • Secure Supplier Network
         </div>
       </div>
     </div>

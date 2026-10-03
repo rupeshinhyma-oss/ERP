@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import type { StockTransferItem, StockTransferLineItem } from "@/pages/StockTransferPage";
+import { getCachedBrandName } from "@/lib/brand";
 
 /**
  * Format currency matching legacy ERP Transfer PDF:
@@ -73,7 +74,7 @@ export function generateStockTransferPdf(
   doc.setProperties({
     title: `Transfer No : ${srNo}`,
     subject: "Stock Transfer Order",
-    author: "Inhyma Solutions LLP",
+    author: getCachedBrandName(),
   });
 
   // 1. Header with double horizontal rules

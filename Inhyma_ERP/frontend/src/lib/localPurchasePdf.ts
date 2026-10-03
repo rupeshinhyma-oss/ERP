@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import type { PurchaseOrderRecord, LocalPurchaseItem } from "@/pages/purchase/LocalPurchasePage";
+import { getCachedBrandName } from "@/lib/brand";
 
 export function formatIndianCurrency(amount: number): string {
   return "₹ " + (amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,7 +35,7 @@ export function generateLocalPurchaseBillPdf(
   doc.setProperties({
     title: `Bill File: ${invoiceNo}`,
     subject: "Local Purchase Bill / Tax Invoice",
-    author: "Inhyma Solutions LLP",
+    author: getCachedBrandName(),
   });
 
   doc.setDrawColor(203, 213, 225);
@@ -105,7 +106,7 @@ export function generateLocalPurchaseBillPdf(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text(order.to_name || "INHYMA SOLUTIONS LLP (M)", rightX + 4, currentY + 11.5);
+  doc.text(order.to_name || `${getCachedBrandName().toUpperCase()} (M)`, rightX + 4, currentY + 11.5);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
@@ -301,7 +302,7 @@ export function generateLocalPurchaseBillPdf(
 
   const sigRightX = margin + sigBoxW + 10;
   doc.line(sigRightX, currentY + 12, sigRightX + sigBoxW, currentY + 12);
-  doc.text("For INHYMA SOLUTIONS LLP (Verified & Received)", sigRightX, currentY + 16);
+  doc.text(`For ${getCachedBrandName().toUpperCase()} (Verified & Received)`, sigRightX, currentY + 16);
 
   // Output options
   if (options?.saveFile) {

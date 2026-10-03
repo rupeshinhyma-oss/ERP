@@ -253,7 +253,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "hrms-setup": "HRMS Setup",
 };
 
-export const DEFAULT_BRAND_NAME = "Inhyma";
+export const DEFAULT_BRAND_NAME = "ERP";
 
 /** Flat lookup of every nav item by key, for the page-access check. */
 export const NAV_ITEMS_BY_KEY: Record<string, NavItem | NavSubItem> = NAV_SECTIONS.reduce(

@@ -6,6 +6,7 @@ import { useToast } from "@/lib/toast";
 import { apiPost } from "@/lib/api";
 import { DatePicker } from "@/components/DatePicker";
 import { formatIndianCurrency, formatUsdCurrency } from "@/lib/importPurchasePdf";
+import { getCachedBrandName } from "@/lib/brand";
 
 export interface ImportPurchaseItem {
   id: string;
@@ -386,7 +387,7 @@ export const INITIAL_IMPORT_ORDERS: ImportPurchaseRecord[] = [
     supplier_email: "9654123654",
     supplier_phone: "",
     supplier_gst: "07ABCDE1234F1Z5",
-    to_name: "INHYMA SOLUTIONS LLP (M)",
+    to_name: `${getCachedBrandName().toUpperCase()} (M)`,
     to_address: "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate",
     to_email: "Payment.Darsh@Gmail.Com",
     to_phone: "9653261742",
@@ -437,7 +438,7 @@ export const INITIAL_IMPORT_ORDERS: ImportPurchaseRecord[] = [
     supplier_email: "9654123654",
     supplier_phone: "",
     supplier_gst: "07ABCDE1234F1Z5",
-    to_name: "INHYMA SOLUTIONS LLP (M)",
+    to_name: `${getCachedBrandName().toUpperCase()} (M)`,
     to_address: "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate",
     to_email: "Payment.Darsh@Gmail.Com",
     to_phone: "9653261742",
@@ -2999,7 +3000,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                           <div><span style={{ fontWeight: 600 }}>GST No: </span>{selectedOrder.supplier_gst || "07ABCDE1234F1Z5"}</div>
                         </td>
                         <td style={{ padding: "10px 12px", verticalAlign: "top", color: "#334155", lineHeight: "1.7" }}>
-                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "2px" }}>{selectedOrder.to_name || "INHYMA SOLUTIONS LLP (M)"}</div>
+                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "2px" }}>{selectedOrder.to_name || `${getCachedBrandName().toUpperCase()} (M)`}</div>
                           <div>{selectedOrder.to_address || "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate"}</div>
                           <div><span style={{ fontWeight: 600 }}>Email: </span>{selectedOrder.to_email || "Payment.Darsh@Gmail.Com"}</div>
                           <div><span style={{ fontWeight: 600 }}>Phone: </span>{selectedOrder.to_phone || "9653261742"}</div>

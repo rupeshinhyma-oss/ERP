@@ -157,7 +157,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "403": "Access Restricted",
 };
 
-export const DEFAULT_BRAND_NAME = "YINGLIMA";
+export const DEFAULT_BRAND_NAME = "ERP";
 
 /** Flat lookup of every nav item by key, for the page-access check. */
 export const NAV_ITEMS_BY_KEY: Record<string, NavItem | NavSubItem> = NAV_SECTIONS.reduce(
