@@ -110,7 +110,10 @@ def main() -> None:
     python = str(Path(sys.executable).resolve())
 
     if not args.skip_migrate:
-        _run_step("Applying database migrations (alembic upgrade head)", [python, "-m", "alembic", "upgrade", "head"])
+        _run_step(
+            "Applying database migrations (alembic upgrade head)",
+            [python, "-c", "import sys; from alembic.config import main; sys.exit(main(argv=['upgrade', 'head']))"],
+        )
     else:
         print("\n[server.py] Skipping migrations (--skip-migrate).")
 

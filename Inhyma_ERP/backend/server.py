@@ -134,7 +134,10 @@ def main() -> None:
     python = str(Path(sys.executable).resolve())  # the interpreter currently running this script (i.e. the active venv's python)
 
     if not args.skip_migrate:
-        _run_step("Applying database migrations (alembic upgrade head)", [python, "-m", "alembic", "upgrade", "head"])
+        _run_step(
+            "Applying database migrations (alembic upgrade head)",
+            [python, "-c", "import sys; from alembic.config import main; sys.exit(main(argv=['upgrade', 'head']))"],
+        )
     else:
         print("\n[server.py] Skipping migrations (--skip-migrate).")
 
