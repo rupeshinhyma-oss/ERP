@@ -245,6 +245,7 @@ async def update_city(
 
 
 @router.post("/{city_id}/activate", summary="Activate a city")
+@router.patch("/{city_id}/activate", summary="Activate alias")
 async def activate_city(
     city_id: uuid.UUID,
     request: Request,
@@ -271,6 +272,7 @@ async def activate_city(
 
 
 @router.post("/{city_id}/deactivate", summary="Deactivate a city")
+@router.patch("/{city_id}/deactivate", summary="Deactivate alias")
 async def deactivate_city(
     city_id: uuid.UUID,
     request: Request,

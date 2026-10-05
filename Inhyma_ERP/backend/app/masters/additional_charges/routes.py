@@ -258,6 +258,7 @@ async def update_additional_charge(
 
 
 @router.patch("/{charge_id}/activate", summary="Activate an additional charge")
+@router.post("/{charge_id}/activate", summary="Activate alias")
 async def activate_additional_charge(
     charge_id: uuid.UUID,
     request: Request,
@@ -290,6 +291,7 @@ async def activate_additional_charge(
 
 
 @router.patch("/{charge_id}/deactivate", summary="Deactivate an additional charge")
+@router.post("/{charge_id}/deactivate", summary="Deactivate alias")
 async def deactivate_additional_charge(
     charge_id: uuid.UUID,
     request: Request,

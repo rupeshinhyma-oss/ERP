@@ -338,6 +338,7 @@ async def update_transport(
 
 
 @router.patch("/{transport_id}/activate", summary="Activate a transport entry")
+@router.post("/{transport_id}/activate", summary="Activate alias")
 async def activate_transport(
     transport_id: uuid.UUID,
     request: Request,
@@ -371,6 +372,7 @@ async def activate_transport(
 
 
 @router.patch("/{transport_id}/deactivate", summary="Deactivate a transport entry")
+@router.post("/{transport_id}/deactivate", summary="Deactivate alias")
 async def deactivate_transport(
     transport_id: uuid.UUID,
     request: Request,

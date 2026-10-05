@@ -256,6 +256,7 @@ async def update_social_media(
 
 
 @router.patch("/{social_media_id}/activate", summary="Activate a social media platform")
+@router.post("/{social_media_id}/activate", summary="Activate alias")
 async def activate_social_media(
     social_media_id: uuid.UUID,
     request: Request,
@@ -288,6 +289,7 @@ async def activate_social_media(
 
 
 @router.patch("/{social_media_id}/deactivate", summary="Deactivate a social media platform")
+@router.post("/{social_media_id}/deactivate", summary="Deactivate alias")
 async def deactivate_social_media(
     social_media_id: uuid.UUID,
     request: Request,

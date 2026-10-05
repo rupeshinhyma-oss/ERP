@@ -257,6 +257,7 @@ async def update_technician(
 
 
 @router.patch("/{technician_id}/activate", summary="Activate a technician")
+@router.post("/{technician_id}/activate", summary="Activate alias")
 async def activate_technician(
     technician_id: uuid.UUID,
     request: Request,
@@ -290,6 +291,7 @@ async def activate_technician(
 
 
 @router.patch("/{technician_id}/deactivate", summary="Deactivate a technician")
+@router.post("/{technician_id}/deactivate", summary="Deactivate alias")
 async def deactivate_technician(
     technician_id: uuid.UUID,
     request: Request,

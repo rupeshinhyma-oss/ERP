@@ -215,6 +215,7 @@ async def update_brand(
 
 
 @router.post("/{brand_id}/activate", summary="Activate a brand")
+@router.patch("/{brand_id}/activate", summary="Activate alias")
 async def activate_brand(
     brand_id: uuid.UUID,
     request: Request,
@@ -241,6 +242,7 @@ async def activate_brand(
 
 
 @router.post("/{brand_id}/deactivate", summary="Deactivate a brand")
+@router.patch("/{brand_id}/deactivate", summary="Deactivate alias")
 async def deactivate_brand(
     brand_id: uuid.UUID,
     request: Request,

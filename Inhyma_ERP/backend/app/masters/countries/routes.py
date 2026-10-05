@@ -240,6 +240,7 @@ async def update_country(
 
 
 @router.post("/{country_id}/activate", summary="Activate a country")
+@router.patch("/{country_id}/activate", summary="Activate alias")
 async def activate_country(
     country_id: uuid.UUID,
     request: Request,
@@ -266,6 +267,7 @@ async def activate_country(
 
 
 @router.post("/{country_id}/deactivate", summary="Deactivate a country")
+@router.patch("/{country_id}/deactivate", summary="Deactivate alias")
 async def deactivate_country(
     country_id: uuid.UUID,
     request: Request,

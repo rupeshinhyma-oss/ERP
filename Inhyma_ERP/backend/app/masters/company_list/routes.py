@@ -170,6 +170,7 @@ async def delete_company(
 
 
 @router.post("/{company_id}/activate", summary="Activate company")
+@router.patch("/{company_id}/activate", summary="Activate alias")
 async def activate_company(
     request: Request,
     company_id: uuid.UUID,
@@ -183,6 +184,7 @@ async def activate_company(
 
 
 @router.post("/{company_id}/deactivate", summary="Deactivate company")
+@router.patch("/{company_id}/deactivate", summary="Deactivate alias")
 async def deactivate_company(
     request: Request,
     company_id: uuid.UUID,

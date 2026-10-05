@@ -226,6 +226,7 @@ async def update_tax(
 
 
 @router.post("/{tax_id}/activate", summary="Activate a tax entry")
+@router.patch("/{tax_id}/activate", summary="Activate alias")
 async def activate_tax(
     tax_id: uuid.UUID,
     request: Request,
@@ -258,6 +259,7 @@ async def activate_tax(
 
 
 @router.post("/{tax_id}/deactivate", summary="Deactivate a tax entry")
+@router.patch("/{tax_id}/deactivate", summary="Deactivate alias")
 async def deactivate_tax(
     tax_id: uuid.UUID,
     request: Request,

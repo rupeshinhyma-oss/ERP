@@ -299,6 +299,7 @@ async def update_district_put(
 
 
 @router.post("/{district_id}/activate", summary="Activate a district")
+@router.patch("/{district_id}/activate", summary="Activate alias")
 async def activate_district(
     district_id: uuid.UUID,
     request: Request,
@@ -331,6 +332,7 @@ async def activate_district(
 
 
 @router.post("/{district_id}/deactivate", summary="Deactivate a district")
+@router.patch("/{district_id}/deactivate", summary="Deactivate alias")
 async def deactivate_district(
     district_id: uuid.UUID,
     request: Request,

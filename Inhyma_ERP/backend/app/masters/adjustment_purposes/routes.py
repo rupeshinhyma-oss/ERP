@@ -237,6 +237,7 @@ async def delete_adjustment_purpose(
 
 
 @router.post("/{purpose_id}/activate", summary="Activate an adjustment purpose")
+@router.patch("/{purpose_id}/activate", summary="Activate alias")
 async def activate_adjustment_purpose(
     request: Request,
     purpose_id: uuid.UUID,
@@ -269,6 +270,7 @@ async def activate_adjustment_purpose(
 
 
 @router.post("/{purpose_id}/deactivate", summary="Deactivate an adjustment purpose")
+@router.patch("/{purpose_id}/deactivate", summary="Deactivate alias")
 async def deactivate_adjustment_purpose(
     request: Request,
     purpose_id: uuid.UUID,

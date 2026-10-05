@@ -53,6 +53,7 @@
 42. [INVENTORY: Client Name Autocomplete in Stock Adjustment](#42-inventory-client-name-autocomplete-in-stock-adjustment)
 43. [LEADS: Lead Inquiries Management & Sales Pipeline](#43-leads-module-lead-inquiries-management--sales-pipeline)
 44. [CALL LOG: Follow Ups Management & Inquiries Tracking](#44-call-log-follow-ups-management--inquiries-tracking)
+45. [MASTERS MODULE: Interactive Status Toggle Switch & Payment Terms Master](#45-masters-module-interactive-status-toggle-switch--payment-terms-master)
 
 ---
 
@@ -2057,4 +2058,42 @@ Checklist to execute:
 - [ ] Verify all 12 tests in `FollowUpsPage.test.tsx` pass 100%.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: September 29, 2026 (Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, and Follow Ups Module).*
+
+## 45. MASTERS MODULE: Interactive Status Toggle Switch & Payment Terms Master
+
+### Overview & Visual Specification
+- **Component:** `StatusToggle.tsx` integrated with `MasterPage.tsx`
+- **Location:** All 27 Master Data admin tables (`/masters/payment-terms`, `/masters/cities`, `/masters/districts`, `/masters/states`, `/masters/countries`, `/masters/currencies`, `/masters/taxes`, `/masters/additional-charges`, `/masters/social-media`, `/masters/agent-types`, `/masters/company-categories`, `/masters/company-sectors`, `/masters/supplier-types`, `/masters/buyer-types`, `/masters/warehouses`, `/masters/uom`, `/masters/billing-company`, `/masters/company-list`, `/masters/technicians`, `/masters/banks`, `/masters/transport`, `/masters/lead-sources`, `/masters/adjustment-purpose`, `/masters/call-types`, `/masters/brands`, `/masters/categories`, `/masters/subcategories`).
+- **Visual Design (Exact Reference Match):**
+  - **Pill track:** 42px width, 22px height, 9999px border-radius.
+  - **Active State (ON):** Vibrant emerald green (`#10b981`) background, white 16px thumb slid to the right (`translateX(20px)`), tooltip: *"Active — Click to deactivate"*.
+  - **Inactive State (OFF):** Soft slate grey (`#cbd5e1`) background, white 16px thumb slid to the left (`translateX(0)`), tooltip: *"Inactive — Click to activate"*.
+  - **Transitions:** 220ms cubic bezier transitions on background color and sliding thumb.
+  - **Loading Indicator:** Micro spinning ring inside the thumb while asynchronous network request is in flight. Rapid duplicate clicks are suppressed.
+  - **Permissions:** If the current authenticated user lacks `.update` permission, the toggle switch renders with 55% opacity, `cursor: not-allowed`, and tooltip *"You do not have permission to modify this status."*
+
+### Backend Routing & Resilience
+- **Dual-Method Compatibility:** Every backend master router (`backend/app/masters/*/routes.py`) accepts both `PATCH` and `POST` methods for `/{id}/activate` and `/{id}/deactivate`.
+- **Failsafe Client Dispatcher (`toggleMasterStatus`):** Tries `PATCH /{id}/activate` (or deactivate), seamlessly falls back to `POST /{id}/activate` on 405/404, and further falls back to direct record update `PATCH / PUT /{id}` with `{ status }`.
+- **Optimistic UI with Rollback:** State flips immediately in table rows and detail drawer. If server returns an error, the switch automatically rolls back to the prior state and displays an error banner.
+
+### Payment Terms Reference View (`/masters/payment-terms`)
+- **Table Columns:** Checkbox (row select), Sr. No., Name (e.g. `30 Days Credit`, `Full Credit`), Status (Interactive toggle switch), Action (`Edit` blue button, `Delete` red button).
+- **Header Actions:** `+ ADD NEW`, `DELETE` (active when rows selected).
+- **Items/Page:** 50 items/page with quick search box.
+
+### Test Cases
+- [ ] Verify navigating to `/masters/payment-terms` displays Payment Terms master table matching legacy erp.inhymasolutions.com/payment terms/list.
+- [ ] Verify the table has Checkbox, Sr. No., Name, Status, and Action columns.
+- [ ] Verify active payment terms display green toggle switches with thumb on the right.
+- [ ] Verify inactive payment terms display gray toggle switches with thumb on the left.
+- [ ] Verify clicking an active toggle switch turns it off (inactive/gray) immediately and calls the backend `/deactivate` endpoint.
+- [ ] Verify clicking an inactive toggle switch turns it on (active/green) immediately and calls the backend `/activate` endpoint.
+- [ ] Verify network spinner appears inside the thumb during request execution and prevents double-clicking.
+- [ ] Verify sorting by Status column groups active and inactive entries correctly.
+- [ ] Verify the Status toggle switch is also present and fully functional across all other master tables (Cities, Districts, States, Countries, Taxes, Warehouses, Banks, etc.).
+- [ ] Verify users without update permissions see disabled toggles with `not-allowed` cursor.
+- [ ] Verify non-master modules (Leads, Users, Inquiries, Sales, HRMS) remain completely unaffected and retain their standard status badges.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 5, 2026 (Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, and Follow Ups Module).*

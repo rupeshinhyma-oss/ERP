@@ -215,6 +215,7 @@ async def update_currency(
 
 
 @router.post("/{currency_id}/activate", summary="Activate a currency")
+@router.patch("/{currency_id}/activate", summary="Activate alias")
 async def activate_currency(
     currency_id: uuid.UUID,
     request: Request,
@@ -241,6 +242,7 @@ async def activate_currency(
 
 
 @router.post("/{currency_id}/deactivate", summary="Deactivate a currency")
+@router.patch("/{currency_id}/deactivate", summary="Deactivate alias")
 async def deactivate_currency(
     currency_id: uuid.UUID,
     request: Request,

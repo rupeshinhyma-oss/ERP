@@ -336,6 +336,7 @@ async def update_lead_source(
 
 
 @router.patch("/{source_id}/activate", summary="Activate a lead source entry")
+@router.post("/{source_id}/activate", summary="Activate alias")
 async def activate_lead_source(
     source_id: uuid.UUID,
     request: Request,
@@ -369,6 +370,7 @@ async def activate_lead_source(
 
 
 @router.patch("/{source_id}/deactivate", summary="Deactivate a lead source entry")
+@router.post("/{source_id}/deactivate", summary="Deactivate alias")
 async def deactivate_lead_source(
     source_id: uuid.UUID,
     request: Request,

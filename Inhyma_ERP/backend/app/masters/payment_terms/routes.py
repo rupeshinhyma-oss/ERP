@@ -336,6 +336,7 @@ async def update_payment_term(
 
 
 @router.patch("/{term_id}/activate", summary="Activate a payment term entry")
+@router.post("/{term_id}/activate", summary="Activate alias")
 async def activate_payment_term(
     term_id: uuid.UUID,
     request: Request,
@@ -369,6 +370,7 @@ async def activate_payment_term(
 
 
 @router.patch("/{term_id}/deactivate", summary="Deactivate a payment term entry")
+@router.post("/{term_id}/deactivate", summary="Deactivate alias")
 async def deactivate_payment_term(
     term_id: uuid.UUID,
     request: Request,
