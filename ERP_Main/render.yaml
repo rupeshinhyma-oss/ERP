@@ -1,0 +1,64 @@
+services:
+  # -----------------------------------------------------------------------------
+  # ERP_Main Backend (Global Control Plane API)
+  # -----------------------------------------------------------------------------
+  - type: web
+    name: erp-main-backend
+    env: python
+    rootDir: backend
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py --no-reload --workers 4
+    healthCheckPath: /api/v1/health/live
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: false
+      - key: HOST
+        value: 0.0.0.0
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: BACKEND_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: PLATFORM_JWT_SECRET_KEY
+        generateValue: true
+      - key: SERVICE_CREDENTIAL_PEPPER
+        generateValue: true
+      - key: YINGLIMA_API_URL
+        sync: false
+      - key: INHYMA_API_URL
+        sync: false
+
+  # -----------------------------------------------------------------------------
+  # ERP_Main Frontend (Global Dashboard Static Site)
+  # -----------------------------------------------------------------------------
+  - type: web
+    name: erp-main-frontend
+    env: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_ORIGIN
+        sync: false
+      - key: VITE_CONTROL_PLANE_URL
+        sync: false
+      - key: VITE_CENTRAL_AUTH_API
+        sync: false
+      - key: VITE_COOKIE_DOMAIN
+        sync: false
+      - key: VITE_YINGLIMA_URL
+        sync: false
+      - key: VITE_INHYMA_URL
+        sync: false

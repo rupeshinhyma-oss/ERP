@@ -55,7 +55,7 @@ EXPOSE 8000
 
 # Container healthcheck using the liveness endpoint
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health/live || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/api/v1/health/live || exit 1
 
-# Production command with graceful shutdown
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--timeout-graceful-shutdown", "30"]
+# Production command respecting the platform PORT variable (e.g. Render, AWS, DigitalOcean)
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4 --timeout-graceful-shutdown 30"]

@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: erp-main-backend
+    restart: always
+    env_file:
+      - ./backend/.env
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_ORIGIN: ${VITE_API_ORIGIN:-}
+        VITE_CONTROL_PLANE_URL: ${VITE_CONTROL_PLANE_URL:-}
+        VITE_CENTRAL_AUTH_API: ${VITE_CENTRAL_AUTH_API:-}
+        VITE_COOKIE_DOMAIN: ${VITE_COOKIE_DOMAIN:-}
+        VITE_YINGLIMA_URL: ${VITE_YINGLIMA_URL:-}
+        VITE_INHYMA_URL: ${VITE_INHYMA_URL:-}
+    container_name: erp-main-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend

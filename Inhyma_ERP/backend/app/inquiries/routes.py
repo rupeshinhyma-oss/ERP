@@ -1049,7 +1049,7 @@ async def create_item_rfq(
         })
 
     # Automatically dispatch emails in the background for suppliers with email addresses
-    base_host = request.headers.get("origin") or "http://192.168.1.23:5173"
+    base_host = (request.headers.get("origin") or getattr(settings, "FRONTEND_URL", "http://localhost:5174")).rstrip("/")
     for link in supplier_links:
         if link.get("emails"):
             full_quote_url = f"{base_host}{link['quote_path']}"
@@ -1563,7 +1563,7 @@ async def inbound_quotation_webhook(
 
     # Broadcast Live WebSocket update to ERP UI (Phase 5: now durable too)
     await _publish_inquiry_post_commit_event(
-        db=db,
+        db=session,
         dispatcher=event_dispatcher,
         event_type="quotation.created",
         entity_id=item.id,

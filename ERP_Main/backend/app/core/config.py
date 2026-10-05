@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     OPENAPI_URL: str | None = "/openapi.json"
 
     # -------------------------------------------------------------------
+    # Server & Service URLs
+    # -------------------------------------------------------------------
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
+    BACKEND_URL: str = "http://localhost:8000"
+    FRONTEND_URL: str = "http://localhost:5170"
+
+    # -------------------------------------------------------------------
     # Database
     #
     # ERP_Main owns its own database, entirely separate from Yinglima's

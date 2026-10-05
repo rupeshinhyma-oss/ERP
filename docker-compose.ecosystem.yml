@@ -1,0 +1,128 @@
+version: "3.8"
+
+services:
+  # =============================================================================
+  # 1. ERP_Main (Global Control Plane)
+  # =============================================================================
+  erp-main-backend:
+    build:
+      context: ./ERP_Main/backend
+      dockerfile: Dockerfile
+    container_name: erp-main-backend
+    restart: always
+    env_file:
+      - ./ERP_Main/backend/.env
+    environment:
+      - ENVIRONMENT=production
+      - HOST=0.0.0.0
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  erp-main-frontend:
+    build:
+      context: ./ERP_Main/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_ORIGIN: ${ERP_MAIN_API_ORIGIN:-}
+        VITE_CONTROL_PLANE_URL: ${VITE_CONTROL_PLANE_URL:-}
+        VITE_YINGLIMA_URL: ${VITE_YINGLIMA_URL:-}
+        VITE_INHYMA_URL: ${VITE_INHYMA_URL:-}
+    container_name: erp-main-frontend
+    restart: always
+    ports:
+      - "5170:80"
+    depends_on:
+      - erp-main-backend
+
+  # =============================================================================
+  # 2. Inhyma ERP (ERP 1)
+  # =============================================================================
+  inhyma-backend:
+    build:
+      context: ./Inhyma_ERP/backend
+      dockerfile: Dockerfile
+    container_name: inhyma-backend
+    restart: always
+    env_file:
+      - ./Inhyma_ERP/backend/.env
+    environment:
+      - ENVIRONMENT=production
+      - HOST=0.0.0.0
+      - PORT=8002
+    ports:
+      - "8002:8002"
+    volumes:
+      - inhyma-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health/live"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  inhyma-frontend:
+    build:
+      context: ./Inhyma_ERP/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_ORIGIN: ${INHYMA_API_ORIGIN:-}
+        VITE_CONTROL_PLANE_URL: ${VITE_CONTROL_PLANE_URL:-}
+    container_name: inhyma-frontend
+    restart: always
+    ports:
+      - "5174:80"
+    depends_on:
+      - inhyma-backend
+
+  # =============================================================================
+  # 3. Yinglima ERP (ERP 2)
+  # =============================================================================
+  yinglima-backend:
+    build:
+      context: ./Yinglima_ERP/backend
+      dockerfile: Dockerfile
+    container_name: yinglima-backend
+    restart: always
+    env_file:
+      - ./Yinglima_ERP/backend/.env
+    environment:
+      - ENVIRONMENT=production
+      - HOST=0.0.0.0
+      - PORT=8001
+    ports:
+      - "8001:8001"
+    volumes:
+      - yinglima-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health/live"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  yinglima-frontend:
+    build:
+      context: ./Yinglima_ERP/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_ORIGIN: ${YINGLIMA_API_ORIGIN:-}
+        VITE_CONTROL_PLANE_URL: ${VITE_CONTROL_PLANE_URL:-}
+    container_name: yinglima-frontend
+    restart: always
+    ports:
+      - "5173:80"
+    depends_on:
+      - yinglima-backend
+
+volumes:
+  inhyma-uploads:
+    driver: local
+  yinglima-uploads:
+    driver: local

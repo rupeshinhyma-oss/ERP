@@ -41,18 +41,25 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         self.timeout = timeout
 
     def _resolve_erp_api_url(self, erp: ErpInstance) -> str:
+        import os
+        # Check environment variable overrides first (e.g. YINGLIMA_API_URL or INHYMA_API_URL)
+        clean_key = (erp.key or "").upper().replace("-", "_")
+        env_override = os.environ.get(f"{clean_key}_API_URL")
+        if env_override:
+            return env_override.strip().rstrip("/")
+
         base = (erp.base_url or "").strip().rstrip("/")
         if base.endswith("/dashboard"):
             base = base[:-len("/dashboard")].rstrip("/")
         if ":5173" in base:
-            return "http://127.0.0.1:8001"
+            return os.environ.get("YINGLIMA_API_URL", "http://127.0.0.1:8001")
         if ":5174" in base:
-            return "http://127.0.0.1:8002"
+            return os.environ.get("INHYMA_API_URL", "http://127.0.0.1:8002")
         if not base or "localhost" in base or "127.0.0.1" in base:
             if erp.key in ("yinglima", "erp-02"):
-                return "http://127.0.0.1:8001"
+                return os.environ.get("YINGLIMA_API_URL", "http://127.0.0.1:8001")
             if erp.key in ("inhyma", "erp-01"):
-                return "http://127.0.0.1:8002"
+                return os.environ.get("INHYMA_API_URL", "http://127.0.0.1:8002")
         return base
 
     def _get_headers(

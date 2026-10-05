@@ -3,6 +3,26 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-05] — Production Deployment Readiness, Zero-LAN URL Decoupling & Multi-Cloud Infrastructure
+
+### 1. Peer ERP API Resolution Overrides
+- **Environment Overrides for Identity Linking:** In [`http_adapter.py:43-57`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/adapters/http_adapter.py#L43-L57), eliminated hardcoded `127.0.0.1:8001` / `127.0.0.1:8002` fallbacks. Added support for `YINGLIMA_API_URL` and `INHYMA_API_URL` environment variables so the Control Plane can communicate with spokes in VPCs, container networks, or live subdomains.
+
+### 2. Central Dashboard Spoke Launch Switcher
+- **Parametric Spoke Launching:** In [`ssoBridge.ts:40-55, 130-150`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ssoBridge.ts#L40-L55), updated `getEcosystemErps()` and `launchErpWithMembership()` to read `VITE_YINGLIMA_URL` and `VITE_INHYMA_URL` when an admin launches a spoke from the central dashboard.
+
+### 3. Server Settings & Cloud Port Binding
+- **Typed Server Settings:** Added `HOST`, `PORT`, `BACKEND_URL`, `FRONTEND_URL`, and verified `OPENAPI_URL` in [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/core/config.py).
+- **Dynamic Port Binding:** Updated [`backend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/Dockerfile) to dynamically bind to `${PORT:-8000}`.
+- **Cross-Subdomain SSO Cookies:** Updated [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ecosystemSession.ts) to support `VITE_CENTRAL_AUTH_API` and `VITE_COOKIE_DOMAIN`.
+
+### 4. Cloud Infrastructure Assets
+- **Docker & Nginx:** Added [`frontend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/Dockerfile) and [`frontend/nginx.conf`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/nginx.conf).
+- **Render Blueprint:** Added [`render.yaml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/render.yaml) for 1-click Render web service and static site provisioning.
+- **Compose Orchestration:** Added [`docker-compose.prod.yml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/docker-compose.prod.yml) and master [`docker-compose.ecosystem.yml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/docker-compose.ecosystem.yml).
+
+---
+
 ## [Release 2026-10-03] — Machine Identifier Routing (erp-01/erp-02) & Dynamic Multi-ERP Company Display
 
 ### 1. Machine Identifier Routing & Secret Validation

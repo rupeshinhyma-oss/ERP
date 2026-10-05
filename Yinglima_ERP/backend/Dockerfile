@@ -56,8 +56,8 @@ EXPOSE 8001
 
 # Container healthcheck hitting liveness probe
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8001/api/v1/health/live || exit 1
+    CMD curl -f http://localhost:${PORT:-8001}/api/v1/health/live || exit 1
 
-# Default command runs the web API server.
+# Default command runs the web API server respecting the platform PORT variable (e.g. Render, AWS, DigitalOcean)
 # To run background queue worker instead, override CMD with: ["python", "-m", "app.queue.worker"]
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "4", "--timeout-graceful-shutdown", "30"]
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --workers 4 --timeout-graceful-shutdown 30"]

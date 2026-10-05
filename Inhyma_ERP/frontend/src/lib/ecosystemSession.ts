@@ -23,6 +23,12 @@ const COOKIE_NAME = "ihm_ecosystem_session";
 const LOCAL_STORAGE_KEY = "ihm_ecosystem_session";
 const BROADCAST_CHANNEL_NAME = "ihm_ecosystem_auth";
 const getCentralAuthApi = (): string => {
+  if (import.meta.env.VITE_CENTRAL_AUTH_API) {
+    return import.meta.env.VITE_CENTRAL_AUTH_API;
+  }
+  if (import.meta.env.VITE_CONTROL_PLANE_API_URL) {
+    return `${import.meta.env.VITE_CONTROL_PLANE_API_URL.replace(/\/+$/, "")}/global/ecosystem-session`;
+  }
   if (typeof window !== "undefined" && window.location.hostname) {
     const host = window.location.hostname;
     return `http://${host}:8000/api/v1/global/ecosystem-session`;
@@ -42,7 +48,8 @@ export function setEcosystemCookie(session: EcosystemSessionData): void {
       sessionStorage.removeItem("ihm_explicit_logout");
     }
     const serialized = encodeURIComponent(JSON.stringify(session));
-    document.cookie = `${COOKIE_NAME}=${serialized}; path=/; max-age=604800; SameSite=Lax`;
+    const domainAttr = import.meta.env.VITE_COOKIE_DOMAIN ? `; domain=${import.meta.env.VITE_COOKIE_DOMAIN}` : "";
+    document.cookie = `${COOKIE_NAME}=${serialized}; path=/; max-age=604800; SameSite=Lax${domainAttr}`;
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(session));
   } catch (err) {
     console.warn("Could not write ecosystem session cookie:", err);
@@ -86,6 +93,9 @@ export function clearEcosystemCookie(): void {
     }
     document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
     document.cookie = `${COOKIE_NAME}=; path=/; domain=localhost; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    if (import.meta.env.VITE_COOKIE_DOMAIN) {
+      document.cookie = `${COOKIE_NAME}=; path=/; domain=${import.meta.env.VITE_COOKIE_DOMAIN}; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    }
     if (typeof window !== "undefined" && window.location.hostname && window.location.hostname !== "localhost") {
       document.cookie = `${COOKIE_NAME}=; path=/; domain=${window.location.hostname}; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
     }
