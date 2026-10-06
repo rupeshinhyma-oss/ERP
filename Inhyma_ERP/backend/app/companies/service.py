@@ -81,19 +81,37 @@ class CompanyService:
         category_id: uuid.UUID | None = None,
         sub_category_id: uuid.UUID | None = None,
         product_id: uuid.UUID | None = None,
+        category_blank: bool = False,
+        sub_category_blank: bool = False,
+        product_blank: bool = False,
     ) -> tuple[list[Company], int]:
         """Return a page of companies matching search/sort/filter and category/sub-cat/product predicates."""
-        if category_id is None and sub_category_id is None and product_id is None:
+        if (
+            category_id is None
+            and sub_category_id is None
+            and product_id is None
+            and not category_blank
+            and not sub_category_blank
+            and not product_blank
+        ):
             return await self.repository.paginated_list(query)
 
         base_stmt = self.repository._base_select()
         base_stmt = self.repository._apply_search(base_stmt, query.search.normalized)
         base_stmt = self.repository._apply_dynamic_filters(base_stmt, query.filters)
-        if category_id is not None:
+        if category_blank:
+            base_stmt = self.repository.apply_category_blank_filter(base_stmt)
+        elif category_id is not None:
             base_stmt = self.repository.apply_category_filter(base_stmt, category_id)
-        if sub_category_id is not None:
+
+        if sub_category_blank:
+            base_stmt = self.repository.apply_sub_category_blank_filter(base_stmt)
+        elif sub_category_id is not None:
             base_stmt = self.repository.apply_sub_category_filter(base_stmt, sub_category_id)
-        if product_id is not None:
+
+        if product_blank:
+            base_stmt = self.repository.apply_product_blank_filter(base_stmt)
+        elif product_id is not None:
             base_stmt = self.repository.apply_product_filter(base_stmt, product_id)
 
         from sqlalchemy import func, select

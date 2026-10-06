@@ -328,6 +328,7 @@ async def update_bank(
 
 
 @router.patch("/{bank_id}/activate", summary="Activate a bank")
+@router.post("/{bank_id}/activate", summary="Activate alias")
 async def activate_bank(
     bank_id: uuid.UUID,
     request: Request,
@@ -361,6 +362,7 @@ async def activate_bank(
 
 
 @router.patch("/{bank_id}/deactivate", summary="Deactivate a bank")
+@router.post("/{bank_id}/deactivate", summary="Deactivate alias")
 async def deactivate_bank(
     bank_id: uuid.UUID,
     request: Request,

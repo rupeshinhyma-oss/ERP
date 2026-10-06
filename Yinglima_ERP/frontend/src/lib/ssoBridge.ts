@@ -30,12 +30,33 @@ const SSO_VALIDITY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 const getHost = () => (typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1");
 
-export const getEcosystemErps = () => {
+export interface EcosystemErpEntry {
+  key: string;
+  id: string;
+  name: string;
+  hostUrl: string;
+  apiUrl?: string;
+  badge: string;
+}
+
+export const getEcosystemErps = (): EcosystemErpEntry[] => {
   const host = getHost();
+  const controlPlaneHost = import.meta.env.VITE_CONTROL_PLANE_URL || `http://${host}:5170/dashboard`;
+  const controlPlaneApi = import.meta.env.VITE_CONTROL_PLANE_API_URL || `http://${host}:8000/api/v1`;
+  const yinglimaHost =
+    import.meta.env.VITE_YINGLIMA_URL ||
+    (typeof window !== "undefined" && window.location.origin ? `${window.location.origin}/dashboard` : `http://${host}:5173/dashboard`);
+  const yinglimaApi =
+    import.meta.env.VITE_API_ORIGIN
+      ? `${import.meta.env.VITE_API_ORIGIN.replace(/\/+$/, "")}/api/v1`
+      : `http://${host}:8001/api/v1`;
+  const inhymaHost = import.meta.env.VITE_INHYMA_URL || `http://${host}:5174/dashboard`;
+  const inhymaApi = import.meta.env.VITE_INHYMA_API_URL || `http://${host}:8002/api/v1`;
+
   return [
-    { key: "control-plane", name: "ERP Dashboard", hostUrl: `http://${host}:5170/dashboard`, badge: "Control Plane" },
-    { key: "yinglima", name: "Yinglima ERP", hostUrl: `http://${host}:5173/dashboard`, badge: "Active Port 5173" },
-    { key: "inhyma", name: "Inhyma ERP", hostUrl: `http://${host}:5174/dashboard`, badge: "Active Port 5174" },
+    { key: "control-plane", id: "control-plane", name: "ERP Dashboard", hostUrl: controlPlaneHost, apiUrl: controlPlaneApi, badge: "Control Plane" },
+    { key: "yinglima", id: "erp-02", name: "ERP 2", hostUrl: yinglimaHost, apiUrl: yinglimaApi, badge: "Yinglima ERP" },
+    { key: "inhyma", id: "erp-01", name: "ERP 1", hostUrl: inhymaHost, apiUrl: inhymaApi, badge: "Inhyma ERP" },
   ];
 };
 

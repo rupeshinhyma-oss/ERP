@@ -44,7 +44,6 @@ import { LocalPurchasePage } from "@/pages/purchase/LocalPurchasePage";
 import { LocalPurchasePdfPage } from "@/pages/LocalPurchasePdfPage";
 import { ImportPurchasePage } from "@/pages/purchase/ImportPurchasePage";
 import { ImportPurchasePdfPage } from "@/pages/ImportPurchasePdfPage";
-import { PlanningPage } from "@/pages/Planning";
 import { TasksPage } from "@/pages/tasks/TasksPage";
 import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
 import { AttendancePage } from "@/pages/hrms/AttendancePage";
@@ -174,9 +173,18 @@ export function App() {
           <Route path="/companies/addedit/:id" element={<CompaniesPage defaultAdd={true} />} />
           <Route path="/user/addEdit" element={<CompaniesPage defaultAdd={true} />} />
           <Route path="/user/addedit" element={<CompaniesPage defaultAdd={true} />} />
-          <Route path="/suppliers" element={<SuppliersPage />} />
-          <Route path="/supplier/list" element={<SuppliersPage />} />
-          <Route path="/supplier" element={<SuppliersPage />} />
+          {/* SUPPLIERS routes under /purchase/suppliers */}
+          <Route path="/purchase/suppliers" element={<SuppliersPage />} />
+          <Route path="/purchase/suppliers/add" element={<SuppliersPage defaultAdd={true} />} />
+          <Route path="/purchase/suppliers/addedit" element={<SuppliersPage defaultAdd={true} />} />
+          <Route path="/purchase/suppliers/addedit/:id" element={<SuppliersPage defaultAdd={true} />} />
+          <Route path="/Purchase/suppliers" element={<Navigate to="/purchase/suppliers" replace />} />
+          <Route path="/suppliers" element={<Navigate to="/purchase/suppliers" replace />} />
+          <Route path="/supplier/list" element={<Navigate to="/purchase/suppliers" replace />} />
+          <Route path="/supplier" element={<Navigate to="/purchase/suppliers" replace />} />
+          <Route path="/suppliers/add" element={<Navigate to="/purchase/suppliers/add" replace />} />
+          <Route path="/suppliers/addedit" element={<Navigate to="/purchase/suppliers/addedit" replace />} />
+
           <Route path="/inquiries" element={<Navigate to="/proforma-invoice/list" replace />} />
           <Route path="/proforma-invoice/list" element={<ProformaInvoicesPage />} />
           <Route path="/proforma-invoice/add" element={<ProformaInvoicesPage defaultAdd={true} />} />
@@ -210,8 +218,17 @@ export function App() {
           <Route path="/sale-discount/list" element={<DiscountPaymentsPage />} />
           <Route path="/sale-discount" element={<Navigate to="/sale-discount/list" replace />} />
 
-          {/* PURCHASE routes */}
-          <Route path="/purchase-order/list" element={<LocalPurchasePage />} />
+          {/* LOCAL PURCHASE routes under /purchase/localpurchase */}
+          <Route path="/purchase/localpurchase" element={<LocalPurchasePage />} />
+          <Route path="/purchase/localpurchase/add" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/localpurchase/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/localpurchase/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/Purchase/localpurchase" element={<Navigate to="/purchase/localpurchase" replace />} />
+          <Route path="/purchase/local-purchase" element={<Navigate to="/purchase/localpurchase" replace />} />
+          <Route path="/purchase/local-purchase/add" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/local-purchase/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/local-purchase/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase-order/list" element={<Navigate to="/purchase/localpurchase" replace />} />
           <Route path="/purchase-order/add" element={<LocalPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
@@ -219,24 +236,38 @@ export function App() {
           <Route path="/purchase-order/bill-file" element={<LocalPurchasePdfPage />} />
           <Route path="/purchase-order/pdf/:id" element={<LocalPurchasePdfPage />} />
           <Route path="/purchase-order/pdf" element={<LocalPurchasePdfPage />} />
+          <Route path="/purchase/localpurchase/bill-file/:id" element={<LocalPurchasePdfPage />} />
+          <Route path="/purchase/localpurchase/pdf/:id" element={<LocalPurchasePdfPage />} />
           <Route path="/purchase/bill-file/:id" element={<LocalPurchasePdfPage />} />
-          <Route path="/purchase-order" element={<Navigate to="/purchase-order/list" replace />} />
-          <Route path="/purchase/local" element={<Navigate to="/purchase-order/list" replace />} />
-          <Route path="/purchase/local/list" element={<Navigate to="/purchase-order/list" replace />} />
-          <Route path="/purchase/local/add" element={<Navigate to="/purchase-order/addedit" replace />} />
-          <Route path="/purchase/local/addedit" element={<Navigate to="/purchase-order/addedit" replace />} />
-          {/* IMPORT PURCHASE routes */}
-          <Route path="/purchase-order/import-purchase-list" element={<ImportPurchasePage />} />
-          <Route path="/purchase/import" element={<ImportPurchasePage />} />
-          <Route path="/purchase/import/list" element={<Navigate to="/purchase-order/import-purchase-list" replace />} />
-          <Route path="/purchase-order/import" element={<Navigate to="/purchase-order/import-purchase-list" replace />} />
-          <Route path="/purchase-order/import/list" element={<Navigate to="/purchase-order/import-purchase-list" replace />} />
+          <Route path="/purchase-order" element={<Navigate to="/purchase/localpurchase" replace />} />
+          <Route path="/purchase/local" element={<Navigate to="/purchase/localpurchase" replace />} />
+          <Route path="/purchase/local/list" element={<Navigate to="/purchase/localpurchase" replace />} />
+          <Route path="/purchase/local/add" element={<Navigate to="/purchase/localpurchase/addedit" replace />} />
+          <Route path="/purchase/local/addedit" element={<Navigate to="/purchase/localpurchase/addedit" replace />} />
+
+          {/* IMPORT PURCHASE routes under /purchase/importpurchase */}
+          <Route path="/purchase/importpurchase" element={<ImportPurchasePage />} />
+          <Route path="/purchase/importpurchase/add" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/importpurchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/importpurchase/addedit/:id" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/Purchase/importpurchase" element={<Navigate to="/purchase/importpurchase" replace />} />
+          <Route path="/purchase/import-purchase" element={<Navigate to="/purchase/importpurchase" replace />} />
+          <Route path="/purchase/import-purchase/add" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/import-purchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/import-purchase/addedit/:id" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase-order/import-purchase-list" element={<Navigate to="/purchase/importpurchase" replace />} />
+          <Route path="/purchase/import" element={<Navigate to="/purchase/importpurchase" replace />} />
+          <Route path="/purchase/import/list" element={<Navigate to="/purchase/importpurchase" replace />} />
+          <Route path="/purchase-order/import" element={<Navigate to="/purchase/importpurchase" replace />} />
+          <Route path="/purchase-order/import/list" element={<Navigate to="/purchase/importpurchase" replace />} />
           <Route path="/purchase-order/import-purchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/import-purchase/addedit/:id" element={<ImportPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/import-purchase/add" element={<ImportPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/import/add" element={<Navigate to="/purchase-order/import-purchase/addedit" replace />} />
+          <Route path="/purchase/import/add" element={<Navigate to="/purchase/importpurchase/addedit" replace />} />
           <Route path="/purchase-order/import-bill-file/:id" element={<ImportPurchasePdfPage />} />
           <Route path="/purchase-order/import-bill-file" element={<ImportPurchasePdfPage />} />
+          <Route path="/purchase/importpurchase/bill-file/:id" element={<ImportPurchasePdfPage />} />
+          <Route path="/purchase/importpurchase/pdf/:id" element={<ImportPurchasePdfPage />} />
           <Route path="/purchase/import/bill-file/:id" element={<ImportPurchasePdfPage />} />
 
           {/* REPORTS routes */}
@@ -289,7 +320,7 @@ export function App() {
             }
           />
 
-          <Route path="/planning" element={<PlanningPage />} />
+          <Route path="/planning" element={<Navigate to="/dashboard" replace />} />
           <Route path="/tasks/my" element={<Navigate to="/tasks?tab=my" replace />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/tasks/kanban" element={<Navigate to="/tasks?tab=kanban" replace />} />

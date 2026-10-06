@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------
     # Application metadata
     # -------------------------------------------------------------------
+    ERP_INSTANCE_ID: str = Field(
+        default="erp-01",
+        description="Unique machine identifier for this ERP instance across the ecosystem.",
+    )
     APP_NAME: str = "ERP Backend"
     APP_VERSION: str = "0.1.0"
     ENVIRONMENT: EnvironmentEnum = EnvironmentEnum.LOCAL
@@ -80,10 +84,12 @@ class Settings(BaseSettings):
     FRONTEND_DIST_DIR: str | None = None
 
     # -------------------------------------------------------------------
-    # Server
+    # Server & Service URLs
     # -------------------------------------------------------------------
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    BACKEND_URL: str = "http://localhost:8002"
+    FRONTEND_URL: str = "http://localhost:5174"
 
     # -------------------------------------------------------------------
     # CORS

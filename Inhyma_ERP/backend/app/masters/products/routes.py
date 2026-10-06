@@ -319,6 +319,7 @@ async def update_product(
 
 
 @router.post("/{product_id}/activate", summary="Activate a product")
+@router.patch("/{product_id}/activate", summary="Activate alias")
 async def activate_product(
     product_id: uuid.UUID,
     request: Request,
@@ -351,6 +352,7 @@ async def activate_product(
 
 
 @router.post("/{product_id}/deactivate", summary="Deactivate a product")
+@router.patch("/{product_id}/deactivate", summary="Deactivate alias")
 async def deactivate_product(
     product_id: uuid.UUID,
     request: Request,

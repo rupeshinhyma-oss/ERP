@@ -13,14 +13,17 @@ The ecosystem comprises three autonomous systems:
    - FastAPI Backend (Port `8000`), React + TypeScript SPA Frontend (Port `5170`)
    - OIDC Federation Authority, Global ERP Registry, Platform RBAC, Event Inbox, Real-Time Projections, Multi-Entity Search, Secure CSV/XLSX Export Engine.
 
-2. **`Yinglima_ERP` (`/Yinglima_ERP`)**
+2. **`Yinglima_ERP` (`/Yinglima_ERP`) — Spoke Machine ID `erp-02`**
    - Autonomous Procurement & Sourcing ERP (China Export / Factory Sourcing)
    - FastAPI Backend (Port `8001`), React + TypeScript SPA Frontend (Port `5173`)
+   - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
    - Local Argon2id Auth, Buyers, Suppliers, Master Data, Inquiries/RFQs, Vendor Quotations, Planning Sheets with MUM group tracking, Transactional Outbox, Relying-Party SSO Client, Standalone Background Queue Worker.
 
-3. **`Inhyma_ERP` (`/Inhyma_ERP`)**
+3. **`Inhyma_ERP` (`/Inhyma_ERP`) — Spoke Machine ID `erp-01`**
    - Autonomous Production Planning & Distribution ERP (India Domestic Distribution)
    - FastAPI Backend (Port `8002`), React + TypeScript SPA Frontend (Port `5174`)
+   - Complete visual uniqueness across all 39 sidebar routes with dedicated SVG icons.
+   - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
    - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, escalations, holds), Master Data, Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker.
 
 ---
@@ -119,9 +122,22 @@ cd Yinglima_ERP/backend && python server.py
 cd Inhyma_ERP/backend && python server.py
 ```
 
-### F. Run Full Production Container Stack (Docker Compose)
+### F. Run Full Ecosystem Production Container Stack (All 3 Systems)
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+# Spins up ERP_Main (8000/5170), Yinglima (8001/5173), and Inhyma (8002/5174) with healthchecks:
+docker compose -f docker-compose.ecosystem.yml up -d --build
 ```
+
+---
+
+## 5. Cloud Deployment Guide (DigitalOcean, Render, AWS)
+
+A comprehensive, production-tested deployment manual is available in **[`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md)**:
+
+- **Render.com Blueprints:** Ready-to-deploy blueprints located at [`Inhyma_ERP/render.yaml`](Inhyma_ERP/render.yaml), [`Yinglima_ERP/render.yaml`](Yinglima_ERP/render.yaml), and [`ERP_Main/render.yaml`](ERP_Main/render.yaml).
+- **DigitalOcean:** Multi-service Droplet setup via `docker-compose.ecosystem.yml` or DigitalOcean App Platform PaaS.
+- **Amazon Web Services (AWS):** AWS ECS Fargate, AWS App Runner, and EC2 containerized topologies.
+- **Production URL & Port Decoupling:** Fully parametric URL resolution (zero hardcoded LAN IPs or localhost references).
+- **Cross-Subdomain SSO & Cookie Sync:** Unified session propagation via `VITE_COOKIE_DOMAIN` and central ecosystem sessions.
 
 

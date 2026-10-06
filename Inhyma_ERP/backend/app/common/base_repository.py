@@ -180,13 +180,31 @@ class BaseRepository(Generic[ModelT]):
             except (NotImplementedError, AttributeError):
                 is_uuid_col = False
 
-            if isinstance(value, str) and isinstance(column.type, (String, Text)):
-                stmt = stmt.where(func.lower(column) == value.lower())
+            is_bool_col = False
+            try:
+                if isinstance(column.type, Boolean) or (hasattr(column.type, "python_type") and column.type.python_type is bool):
+                    is_bool_col = True
+            except (NotImplementedError, AttributeError):
+                is_bool_col = False
+
+            if is_bool_col:
+                bool_val = value.lower() in ("true", "1", "t", "yes") if isinstance(value, str) else bool(value)
+                stmt = stmt.where(column == bool_val)
+            elif isinstance(value, str) and isinstance(column.type, (String, Text)):
+                if value.lower() == "blank":
+                    stmt = stmt.where(or_(column.is_(None), column == "", func.lower(column) == "blank"))
+                else:
+                    stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
-                try:
-                    stmt = stmt.where(column == uuid.UUID(value))
-                except ValueError:
-                    stmt = stmt.where(column == value)
+                if value.lower() == "blank":
+                    stmt = stmt.where(column.is_(None))
+                else:
+                    try:
+                        stmt = stmt.where(column == uuid.UUID(value))
+                    except ValueError:
+                        stmt = stmt.where(column == value)
+            elif isinstance(value, str) and value.lower() == "blank":
+                stmt = stmt.where(column.is_(None))
             else:
                 stmt = stmt.where(column == value)
         return stmt
@@ -295,12 +313,20 @@ class BaseRepository(Generic[ModelT]):
                 bool_val = value.lower() in ("true", "1", "t", "yes") if isinstance(value, str) else bool(value)
                 stmt = stmt.where(column == bool_val)
             elif isinstance(value, str) and isinstance(column.type, (String, Text)):
-                stmt = stmt.where(func.lower(column) == value.lower())
+                if value.lower() == "blank":
+                    stmt = stmt.where(or_(column.is_(None), column == "", func.lower(column) == "blank"))
+                else:
+                    stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
-                try:
-                    stmt = stmt.where(column == uuid.UUID(value))
-                except ValueError:
-                    stmt = stmt.where(column == value)
+                if value.lower() == "blank":
+                    stmt = stmt.where(column.is_(None))
+                else:
+                    try:
+                        stmt = stmt.where(column == uuid.UUID(value))
+                    except ValueError:
+                        stmt = stmt.where(column == value)
+            elif isinstance(value, str) and value.lower() == "blank":
+                stmt = stmt.where(column.is_(None))
             else:
                 stmt = stmt.where(column == value)
 

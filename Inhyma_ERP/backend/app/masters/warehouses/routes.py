@@ -277,6 +277,7 @@ async def update_warehouse(
 
 
 @router.patch("/{warehouse_id}/activate", summary="Activate a warehouse")
+@router.post("/{warehouse_id}/activate", summary="Activate alias")
 async def activate_warehouse(
     warehouse_id: uuid.UUID,
     request: Request,
@@ -309,6 +310,7 @@ async def activate_warehouse(
 
 
 @router.patch("/{warehouse_id}/deactivate", summary="Deactivate a warehouse")
+@router.post("/{warehouse_id}/deactivate", summary="Deactivate alias")
 async def deactivate_warehouse(
     warehouse_id: uuid.UUID,
     request: Request,

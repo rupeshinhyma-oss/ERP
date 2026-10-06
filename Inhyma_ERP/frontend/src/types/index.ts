@@ -405,13 +405,8 @@ export interface ProformaStatusCounts {
   amount: number;
 }
 
-export interface ProformaTabCounts {
-  all: ProformaStatusCounts;
-  pending: ProformaStatusCounts;
-  admin_approved: ProformaStatusCounts;
-  confirmed: ProformaStatusCounts;
-  cancelled: ProformaStatusCounts;
-}
+/** Per-status counts keyed by the status values defined in the `proforma.status` option list. */
+export type ProformaTabCounts = Record<string, ProformaStatusCounts>;
 
 /* ------------------------------------------------------------------ */
 /* Organization                                                       */
@@ -773,6 +768,7 @@ export interface Company {
   primary_website?: string | null;
   secondary_website?: string | null;
   company_category?: string | null;
+  sector?: string | null;
   product_manufacture_or_supply?: string | null;
   machines_buying_from?: string | null;
   spares_buying_from?: string | null;
@@ -897,4 +893,4 @@ export interface Lead {
   added_on?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-}
+}

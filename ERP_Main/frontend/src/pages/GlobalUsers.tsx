@@ -179,11 +179,19 @@ export function GlobalUsers() {
 
   // Spoke ERP Resolution
   const yinglimaErp = useMemo(
-    () => erps.find((e) => (e.erp_key || e.key || "").toLowerCase().includes("yinglima")),
+    () =>
+      erps.find((e) => {
+        const k = (e.erp_key || e.key || "").toLowerCase();
+        return k.includes("yinglima") || k === "erp-02";
+      }),
     [erps]
   );
   const inhymaErp = useMemo(
-    () => erps.find((e) => (e.erp_key || e.key || "").toLowerCase().includes("inhyma")),
+    () =>
+      erps.find((e) => {
+        const k = (e.erp_key || e.key || "").toLowerCase();
+        return k.includes("inhyma") || k === "erp-01";
+      }),
     [erps]
   );
 
@@ -1209,7 +1217,7 @@ export function GlobalUsers() {
                     disabled={!yinglimaErp}
                   />
                   <span>
-                    Grant <strong>Yinglima ERP</strong> Access {yinglimaErp ? `(${yinglimaErp.erp_key || yinglimaErp.key})` : "(Not registered)"}
+                    Grant <strong>{yinglimaErp?.name || yinglimaErp?.display_name || "ERP 2"}</strong> Access {yinglimaErp ? `(${yinglimaErp.erp_key || yinglimaErp.key})` : "(Not registered)"}
                   </span>
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: "pointer" }}>
@@ -1221,7 +1229,7 @@ export function GlobalUsers() {
                     disabled={!inhymaErp}
                   />
                   <span>
-                    Grant <strong>Inhyma ERP</strong> Access {inhymaErp ? `(${inhymaErp.erp_key || inhymaErp.key})` : "(Not registered)"}
+                    Grant <strong>{inhymaErp?.name || inhymaErp?.display_name || "ERP 1"}</strong> Access {inhymaErp ? `(${inhymaErp.erp_key || inhymaErp.key})` : "(Not registered)"}
                   </span>
                 </label>
               </div>
@@ -1456,7 +1464,7 @@ export function GlobalUsers() {
                     disabled={!yinglimaErp || isRowUserAdmin(editingUser)}
                   />
                   <span>
-                    Grant <strong>Yinglima ERP</strong> Access {yinglimaErp ? `(${yinglimaErp.erp_key || yinglimaErp.key})` : "(Not registered)"}
+                    Grant <strong>{yinglimaErp?.name || yinglimaErp?.display_name || "ERP 2"}</strong> Access {yinglimaErp ? `(${yinglimaErp.erp_key || yinglimaErp.key})` : "(Not registered)"}
                     {isRowUserAdmin(editingUser) && " — Full Root Access"}
                   </span>
                 </label>
@@ -1469,7 +1477,7 @@ export function GlobalUsers() {
                     disabled={!inhymaErp || isRowUserAdmin(editingUser)}
                   />
                   <span>
-                    Grant <strong>Inhyma ERP</strong> Access {inhymaErp ? `(${inhymaErp.erp_key || inhymaErp.key})` : "(Not registered)"}
+                    Grant <strong>{inhymaErp?.name || inhymaErp?.display_name || "ERP 1"}</strong> Access {inhymaErp ? `(${inhymaErp.erp_key || inhymaErp.key})` : "(Not registered)"}
                     {isRowUserAdmin(editingUser) && " — Full Root Access"}
                   </span>
                 </label>

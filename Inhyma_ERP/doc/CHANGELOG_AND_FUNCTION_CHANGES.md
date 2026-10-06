@@ -3,6 +3,45 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-05] — Production Deployment Readiness, Zero-LAN URL Decoupling & Multi-Cloud Infrastructure
+
+### 1. Quotation Portal URL Parametrization
+- **Eliminated Hardcoded LAN Fallback:** In [`routes.py:1052`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/inquiries/routes.py#L1052), replaced the hardcoded `192.168.1.23:5173` LAN IP fallback with `(request.headers.get("origin") or getattr(settings, "FRONTEND_URL", "http://localhost:5174")).rstrip("/")`. Automated RFQ quotation email links now resolve dynamically to the live production domain.
+- **Fixed Session Name Bug:** In [`routes.py:1566`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/inquiries/routes.py#L1566), corrected `db=db` to `db=session` in `_publish_inquiry_post_commit_event`.
+
+### 2. Central Control Plane Dynamic Navigation & SSO Handover
+- **Decoupled User Management Link:** In [`Users.tsx:990`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Users.tsx#L990), replaced hardcoded `http://localhost:5170/access/users` with dynamic URL resolution from `getEcosystemErps()` / `VITE_CONTROL_PLANE_URL`.
+- **SSO Handover Integration:** Wrapped the button link with `createSsoHandoverUrl` so operators navigating to the Central Dashboard are seamlessly authenticated.
+
+### 3. Multi-ERP Ecosystem & Session Synchronization
+- **Configurable Spoke & Control Plane URLs:** Updated [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts) to read `VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_YINGLIMA_URL`, `VITE_INHYMA_URL`, and `VITE_API_ORIGIN`.
+- **Cross-Subdomain SSO Cookies:** Updated [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ecosystemSession.ts) to support `VITE_CENTRAL_AUTH_API` and `VITE_COOKIE_DOMAIN` (e.g. `.yourcompany.com`).
+- **Pydantic Settings:** Added `BACKEND_URL` and `FRONTEND_URL` to the `Settings` class in [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/core/config.py).
+
+### 4. Cloud Infrastructure Assets
+- **Docker & Nginx:** Added [`frontend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/Dockerfile) and [`frontend/nginx.conf`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/nginx.conf) with SPA fallback rewrites and asset caching.
+- **Render Blueprint:** Added [`render.yaml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/render.yaml) for 1-click Render web service and static site provisioning.
+- **Dynamic Port Binding:** Updated [`backend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/Dockerfile) to dynamically bind to `${PORT:-8002}`.
+- **Compose Orchestration:** Added [`docker-compose.prod.yml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/docker-compose.prod.yml).
+
+---
+
+## [Release 2026-10-03] — Unique Navigation Icons, Machine Identifiers & Dynamic Company Branding from ERP Settings
+
+### 1. Unique Navigation Icons across All 39 Sidebar Routes
+- **Complete Visual Icon Differentiation:** Every navigation entry across all 7 sidebar sections (`DASHBOARD`, `OPERATIONS`, `LOGISTICS`, `PROCUREMENT & SOURCING`, `MASTERS`, `ADMINISTRATION`, `SETTINGS`) was upgraded to use a dedicated, semantically matched SVG icon in [`icons.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/icons.tsx) and mapped in [`nav.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/nav.ts). Zero icons are duplicated or shared.
+- **Automated Regression Guard:** Added [`NavIconsUniqueness.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/NavIconsUniqueness.test.tsx) asserting 100% unique icon keys across all top-level and sub-navigation routes.
+
+### 2. Backend Machine Identifiers (`erp-01` and `erp-02`)
+- **Machine Identification Contract:** Added `ERP_INSTANCE_ID = "erp-01"` in [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/core/config.py) for backend routing, heartbeat checks, and machine-to-machine federation, eliminating reliance on hardcoded human company names.
+- **Public Branding Endpoint (`GET /organizations/public`):** Added in [`organizations/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/organizations/routes.py) returning `{ company_name, legal_name, logo_url, erp_id }` without requiring user authentication.
+
+### 3. Dynamic Human-Facing Branding from ERP Settings
+- **Dynamic Brand Resolver:** Updated [`brand.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/brand.ts) and [`nav.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/nav.ts) to default to generic `"ERP"` and dynamically resolve the active company name from `GET /organizations/public`, persisting to `localStorage` (`erp_org_company_name`) for 0ms flicker-free hydration.
+- **Document & PDF Generation:** Updated all official document generators ([`localPurchasePdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/localPurchasePdf.ts), [`importPurchasePdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/importPurchasePdf.ts), [`proformaInvoicePdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/proformaInvoicePdf.ts), [`salesOrderPdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/salesOrderPdf.ts), [`stockTransferPdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/stockTransferPdf.ts), [`stockAdjustmentPdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/stockAdjustmentPdf.ts)) to call `getCachedBrandName()`, ensuring company name changes made in **ERP Settings -> Company Name** instantly reflect on generated PDFs.
+- **Cross-ERP Switcher:** Updated [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/EcosystemSwitcher.tsx) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts) to dynamically resolve peer ERP company names from peer `/organizations/public` endpoints.
+- **Automated Regression Suite:** Added [`brandResolution.test.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/__tests__/brandResolution.test.ts) covering public resolution, reactivity, subscriber notification, and machine ID mappings.
+
 ---
 
 ## [Release 2026-09-29] — Renamed Organization Settings to ERP Settings

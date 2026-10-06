@@ -3,6 +3,38 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-05] — Production Deployment Readiness, Zero-LAN URL Decoupling & Multi-Cloud Infrastructure
+
+### 1. Peer ERP API Resolution Overrides
+- **Environment Overrides for Identity Linking:** In [`http_adapter.py:43-57`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/adapters/http_adapter.py#L43-L57), eliminated hardcoded `127.0.0.1:8001` / `127.0.0.1:8002` fallbacks. Added support for `YINGLIMA_API_URL` and `INHYMA_API_URL` environment variables so the Control Plane can communicate with spokes in VPCs, container networks, or live subdomains.
+
+### 2. Central Dashboard Spoke Launch Switcher
+- **Parametric Spoke Launching:** In [`ssoBridge.ts:40-55, 130-150`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ssoBridge.ts#L40-L55), updated `getEcosystemErps()` and `launchErpWithMembership()` to read `VITE_YINGLIMA_URL` and `VITE_INHYMA_URL` when an admin launches a spoke from the central dashboard.
+
+### 3. Server Settings & Cloud Port Binding
+- **Typed Server Settings:** Added `HOST`, `PORT`, `BACKEND_URL`, `FRONTEND_URL`, and verified `OPENAPI_URL` in [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/core/config.py).
+- **Dynamic Port Binding:** Updated [`backend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/Dockerfile) to dynamically bind to `${PORT:-8000}`.
+- **Cross-Subdomain SSO Cookies:** Updated [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ecosystemSession.ts) to support `VITE_CENTRAL_AUTH_API` and `VITE_COOKIE_DOMAIN`.
+
+### 4. Cloud Infrastructure Assets
+- **Docker & Nginx:** Added [`frontend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/Dockerfile) and [`frontend/nginx.conf`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/nginx.conf).
+- **Render Blueprint:** Added [`render.yaml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/render.yaml) for 1-click Render web service and static site provisioning.
+- **Compose Orchestration:** Added [`docker-compose.prod.yml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/docker-compose.prod.yml) and master [`docker-compose.ecosystem.yml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/docker-compose.ecosystem.yml).
+
+---
+
+## [Release 2026-10-03] — Machine Identifier Routing (erp-01/erp-02) & Dynamic Multi-ERP Company Display
+
+### 1. Machine Identifier Routing & Secret Validation
+- **Machine Identification Protocol:** Extended [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/core/config.py) `get_service_credential_for_erp()` to recognize unique machine identifiers `erp-01` (Inhyma port 8002) and `erp-02` (Yinglima port 8001) alongside legacy keys.
+- **RPC Routing Adapter:** Updated [`http_adapter.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/adapters/http_adapter.py) to resolve target base URLs via `erp.key in ("yinglima", "erp-02")` and `erp.key in ("inhyma", "erp-01")`.
+- **Dependency Health Monitoring:** Updated [`health/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/health/routes.py) reporting `erp-01` and `erp-02` credential status.
+
+### 2. Dynamic Spoke Company Display & Peer Switcher
+- **Ecosystem Switcher Dynamic Resolution:** Updated [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/EcosystemSwitcher.tsx) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ssoBridge.ts) to query connected spoke apps' `/organizations/public` endpoints, caching dynamic company names locally and rendering `{isCurrent ? displayName : (peerNames[erp.key] || erp.name)}`.
+- **Global User Access Grants:** Updated [`GlobalUsers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/GlobalUsers.tsx) to resolve spoke instances by `erp-01` / `erp-02` and display live `{erp.name || erp.display_name}` instead of hardcoded strings in access checkboxes.
+- **Generic Onboarding Messages:** Updated [`Dashboard.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/Dashboard.tsx) empty state to be completely generic.
+
 ---
 
 ## [Release 2026-09-29] — Global Autocomplete Blocker & UI Hardening

@@ -109,3 +109,21 @@ Yinglima_ERP/
 │   └── package.json
 └── doc/                          # System documentation
 ```
+
+---
+
+## 5. Machine Identifiers vs. Dynamic Human Branding
+
+To achieve complete decoupling between infrastructure routing and organizational branding:
+
+1. **Unique Machine Identifier (`erp-02`):**
+   - The backend instance identifier `ERP_INSTANCE_ID = "erp-02"` is defined in [`backend/app/core/config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/core/config.py).
+   - Used for inter-ERP service-to-service authentication, health reporting, and identity sync across the ecosystem.
+
+2. **Public Branding Contract (`GET /organizations/public`):**
+   - Unauthenticated endpoint serving `{ company_name, legal_name, logo_url, erp_id }`.
+   - Allows client applications, login pages, and browser tab titles to resolve branding dynamically before authentication.
+
+3. **Dynamic Single Source of Truth (`ERP Settings -> Company Name`):**
+   - The human-facing brand name is never hardcoded in source files.
+   - All frontend components, public supplier quotation pages, and sales order forms query `getCachedBrandName()`, which stays synchronized with the active record in the `organizations` database table.

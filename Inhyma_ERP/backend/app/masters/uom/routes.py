@@ -215,6 +215,7 @@ async def update_uom(
 
 
 @router.post("/{uom_id}/activate", summary="Activate a uom")
+@router.patch("/{uom_id}/activate", summary="Activate alias")
 async def activate_uom(
     uom_id: uuid.UUID,
     request: Request,
@@ -241,6 +242,7 @@ async def activate_uom(
 
 
 @router.post("/{uom_id}/deactivate", summary="Deactivate a uom")
+@router.patch("/{uom_id}/deactivate", summary="Deactivate alias")
 async def deactivate_uom(
     uom_id: uuid.UUID,
     request: Request,

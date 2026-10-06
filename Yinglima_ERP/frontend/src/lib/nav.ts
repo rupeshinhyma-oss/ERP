@@ -43,7 +43,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "CONTACT",
     items: [
       { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
-      { key: "buyers", label: "Buyers", path: "/buyers", icon: "shoppingBag", permission: "buyer.view" },
+      { key: "buyers", label: "Buyers", path: "/buyers", icon: "idCard", permission: "buyer.view" },
     ],
   },
   {
@@ -57,7 +57,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "SALE",
     items: [
-      { key: "sale-process", label: "Sale Process", path: "/sale/process", icon: "shoppingBag" },
+      { key: "sale-process", label: "Sale Process", path: "/sale/process", icon: "shoppingCart" },
       { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText", permission: "inquiry.view" },
     ],
   },
@@ -87,7 +87,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         key: "masters-group",
         label: "Masters",
-        icon: "masters",
+        icon: "database",
         children: [
           { key: "masters-cities", label: "Cities", path: "/masters/cities", permission: "city.view" },
           { key: "masters-states", label: "Provinces", path: "/masters/states", permission: "state.view" },
@@ -157,7 +157,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "403": "Access Restricted",
 };
 
-export const DEFAULT_BRAND_NAME = "YINGLIMA";
+export const DEFAULT_BRAND_NAME = "ERP";
 
 /** Flat lookup of every nav item by key, for the page-access check. */
 export const NAV_ITEMS_BY_KEY: Record<string, NavItem | NavSubItem> = NAV_SECTIONS.reduce(

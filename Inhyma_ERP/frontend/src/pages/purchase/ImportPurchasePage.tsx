@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { useToast } from "@/lib/toast";
 import { apiPost } from "@/lib/api";
 import { DatePicker } from "@/components/DatePicker";
 import { formatIndianCurrency, formatUsdCurrency } from "@/lib/importPurchasePdf";
+import { getCachedBrandName } from "@/lib/brand";
 
 export interface ImportPurchaseItem {
   id: string;
@@ -385,7 +387,7 @@ export const INITIAL_IMPORT_ORDERS: ImportPurchaseRecord[] = [
     supplier_email: "9654123654",
     supplier_phone: "",
     supplier_gst: "07ABCDE1234F1Z5",
-    to_name: "INHYMA SOLUTIONS LLP (M)",
+    to_name: `${getCachedBrandName().toUpperCase()} (M)`,
     to_address: "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate",
     to_email: "Payment.Darsh@Gmail.Com",
     to_phone: "9653261742",
@@ -436,7 +438,7 @@ export const INITIAL_IMPORT_ORDERS: ImportPurchaseRecord[] = [
     supplier_email: "9654123654",
     supplier_phone: "",
     supplier_gst: "07ABCDE1234F1Z5",
-    to_name: "INHYMA SOLUTIONS LLP (M)",
+    to_name: `${getCachedBrandName().toUpperCase()} (M)`,
     to_address: "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate",
     to_email: "Payment.Darsh@Gmail.Com",
     to_phone: "9653261742",
@@ -700,9 +702,16 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const toast = useToast();
 
   const isAddRoute =
+    location.pathname.includes("/purchase/importpurchase/add") ||
+    location.pathname.includes("/purchase/import-purchase/add") ||
     location.pathname.includes("/purchase-order/import-purchase/add") ||
     location.pathname.includes("/purchase/import/add");
   const isListRoute =
+    location.pathname === "/purchase/importpurchase" ||
+    location.pathname === "/purchase/importpurchase/" ||
+    location.pathname === "/purchase/import-purchase" ||
+    location.pathname === "/purchase/import-purchase/" ||
+    location.pathname.includes("/purchase/importpurchase/list") ||
     location.pathname.includes("/purchase-order/import-purchase-list") ||
     location.pathname.includes("/purchase/import/list") ||
     location.pathname === "/purchase/import";
@@ -773,6 +782,36 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filterWarehouse, setFilterWarehouse] = useState("ALL");
   const [filterSupplier, setFilterSupplier] = useState("ALL");
+
+  // Selection & Bulk Actions matching Companies design
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
+
+  const handleBulkConfirm = () => {
+    if (selectedIds.length === 0) return;
+    setOrders((prev) =>
+      prev.map((o) => (selectedIds.includes(o.id) ? { ...o, status: "Confirmed" as const } : o))
+    );
+    toast(`${selectedIds.length} import consignment(s) confirmed`, "success");
+    setSelectedIds([]);
+    setBulkMenuOpen(false);
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected consignments?`)) {
+      setOrders((prev) => {
+        const updated = prev.filter((o) => !selectedIds.includes(o.id));
+        try {
+          localStorage.setItem("inhyma_import_purchase_orders", JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      toast(`${selectedIds.length} import consignment(s) deleted`, "success");
+      setSelectedIds([]);
+      setBulkMenuOpen(false);
+    }
+  };
 
   useEffect(() => {
     const handleDocumentClick = (e: MouseEvent) => {
@@ -1006,7 +1045,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const handleBack = () => {
     setEditingOrderId(null);
     setIsFormOpen(false);
-    navigate("/purchase-order/import-purchase-list");
+    navigate("/purchase/importpurchase");
   };
 
   const handleSaveImportOrder = (e: React.FormEvent) => {
@@ -1062,7 +1101,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       toast("Import consignment updated successfully", "success");
       setEditingOrderId(null);
       setIsFormOpen(false);
-      navigate("/purchase-order/import-purchase-list");
+      navigate("/purchase/importpurchase");
       return;
     }
 
@@ -1093,7 +1132,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     setOrders([newOrder, ...orders]);
     toast("Import consignment created successfully", "success");
     setIsFormOpen(false);
-    navigate("/purchase-order/import-purchase-list");
+    navigate("/purchase/importpurchase");
   };
 
   const handleExport = () => {
@@ -1156,6 +1195,9 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     return (
       <AppShell activeKey="import-purchases">
         <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
+          <div style={{ marginBottom: "12px" }}>
+            <Breadcrumb trail={["Purchase", "Import Purchase", editingOrderId ? "Edit Import Purchase" : "Add Import Purchase"]} />
+          </div>
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
@@ -1570,8 +1612,12 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   return (
     <AppShell activeKey="import-purchases">
       <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
-        {/* Header matching screenshot */}
+        <div style={{ marginBottom: "12px" }}>
+          <Breadcrumb trail={["Purchase", "Import Purchase"]} />
+        </div>
+        {/* Top Header matching Companies */}
         <div
+          className="page-header"
           style={{
             display: "flex",
             justifyContent: "space-between",
@@ -1590,28 +1636,28 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             Import Purchase
           </h1>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
+              className="btn"
               data-testid="btn-filter-toggle"
               onClick={() => setIsFilterOpen((prev) => !prev)}
               style={{
-                width: "36px",
-                height: "34px",
-                display: "inline-flex",
+                background: isFilterOpen ? "#0061f2" : "#556987",
+                color: "#ffffff",
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "none",
+                display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: isFilterOpen ? "#334155" : "#5b6b79",
-                border: "none",
-                borderRadius: "4px",
-                color: "#ffffff",
                 cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
-              title="Toggle Filter"
+              title="Toggle Filter Options"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
             </button>
@@ -1619,21 +1665,19 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             {/* ADD NEW button */}
             <button
               type="button"
+              className="btn btn-add-new"
               data-testid="btn-add-new"
               onClick={handleOpenCreate}
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                backgroundColor: "#0061f2",
+                background: "#0061f2",
                 color: "#ffffff",
-                border: "none",
-                borderRadius: "4px",
-                padding: "6px 16px",
-                fontSize: "13px",
+                padding: "8px 16px",
+                borderRadius: "6px",
                 fontWeight: 600,
+                fontSize: "13px",
+                border: "none",
                 cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
               }}
             >
               ADD NEW
@@ -1642,25 +1686,101 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             {/* Export button */}
             <button
               type="button"
+              className="btn btn-export"
               data-testid="btn-export"
               onClick={handleExport}
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                backgroundColor: "#f59e0b",
+                background: "#f59e0b",
                 color: "#ffffff",
-                border: "none",
-                borderRadius: "4px",
-                padding: "6px 16px",
-                fontSize: "13px",
+                padding: "8px 16px",
+                borderRadius: "6px",
                 fontWeight: 600,
+                fontSize: "13px",
+                border: "none",
                 cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                boxShadow: "0 2px 4px rgba(245,158,11,0.2)",
               }}
             >
               Export
             </button>
+
+            {/* Bulk Actions Button */}
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="btn btn-bulk-action"
+                disabled={selectedIds.length === 0}
+                onClick={() => setBulkMenuOpen((v) => !v)}
+                style={{
+                  background: selectedIds.length > 0 ? "#198754" : "#94a3b8",
+                  color: "#ffffff",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  border: "none",
+                  cursor: selectedIds.length > 0 ? "pointer" : "not-allowed",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                Bulk Actions {selectedIds.length > 0 ? `(${selectedIds.length})` : ""} ▼
+              </button>
+              {bulkMenuOpen && selectedIds.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    right: 0,
+                    top: "calc(100% + 4px)",
+                    background: "#ffffff",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                    zIndex: 100,
+                    minWidth: "160px",
+                    padding: "4px 0",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={handleBulkConfirm}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "8px 14px",
+                      background: "none",
+                      border: "none",
+                      fontSize: "13px",
+                      color: "#1e293b",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    Confirm Selected
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBulkDelete}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "8px 14px",
+                      background: "none",
+                      border: "none",
+                      fontSize: "13px",
+                      color: "#dc2626",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    Delete Selected
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1941,34 +2061,40 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
         {/* Table Container Card */}
         <div
+          className="card"
           style={{
             background: "#ffffff",
             border: "1px solid #e2e8f0",
-            borderRadius: "6px",
+            borderRadius: "8px",
             overflow: "hidden",
             boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
             minHeight: "420px",
           }}
         >
-          {/* Table Toolbar */}
+          {/* Table Toolbar matching Companies */}
           <div
+            className="toolbar"
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              padding: "12px 16px",
+              padding: "10px 16px",
+              borderBottom: "1px solid #f1f5f9",
             }}
           >
-            <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <select
                 aria-label="Items per page"
                 value={perPage}
-                onChange={(e) => setPerPage(Number(e.target.value))}
+                onChange={(e) => {
+                  setPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
                 style={{
-                  height: "32px",
+                  height: "34px",
+                  padding: "0 10px",
                   border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  padding: "0 8px",
+                  borderRadius: "6px",
                   fontSize: "13px",
                   background: "#ffffff",
                   color: "#334155",
@@ -1980,29 +2106,54 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                 <option value={50}>50</option>
                 <option value={100}>100</option>
               </select>
-              <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px", fontWeight: 500 }}>
+              <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>
                 Items/Page
-              </div>
+              </span>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
               <input
                 type="text"
                 aria-label="Search Import Purchases"
                 placeholder="Search..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
                 style={{
-                  height: "32px",
-                  width: "200px",
+                  height: "34px",
+                  width: "240px",
                   border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  padding: "0 10px",
+                  borderRadius: "6px",
+                  padding: "0 32px 0 12px",
                   fontSize: "13px",
                   outline: "none",
                   color: "#334155",
                 }}
               />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  title="Clear search"
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                    lineHeight: 1,
+                    padding: "0 2px",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  ×
+                </button>
+              )}
             </div>
           </div>
 
@@ -2010,80 +2161,95 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "12.5px" }}>
               <thead>
-                <tr style={{ borderBottom: "1px solid #cbd5e1", background: "#ffffff", whiteSpace: "nowrap" }}>
+                <tr style={{ borderBottom: "1px solid #cbd5e1", background: "#f8fafc", whiteSpace: "nowrap" }}>
+                  <th style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", padding: "10px 14px" }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all import orders"
+                      checked={paginatedOrders.length > 0 && paginatedOrders.every((o) => selectedIds.includes(o.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIds(paginatedOrders.map((o) => o.id));
+                        } else {
+                          setSelectedIds([]);
+                        }
+                      }}
+                      style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                    />
+                  </th>
                   <th
                     onClick={() => handleSort("consignment_no")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
                   >
                     Inv. / Con. No & Date <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "consignment_no" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
                   </th>
                   <th
                     onClick={() => handleSort("supplier_name")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
                   >
                     Supplier <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "supplier_name" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
                   </th>
                   <th
                     onClick={() => handleSort("warehouse")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
                   >
                     Warehouse <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "warehouse" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
                   </th>
                   <th
                     onClick={() => handleSort("ordered_date")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
                   >
                     Ordered Date <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "ordered_date" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
                     ETD Origin Date
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
                     ETA Port Date
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
                     Arrival Date
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "right" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
                     Inv. Total ($)
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "right" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
                     Inv. Total (₹)
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "right" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
                     Total CBM
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "right" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
                     Total Exp
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "right" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
                     % Loading Exp(VB)
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "right" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
                     Loading Exp(CB)(₹)
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "right" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
                     Gross Total Landing(₹)
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
                     Created By
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
                     Invoice
                   </th>
                   <th
                     onClick={() => handleSort("updated_date")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", cursor: "pointer", userSelect: "none" }}
+                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
                   >
                     Updated Date <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "updated_date" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
                   </th>
                   <th
                     onClick={() => handleSort("status")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "center", cursor: "pointer", userSelect: "none" }}
+                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "center", cursor: "pointer", userSelect: "none" }}
                   >
                     Status <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "status" ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}</span>
                   </th>
-                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#334155", textAlign: "center", width: "70px" }}>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "center", width: "70px" }}>
                     Action
                   </th>
                 </tr>
@@ -2091,7 +2257,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
               <tbody>
                 {paginatedOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={19} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "13.5px", background: "#f8fafc" }}>
+                    <td colSpan={20} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "13.5px", background: "#f8fafc" }}>
                       No Data Available In Table
                     </td>
                   </tr>
@@ -2101,13 +2267,37 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                       key={order.id}
                       style={{
                         borderBottom: "1px solid #f1f5f9",
-                        background: idx % 2 === 1 ? "#fafbfd" : "#ffffff",
+                        background: selectedIds.includes(order.id) ? "#eff6ff" : idx % 2 === 1 ? "#fafbfd" : "#ffffff",
                         transition: "background 0.15s ease",
                         whiteSpace: "nowrap",
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = idx % 2 === 1 ? "#fafbfd" : "#ffffff")}
+                      onMouseEnter={(e) => {
+                        if (!selectedIds.includes(order.id)) {
+                          e.currentTarget.style.background = "#f1f5f9";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!selectedIds.includes(order.id)) {
+                          e.currentTarget.style.background = idx % 2 === 1 ? "#fafbfd" : "#ffffff";
+                        }
+                      }}
                     >
+                      <td style={{ textAlign: "center", padding: "10px 14px" }}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select consignment ${order.consignment_no}`}
+                          checked={selectedIds.includes(order.id)}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            if (e.target.checked) {
+                              setSelectedIds((prev) => [...prev, order.id]);
+                            } else {
+                              setSelectedIds((prev) => prev.filter((id) => id !== order.id));
+                            }
+                          }}
+                          style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                        />
+                      </td>
                       {/* Inv. / Con. No & Date */}
                       <td style={{ padding: "10px 14px" }}>
                         <button
@@ -2557,8 +2747,9 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             </table>
           </div>
 
-          {/* Footer matching screenshot */}
+          {/* Footer matching Companies pagination */}
           <div
+            className="pagination"
             style={{
               display: "flex",
               justifyContent: "space-between",
@@ -2809,7 +3000,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                           <div><span style={{ fontWeight: 600 }}>GST No: </span>{selectedOrder.supplier_gst || "07ABCDE1234F1Z5"}</div>
                         </td>
                         <td style={{ padding: "10px 12px", verticalAlign: "top", color: "#334155", lineHeight: "1.7" }}>
-                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "2px" }}>{selectedOrder.to_name || "INHYMA SOLUTIONS LLP (M)"}</div>
+                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "2px" }}>{selectedOrder.to_name || `${getCachedBrandName().toUpperCase()} (M)`}</div>
                           <div>{selectedOrder.to_address || "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate"}</div>
                           <div><span style={{ fontWeight: 600 }}>Email: </span>{selectedOrder.to_email || "Payment.Darsh@Gmail.Com"}</div>
                           <div><span style={{ fontWeight: 600 }}>Phone: </span>{selectedOrder.to_phone || "9653261742"}</div>

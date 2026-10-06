@@ -49,6 +49,7 @@ class CompanyRepository(BaseRepository[Company]):
         "district",
         "pincode",
         "company_category",
+        "sector",
         "product_manufacture_or_supply",
         "machines_buying_from",
         "spares_buying_from",
@@ -72,8 +73,10 @@ class CompanyRepository(BaseRepository[Company]):
         "country_id",
         "state_id",
         "city_id",
+        "district",
         "company_type",
         "company_category",
+        "sector",
         "company_grade",
         "current_status",
         "potential",
@@ -322,6 +325,12 @@ class CompanyRepository(BaseRepository[Company]):
             )
         )
 
+    def apply_product_blank_filter(self, stmt: Select) -> Select:
+        """Restrict a company SELECT to companies with no linked product."""
+        return stmt.where(
+            ~exists().where(CompanyProductLink.company_id == Company.id)
+        )
+
     async def replace_emails(self, company_id: uuid.UUID, emails: list[str]) -> None:
         """Replace a company's email addresses with exactly the given list."""
         existing = await self.session.execute(select(CompanyEmail).where(CompanyEmail.company_id == company_id))
@@ -348,6 +357,12 @@ class CompanyRepository(BaseRepository[Company]):
             )
         )
 
+    def apply_category_blank_filter(self, stmt: Select) -> Select:
+        """Restrict a company SELECT to companies with no linked product category."""
+        return stmt.where(
+            ~exists().where(CompanyCategoryLink.company_id == Company.id)
+        )
+
     def apply_sub_category_filter(self, stmt: Select, sub_category_id: uuid.UUID) -> Select:
         """Restrict a company SELECT to companies linked to the given product sub-category."""
         return stmt.where(
@@ -357,6 +372,12 @@ class CompanyRepository(BaseRepository[Company]):
                     CompanySubCategoryLink.sub_category_id == sub_category_id,
                 )
             )
+        )
+
+    def apply_sub_category_blank_filter(self, stmt: Select) -> Select:
+        """Restrict a company SELECT to companies with no linked product sub-category."""
+        return stmt.where(
+            ~exists().where(CompanySubCategoryLink.company_id == Company.id)
         )
 
 

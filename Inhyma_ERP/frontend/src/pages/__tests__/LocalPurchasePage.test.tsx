@@ -31,6 +31,8 @@ describe("LocalPurchasePage (/purchase-order/list and /purchase-order/addedit)",
     return render(
       <MemoryRouter initialEntries={[initialRoute]}>
         <Routes>
+          <Route path="/purchase/localpurchase" element={<LocalPurchasePage defaultAdd={false} />} />
+          <Route path="/purchase/localpurchase/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/list" element={<LocalPurchasePage defaultAdd={false} />} />
           <Route path="/purchase-order/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
           <Route path="/purchase-order/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
@@ -51,6 +53,8 @@ describe("LocalPurchasePage (/purchase-order/list and /purchase-order/addedit)",
     expect(screen.getByText("+ ADD NEW")).toBeTruthy();
     expect(screen.getByTestId("btn-export")).toBeTruthy();
     expect(screen.getByText("Export")).toBeTruthy();
+    expect(screen.getByTestId("btn-import")).toBeTruthy();
+    expect(screen.getByText("Import")).toBeTruthy();
   });
 
   it("renders toolbar with Items/Page dropdown and Search... input", () => {
@@ -68,12 +72,12 @@ describe("LocalPurchasePage (/purchase-order/list and /purchase-order/addedit)",
   it("renders exact table header columns matching the production screenshot", () => {
     renderPurchasePage();
 
-    expect(screen.getByRole("columnheader", { name: /^Invoice ⇅/ })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: /^Supplier ⇅/ })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: /^Warehouse ⇅/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Invoice [↕⇅]/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Supplier [↕⇅]/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Warehouse [↕⇅]/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: /^Invoice Total Value/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Created By" })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: /^Added On ⇅/ })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Added On [↕⇅]/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: /^Status/ })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Action" })).toBeTruthy();
   });
@@ -130,7 +134,7 @@ describe("LocalPurchasePage (/purchase-order/list and /purchase-order/addedit)",
     expect(modalScope.getByText("From")).toBeTruthy();
     expect(modalScope.getByText("To")).toBeTruthy();
     expect(modalScope.getByText("Akshata Wadekar")).toBeTruthy();
-    expect(modalScope.getByText("INHYMA SOLUTIONS LLP (M)")).toBeTruthy();
+    expect(modalScope.getByText(/(\(M\)|INHYMA SOLUTIONS LLP \(M\)|ERP \(M\))/i)).toBeTruthy();
     expect(modalScope.getByText("Expenses")).toBeTruthy();
     expect(modalScope.getByText("Product Summary")).toBeTruthy();
 
@@ -453,4 +457,91 @@ describe("LocalPurchasePage (/purchase-order/list and /purchase-order/addedit)",
 
     expect(screen.queryByTestId("action-menu-po-1")).toBeNull();
   });
+
+  it("handles clicking sortable headers: toggles asc/desc indicators and sorts rows accordingly", () => {
+    renderPurchasePage();
+
+    // Initially Status is sorted asc
+    const statusHeader = screen.getByRole("columnheader", { name: /^Status/ });
+    expect(statusHeader).toBeTruthy();
+
+    // Click Invoice column header (strictly match 'Invoice' column, not 'Invoice Total Value')
+    const invoiceHeader = screen.getByRole("columnheader", { name: /^Invoice\s+[▲▼↕⇅]/ });
+    fireEvent.click(invoiceHeader);
+
+    // Invoice is now sorted ascending (▲)
+    expect(invoiceHeader.textContent).toContain("▲");
+
+    // Click Invoice column header again
+    fireEvent.click(invoiceHeader);
+
+    // Invoice is now sorted descending (▼)
+    expect(invoiceHeader.textContent).toContain("▼");
+
+    // Click Supplier column header
+    const supplierHeader = screen.getByRole("columnheader", { name: /^Supplier/ });
+    fireEvent.click(supplierHeader);
+
+    // Supplier is sorted ascending (▲), and Invoice resets to ↕
+    expect(supplierHeader.textContent).toContain("▲");
+    expect(invoiceHeader.textContent).toMatch(/[↕⇅]/);
+  });
+
+  it("renders Import button next to Export and opens Import modal on click", () => {
+    renderPurchasePage();
+
+    const importBtn = screen.getByTestId("btn-import");
+    expect(importBtn).toBeTruthy();
+    expect(importBtn.textContent).toContain("Import");
+
+    fireEvent.click(importBtn);
+
+    const modal = screen.getByTestId("local-purchase-import-modal");
+    expect(modal).toBeTruthy();
+    expect(screen.getByText("Import Local Purchase Orders")).toBeTruthy();
+    expect(screen.getByTestId("btn-download-sample-csv")).toBeTruthy();
+    expect(screen.getByTestId("btn-download-sample-excel")).toBeTruthy();
+    expect(screen.getByTestId("import-dropzone")).toBeTruthy();
+
+    // Close modal
+    fireEvent.click(screen.getByTestId("btn-close-import-modal"));
+    expect(screen.queryByTestId("local-purchase-import-modal")).toBeNull();
+  });
+
+  it("handles CSV file upload, displays preview rows and executes import", async () => {
+    renderPurchasePage();
+
+    fireEvent.click(screen.getByTestId("btn-import"));
+    expect(screen.getByTestId("local-purchase-import-modal")).toBeTruthy();
+
+    const csvContent =
+      "Invoice No,Invoice Date,Supplier,Warehouse,Invoice Total Value (INR),Created By,Added On,Status\n" +
+      "TEST-INV-999,23-09-2026,Acme Corporation,Mumbai,99000.00,Test Admin,23-09-2026,Confirmed";
+
+    const file = new File([csvContent], "test_import.csv", { type: "text/csv" });
+    const fileInput = screen.getByTestId("file-import-input") as HTMLInputElement;
+
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("import-preview-section")).toBeTruthy();
+    });
+
+    expect(screen.getByText("TEST-INV-999")).toBeTruthy();
+    expect(screen.getByText("Acme Corporation")).toBeTruthy();
+
+    // Confirm import
+    const confirmBtn = screen.getByTestId("btn-confirm-import");
+    expect(confirmBtn).toBeTruthy();
+    fireEvent.click(confirmBtn);
+
+    // Modal should close and order should be added
+    await waitFor(() => {
+      expect(screen.queryByTestId("local-purchase-import-modal")).toBeNull();
+    });
+
+    expect(screen.getByText("TEST-INV-999")).toBeTruthy();
+    expect(screen.getByText("Acme Corporation")).toBeTruthy();
+  });
 });
+

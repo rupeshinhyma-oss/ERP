@@ -18,6 +18,7 @@ import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
 import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
+import { createSsoHandoverUrl, getEcosystemErps } from "@/lib/ssoBridge";
 import { friendlyPermissionLabel, groupPermissionsByModule, MODULE_NAMES } from "@/lib/permissionLabels";
 import type {
   BulkPermissionOverrideItem,
@@ -952,6 +953,9 @@ export function UsersPage() {
   }
 
   const canManage = hasPermission("user.action") || isSuperAdmin;
+  const controlPlane = getEcosystemErps().find((e) => e.key === "control-plane");
+  const controlPlaneHost = controlPlane?.hostUrl || "http://localhost:5170/dashboard";
+  const centralUsersUrl = createSsoHandoverUrl(controlPlaneHost, "/access/users");
 
   return (
     <AppShell activeKey="users" pageClassName="page-users">
@@ -961,7 +965,7 @@ export function UsersPage() {
           <div>
             <h1>User Accounts &amp; Passwords</h1>
             <div className="page-subtitle">
-              Viewing users provisioned for Yinglima ERP. User accounts, access provisioning, and active/disabled status are governed centrally from the ERP_Main Global Control Panel.
+              Viewing users provisioned for this ERP application. User accounts, access provisioning, and active/disabled status are governed centrally from the ERP_Main Global Control Panel.
             </div>
           </div>
           <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -987,7 +991,7 @@ export function UsersPage() {
               <span>User accounts &amp; status managed centrally via <strong>ERP_Main</strong></span>
             </span>
             <a
-              href="http://localhost:5170/access/users"
+              href={centralUsersUrl}
               target="_blank"
               rel="noreferrer"
               className="btn btn-secondary"

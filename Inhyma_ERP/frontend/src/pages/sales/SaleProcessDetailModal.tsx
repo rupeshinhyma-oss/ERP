@@ -19,6 +19,7 @@ import { useToast } from "@/lib/toast";
 import type { SaleOrder, SaleOrderStatus } from "@/types/saleProcess";
 import { generateSalesOrderPdf } from "@/lib/salesOrderPdf";
 import { INITIAL_SALE_ORDERS } from "./SaleProcessList";
+import { getCachedBrandName } from "@/lib/brand";
 
 interface SaleProcessDetailModalProps {
   orderId: string;
@@ -403,7 +404,7 @@ export function SaleProcessDetailModal({
                     marginBottom: "3px",
                   }}
                 >
-                  INHYMA SOLUTIONS LLP (M)
+                  {`${getCachedBrandName().toUpperCase()} (M)`}
                 </div>
                 <div style={{ fontSize: "11px", color: "#475569", lineHeight: 1.45 }}>
                   4th Floor, Office No 421, Supremus -II, Road No- 22, Near Passport Office, Wagle

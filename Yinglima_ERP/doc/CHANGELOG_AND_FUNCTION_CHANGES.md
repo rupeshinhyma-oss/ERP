@@ -59,76 +59,42 @@
 
 ---
 
-## [Release 2026-10-03] — Local Purchase: Smart Supplier Quote Auto-Inheritance & User-Driven Quantity Logic
+## [Release 2026-10-05] — Production Deployment Readiness, Zero-LAN URL Decoupling & Multi-Cloud Infrastructure
 
-### 1. Smart Supplier Unit Rate & Quote Lookup
-- **Supplier-Aware Rate Auto-Inheritance:**
-  - In [`LocalPurchaseForm.tsx`](file:///d:/Om/work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseForm.tsx), when adding a product from catalog search, the system now queries `/api/v1/inventory/product-prices/{product_id}/suppliers`.
-  - **Priority 1 (Matched Supplier Quote):** If the supplier selected on the invoice has an active quote for that product in `supplier_product_links`, that supplier's exact `unit_price` is auto-filled into `unit_rate`.
-  - **Priority 2 (Preferred Quote / Available Quote):** If the selected supplier does not have a quote, it falls back to the preferred quote (or first active quote > 0) in Product Prices.
-  - **No Quote in Product Prices:** If no supplier quote exists in Product Prices, the system does **NOT** check Product Master (since master catalog does not hold purchase prices). `unit_rate` is left empty/blank (`""`) with placeholder `0.00` so the user types their own price directly.
-- **Dynamic Supplier Switch Auto-Fill:**
-  - When the user selects or switches the Supplier on the invoice, existing items with `unit_rate = 0` are automatically checked against the newly selected supplier's price quotes and updated.
+### 1. Quotation Portal URL Parametrization
+- **Eliminated Hardcoded LAN Fallback:** In [`routes.py:1057`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/inquiries/routes.py#L1057), replaced the hardcoded `192.168.1.23:5173` LAN IP fallback with `(request.headers.get("origin") or getattr(settings, "FRONTEND_URL", "http://localhost:5173")).rstrip("/")`. Automated RFQ quotation email links now resolve dynamically to the live production domain.
 
-### 2. Multi-Level Quantity Auto-Populate & Direct User Entry
-- **Quantity Hierarchy:**
-  - **Priority 1 (Supplier Quote MOQ):** If the matched supplier quote specifies `moq > 0`, quantity is initialized to `quote.moq`.
-  - **Priority 2 (Packaging Quantity / MOQ from Product Master):** If supplier quote has no MOQ (or 0), the system checks `packaging_quantity` (or `minimum_order_quantity`) from Product Master.
-  - **Priority 3 (Both Zero / Empty — User's Own Input):** If both MOQ and Product Master packaging quantity are 0 or empty, the field is **NOT** forced to 1. It is left blank/empty (`""`) with placeholder `0` so the user types their own required quantity directly.
-- **Removed Forced Blur Overrides:**
-  - Removed old `onBlur` behavior that forcibly overrode empty quantities to `1`.
-  - Added visual error highlight (`▲ Qty > 0 req.`) and form submission validation to prevent submitting an invoice without quantity while giving the user full editing freedom.
+### 2. Central Control Plane Dynamic Navigation & SSO Handover
+- **Decoupled User Management Link:** In [`Users.tsx:990`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/pages/Users.tsx#L990), replaced hardcoded `http://localhost:5170/access/users` with dynamic URL resolution from `getEcosystemErps()` / `VITE_CONTROL_PLANE_URL`.
+- **SSO Handover Integration:** Wrapped the button link with `createSsoHandoverUrl` so operators navigating to the Central Dashboard are seamlessly authenticated.
 
----
+### 3. Multi-ERP Ecosystem & Session Synchronization
+- **Configurable Spoke & Control Plane URLs:** Updated [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/ssoBridge.ts) to read `VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_YINGLIMA_URL`, `VITE_INHYMA_URL`, and `VITE_API_ORIGIN`.
+- **Cross-Subdomain SSO Cookies:** Updated [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/ecosystemSession.ts) to support `VITE_CENTRAL_AUTH_API` and `VITE_COOKIE_DOMAIN`.
+- **Pydantic Settings:** Added `BACKEND_URL` and `FRONTEND_URL` to the `Settings` class in [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/core/config.py).
 
-## [Release 2026-10-03] — Product Price Directory: Manual Preferred Supplier Selection & Rate Benchmark Control
-
-### 1. Manual Supplier Selection Control (No Automatic Lowest-Wins Enforced)
-- **Eliminated Automatic Lowest Quote Constraint:**
-  - Previously, the system strictly sorted quotations by price (`ORDER BY price ASC`), automatically crowning whichever supplier quoted the lowest amount as the primary benchmark.
-  - Added user-directed control allowing procurement and management to manually designate any supplier quote as the **⭐ Preferred Supplier** for any product.
-- **Backend Prioritized Ordering & API:**
-  - Updated CTE query in [`repository.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/masters/product_prices/repository.py) to prioritize the manually selected supplier (`CASE WHEN spl.supplier_id = p.supplier_id THEN 0 ELSE 1 END ASC`) before falling back to lowest quote.
-  - Added `PUT /api/v1/inventory/product-prices/{product_id}/preferred-supplier` with [`SetPreferredSupplierPayload`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/masters/product_prices/schemas.py) to set or clear preferred supplier status on `products.supplier_id`.
-  - Added `is_preferred: bool` flag to [`ProductPriceItem`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/masters/product_prices/schemas.py), [`ProductPriceSupplierItem`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/masters/product_prices/schemas.py), and [`AssignSupplierPricePayload`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/masters/product_prices/schemas.py).
-
-### 2. Multi-Currency Conversions & Exchange Rates 100% Preserved
-- **Multi-Currency System Retained:**
-  - Preserved all dynamic currency conversions (`USD`, `CNY`/`RMB`, `EUR`, `INR`), currency symbols, converted estimate hints `(~$ ...)`, and live exchange rate API polling (`/masters/currencies/rates`).
-  - Quoted prices and conversions reflect the exact currency and unit rate of the selected preferred supplier.
-
-### 3. Interactive UI Controls in Product Prices Module
-- **Accordion Sub-Table (`Compare ▾`):**
-  - Added `[⭐ Set Preferred]` and `[⭐ Preferred (Unset)]` action buttons on each supplier quotation row with optimistic UI updates.
-  - Added golden `⭐ PREFERRED` badge for the designated supplier, and preserved `LOWEST` badge for lowest price comparison.
-- **Add Quote Modal & Sub-Table Quick Add:**
-  - Added `☑ Set as Preferred Supplier for this product` toggle in both the `+ Add Price / + Quote` modal and the sub-table inline quick-add row.
-- **Main Table Row:**
-  - Displays `⭐ Preferred` badge next to the primary supplier name when manually selected by the user.
+### 4. Cloud Infrastructure Assets
+- **Docker & Nginx:** Added [`frontend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/Dockerfile) and [`frontend/nginx.conf`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/nginx.conf) with SPA fallback rewrites and asset caching.
+- **Render Blueprint:** Added [`render.yaml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/render.yaml) for 1-click Render web service and static site provisioning.
+- **Dynamic Port Binding:** Updated [`backend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/Dockerfile) to dynamically bind to `${PORT:-8001}`.
+- **Compose Orchestration:** Added [`docker-compose.prod.yml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/docker-compose.prod.yml).
 
 ---
 
-## [Release 2026-10-03] — Local Purchase Streamlining & Complete Organization/Branch Removal
+## [Release 2026-10-03] — Machine Identifiers & Dynamic Company Branding from ERP Settings
 
-### 1. Complete Database Column Drop & Backend Clean-up
-- **Database Column Dropping (`local_purchases` table):**
-  - Executed PostgreSQL schema migration dropping `organization_id`, `organization_name`, `branch_id`, and `branch_name` columns from `local_purchases` (`ALTER TABLE local_purchases DROP COLUMN IF EXISTS ...`).
-- **Backend ORM Models & Schemas:**
-  - Removed `organization_id`, `organization_name`, `branch_id`, and `branch_name` from [`LocalPurchase` model](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/models.py), [`LocalPurchaseBase`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/schemas.py), [`LocalPurchaseCreate`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/schemas.py), [`LocalPurchaseUpdate`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/schemas.py), and [`LocalPurchaseSummaryResponse`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/schemas.py).
-- **Backend Repository, Service & Routes:**
-  - Removed organization and branch fields from [`LocalPurchaseRepository`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/repository.py) searchable and filterable fields and queries.
-  - Removed columns from Excel exporter in [`service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/service.py) with re-indexed number and alignment formatting.
-  - Cleaned up query parameters and response mappings in [`routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/routes.py).
+### 1. Backend Machine Identifiers (`erp-01` and `erp-02`)
+- **Machine Identification Contract:** Added `ERP_INSTANCE_ID = "erp-02"` in [`config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/core/config.py) for backend routing, heartbeat checks, and machine-to-machine federation.
+- **Public Branding Endpoint (`GET /organizations/public`):** Added in [`organizations/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/organizations/routes.py) returning `{ company_name, legal_name, logo_url, erp_id }` unauthenticated.
 
-### 2. Frontend List Table & Filter Drawer Clean-up
-- **Table Column Removal (`LocalPurchases.tsx`):**
-  - Removed the `ORGANIZATION & BRANCH` column header and table body cells.
-  - Adjusted table empty and loading states to `colSpan={10}`.
-- **Filter Drawer & State:**
-  - Removed the `Organization` and `Operating Branch` dropdown filters and lookup dependencies from [`LocalPurchases.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchases.tsx).
-- **Detail View & Form Dead Code Elimination:**
-  - Removed the `To (Receiving Location)` card from [`LocalPurchaseDetailModal.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseDetailModal.tsx).
-  - Removed all leftover state and payload attributes from [`LocalPurchaseForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseForm.tsx) and updated TypeScript interfaces in [`types/localPurchase.ts`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/types/localPurchase.ts).
+### 2. Dynamic Human-Facing Branding from ERP Settings
+- **Dynamic Brand Resolver:** Updated [`brand.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/brand.ts) and [`nav.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/nav.ts) to default to generic `"ERP"` and dynamically resolve the active company name from `GET /organizations/public`, persisting to `localStorage` (`erp_org_company_name`) for 0ms flicker-free hydration.
+- **Dynamic Forms & Portals:**
+  - [`PublicSupplierQuotePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/pages/PublicSupplierQuotePage.tsx): RFQ title and footer dynamically display the resolved organization name.
+  - [`SaleProcessForm.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/pages/sales/SaleProcessForm.tsx): Organization name state defaults to `getCachedBrandName()`.
+  - [`Users.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/pages/Users.tsx): Replaced static naming with generic subtitle.
+- **Cross-ERP Switcher:** Updated [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/components/EcosystemSwitcher.tsx) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/ssoBridge.ts) to dynamically resolve peer ERP company names from peer `/organizations/public` endpoints.
+- **Automated Regression Suite:** Added [`brandResolution.test.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/__tests__/brandResolution.test.ts).
 
 ---
 

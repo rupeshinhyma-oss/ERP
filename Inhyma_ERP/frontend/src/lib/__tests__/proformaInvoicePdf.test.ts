@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { generateProformaInvoicePdf, formatPdfCurrency } from "../proformaInvoicePdf";
-import { INITIAL_PROFORMA_ITEMS } from "@/pages/ProformaInvoicesPage";
+import { PROFORMA_FIXTURE_ITEMS } from "./fixtures/proformaInvoices";
 import jsPDF from "jspdf";
 
 describe("proformaInvoicePdf", () => {
@@ -15,7 +15,7 @@ describe("proformaInvoicePdf", () => {
 
   describe("generateProformaInvoicePdf", () => {
     it("creates a valid jsPDF document instance from proforma item", () => {
-      const item = INITIAL_PROFORMA_ITEMS[0]; // PI-MH/26-27/1714 ELITE PACK INDIA
+      const item = PROFORMA_FIXTURE_ITEMS[0]; // PI-MH/26-27/1714 ELITE PACK INDIA
       const doc = generateProformaInvoicePdf(item, { saveFile: false, openInNewTab: false });
 
       expect(doc).toBeDefined();
@@ -23,7 +23,7 @@ describe("proformaInvoicePdf", () => {
     });
 
     it("calls doc.save with 'proforma_invoice.pdf' when saveFile is true", () => {
-      const item = INITIAL_PROFORMA_ITEMS[0];
+      const item = PROFORMA_FIXTURE_ITEMS[0];
       const doc = new jsPDF();
       const saveSpy = vi.spyOn(doc, "save").mockImplementation(() => doc);
 
@@ -32,7 +32,7 @@ describe("proformaInvoicePdf", () => {
     });
 
     it("handles an item without line items gracefully", () => {
-      const item = { ...INITIAL_PROFORMA_ITEMS[0], items: [] };
+      const item = { ...PROFORMA_FIXTURE_ITEMS[0], items: [] };
       const doc = generateProformaInvoicePdf(item, { saveFile: false, openInNewTab: false });
 
       expect(doc).toBeDefined();

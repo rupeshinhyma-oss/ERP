@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
@@ -467,7 +467,8 @@ function SupplierSkeletonRows({
   );
 }
 
-export function SuppliersPage() {
+export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } = {}) {
+  const location = useLocation();
   const { hasPermission } = useAuth();
   const canCreate = hasPermission("supplier.create");
   const canUpdate = hasPermission("supplier.update");
@@ -1540,7 +1541,16 @@ export function SuppliersPage() {
     setError(null);
     setAlertPopup(null);
     setValidationErrors({});
+    if (location.pathname.includes("/add")) {
+      window.history.replaceState(null, "", "/purchase/suppliers");
+    }
   }
+
+  useEffect(() => {
+    if (defaultAdd || location.pathname.includes("/suppliers/add")) {
+      openModal(null, "full");
+    }
+  }, [defaultAdd, location.pathname]);
 
   function buildPayload() {
     const emails = form.emails || [];
@@ -2016,7 +2026,7 @@ export function SuppliersPage() {
     return (
       <AppShell activeKey="suppliers" pageClassName="page-suppliers">
         <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
-          <Breadcrumb trail={["Supplier Profiles", "Import Suppliers"]} />
+          <Breadcrumb trail={["Purchase", "Suppliers", "Import Suppliers"]} />
 
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
@@ -3600,17 +3610,17 @@ export function SuppliersPage() {
         </main>
       ) : (
         <main className="page">
-          <Breadcrumb trail={["Suppliers"]} />
+          <Breadcrumb trail={["Purchase", "Suppliers"]} />
           <div className="page-header">
             <div>
-              <h1>Suppliers</h1>
+              <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Suppliers</h1>
             </div>
             <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <button
                 type="button"
                 className="btn"
                 style={{
-                  background: filterOpen ? "#0061f2" : "#475569",
+                  background: filterOpen ? "#0061f2" : "#556987",
                   color: "#ffffff",
                   padding: "8px 14px",
                   borderRadius: "6px",

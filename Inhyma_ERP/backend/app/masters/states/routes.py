@@ -238,6 +238,7 @@ async def update_state(
 
 
 @router.post("/{state_id}/activate", summary="Activate a state")
+@router.patch("/{state_id}/activate", summary="Activate alias")
 async def activate_state(
     state_id: uuid.UUID,
     request: Request,
@@ -264,6 +265,7 @@ async def activate_state(
 
 
 @router.post("/{state_id}/deactivate", summary="Deactivate a state")
+@router.patch("/{state_id}/deactivate", summary="Deactivate alias")
 async def deactivate_state(
     state_id: uuid.UUID,
     request: Request,

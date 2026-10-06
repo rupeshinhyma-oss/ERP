@@ -40,6 +40,14 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: "TASK",
+    items: [
+      { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
+      { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
+      { key: "marketing-tasks", label: "Marketing Tasks", path: "/marketing-task/list", icon: "messageSquare" },
+    ],
+  },
+  {
     label: "CONTACT",
     items: [
       { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "company.view" },
@@ -50,7 +58,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "product-stock", label: "Product Stock", path: "/product-stock/list", icon: "stock", permission: "product.view" },
       { key: "stock-adjustment", label: "Stock Adjustment", path: "/stock-adjustment", icon: "sliders", permission: "product.view" },
-      { key: "stock-transfer", label: "Stock Transfer", path: "/stock-transfer", icon: "truck", permission: "product.view" },
+      { key: "stock-transfer", label: "Stock Transfer", path: "/stock-transfer", icon: "transfer", permission: "product.view" },
       { key: "masters-products", label: "Product Master", path: "/product/list", icon: "box", permission: "product.view" },
       { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "productgallery.view" },
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "layers", permission: "category.view" },
@@ -69,43 +77,29 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "PURCHASE",
     items: [
-      { key: "local-purchases", label: "Local Purchase", path: "/purchase-order/list", icon: "shoppingBag", permission: "purchase.view" },
-      { key: "import-purchases", label: "Import Purchase", path: "/purchase-order/import-purchase-list", icon: "truck", permission: "purchase.view" },
-      { key: "purchase-suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
+      { key: "local-purchases", label: "Local Purchase", path: "/purchase/localpurchase", icon: "shoppingBag", permission: "purchase.view" },
+      { key: "import-purchases", label: "Import Purchase", path: "/purchase/importpurchase", icon: "ship", permission: "purchase.view" },
+      { key: "purchase-suppliers", label: "Suppliers", path: "/purchase/suppliers", icon: "factory", permission: "supplier.view" },
     ],
   },
   {
     label: "REPORTS",
     items: [
-      { key: "reports-re-order", label: "Re-Order", path: "/reports/re-order", icon: "stock", permission: "report.view" },
+      { key: "reports-re-order", label: "Re-Order", path: "/reports/re-order", icon: "reorder", permission: "report.view" },
       { key: "reports-stock-transactions", label: "Stock Transactions", path: "/reports/stock-transactions", icon: "refresh", permission: "report.view" },
-      { key: "reports-deleted-orders", label: "Deleted Orders", path: "/reports/deleted-orders", icon: "trash", permission: "report.view" },
-      { key: "reports-general", label: "General Reports", path: "/reports/general", icon: "fileText", permission: "report.view" },
-    ],
-  },
-  {
-    label: "PLANNING",
-    items: [
-      { key: "planning", label: "Shipment Planning", path: "/planning", icon: "truck", permission: "planning.view" },
-    ],
-  },
-  {
-    label: "TASK",
-    items: [
-      { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
-      { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
-      { key: "marketing-tasks", label: "Marketing Tasks", path: "/marketing-task/list", icon: "messageSquare" },
+      { key: "reports-deleted-orders", label: "Deleted Orders", path: "/reports/deleted-orders", icon: "fileX", permission: "report.view" },
+      { key: "reports-general", label: "General Reports", path: "/reports/general", icon: "pieChart", permission: "report.view" },
     ],
   },
   {
     label: "HRMS",
     items: [
-      { key: "hrms-attendance", label: "Attendance", path: "/hrms/attendance", icon: "clock" },
+      { key: "hrms-attendance", label: "Attendance", path: "/hrms/attendance", icon: "userCheck" },
       { key: "hrms-leave", label: "Leave", path: "/hrms/leave", icon: "calendar" },
-      { key: "hrms-expenses", label: "Expense Management", path: "/hrms/expenses", icon: "creditCard" },
+      { key: "hrms-expenses", label: "Expense Management", path: "/hrms/expenses", icon: "receipt" },
       { key: "hrms-site-visit", label: "Site Visit", path: "/hrms/site-visit", icon: "map" },
       { key: "hrms-payroll", label: "Payroll", path: "/hrms/payroll", icon: "coins" },
-      { key: "hrms-setup", label: "Setup", path: "/hrms/setup", icon: "settings" },
+      { key: "hrms-setup", label: "Setup", path: "/hrms/setup", icon: "userCog" },
     ],
   },
   {
@@ -114,7 +108,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
       { key: "positions", label: "Positions", path: "/positions", icon: "briefcase", permission: "position.view" },
       { key: "rbac", label: "Departments & Permissions", path: "/rbac", icon: "shield", permission: "roles_permissions.view" },
-      { key: "effective-permissions", label: "Effective Permissions", path: "/effective-permissions", icon: "shield", permission: "roles_permissions.view" },
+      { key: "effective-permissions", label: "Effective Permissions", path: "/effective-permissions", icon: "key", permission: "roles_permissions.view" },
     ],
   },
   {
@@ -123,11 +117,13 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         key: "masters-group",
         label: "Masters",
-        icon: "masters",
+        icon: "database",
         children: [
           { key: "masters-cities", label: "Cities", path: "/masters/cities", permission: "city.view" },
           { key: "masters-districts", label: "Districts", path: "/masters/districts", permission: "district.view" },
           { key: "masters-states", label: "States", path: "/masters/states", permission: "state.view" },
+          { key: "masters-countries", label: "Countries", path: "/masters/countries", permission: "country.view" },
+          { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", permission: "currency.view" },
           { key: "masters-taxes", label: "Taxes", path: "/masters/taxes", permission: "tax.view" },
           { key: "masters-additional-charges", label: "Additional Charges", path: "/masters/additional-charges", permission: "additionalcharge.view" },
           { key: "masters-social-media", label: "Social Media", path: "/masters/social-media", permission: "socialmedia.view" },
@@ -139,6 +135,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-warehouses", label: "Warehouses", path: "/masters/warehouses", permission: "warehouse.view" },
           { key: "masters-uom", label: "UOM", path: "/masters/uom", permission: "uom.view" },
           { key: "masters-billing-company", label: "Billing Company", path: "/masters/billing-company", permission: "billingcompany.view" },
+          { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", permission: "organizationlist.view" },
           { key: "masters-technicians", label: "Technicians", path: "/masters/technicians", permission: "technician.view" },
           { key: "masters-banks", label: "Bank", path: "/masters/banks", permission: "bank.view" },
           { key: "masters-transport", label: "Transport", path: "/masters/transport", permission: "transport.view" },
@@ -148,10 +145,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-call-types", label: "Call Types", path: "/masters/call-types", permission: "call_type.view" },
         ],
       },
-      { key: "masters-countries", label: "Countries", path: "/masters/countries", icon: "globe", permission: "country.view" },
-      { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", icon: "coins", permission: "currency.view" },
       { key: "organization", label: "ERP Settings", path: "/organization", icon: "settings", permission: "organization.manage" },
-      { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", icon: "building", permission: "organizationlist.view" },
       { key: "audit", label: "Audit Log", path: "/audit", icon: "clock", permission: "audit.view" },
       { key: "trash", label: "Trash", path: "/trash", icon: "trash", permission: "trash.view" },
     ],
@@ -259,7 +253,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "hrms-setup": "HRMS Setup",
 };
 
-export const DEFAULT_BRAND_NAME = "Inhyma";
+export const DEFAULT_BRAND_NAME = "ERP";
 
 /** Flat lookup of every nav item by key, for the page-access check. */
 export const NAV_ITEMS_BY_KEY: Record<string, NavItem | NavSubItem> = NAV_SECTIONS.reduce(
@@ -295,9 +289,11 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/effective-permissions.html": "/effective-permissions",
   "/teams.html": "/users",
   "/teams": "/users",
-  "/suppliers.html": "/suppliers",
-  "/supplier/list": "/suppliers",
-  "/supplier": "/suppliers",
+  "/suppliers.html": "/purchase/suppliers",
+  "/supplier/list": "/purchase/suppliers",
+  "/supplier": "/purchase/suppliers",
+  "/suppliers": "/purchase/suppliers",
+  "/purchase/suppliers": "/purchase/suppliers",
   "/inquiries.html": "/proforma-invoice/list",
   "/inquiries": "/proforma-invoice/list",
   "/masters-countries.html": "/masters/countries",
@@ -316,11 +312,17 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/sale-process/list": "/sales/process",
   "/sales-process/list": "/sales/process",
   "/discount-payments/list": "/discount-payments/list",
-  "/purchase/local": "/purchase-order/list",
-  "/purchase/local/list": "/purchase-order/list",
-  "/purchase-order": "/purchase-order/list",
-  "/purchase-order.html": "/purchase-order/list",
-  "/purchase-order/list": "/purchase-order/list",
+  "/purchase/local": "/purchase/localpurchase",
+  "/purchase/local/list": "/purchase/localpurchase",
+  "/purchase/local-purchase": "/purchase/localpurchase",
+  "/purchase-order": "/purchase/localpurchase",
+  "/purchase-order.html": "/purchase/localpurchase",
+  "/purchase-order/list": "/purchase/localpurchase",
+  "/purchase/import": "/purchase/importpurchase",
+  "/purchase/import/list": "/purchase/importpurchase",
+  "/purchase/import-purchase": "/purchase/importpurchase",
+  "/purchase-order/import": "/purchase/importpurchase",
+  "/purchase-order/import-purchase-list": "/purchase/importpurchase",
   "/product-stock": "/product-stock/list",
   "/product-stock.html": "/product-stock/list",
   "/product_stock/list": "/product-stock/list",
@@ -346,6 +348,8 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/masters-banks.html": "/masters/banks",
   "/bank/list": "/masters/banks",
   "/masters/bank": "/masters/banks",
+  "/planning": "/dashboard",
+  "/planning.html": "/dashboard",
   "/trash.html": "/trash",
   "/tasks.html": "/tasks",
   "/technical-tasks": "/technical-task/list",

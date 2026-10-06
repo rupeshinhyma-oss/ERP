@@ -256,6 +256,7 @@ async def update_company_category(
 
 
 @router.patch("/{company_category_id}/activate", summary="Activate a company category")
+@router.post("/{company_category_id}/activate", summary="Activate alias")
 async def activate_company_category(
     company_category_id: uuid.UUID,
     request: Request,
@@ -288,6 +289,7 @@ async def activate_company_category(
 
 
 @router.patch("/{company_category_id}/deactivate", summary="Deactivate a company category")
+@router.post("/{company_category_id}/deactivate", summary="Deactivate alias")
 async def deactivate_company_category(
     company_category_id: uuid.UUID,
     request: Request,

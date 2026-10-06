@@ -18,43 +18,17 @@ import type {
   TechnicalTaskCreatePayload,
 } from "@/types/technicalTasks";
 import { apiGet, errorMessage } from "@/lib/api";
+import { useOptions, optionValues } from "@/lib/options";
 import { Banner, Modal } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import "@/styles/technicalTasks.css";
 
-const TASK_TYPE_OPTIONS = [
-  "Telecall",
-  "Onsite Visit - Client Location",
-  "Onsite Visit - Third-Party Location",
-  "In-house",
-];
-
-const CALL_TYPE_OPTIONS = [
-  "Demo",
-  "Repair",
-  "Trial",
-];
-
-const PRIORITY_OPTIONS = ["A", "B", "C"];
-const SERVICE_TYPE_OPTIONS = ["Chargeable", "Free"];
-const STATUS_OPTIONS = ["Pending", "Approved", "Completed", "Cancel"];
-
-const DEFAULT_CITIES = [
-  "Ahmedabad",
-  "Surat",
-  "Rajkot",
-  "Vadodara",
-  "Mumbai",
-  "Pune",
-  "Delhi",
-  "Bengaluru",
-];
-
-const DEFAULT_TECHNICIANS = [
-  "Devendra Marade",
-  "Sushant Dhawade",
-  "Admin Technician",
-];
+const TECHNICAL_TASK_OPTION_GROUPS = [
+  "technical_task.task_type",
+  "technical_task.priority",
+  "technical_task.service_type",
+  "technical_task.status",
+] as const;
 
 const TECHNICAL_TASK_COLUMN_LABELS = [
   "", // 0: Checkbox
@@ -505,8 +479,8 @@ function TypableCombobox({
                     background: isHighlighted
                       ? "#eff6ff"
                       : isSelected
-                      ? "#f8fafc"
-                      : "transparent",
+                        ? "#f8fafc"
+                        : "transparent",
                     color: isSelected ? "#0061f2" : "#1e293b",
                     fontWeight: isSelected ? 600 : 400,
                     display: "flex",
@@ -571,6 +545,13 @@ function TechnicalTasksPageContent() {
   // Master lookups
   const [cityOptions, setCityOptions] = useState<string[]>([]);
   const [technicianOptions, setTechnicianOptions] = useState<string[]>([]);
+  const [callTypeOptions, setCallTypeOptions] = useState<string[]>([]);
+  const { options: optionGroups } = useOptions(TECHNICAL_TASK_OPTION_GROUPS);
+  const TASK_TYPE_OPTIONS = optionValues(optionGroups, "technical_task.task_type");
+  const CALL_TYPE_OPTIONS = callTypeOptions;
+  const PRIORITY_OPTIONS = optionValues(optionGroups, "technical_task.priority");
+  const SERVICE_TYPE_OPTIONS = optionValues(optionGroups, "technical_task.service_type");
+  const STATUS_OPTIONS = optionValues(optionGroups, "technical_task.status");
 
   // Feedback and Error Handling States
   const [apiError, setApiError] = useState<unknown>(null);
@@ -657,25 +638,31 @@ function TechnicalTasksPageContent() {
     return () => document.removeEventListener("click", handleDocClick);
   }, []);
 
-  // Load Lookups on mount with graceful fallback systems
+  // Load lookups from their master tables (no hardcoded fallbacks)
   useEffect(() => {
     async function loadLookups() {
       try {
-        const cityRes = await apiGet<any[]>("/masters/cities?page=1&page_size=200");
-        const cities = cityRes?.data?.map((c: any) => c.name || c.city_name).filter(Boolean) || [];
-        setCityOptions(cities.length > 0 ? cities : DEFAULT_CITIES);
+        const cityRes = await apiGet<any[]>("/masters/cities?page=1&page_size=200&status=active");
+        setCityOptions(cityRes?.data?.map((c: any) => c.name || c.city_name).filter(Boolean) || []);
       } catch (err) {
-        console.warn("Could not load cities lookup, using fallback defaults:", err);
-        setCityOptions(DEFAULT_CITIES);
+        console.warn("Could not load cities lookup:", err);
+        setCityOptions([]);
       }
 
       try {
-        const techRes = await apiGet<any[]>("/masters/technicians?page=1&page_size=100");
-        const techs = techRes?.data?.map((t: any) => t.name || t.technician_name).filter(Boolean) || [];
-        setTechnicianOptions(techs.length > 0 ? techs : DEFAULT_TECHNICIANS);
+        const techRes = await apiGet<any[]>("/masters/technicians?page=1&page_size=100&status=active");
+        setTechnicianOptions(techRes?.data?.map((t: any) => t.name || t.technician_name).filter(Boolean) || []);
       } catch (err) {
-        console.warn("Could not load technicians lookup, using fallback defaults:", err);
-        setTechnicianOptions(DEFAULT_TECHNICIANS);
+        console.warn("Could not load technicians lookup:", err);
+        setTechnicianOptions([]);
+      }
+
+      try {
+        const callRes = await apiGet<any[]>("/masters/call-types?page=1&page_size=100&status=active");
+        setCallTypeOptions(callRes?.data?.map((c: any) => c.name).filter(Boolean) || []);
+      } catch (err) {
+        console.warn("Could not load call types lookup:", err);
+        setCallTypeOptions([]);
       }
     }
     loadLookups();
@@ -1111,12 +1098,12 @@ function TechnicalTasksPageContent() {
     const dir = pinnedCols[colIdx];
     const headerTopStyle: React.CSSProperties = isHeader
       ? {
-          position: "sticky",
-          top: 0,
-          zIndex: dir ? 30 : 15,
-          backgroundColor: "#f8fafc",
-          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
-        }
+        position: "sticky",
+        top: 0,
+        zIndex: dir ? 30 : 15,
+        backgroundColor: "#f8fafc",
+        boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
+      }
       : {};
 
     if (!dir) return headerTopStyle;
@@ -3431,4 +3418,3 @@ export function TechnicalTasksPage() {
     </ErrorBoundary>
   );
 }
-

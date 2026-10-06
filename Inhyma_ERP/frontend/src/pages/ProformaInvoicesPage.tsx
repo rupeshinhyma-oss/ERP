@@ -9,7 +9,7 @@
  * KPI summary cards, and SideDrawer details view.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -19,64 +19,26 @@ import { Combobox } from "@/components/Combobox";
 import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
+import { useOptions, useMasterNames } from "@/lib/options";
 import type { PaginationMeta, ProformaInvoice, ProformaTabCounts } from "@/types";
 import { numberToIndianWords } from "@/utils/text";
 import "@/styles/stockAdjustment.css";
 
-const WAREHOUSE_OPTIONS = ["Mumbai", "Ahmedabad", "Indore", "Delhi", "Bangalore", "Chennai"];
-const PAYMENT_TERM_OPTIONS = [
-  "100% Advance",
-  "Against Delivery",
-  "30 Days",
-  "15 Days",
-  "Immediate",
-  "50% Advance & 50% Against Delivery",
-  "45 Days",
-  "60 Days",
-];
-const SALES_PERSON_OPTIONS = [
-  "Rupesh Malla",
-  "Deepika Samel",
-  "Dhairya Shah",
-  "Sunita Pawar",
-  "Bhavin Suthar",
-  "Om Inhyma",
-];
-const TRANSPORT_NAME_OPTIONS = [
-  "By Road",
-  "V-Trans",
-  "TCI Express",
-  "DTDC",
-  "Blue Dart",
-  "Safechem Logistics",
-  "Gati KWE",
-  "Trackon",
-  "Self Transport",
-];
-const THIRD_PARTY_OPTIONS = ["No", "Yes"];
-const LEAD_SOURCE_OPTIONS = ["Direct", "IndiaMART", "TradeIndia", "Website", "Reference", "Exhibition", "Other"];
-const DELIVERY_TYPE_OPTIONS = ["Door Delivery", "Godown Delivery", "To Pay", "Paid", "Self Pickup", "Courier"];
-const DELIVERY_CHARGE_OPTIONS = ["Paid", "To Pay", "Inclusive", "Exclusive", "Extra as Actual", "Free Delivery"];
-const ADDITIONAL_CHARGE_TYPES = [
-  "Freight Charges",
-  "Packing & Forwarding",
-  "Loading Charges",
-  "Insurance Charges",
-  "Installation Charges",
-  "Courier Charges",
-  "Other Charges",
-];
+const PROFORMA_OPTION_GROUPS = ["proforma.status", "common.yes_no", "delivery.type", "delivery.charge"] as const;
 
-const SAMPLE_PRODUCTS = [
-  { product_name: "Continuous Band Sealer", hsn: "84223000", rate: 25000, gst_percent: 18 },
-  { product_name: "Induction Cap Sealing Machine", hsn: "84223000", rate: 72203, gst_percent: 18 },
-  { product_name: "Shrink Wrapping Machine", hsn: "84224000", rate: 45000, gst_percent: 18 },
-  { product_name: "Carton Sealer Machine", hsn: "84223000", rate: 38000, gst_percent: 18 },
-  { product_name: "Vacuum Packaging Machine", hsn: "84224000", rate: 65000, gst_percent: 18 },
-  { product_name: "Pouch Packing Machine", hsn: "84223000", rate: 120000, gst_percent: 18 },
-  { product_name: "Automatic Liquid Filling Machine", hsn: "84223000", rate: 185000, gst_percent: 18 },
-  { product_name: "Semi-Automatic Strapping Machine", hsn: "84224000", rate: 28000, gst_percent: 18 },
-];
+type StatusTab = { key: string; label: string; cardLabel: string; badge: string };
+type CatalogProduct = { product_name: string; hsn: string; rate: number; gst_percent: number };
+
+function statusBadgeClass(status: string, tabs: StatusTab[]): string {
+  return tabs.find((t) => t.key === status)?.badge || "badge badge-neutral";
+}
+
+function statusLabel(status: string, tabs: StatusTab[]): string {
+  const found = tabs.find((t) => t.key === status);
+  if (found) return found.label;
+  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 function formatIndianCurrency(amount: number): string {
   return "₹ " + (amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -121,289 +83,6 @@ function dateInRange(targetStr?: string | null, rangeStr?: string): boolean {
   return target >= start && target <= end;
 }
 
-const STATUS_TABS: { key: "all" | "pending" | "admin_approved" | "confirmed" | "cancelled"; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "pending", label: "Pending" },
-  { key: "admin_approved", label: "Admin Approved" },
-  { key: "confirmed", label: "Confirmed" },
-  { key: "cancelled", label: "Cancelled" },
-];
-
-const SUMMARY_CARDS: { key: "all" | "pending" | "admin_approved" | "confirmed" | "cancelled"; label: string }[] = [
-  { key: "all", label: "ALL" },
-  { key: "pending", label: "PENDING" },
-  { key: "admin_approved", label: "ADMIN APPROVED" },
-  { key: "confirmed", label: "CONFIRMED" },
-  { key: "cancelled", label: "CANCELLED" },
-];
-
-function statusBadgeClass(status: string): string {
-  switch (status) {
-    case "confirmed":
-      return "badge badge-active";
-    case "admin_approved":
-      return "badge badge-warning";
-    case "cancelled":
-      return "badge badge-danger";
-    default:
-      return "badge badge-neutral";
-  }
-}
-
-function statusLabel(status: string): string {
-  const found = STATUS_TABS.find((t) => t.key === status);
-  if (found) return found.label;
-  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-const INITIAL_TAB_COUNTS: ProformaTabCounts = {
-  all: { count: 1609, amount: 162708410.52 },
-  pending: { count: 0, amount: 0.0 },
-  admin_approved: { count: 607, amount: 80914635.5 },
-  confirmed: { count: 991, amount: 80545569.84 },
-  cancelled: { count: 11, amount: 1248205.18 },
-};
-
-export const INITIAL_PROFORMA_ITEMS: ProformaInvoice[] = [
-  {
-    id: "1708",
-    proforma_no: "PI-MH/26-27/1714",
-    proforma_date: "21-09-2026",
-    expected_delivery_date: "21-09-2026",
-    warehouse: "Mumbai",
-    lead_source: "",
-    company_name: "ELITE PACK INDIA",
-    city: "New Delhi",
-    state: "Delhi",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 182900.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: null,
-    created_by: "Dhairya Shah",
-    billing_address: "THIRD FLOOR, B-10/A, SHISH RAM PARK, UTTAM NAGAR, West Delhi, Delhi, 110059, New Delhi, Delhi, 110059",
-    shipping_address: "THIRD FLOOR, B-10/A, SHISH RAM PARK, UTTAM NAGAR, West Delhi, Delhi, 110059, New Delhi, Delhi, 110059",
-    payment_terms: "30 Days Credit",
-    transport_name: "Self Pickup",
-    items: [
-      {
-        id: "pi-it-1714",
-        product_name: "DQFXA6050 Automatic Carton Sealer",
-        hsn_code: "8422.30.00",
-        quantity: 1,
-        uom: "Nos",
-        rate: 155000.0,
-        amount: 182900.0,
-        unit_price: 155000.0,
-        taxable_amount: 155000.0,
-        gst_percent: 18,
-        gst_amount: 27900.0,
-        total: 182900.0,
-      },
-    ],
-  },
-  {
-    id: "pi-002",
-    proforma_no: "PI-MH/26-27/1701",
-    proforma_date: "21-09-2026",
-    expected_delivery_date: "21-09-2026",
-    warehouse: "Mumbai",
-    lead_source: "",
-    company_name: "V S Machines",
-    city: "Navi Mumbai",
-    state: "Maharashtra",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 271400.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: null,
-    created_by: "Dhairya Shah",
-    items: [
-      { id: "pi-it-2", product_name: "DZ800 Double Face Shaping Vacuum Machine 10Kgs", quantity: 1, uom: "Nos", rate: 230000.0, amount: 271400.0 },
-    ],
-  },
-  {
-    id: "pi-003",
-    proforma_no: "PI-MH/26-27/1698",
-    proforma_date: "19-09-2026",
-    expected_delivery_date: "19-09-2026",
-    warehouse: "Mumbai",
-    lead_source: "",
-    company_name: "R K ENGINEERING SOLUTIONS",
-    city: "Pune",
-    state: "Maharashtra",
-    sales_person: "Sunita Pawar",
-    amount_inc_gst: 70210.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: null,
-    created_by: "Sunita Pawar",
-    items: [
-      { id: "pi-it-3", product_name: "Sensor (Banding)", quantity: 2, uom: "Nos", rate: 15000.0, amount: 35400.0 },
-    ],
-  },
-  {
-    id: "pi-004",
-    proforma_no: "PI-MH/26-27/1696",
-    proforma_date: "19-09-2026",
-    expected_delivery_date: "19-09-2026",
-    warehouse: "Mumbai",
-    lead_source: "",
-    company_name: "POWERON PACKAGING",
-    city: "THAZHEKODE",
-    state: "Kerala",
-    sales_person: "Sunita Pawar",
-    amount_inc_gst: 377600.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: null,
-    created_by: "Sunita Pawar",
-    items: [
-      { id: "pi-it-4", product_name: "Rotary PFS Packaging Unit", quantity: 1, uom: "Nos", rate: 320000.0, amount: 377600.0 },
-    ],
-  },
-  {
-    id: "pi-005",
-    proforma_no: "PI-GJ/26-27/0176",
-    proforma_date: "19-09-2026",
-    expected_delivery_date: "19-09-2026",
-    warehouse: "Ahmedabad",
-    lead_source: "",
-    company_name: "GANU AGROTECH",
-    city: "Pune",
-    state: "Maharashtra",
-    sales_person: "Sunita Pawar",
-    amount_inc_gst: 30680.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: null,
-    created_by: "Sunita Pawar",
-    items: [
-      { id: "pi-it-5", product_name: "Heating Element 12mm", quantity: 5, uom: "Nos", rate: 5200.0, amount: 30680.0 },
-    ],
-  },
-  {
-    id: "pi-006",
-    proforma_no: "PI-GJ/26-27/0175",
-    proforma_date: "19-09-2026",
-    expected_delivery_date: "19-09-2026",
-    warehouse: "Ahmedabad",
-    lead_source: "",
-    company_name: "PPR PACKING SOLUTION",
-    city: "Nagpur",
-    state: "Maharashtra",
-    sales_person: "Deepika Samel",
-    amount_inc_gst: 2891.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: "Remark",
-    created_by: "Deepika Samel",
-    items: [
-      { id: "pi-it-6", product_name: "Teflon Tape 50mm Roll", quantity: 3, uom: "Nos", rate: 816.0, amount: 2891.0 },
-    ],
-  },
-  {
-    id: "pi-007",
-    proforma_no: "PI-MH/26-27/1693",
-    proforma_date: "18-09-2026",
-    expected_delivery_date: "18-09-2026",
-    warehouse: "Mumbai",
-    lead_source: "",
-    company_name: "SMART PACKAGING SYSTEMS",
-    city: "Indore",
-    state: "Madhya Pradesh",
-    sales_person: "Sunita Pawar",
-    amount_inc_gst: 12272.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: null,
-    created_by: "Sunita Pawar",
-    items: [
-      { id: "pi-it-7", product_name: "Teflon Belt 10 Pack", quantity: 2, uom: "Pkt", rate: 5200.0, amount: 12272.0 },
-    ],
-  },
-  {
-    id: "pi-008",
-    proforma_no: "PI-MH/26-27/1689",
-    proforma_date: "18-09-2026",
-    expected_delivery_date: "18-09-2026",
-    warehouse: "Mumbai",
-    lead_source: "Other",
-    company_name: "SYNO PACK INDIA",
-    city: "Hyderabad",
-    state: "Telangana",
-    sales_person: "Sunita Pawar",
-    amount_inc_gst: 63720.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: null,
-    created_by: "Sunita Pawar",
-    items: [
-      { id: "pi-it-8", product_name: "Semi-Auto Strapping Machine", quantity: 1, uom: "Nos", rate: 54000.0, amount: 63720.0 },
-    ],
-  },
-  {
-    id: "pi-009",
-    proforma_no: "PI-GJ/26-27/0174",
-    proforma_date: "17-09-2026",
-    expected_delivery_date: "17-09-2026",
-    warehouse: "Ahmedabad",
-    lead_source: "",
-    company_name: "HETAL TRADERS",
-    city: "Vadodara",
-    state: "Gujarat",
-    sales_person: "Bhavin Suthar",
-    amount_inc_gst: 62068.0,
-    discount: 0.0,
-    status: "admin_approved",
-    remark: null,
-    created_by: "Bhavin Suthar",
-    items: [
-      { id: "pi-it-9", product_name: "Continuous Band Sealer Horizontal", quantity: 1, uom: "Nos", rate: 52600.0, amount: 62068.0 },
-    ],
-  },
-  {
-    id: "pi-010",
-    proforma_no: "PI-MH/26-27/1680",
-    proforma_date: "15-09-2026",
-    expected_delivery_date: "15-09-2026",
-    warehouse: "Mumbai",
-    lead_source: "Direct",
-    company_name: "APEX ENTERPRISES",
-    city: "Mumbai",
-    state: "Maharashtra",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 145000.0,
-    discount: 0.0,
-    status: "confirmed",
-    remark: null,
-    created_by: "Dhairya Shah",
-    items: [
-      { id: "pi-it-10", product_name: "Automatic Liquid Filling Machine", quantity: 1, uom: "Nos", rate: 122881.0, amount: 145000.0 },
-    ],
-  },
-  {
-    id: "pi-011",
-    proforma_no: "PI-MH/26-27/1675",
-    proforma_date: "12-09-2026",
-    expected_delivery_date: "12-09-2026",
-    warehouse: "Mumbai",
-    lead_source: "IndiaMART",
-    company_name: "ZENITH PACKAGING",
-    city: "Surat",
-    state: "Gujarat",
-    sales_person: "Deepika Samel",
-    amount_inc_gst: 85200.0,
-    discount: 0.0,
-    status: "cancelled",
-    remark: null,
-    created_by: "Deepika Samel",
-    items: [
-      { id: "pi-it-11", product_name: "Induction Cap Sealing Machine", quantity: 1, uom: "Nos", rate: 72203.0, amount: 85200.0 },
-    ],
-  },
-];
-
 export function ProformaInvoicesPage({
   defaultAdd = false,
   defaultFilterOpen = false,
@@ -413,9 +92,30 @@ export function ProformaInvoicesPage({
 } = {}) {
   const navigate = useNavigate();
 
-  const [items, setItems] = useState<ProformaInvoice[]>(INITIAL_PROFORMA_ITEMS);
-  const [tabCounts, setTabCounts] = useState<ProformaTabCounts>(INITIAL_TAB_COUNTS);
-  const [activeTab, setActiveTab] = useState<typeof STATUS_TABS[number]["key"]>("all");
+  const [items, setItems] = useState<ProformaInvoice[]>([]);
+  const [tabCounts, setTabCounts] = useState<ProformaTabCounts>({});
+  const [activeTab, setActiveTab] = useState<string>("all");
+
+  // Option lists: fixed choices from option_lists, others from their master tables
+  const { options: optionGroups } = useOptions(PROFORMA_OPTION_GROUPS);
+  const STATUS_TABS: StatusTab[] = useMemo(
+    () =>
+      (optionGroups["proforma.status"] || []).map((o) => ({
+        key: o.value,
+        label: o.label,
+        cardLabel: o.meta?.card_label || o.label.toUpperCase(),
+        badge: o.meta?.badge || "badge badge-neutral",
+      })),
+    [optionGroups]
+  );
+  const THIRD_PARTY_OPTIONS = useMemo(() => (optionGroups["common.yes_no"] || []).map((o) => o.value), [optionGroups]);
+  const DELIVERY_TYPE_OPTIONS = useMemo(() => (optionGroups["delivery.type"] || []).map((o) => o.value), [optionGroups]);
+  const DELIVERY_CHARGE_OPTIONS = useMemo(() => (optionGroups["delivery.charge"] || []).map((o) => o.value), [optionGroups]);
+  const WAREHOUSE_OPTIONS = useMasterNames("/masters/warehouses");
+  const PAYMENT_TERM_OPTIONS = useMasterNames("/masters/payment-terms");
+  const TRANSPORT_NAME_OPTIONS = useMasterNames("/masters/transports");
+  const LEAD_SOURCE_OPTIONS = useMasterNames("/masters/lead-sources");
+  const ADDITIONAL_CHARGE_TYPES = useMasterNames("/masters/additional-charges");
   const [searchTerm, setSearchTerm] = useState("");
   const [perPage, setPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
@@ -448,12 +148,34 @@ export function ProformaInvoicesPage({
   const [isFormOpen, setIsFormOpen] = useState(defaultAdd);
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const { profile } = useAuth();
+  const loggedInUserName = useMemo(() => {
+    if (!profile) return "Admin";
+    return (
+      profile.full_name ||
+      (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username))
+    );
+  }, [profile]);
+
+  const [salesPersonOptions, setSalesPersonOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
+      .then((res) => {
+        if (res?.data) {
+          setSalesPersonOptions(res.data.map((u) => u.full_name || u.username));
+        }
+      })
+      .catch(() => { });
+  }, []);
+
   const [formState, setFormState] = useState({
     proforma_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
     expected_delivery_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
     warehouse: "",
     payment_terms: "",
-    sales_person: "Rupesh Malla",
+    sales_person: loggedInUserName,
     transport_name: "",
     third_party_delivery: "No",
     lead_source: "",
@@ -471,6 +193,20 @@ export function ProformaInvoicesPage({
     terms_and_conditions: "Make all cheque payable to USER",
     remarks: "",
   });
+
+  useEffect(() => {
+    if (loggedInUserName) {
+      setFormState((prev) => (!prev.sales_person || prev.sales_person === "Rupesh Malla" ? { ...prev, sales_person: loggedInUserName } : prev));
+    }
+  }, [loggedInUserName]);
+
+  const effectiveSalesPersonOptions = useMemo(() => {
+    const set = new Set<string>();
+    if (loggedInUserName) set.add(loggedInUserName);
+    salesPersonOptions.forEach((n) => set.add(n));
+    if (formState.sales_person && formState.sales_person.trim()) set.add(formState.sales_person.trim());
+    return Array.from(set);
+  }, [loggedInUserName, salesPersonOptions, formState.sales_person]);
   const [formLineItems, setFormLineItems] = useState<any[]>([
     {
       id: "charge-1",
@@ -501,7 +237,8 @@ export function ProformaInvoicesPage({
       total: 0,
     },
   ]);
-  const [productSearchMatches, setProductSearchMatches] = useState<typeof SAMPLE_PRODUCTS>([]);
+  const productSearchSeq = useRef(0);
+  const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -529,18 +266,11 @@ export function ProformaInvoicesPage({
       const { data } = await apiGet<{ items: ProformaInvoice[]; tab_counts: ProformaTabCounts }>(
         `/proforma-invoice/list?${params.toString()}`
       );
-      if (data?.items && data.items.length > 0) {
-        setItems(data.items);
-      } else {
-        setItems(INITIAL_PROFORMA_ITEMS);
-      }
-      if (data?.tab_counts) {
-        setTabCounts(data.tab_counts);
-      }
+      setItems(data?.items || []);
+      setTabCounts(data?.tab_counts || {});
     } catch {
-      // Fall back to initial items
-      setItems(INITIAL_PROFORMA_ITEMS);
-      setTabCounts(INITIAL_TAB_COUNTS);
+      setItems([]);
+      setTabCounts({});
     } finally {
       setLoading(false);
     }
@@ -728,14 +458,25 @@ export function ProformaInvoicesPage({
       setProductSearchMatches([]);
       return;
     }
-    const q = query.toLowerCase();
-    const matches = SAMPLE_PRODUCTS.filter(
-      (p) => p.product_name.toLowerCase().includes(q) || p.hsn.includes(q)
-    );
-    setProductSearchMatches(matches);
+    const seq = ++productSearchSeq.current;
+    void apiGet<any[]>(`/masters/products?page=1&page_size=10&status=active&search=${encodeURIComponent(query.trim())}`)
+      .then((res) => {
+        if (seq !== productSearchSeq.current) return;
+        setProductSearchMatches(
+          (res?.data || []).map((p) => ({
+            product_name: p.product_name,
+            hsn: p.hsn_number || "",
+            rate: Number(p.standard_price) || 0,
+            gst_percent: Number(p.gst_percent) || 0,
+          }))
+        );
+      })
+      .catch(() => {
+        if (seq === productSearchSeq.current) setProductSearchMatches([]);
+      });
   };
 
-  const handleSelectProductMatch = (prod: typeof SAMPLE_PRODUCTS[0]) => {
+  const handleSelectProductMatch = (prod: CatalogProduct) => {
     handleAddProductItem(prod);
     setFormState((prev) => ({ ...prev, product_search: "" }));
     setProductSearchMatches([]);
@@ -749,7 +490,7 @@ export function ProformaInvoicesPage({
       expected_delivery_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
       warehouse: "",
       payment_terms: "",
-      sales_person: "Rupesh Malla",
+      sales_person: loggedInUserName,
       transport_name: "",
       third_party_delivery: "No",
       lead_source: "",
@@ -1038,7 +779,7 @@ export function ProformaInvoicesPage({
                     ariaLabel="Sales Person"
                     value={formState.sales_person}
                     onChange={(val) => setFormState({ ...formState, sales_person: val })}
-                    options={SALES_PERSON_OPTIONS}
+                    options={effectiveSalesPersonOptions}
                     placeholder="Select Sales Person"
                   />
                 </div>
@@ -1853,7 +1594,7 @@ export function ProformaInvoicesPage({
 
         {/* Summary cards: ALL / PENDING / ADMIN APPROVED / CONFIRMED / CANCELLED */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "16px" }}>
-          {SUMMARY_CARDS.map((card) => {
+          {STATUS_TABS.map((card) => {
             const c = tabCounts[card.key] || { count: 0, amount: 0 };
             const isActive = activeTab === card.key;
             return (
@@ -1875,7 +1616,7 @@ export function ProformaInvoicesPage({
                 }}
               >
                 <div style={{ fontSize: "11px", fontWeight: 700, color: isActive ? "#0061f2" : "#64748b", letterSpacing: "0.03em", marginBottom: "6px" }}>
-                  {card.label}
+                  {card.cardLabel}
                 </div>
                 <div style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
                   {formatIndianCurrency(c.amount)} <span style={{ fontWeight: 500, fontSize: "13px", color: "#64748b" }}>({c.count})</span>
@@ -2082,7 +1823,7 @@ export function ProformaInvoicesPage({
                         {formatIndianCurrency(p.discount)}
                       </td>
                       <td style={{ textAlign: "center", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
-                        <span className={statusBadgeClass(p.status)}>{statusLabel(p.status)}</span>
+                        <span className={statusBadgeClass(p.status, STATUS_TABS)}>{statusLabel(p.status, STATUS_TABS)}</span>
                         {p.remark && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "2px" }}>{p.remark}</div>}
                       </td>
                       <td style={{ textAlign: "center", position: "relative", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
@@ -2174,7 +1915,7 @@ export function ProformaInvoicesPage({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  apiPatch(`/proforma-invoice/${p.id}/status`, { status: "admin_approved" }).catch(() => {});
+                                  apiPatch(`/proforma-invoice/${p.id}/status`, { status: "admin_approved" }).catch(() => { });
                                   setItems(items.map((it) => (it.id === p.id ? { ...it, status: "admin_approved" } : it)));
                                   setOpenActionId(null);
                                 }}
@@ -2201,7 +1942,7 @@ export function ProformaInvoicesPage({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  apiPatch(`/proforma-invoice/${p.id}/status`, { status: "confirmed" }).catch(() => {});
+                                  apiPatch(`/proforma-invoice/${p.id}/status`, { status: "confirmed" }).catch(() => { });
                                   setItems(items.map((it) => (it.id === p.id ? { ...it, status: "confirmed" } : it)));
                                   setOpenActionId(null);
                                 }}
@@ -2279,7 +2020,7 @@ export function ProformaInvoicesPage({
                     { label: "City / State", value: `${selectedProforma.city || "—"}, ${selectedProforma.state || "—"}` },
                     { label: "Sales Person", value: selectedProforma.sales_person || "—" },
                     { label: "Lead Source", value: selectedProforma.lead_source || "—" },
-                    { label: "Status", value: statusLabel(selectedProforma.status) },
+                    { label: "Status", value: statusLabel(selectedProforma.status, STATUS_TABS) },
                   ]}
                 />
               </div>

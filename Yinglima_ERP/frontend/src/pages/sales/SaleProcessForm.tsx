@@ -26,6 +26,8 @@ import type {
   SaleOrderItem,
 } from "@/types/saleProcess";
 
+import { getCachedBrandName } from "@/lib/brand";
+
 export function SaleProcessFormPage() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -34,7 +36,7 @@ export function SaleProcessFormPage() {
 
   // Form State
   const [organizationId, setOrganizationId] = useState("");
-  const [organizationName, setOrganizationName] = useState("Yinglima");
+  const [organizationName, setOrganizationName] = useState(() => getCachedBrandName());
   const [buyerId, setBuyerId] = useState("");
   const [buyerName, setBuyerName] = useState("");
   const [buyerBranchId, setBuyerBranchId] = useState("");

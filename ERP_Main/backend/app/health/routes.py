@@ -90,6 +90,8 @@ async def dependency_health(
         "federation_credentials": {
             "yinglima": "configured" if yinglima_cred_configured else "not_configured",
             "inhyma": "configured" if inhyma_cred_configured else "not_configured",
+            "erp-02": "configured" if yinglima_cred_configured else "not_configured",
+            "erp-01": "configured" if inhyma_cred_configured else "not_configured",
         },
         "background_reconciliation": "enabled" if reconciliation_enabled else "disabled",
     }

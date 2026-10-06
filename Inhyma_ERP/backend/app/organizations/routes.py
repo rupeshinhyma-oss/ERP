@@ -47,7 +47,37 @@ async def _record_org_action(
     request.state.audit_logged = True
 
 
+from app.core.config import settings
 from app.auth.dependencies import get_current_user
+
+
+@router.get("/public", summary="Get public organization branding and ERP identity")
+async def get_public_organization_branding(
+    request: Request,
+    organization_service: OrganizationService = Depends(get_organization_service),
+) -> dict:
+    """Public endpoint returning company_name, logo_url, and erp_id without requiring authentication."""
+    try:
+        organization = await organization_service.get_or_raise()
+        return build_success_response(
+            data={
+                "company_name": organization.company_name,
+                "legal_name": organization.legal_name,
+                "logo_url": organization.logo_url,
+                "erp_id": settings.ERP_INSTANCE_ID,
+            },
+            request_id=request.state.request_id,
+        )
+    except Exception:
+        return build_success_response(
+            data={
+                "company_name": "ERP",
+                "legal_name": None,
+                "logo_url": None,
+                "erp_id": settings.ERP_INSTANCE_ID,
+            },
+            request_id=request.state.request_id,
+        )
 
 
 @router.get("", summary="Get the organization profile")

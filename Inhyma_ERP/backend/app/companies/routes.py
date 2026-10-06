@@ -126,6 +126,7 @@ async def _to_company_read(service: CompanyService, company) -> dict:
         "primary_website": company.primary_website,
         "secondary_website": company.secondary_website,
         "company_category": company.company_category,
+        "sector": company.sector,
         "product_manufacture_or_supply": company.product_manufacture_or_supply,
         "machines_buying_from": company.machines_buying_from,
         "spares_buying_from": company.spares_buying_from,
@@ -206,15 +207,54 @@ async def create_company(
 async def list_companies(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
-    category_id: uuid.UUID | None = None,
-    sub_category_id: uuid.UUID | None = None,
-    product_id: uuid.UUID | None = None,
+    category_id: str | None = None,
+    sub_category_id: str | None = None,
+    product_id: str | None = None,
     service: CompanyService = Depends(get_company_service),
     _current_user: CurrentUser = Depends(require_any_permission("company.view", "supplier.view")),
 ) -> dict:
     """List companies with search/sort/filter/pagination."""
+    cat_uuid: uuid.UUID | None = None
+    is_cat_blank = False
+    if category_id:
+        if category_id.lower() == "blank":
+            is_cat_blank = True
+        else:
+            try:
+                cat_uuid = uuid.UUID(category_id)
+            except ValueError:
+                pass
+
+    sub_uuid: uuid.UUID | None = None
+    is_sub_blank = False
+    if sub_category_id:
+        if sub_category_id.lower() == "blank":
+            is_sub_blank = True
+        else:
+            try:
+                sub_uuid = uuid.UUID(sub_category_id)
+            except ValueError:
+                pass
+
+    prod_uuid: uuid.UUID | None = None
+    is_prod_blank = False
+    if product_id:
+        if product_id.lower() == "blank":
+            is_prod_blank = True
+        else:
+            try:
+                prod_uuid = uuid.UUID(product_id)
+            except ValueError:
+                pass
+
     companies, total = await service.list_paginated(
-        query, category_id=category_id, sub_category_id=sub_category_id, product_id=product_id
+        query,
+        category_id=cat_uuid,
+        sub_category_id=sub_uuid,
+        product_id=prod_uuid,
+        category_blank=is_cat_blank,
+        sub_category_blank=is_sub_blank,
+        product_blank=is_prod_blank,
     )
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [_to_list_item(c) for c in companies]
@@ -303,15 +343,20 @@ async def list_sales_persons(
     from app.users.models import User
     from sqlalchemy import select
     stmt = (
-        select(User.id, User.username, User.full_name)
-        .where(User.is_active == True, User.is_deleted == False)
-        .order_by(User.full_name.asc(), User.username.asc())
+        select(User.id, User.username, User.first_name, User.last_name, User.display_name)
+        .where(User.is_active == True, User.deleted_at.is_(None))
+        .order_by(User.username.asc())
     )
     result = await db.execute(stmt)
     users = [
-        {"id": str(r.id), "username": r.username, "full_name": r.full_name or r.username}
+        {
+            "id": str(r.id),
+            "username": r.username,
+            "full_name": (f"{r.first_name or ''} {r.last_name or ''}").strip() or r.display_name or r.username,
+        }
         for r in result.all()
     ]
+    users.sort(key=lambda u: u["full_name"].lower())
     return build_success_response(data=users, request_id=request.state.request_id)
 
 

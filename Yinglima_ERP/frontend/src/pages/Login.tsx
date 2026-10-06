@@ -11,7 +11,7 @@ import { setBrandName } from "@/lib/brand";
 import { ErrorBanner } from "@/components/ui";
 import type { Profile, TokenPair } from "@/types";
 
-const DEFAULT_LOGIN_BRAND = "INHYMA SOLUTIONS LLP";
+const DEFAULT_LOGIN_BRAND = "ERP Portal";
 
 interface PublicOrgInfo {
   company_name: string;
