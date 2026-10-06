@@ -19,7 +19,8 @@ vi.mock("@/lib/toast", () => ({
 }));
 
 // Mock api
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
@@ -487,7 +488,8 @@ describe("LeadsPage", () => {
     fireEvent.click(toggleBtn!);
 
     // Can click an option from the dropdown
-    const indiamartOption = screen.getByText("IndiaMart");
+    // lead sources are loaded from the master table
+    const indiamartOption = await screen.findByText("IndiaMart");
     expect(indiamartOption).toBeTruthy();
     fireEvent.click(indiamartOption);
 

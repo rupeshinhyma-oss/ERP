@@ -20,11 +20,11 @@ class ProformaLineItemSchema(BaseModel):
 
     id: Optional[str] = None
     product_name: str
-    product_code: Optional[str] = "-"
+    product_code: Optional[str] = None
     hsn_code: Optional[str] = None
-    gst_rate: Optional[str] = "18%"
+    gst_rate: Optional[str] = None
     quantity: float = Field(1.0, gt=0)
-    uom: str = "Nos"
+    uom: Optional[str] = None
     rate: float = Field(0.0, ge=0)
     amount: float = Field(0.0, ge=0)
     hsn: Optional[str] = None
@@ -35,6 +35,7 @@ class ProformaLineItemSchema(BaseModel):
     gst_amount: Optional[float] = None
     total: Optional[float] = None
     is_additional_charge: Optional[bool] = False
+    charge_type: Optional[str] = None
 
 
 class ProformaInvoiceCreate(BaseModel):
@@ -57,12 +58,9 @@ class ProformaInvoiceCreate(BaseModel):
     billing_address: Optional[str] = None
     shipping_address: Optional[str] = None
     terms_and_conditions: Optional[str] = None
-    amount_inc_gst: Optional[float] = Field(None, ge=0, description="Grand total, GST included -- computed from items if omitted")
-    discount: float = Field(0.0, ge=0)
-    status: str = Field("pending", description="'pending' | 'admin_approved' | 'confirmed' | 'cancelled'")
     remark: Optional[str] = None
-    created_by: str = "Admin User"
     items: List[ProformaLineItemSchema] = Field(default_factory=list)
+    # status, totals, discount, below_min_price and created_by are server-controlled
 
 
 class ProformaInvoiceUpdate(BaseModel):
@@ -85,9 +83,6 @@ class ProformaInvoiceUpdate(BaseModel):
     billing_address: Optional[str] = None
     shipping_address: Optional[str] = None
     terms_and_conditions: Optional[str] = None
-    amount_inc_gst: Optional[float] = Field(None, ge=0)
-    discount: Optional[float] = Field(None, ge=0)
-    status: Optional[str] = None
     remark: Optional[str] = None
     items: Optional[List[ProformaLineItemSchema]] = None
 
@@ -119,9 +114,26 @@ class ProformaInvoiceRead(BaseModel):
     status: str
     remark: Optional[str] = None
     created_by: str
+    taxable_amount: float = 0.0
+    gst_amount: float = 0.0
+    below_min_price: bool = False
+    cancel_reason: Optional[str] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[str] = None
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[str] = None
+    cancelled_by: Optional[str] = None
+    cancelled_at: Optional[str] = None
     items: List[ProformaLineItemSchema] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
+
+
+class ProformaStatusUpdate(BaseModel):
+    """Payload for PATCH /proforma-invoice/{id}/status."""
+
+    status: str = Field(..., min_length=1)
+    reason: Optional[str] = Field(None, description="Required when the DB rules say so (e.g. cancelling).")
 
 
 class ProformaStatusCounts(BaseModel):
@@ -367,4 +379,3 @@ class DiscountPaymentResponse(BaseModel):
     created_by: str
 
     model_config = ConfigDict(from_attributes=True)
-

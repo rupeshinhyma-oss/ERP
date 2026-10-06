@@ -370,6 +370,8 @@ async def lookup_companies(
 ) -> dict:
     """Return matching company names and details for typeahead autocomplete."""
     from app.companies.models import Company
+    from app.masters.cities.models import City
+    from app.masters.states.models import State
     from sqlalchemy import select
     stmt = (
         select(
@@ -381,6 +383,10 @@ async def lookup_companies(
             Company.district,
             Company.city_id,
             Company.state_id,
+            Company.address,
+            Company.pincode,
+            City.name.label("city_name"),
+            State.name.label("state_name"),
             Company.contact_salutation,
             Company.contact_full_name,
             Company.contact_designation,
@@ -390,6 +396,8 @@ async def lookup_companies(
             Company.primary_website,
             Company.sales_person_id,
         )
+        .outerjoin(City, City.id == Company.city_id)
+        .outerjoin(State, State.id == Company.state_id)
         .where(Company.deleted_at.is_(None))
     )
     if q.strip():
@@ -408,6 +416,10 @@ async def lookup_companies(
             "district": r.district,
             "city_id": str(r.city_id) if r.city_id else None,
             "state_id": str(r.state_id) if r.state_id else None,
+            "address": r.address,
+            "pincode": r.pincode,
+            "city_name": r.city_name,
+            "state_name": r.state_name,
             "contact_salutation": r.contact_salutation,
             "contact_full_name": r.contact_full_name,
             "contact_designation": r.contact_designation,

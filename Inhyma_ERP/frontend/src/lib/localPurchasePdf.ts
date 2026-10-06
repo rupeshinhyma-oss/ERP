@@ -28,9 +28,9 @@ export function generateLocalPurchaseBillPdf(
   const margin = 12;
   const contentWidth = pageWidth - margin * 2; // 186mm
 
-  const invoiceNo = order.invoice_no || "2026-27/SO/1534";
-  const invoiceDate = order.invoice_date || "19-09-2026";
-  const warehouse = order.warehouse || "Mumbai";
+  const invoiceNo = order.invoice_no || "";
+  const invoiceDate = order.invoice_date || "";
+  const warehouse = order.warehouse || "";
 
   doc.setProperties({
     title: `Bill File: ${invoiceNo}`,
@@ -74,21 +74,21 @@ export function generateLocalPurchaseBillPdf(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text(order.supplier_name || "S B Inks & Packaging Co.", margin + 4, currentY + 11.5);
+  doc.text(order.supplier_name || "", margin + 4, currentY + 11.5);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
 
-  const supAddressLines = (order.supplier_address || "6/7, Ripal Shopping Complex, Near Cosmo Vila Row House,\nPremchand Nagar Road, Bodakdev, Ahmedabad 380015").split("\n");
+  const supAddressLines = (order.supplier_address || "").split("\n");
   let supY = currentY + 16;
   supAddressLines.forEach((line) => {
     doc.text(line, margin + 4, supY);
     supY += 3.8;
   });
 
-  doc.text(`GSTIN: ${order.supplier_gst || "24ACSF51727J1ZB"}`, margin + 4, currentY + 29);
-  doc.text(`Email: ${order.supplier_email || "8799513908"}`, margin + 4, currentY + 33);
+  doc.text(`GSTIN: ${order.supplier_gst || "—"}`, margin + 4, currentY + 29);
+  doc.text(`Email: ${order.supplier_email || "—"}`, margin + 4, currentY + 33);
   if (order.supplier_phone) {
     doc.text(`Phone: ${order.supplier_phone}`, margin + 50, currentY + 33);
   }
@@ -106,22 +106,22 @@ export function generateLocalPurchaseBillPdf(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text(order.to_name || `${getCachedBrandName().toUpperCase()} (M)`, rightX + 4, currentY + 11.5);
+  doc.text(order.to_name || "", rightX + 4, currentY + 11.5);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
 
-  const toAddressLines = (order.to_address || "4th Floor, Office No 421, Supremus - [I, Road No- 22,\nNear Passport Office, Wagle Estate, Thane 400604").split("\n");
+  const toAddressLines = (order.to_address || "").split("\n");
   let toY = currentY + 16;
   toAddressLines.forEach((line) => {
     doc.text(line, rightX + 4, toY);
     toY += 3.8;
   });
 
-  doc.text(`GSTIN: ${order.to_gst || "27AAKFI9869H1ZL"}`, rightX + 4, currentY + 29);
-  doc.text(`Email: ${order.to_email || "Payment.Darsh@Gmail.Com"}`, rightX + 4, currentY + 33);
-  doc.text(`Phone: ${order.to_phone || "9653261742"}`, rightX + 50, currentY + 33);
+  doc.text(`GSTIN: ${order.to_gst || "—"}`, rightX + 4, currentY + 29);
+  doc.text(`Email: ${order.to_email || "—"}`, rightX + 4, currentY + 33);
+  doc.text(`Phone: ${order.to_phone || "—"}`, rightX + 50, currentY + 33);
 
   currentY += infoBoxHeight + 3;
 
@@ -136,8 +136,8 @@ export function generateLocalPurchaseBillPdf(
     { label: "Invoice No.", val: invoiceNo },
     { label: "Invoice Date", val: invoiceDate },
     { label: "Warehouse", val: warehouse },
-    { label: "Created By", val: order.created_by || "Akshata Wadekar" },
-    { label: "Status", val: order.status || "Pending" },
+    { label: "Created By", val: order.created_by || "—" },
+    { label: "Status", val: order.status || "—" },
   ];
 
   const stripColW = contentWidth / stripCols.length;
@@ -159,20 +159,7 @@ export function generateLocalPurchaseBillPdf(
   // ==========================================
   // SECTION 4: Product Items Table
   // ==========================================
-  const items: LocalPurchaseItem[] = order.items && order.items.length > 0
-    ? order.items
-    : [
-        {
-          id: "item-1",
-          product_name: "G43 Online Printer TIJ 4.3",
-          quantity: 1,
-          unit_rate: order.basic_amount || Math.round((order.invoice_total / 1.18) * 100) / 100,
-          item_total: order.basic_amount || Math.round((order.invoice_total / 1.18) * 100) / 100,
-          expense_per_unit: 0,
-          unit_landing_rate: order.basic_amount || Math.round((order.invoice_total / 1.18) * 100) / 100,
-          total_landing_rate: order.basic_amount || Math.round((order.invoice_total / 1.18) * 100) / 100,
-        },
-      ];
+  const items: LocalPurchaseItem[] = order.items || [];
 
   // Table Columns: Sr (12) | Product Name (70) | Qty (20) | Unit Rate (26) | Item Total (28) | Landing Rate (30)
   const colW = [12, 72, 20, 26, 28, 28];
@@ -247,14 +234,14 @@ export function generateLocalPurchaseBillPdf(
   // Summary Container
   doc.rect(summaryBoxX, currentY, summaryBoxW, summaryH);
 
-  const basicWithoutGst = order.basic_amount || totalItemAmt || Math.round((order.invoice_total / 1.18) * 100) / 100;
+  const basicWithoutGst = order.basic_amount || totalItemAmt;
   const totalExpenses = order.total_expenses || 0;
   const invoiceTotalWithGst = order.invoice_total;
   const gstAmount = Math.max(0, invoiceTotalWithGst - basicWithoutGst);
 
   const summaryLines = [
     { label: "Basic Value (Without GST):", val: formatIndianCurrency(basicWithoutGst) },
-    { label: "GST Amount (18%):", val: formatIndianCurrency(gstAmount) },
+    { label: "GST Amount:", val: formatIndianCurrency(gstAmount) },
     { label: "Total Other Expenses:", val: formatIndianCurrency(totalExpenses) },
     { label: "Invoice Total (Including GST):", val: formatIndianCurrency(invoiceTotalWithGst), bold: true },
   ];
@@ -285,7 +272,7 @@ export function generateLocalPurchaseBillPdf(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
-  doc.text(order.remarks || "Make all cheque payable to USER. Standard inventory procurement invoice.", margin + 4, currentY + 12);
+  doc.text(order.remarks || "", margin + 4, currentY + 12);
   doc.text("This document is a computer generated copy of the original supplier bill file.", margin + 4, currentY + 17);
 
   currentY += summaryH + 10;

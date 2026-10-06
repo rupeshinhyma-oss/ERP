@@ -361,6 +361,10 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("quotation.create", "inquiry", "inquiries", "create", "ALL", "Add and upload quotations for inquiry items."),
     ("quotation.approve", "inquiry", "inquiries", "manage", "ALL", "Approve quotations for inquiry items."),
     ("quotation.delete", "inquiry", "inquiries", "delete", "ALL", "Delete quotations and quotation attachments."),
+    # Proforma & Purchase Workflows
+    ("proforma.approve", "proforma", "proforma-invoice", "approve", "ALL", "Approve proforma invoices."),
+    ("localpurchase.update", "localpurchase", "purchase-local", "update", "ALL", "Edit pending local purchases."),
+    ("localpurchase.confirm", "localpurchase", "purchase-local", "confirm", "ALL", "Confirm local purchases (adds stock)."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"

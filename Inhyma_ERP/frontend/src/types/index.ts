@@ -370,6 +370,7 @@ export interface ProformaLineItem {
   gst_amount?: number;
   total?: number;
   is_additional_charge?: boolean;
+  charge_type?: string | null;
 }
 
 export interface ProformaInvoice {
@@ -393,12 +394,36 @@ export interface ProformaInvoice {
   shipping_address?: string | null;
   terms_and_conditions?: string | null;
   amount_inc_gst: number;
+  taxable_amount?: number;
+  gst_amount?: number;
   discount: number;
   status: string;
+  below_min_price?: boolean;
   remark?: string | null;
+  cancel_reason?: string | null;
   created_by: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  confirmed_by?: string | null;
+  confirmed_at?: string | null;
+  cancelled_by?: string | null;
+  cancelled_at?: string | null;
   items: ProformaLineItem[];
 }
+
+/** Workflow rules for one proforma status, configured in the `proforma.status` option list. */
+export interface ProformaStatusRule {
+  next: string[];
+  admin_only_to?: string[];
+  reason_required_to?: string[];
+  edit?: "any" | "admin" | "none";
+  delete?: boolean;
+  initial?: boolean;
+  action_label?: string;
+  action_color?: string;
+}
+
+export type ProformaStatusRules = Record<string, ProformaStatusRule>;
 
 export interface ProformaStatusCounts {
   count: number;
@@ -734,6 +759,8 @@ export interface CompanyContact {
   whatsapp_number?: string | null;
   wechat_number?: string | null;
   email?: string | null;
+  birth_date?: string | null;
+  anniversary_date?: string | null;
   is_primary?: boolean;
 }
 
@@ -769,6 +796,7 @@ export interface Company {
   secondary_website?: string | null;
   company_category?: string | null;
   sector?: string | null;
+  monthly_turnover?: string | null;
   product_manufacture_or_supply?: string | null;
   machines_buying_from?: string | null;
   spares_buying_from?: string | null;
@@ -780,6 +808,10 @@ export interface Company {
   current_status?: string | null;
   potential?: string | null;
   potential_reason?: string | null;
+  potential_business_per_month?: string | null;
+  direct_import_from_china?: string | null;
+  monthly_import_volume?: string | null;
+  products_needed_for_imports?: string | null;
   secondary_products_description?: string | null;
   visited_factory_office?: boolean;
   visit_remarks?: string | null;

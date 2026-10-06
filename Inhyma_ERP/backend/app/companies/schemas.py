@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.core.exceptions import BadRequestException
 from app.companies.models import CompanyCurrentStatus, CompanyGrade, CompanyPotential, CompanyType
@@ -46,6 +46,8 @@ class CompanyContactCreate(BaseModel):
     whatsapp_number: str | None = Field(default=None, max_length=50)
     wechat_number: str | None = Field(default=None, max_length=50)
     email: EmailStr | None = None
+    birth_date: str | None = Field(default=None, max_length=20, description="DD-MM-YYYY.")
+    anniversary_date: str | None = Field(default=None, max_length=20, description="DD-MM-YYYY.")
 
     @field_validator("email", mode="before")
     @classmethod
@@ -70,6 +72,8 @@ class CompanyContactUpdate(BaseModel):
     whatsapp_number: str | None = Field(default=None, max_length=50)
     wechat_number: str | None = Field(default=None, max_length=50)
     email: EmailStr | None = None
+    birth_date: str | None = Field(default=None, max_length=20)
+    anniversary_date: str | None = Field(default=None, max_length=20)
 
     @field_validator("email", mode="before")
     @classmethod
@@ -98,6 +102,8 @@ class CompanyContactRead(BaseModel):
     whatsapp_number: str | None
     wechat_number: str | None
     email: str | None
+    birth_date: str | None = None
+    anniversary_date: str | None = None
     is_primary: bool
     created_at: datetime
     updated_at: datetime
@@ -141,6 +147,7 @@ class CompanyCreate(BaseModel):
     secondary_website: str | None = Field(default=None, max_length=5000)
     company_category: str | None = Field(default=None, max_length=150)
     sector: str | None = Field(default=None, max_length=150)
+    monthly_turnover: str | None = Field(default=None, max_length=50, description="Monthly Turnover (shown only when Business Type is set).")
     product_manufacture_or_supply: str | None = None
     machines_buying_from: str | None = None
     spares_buying_from: str | None = None
@@ -157,7 +164,11 @@ class CompanyCreate(BaseModel):
     company_grade: CompanyGrade | None = None
     current_status: CompanyCurrentStatus | None = None
     potential: CompanyPotential | None = None
-    potential_reason: str | None = None
+    potential_reason: str | None = Field(default=None, description="Required reason when Potential is 'No'.")
+    potential_business_per_month: str | None = Field(default=None, max_length=50, description="Shown only when Potential is 'Yes'.")
+    direct_import_from_china: str | None = Field(default=None, max_length=10, description="Yes/No; shown only when Business Type is B2B.")
+    monthly_import_volume: str | None = Field(default=None, max_length=50, description="Shown only when Direct Import from China is 'Yes'.")
+    products_needed_for_imports: str | None = Field(default=None, description="Shown only when Direct Import from China is 'Yes'.")
     secondary_products_description: str | None = None
     visited_factory_office: bool = False
     visit_remarks: str | None = None
@@ -186,6 +197,30 @@ class CompanyCreate(BaseModel):
 
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
+
+    @field_validator("direct_import_from_china", mode="before")
+    @classmethod
+    def _normalize_direct_import(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --"):
+                return None
+            return cleaned.title() if cleaned.lower() in ("yes", "no") else cleaned
+        return value
+
+    @model_validator(mode="after")
+    def _check_conditional_fields(self) -> "CompanyCreate":
+        """The spec ties these fields to Business Type / Potential / Direct Import -- enforce it server-side too."""
+        b2b = (self.company_type or "").strip().upper() == "B2B"
+        if not b2b and (self.direct_import_from_china or self.monthly_import_volume or self.products_needed_for_imports):
+            raise ValueError("Direct Import from China is only applicable when Business Type is B2B.")
+        if self.direct_import_from_china != "Yes" and (self.monthly_import_volume or self.products_needed_for_imports):
+            raise ValueError("Monthly Import Volume and Products needed for imports require Direct Import from China = Yes.")
+        if self.potential == CompanyPotential.NO and not (self.potential_reason or "").strip():
+            raise ValueError("A reason is required when Potential is 'No'.")
+        if self.potential != CompanyPotential.YES and self.potential_business_per_month:
+            raise ValueError("Potential Business per month requires Potential = Yes.")
+        return self
 
 
 class CompanyUpdate(BaseModel):
@@ -219,6 +254,7 @@ class CompanyUpdate(BaseModel):
     secondary_website: str | None = Field(default=None, max_length=5000)
     company_category: str | None = Field(default=None, max_length=150)
     sector: str | None = Field(default=None, max_length=150)
+    monthly_turnover: str | None = Field(default=None, max_length=50)
     product_manufacture_or_supply: str | None = None
     machines_buying_from: str | None = None
     spares_buying_from: str | None = None
@@ -232,6 +268,10 @@ class CompanyUpdate(BaseModel):
     current_status: CompanyCurrentStatus | None = None
     potential: CompanyPotential | None = None
     potential_reason: str | None = None
+    potential_business_per_month: str | None = Field(default=None, max_length=50)
+    direct_import_from_china: str | None = Field(default=None, max_length=10)
+    monthly_import_volume: str | None = Field(default=None, max_length=50)
+    products_needed_for_imports: str | None = None
     secondary_products_description: str | None = None
     visited_factory_office: bool | None = None
     visit_remarks: str | None = None
@@ -311,6 +351,7 @@ class CompanyRead(BaseModel):
     secondary_website: str | None
     company_category: str | None = None
     sector: str | None = None
+    monthly_turnover: str | None = None
     product_manufacture_or_supply: str | None = None
     machines_buying_from: str | None = None
     spares_buying_from: str | None = None
@@ -322,6 +363,10 @@ class CompanyRead(BaseModel):
     current_status: CompanyCurrentStatus | None
     potential: CompanyPotential | None
     potential_reason: str | None
+    potential_business_per_month: str | None = None
+    direct_import_from_china: str | None = None
+    monthly_import_volume: str | None = None
+    products_needed_for_imports: str | None = None
     secondary_products_description: str | None
     visited_factory_office: bool
     visit_remarks: str | None

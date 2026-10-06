@@ -95,6 +95,19 @@ flowchart TD
 - Real-time typeahead company extraction powered by `ClientNameAutocomplete`.
 - Soft-deletion lifecycle with single and bulk delete operations, fully recoverable via Trash.
 
+### 2.6 Purchase Management & Costing Engine (`/purchase/localpurchase` & `/purchase/importpurchase`)
+- **Local Purchase Orders:** Full domestic PO workflow with overhead expense absorption (Freight, Handling, Insurance). Calculates dynamic itemized landing costs via the Expense Factor formula and supports atomic inventory stock-in into destination warehouses.
+- **Import Consignments:** Multi-currency international purchase tracking with live exchange rates, shipping logistics (BL, vessel, container references), Indian Customs statutory tariff computation (Assessable Value, BCD, SWS 10%, IGST), and dual landing cost matrices (with vs. without statutory duty/tax).
+
+### 2.7 Sales Proforma Invoices & Commercial Terms (`/proforma-invoice/list`)
+- Formal B2B quotation and Proforma Invoice lifecycle with independent Billing and Shipping address routing.
+- Extended commercial terms: payment terms, delivery timelines, transport carrier, dispatch port, and dynamic RTGS/NEFT corporate bank detail embedding.
+- Automatic intra-state (CGST+SGST) vs. inter-state (IGST) tax resolution based on dispatch and delivery state combinations.
+
+### 2.8 Database-Driven Workflow Rules Engine (`app_workflow_rules`)
+- Universal status transition framework replacing hardcoded status graphs.
+- Enforces role-based permissions (`purchase.local.status`, `purchase.import.status`, `proforma.status`) before permitting entity state mutations.
+
 ---
 
 ## 3. Frontend Architecture & Platform Hardening
@@ -120,16 +133,20 @@ Inhyma_ERP/
 │   │   ├── masters/districts/    # District lookup and relations
 │   │   ├── masters/states/       # State lookup and relations
 │   │   ├── inventory/            # Stock adjustments & vouchers
+│   │   ├── purchase/             # Local & Import PO models, costing, stock-in, and routes
+│   │   ├── sales/                # Proforma invoices, commercial terms, and routes
+│   │   ├── common/workflow.py    # Database-driven workflow transition validator
+│   │   ├── suppliers/            # Supplier directory with mandatory calling number
 │   │   ├── technical_tasks/      # Field service tickets & technician dispatch
 │   │   ├── api/v1/internal_users.py # Spoke user deprovisioning endpoint
 │   │   └── events/               # WebSocket connection manager & broadcast
-│   ├── alembic/                  # Database migrations
-│   └── tests/                    # Backend test suites
+│   ├── alembic/                  # Database migrations (j1 through o1)
+│   └── tests/                    # Backend test suites (38 passing tests)
 ├── frontend/
 │   ├── src/
 │   │   ├── components/           # UI design tokens, SideDrawer, ActionMenu
-│   │   ├── lib/                  # autocompleteBlocker.ts, api.ts, authContext
-│   │   ├── pages/                # Companies.tsx, StockAdjustmentPage.tsx, etc.
+│   │   ├── lib/                  # autocompleteBlocker.ts, api.ts, purchaseApi.ts, workflowRules.ts
+│   │   ├── pages/                # Companies.tsx, Suppliers.tsx, LocalPurchasePage.tsx, etc.
 │   │   ├── styles/               # style.css (spin button removal)
 │   │   ├── App.tsx               # App lifecycle & blocker initialization
 │   │   └── main.tsx              # Wheel scroll lockout listener
