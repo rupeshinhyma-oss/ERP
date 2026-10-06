@@ -18,11 +18,37 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent
+
+
+def _get_alembic_command(python: str) -> list[str]:
+    """Find the real alembic CLI binary or invoke with clean sys.path to avoid local directory shadowing."""
+    alembic_bin = shutil.which("alembic")
+    if alembic_bin:
+        return [alembic_bin, "upgrade", "head"]
+
+    bin_dir = Path(python).parent
+    for name in ("alembic", "alembic.exe"):
+        cand = bin_dir / name
+        if cand.is_file():
+            return [str(cand), "upgrade", "head"]
+
+    return [
+        python,
+        "-c",
+        (
+            "import sys, os; "
+            "cwd = os.getcwd(); "
+            "sys.path = [p for p in sys.path if p not in ('', cwd, os.path.abspath(cwd))]; "
+            "from alembic.config import main; "
+            "sys.exit(main(argv=['upgrade', 'head']))"
+        ),
+    ]
 
 
 def _run_step(description: str, command: list[str]) -> None:
@@ -112,7 +138,7 @@ def main() -> None:
     if not args.skip_migrate:
         _run_step(
             "Applying database migrations (alembic upgrade head)",
-            [python, "-c", "import sys; from alembic.config import main; sys.exit(main(argv=['upgrade', 'head']))"],
+            _get_alembic_command(python),
         )
     else:
         print("\n[server.py] Skipping migrations (--skip-migrate).")
