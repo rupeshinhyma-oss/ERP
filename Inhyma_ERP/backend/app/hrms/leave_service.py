@@ -275,10 +275,11 @@ class HrmsLeaveService:
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
             .where(UserRole.user_id == employee_id)
-            .order_by(UserRole.is_primary.desc())
+            .order_by(Role.is_system.asc(), UserRole.is_primary.desc())
             .limit(1)
         )
-        department = role_res.scalar_one_or_none() or "General"
+        rname = role_res.scalar_one_or_none()
+        department = "Admin" if rname == "super_admin" else ("User" if rname == "user" else (rname or "General"))
         return branch, department
 
     # -----------------------------------------------------------------------
@@ -965,10 +966,17 @@ class HrmsLeaveService:
                     allocated=lt.annual_balance,
                     consumed=0.0,
                     adjusted=0.0,
+                    available=lt.annual_balance,
                 )
                 self.db.add(new_bal)
                 await self.db.flush()
                 bal_by_lt[lt.id] = new_bal
+
+        # Ensure all balances have accurate available synchronized
+        for bal in bal_by_lt.values():
+            calc_avail = round(bal.allocated + bal.adjusted - bal.consumed, 2)
+            if bal.available != calc_avail:
+                bal.available = calc_avail
 
         await self.db.commit()
 
@@ -980,6 +988,7 @@ class HrmsLeaveService:
             lt = lt_map.get(lt_id)
             if not lt or lt.deleted_at is not None:
                 continue
+            avail_val = bal.available if bal.available is not None else round(bal.allocated + bal.adjusted - bal.consumed, 2)
             out.append(
                 EmployeeLeaveBalanceRead(
                     id=bal.id,
@@ -995,7 +1004,7 @@ class HrmsLeaveService:
                     allocated=bal.allocated,
                     consumed=bal.consumed,
                     adjusted=bal.adjusted,
-                    available=bal.available,
+                    available=avail_val,
                     created_at=bal.created_at,
                     updated_at=bal.updated_at,
                 )
@@ -1006,51 +1015,209 @@ class HrmsLeaveService:
     # -----------------------------------------------------------------------
     # Leave Adjustment Matrix Screen
     # -----------------------------------------------------------------------
+    # Leave Adjustment Matrix Screen
+    # -----------------------------------------------------------------------
     async def get_leave_adjustment_matrix(
-        self, year: int = 2026, search: Optional[str] = None
+        self,
+        year: int = 2026,
+        search: Optional[str] = None,
+        department: Optional[str] = None,
+        branch: Optional[str] = None,
+        employee_id: Optional[uuid.UUID] = None,
+        user_id: Optional[uuid.UUID] = None,
+        is_admin: bool = True,
     ) -> List[EmployeeLeaveAdjustmentRow]:
         """
-        Generates employee-wise balance matrix for Leave Adjustment screen.
+        Generates employee-wise balance matrix for Leave Adjustment screen with role scoping.
         """
         await self.ensure_seeds()
 
-        emp_query = (
-            select(User)
-            .where(User.deleted_at.is_(None), User.is_active.is_(True))
-            .order_by(User.first_name.asc(), User.last_name.asc())
-        )
-        employees = (await self.db.scalars(emp_query)).all()
+        # Role scoping
+        if not is_admin and user_id:
+            user_is_admin = await self.is_user_admin(user_id)
+            if not user_is_admin:
+                managed_ids = await self.get_managed_employee_ids(user_id)
+                perm_codes = (
+                    await self.db.scalars(
+                        select(Permission.code)
+                        .join(RolePermission, RolePermission.permission_id == Permission.id)
+                        .join(UserRole, UserRole.role_id == RolePermission.role_id)
+                        .where(UserRole.user_id == user_id)
+                    )
+                ).all()
+                perm_set = set(perm_codes)
+                can_adjust = any(p in perm_set for p in ("hrms.adjust", "hrms.manage", "hrms:admin", "hrms.approve"))
+                if not can_adjust and managed_ids == {user_id}:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Employees cannot access organization-wide Leave Adjustment.",
+                    )
+                emp_query = (
+                    select(User)
+                    .where(
+                        User.id.in_(managed_ids),
+                        User.deleted_at.is_(None),
+                        User.is_active.is_(True),
+                    )
+                    .order_by(User.first_name.asc(), User.last_name.asc())
+                )
+            else:
+                emp_query = (
+                    select(User)
+                    .where(User.deleted_at.is_(None), User.is_active.is_(True))
+                    .order_by(User.first_name.asc(), User.last_name.asc())
+                )
+        else:
+            emp_query = (
+                select(User)
+                .where(User.deleted_at.is_(None), User.is_active.is_(True))
+                .order_by(User.first_name.asc(), User.last_name.asc())
+            )
 
-        out: List[EmployeeLeaveAdjustmentRow] = []
-        for emp in employees:
+        if employee_id:
+            emp_query = emp_query.where(User.id == employee_id)
+
+        all_employees = (await self.db.scalars(emp_query)).all()
+
+        # Pre-filter search in memory
+        filtered_employees: List[User] = []
+        for emp in all_employees:
             emp_name = emp.display_name or f"{emp.first_name or ''} {emp.last_name or ''}".strip() or emp.username or "Employee"
             if search:
                 s = search.lower()
                 code = (emp.employee_code or "").lower()
                 if s not in emp_name.lower() and s not in code:
                     continue
+            filtered_employees.append(emp)
 
-            balances = await self.get_or_create_employee_balances(emp.id, year=year)
-            branch = balances[0].branch if balances else "Thane"
-            department = balances[0].department if balances else "General"
+        if not filtered_employees:
+            return []
+
+        # 1. Batch load all active leave types
+        all_lts = (
+            await self.db.scalars(
+                select(HrmsLeaveType).where(
+                    HrmsLeaveType.deleted_at.is_(None),
+                    HrmsLeaveType.is_active.is_(True),
+                )
+            )
+        ).all()
+        lt_map = {lt.id: lt for lt in all_lts}
+
+        # 2. Batch load all existing balances for filtered employees in one query
+        emp_ids = [e.id for e in filtered_employees]
+        existing_balances = (
+            await self.db.scalars(
+                select(HrmsEmployeeLeaveBalance).where(
+                    HrmsEmployeeLeaveBalance.employee_id.in_(emp_ids),
+                    HrmsEmployeeLeaveBalance.year == year,
+                )
+            )
+        ).all()
+
+        bal_by_emp_lt = {(b.employee_id, b.leave_type_id): b for b in existing_balances}
+        to_create: List[HrmsEmployeeLeaveBalance] = []
+
+        for emp in filtered_employees:
+            for lt in all_lts:
+                if (emp.id, lt.id) not in bal_by_emp_lt:
+                    new_bal = HrmsEmployeeLeaveBalance(
+                        employee_id=emp.id,
+                        leave_type_id=lt.id,
+                        year=year,
+                        allocated=lt.annual_balance,
+                        consumed=0.0,
+                        adjusted=0.0,
+                        available=lt.annual_balance,
+                    )
+                    to_create.append(new_bal)
+                    bal_by_emp_lt[(emp.id, lt.id)] = new_bal
+
+        if to_create:
+            self.db.add_all(to_create)
+            await self.db.commit()
+
+        # Batch load departments for all filtered employees
+        role_links = (
+            await self.db.execute(
+                select(UserRole.user_id, Role.name, Role.is_system, UserRole.is_primary)
+                .join(Role, Role.id == UserRole.role_id)
+                .where(
+                    UserRole.user_id.in_(emp_ids),
+                    Role.deleted_at.is_(None),
+                )
+                .order_by(
+                    Role.is_system.asc(),
+                    UserRole.is_primary.desc(),
+                )
+            )
+        ).all()
+        dept_by_emp: dict[uuid.UUID, str] = {}
+        for uid, rname, _, _ in role_links:
+            if uid not in dept_by_emp:
+                display_rname = "Admin" if rname == "super_admin" else ("User" if rname == "user" else rname)
+                dept_by_emp[uid] = display_rname
+
+        # Batch load branch/locations for all filtered employees
+        loc_links = (
+            await self.db.execute(
+                select(HrmsEmployeeLocation.user_id, HrmsLocation.name, HrmsEmployeeLocation.is_primary)
+                .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
+                .where(
+                    HrmsEmployeeLocation.user_id.in_(emp_ids),
+                    HrmsLocation.deleted_at.is_(None),
+                )
+                .order_by(HrmsEmployeeLocation.is_primary.desc())
+            )
+        ).all()
+        branch_by_emp: dict[uuid.UUID, str] = {}
+        for uid, lname, _ in loc_links:
+            if uid not in branch_by_emp:
+                branch_by_emp[uid] = lname
+
+        out: List[EmployeeLeaveAdjustmentRow] = []
+        for emp in filtered_employees:
+            emp_name = emp.display_name or f"{emp.first_name or ''} {emp.last_name or ''}".strip() or emp.username or "Employee"
+            emp_dept = dept_by_emp.get(emp.id) or "Unassigned"
+            emp_branch = branch_by_emp.get(emp.id) or (emp.city if emp.city else "All Branches")
+
+            if department and department.upper() != "ALL":
+                target_dept = department.lower().strip()
+                emp_dept_lower = emp_dept.lower().strip()
+                is_dept_match = (
+                    emp_dept_lower == target_dept
+                    or (target_dept in ("admin", "super_admin") and emp_dept_lower in ("admin", "super_admin"))
+                    or (target_dept in ("user") and emp_dept_lower in ("user"))
+                )
+                if not is_dept_match:
+                    continue
+
+            if branch and branch.upper() != "ALL" and emp_branch.lower() != branch.lower():
+                continue
 
             bal_dict: dict[str, LeaveBalanceSummary] = {}
-            for b in balances:
-                bal_dict[str(b.leave_type_id)] = LeaveBalanceSummary(
+            for lt in all_lts:
+                b = bal_by_emp_lt.get((emp.id, lt.id))
+                if not b:
+                    continue
+                available_val = b.available if b.available is not None else round(b.allocated + b.adjusted - b.consumed, 2)
+                summary = LeaveBalanceSummary(
                     allocated=b.allocated,
                     consumed=b.consumed,
                     adjusted=b.adjusted,
-                    available=b.available,
+                    available=available_val,
                     total_leave=round(b.allocated + b.adjusted, 2),
                 )
+                bal_dict[str(lt.id)] = summary
+                bal_dict[lt.name] = summary
 
             out.append(
                 EmployeeLeaveAdjustmentRow(
                     employee_id=emp.id,
                     employee_name=emp_name,
                     employee_code=emp.employee_code,
-                    branch=branch,
-                    department=department,
+                    branch=emp_branch,
+                    department=emp_dept,
                     balances=bal_dict,
                 )
             )
@@ -1063,6 +1230,9 @@ class HrmsLeaveService:
         Modifies employee leave balance and records non-destructive audit history.
         available = allocated + adjusted - consumed
         """
+        if not payload.reason or not payload.reason.strip():
+            raise HTTPException(status_code=400, detail="A reason is required for every manual balance adjustment.")
+
         # Ensure employee balance exists
         await self.get_or_create_employee_balances(payload.employee_id, year=payload.year)
 
@@ -1082,6 +1252,7 @@ class HrmsLeaveService:
                 allocated=lt.annual_balance if lt else 0.0,
                 consumed=0.0,
                 adjusted=0.0,
+                available=lt.annual_balance if lt else 0.0,
             )
             self.db.add(balance)
             await self.db.flush()
@@ -1089,30 +1260,46 @@ class HrmsLeaveService:
         prev_available = balance.available
         adj_type = payload.adjustment_type.upper().strip()
 
-        if adj_type == "ADD":
+        if adj_type in ("ADD", "CREDIT", "MANUAL_CREDIT"):
             delta = abs(payload.amount)
-        elif adj_type == "DEDUCT":
+            audit_type = "MANUAL_CREDIT" if "CREDIT" in adj_type else "ADD"
+        elif adj_type in ("DEDUCT", "DEBIT", "MANUAL_DEBIT"):
             delta = -abs(payload.amount)
+            audit_type = "MANUAL_DEBIT" if "DEBIT" in adj_type else "DEDUCT"
         elif adj_type == "CORRECTION":
             # Target is payload.amount
             delta = payload.amount - prev_available
+            audit_type = "CORRECTION"
         else:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid adjustment type. Must be 'ADD', 'DEDUCT', or 'CORRECTION'.",
+                detail="Invalid adjustment type. Must be 'ADD', 'CREDIT', 'DEDUCT', 'DEBIT', or 'CORRECTION'.",
             )
 
+        # Check negative balance restriction
+        lt = await self.get_leave_type(payload.leave_type_id)
+        if delta < 0 and lt and not getattr(lt, "allow_negative_balance", False):
+            if round(prev_available + delta, 2) < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Negative balance is not allowed for {lt.name}. Current available is {prev_available}, cannot deduct {abs(delta)}.",
+                )
+
         balance.adjusted = round(balance.adjusted + delta, 2)
-        new_available = balance.available
+        new_available = round(balance.allocated + balance.adjusted - balance.consumed, 2)
+        balance.available = new_available
 
         audit = HrmsLeaveAdjustment(
             employee_id=payload.employee_id,
             leave_type_id=payload.leave_type_id,
-            adjustment_type=adj_type,
+            adjustment_type=audit_type,
             amount=delta,
             previous_balance=prev_available,
             new_balance=new_available,
             reason=payload.reason.strip(),
+            remarks=payload.remarks.strip() if payload.remarks else None,
+            source="MANUAL",
+            effective_date=payload.effective_date or date.today(),
             adjusted_by=adjusted_by,
         )
         self.db.add(audit)
@@ -1120,7 +1307,6 @@ class HrmsLeaveService:
         await self.db.refresh(audit)
 
         emp = await self.db.scalar(select(User).where(User.id == payload.employee_id))
-        lt = await self.db.scalar(select(HrmsLeaveType).where(HrmsLeaveType.id == payload.leave_type_id))
         adj_user = await self.db.scalar(select(User).where(User.id == adjusted_by)) if adjusted_by else None
 
         emp_name = (
@@ -1135,36 +1321,46 @@ class HrmsLeaveService:
             employee_id=audit.employee_id,
             employee_name=emp_name,
             leave_type_id=audit.leave_type_id,
-            leave_type_name=lt.name if lt else None,
+            leave_type_name=lt.name if lt else "Leave",
             adjustment_type=audit.adjustment_type,
             amount=audit.amount,
             previous_balance=audit.previous_balance,
             new_balance=audit.new_balance,
             reason=audit.reason,
+            remarks=audit.remarks,
+            source=audit.source,
+            effective_date=audit.effective_date,
             adjusted_by=audit.adjusted_by,
             adjusted_by_name=adj_user.display_name if adj_user else "Admin",
             created_at=audit.created_at,
         )
 
     async def get_adjustment_history(
-        self, employee_id: uuid.UUID, leave_type_id: Optional[uuid.UUID] = None
+        self,
+        employee_id: Optional[uuid.UUID] = None,
+        leave_type_id: Optional[uuid.UUID] = None,
+        limit: int = 200,
     ) -> List[LeaveAdjustmentHistoryRead]:
         query = (
             select(HrmsLeaveAdjustment)
-            .where(HrmsLeaveAdjustment.employee_id == employee_id)
             .order_by(HrmsLeaveAdjustment.created_at.desc())
+            .limit(limit)
         )
+        if employee_id:
+            query = query.where(HrmsLeaveAdjustment.employee_id == employee_id)
         if leave_type_id:
             query = query.where(HrmsLeaveAdjustment.leave_type_id == leave_type_id)
 
         audits = (await self.db.scalars(query)).all()
-        emp = await self.db.scalar(select(User).where(User.id == employee_id))
-        emp_name = (
-            emp.display_name
-            or f"{emp.first_name or ''} {emp.last_name or ''}".strip()
-            or emp.username
-            or "Employee"
-        ) if emp else "Employee"
+        if not audits:
+            return []
+
+        emp_ids = {a.employee_id for a in audits}
+        emps = (await self.db.scalars(select(User).where(User.id.in_(emp_ids)))).all()
+        emp_names = {
+            e.id: (e.display_name or f"{e.first_name or ''} {e.last_name or ''}".strip() or e.username or "Employee")
+            for e in emps
+        }
 
         lt_ids = {a.leave_type_id for a in audits}
         lts = (await self.db.scalars(select(HrmsLeaveType).where(HrmsLeaveType.id.in_(lt_ids)))).all()
@@ -1180,7 +1376,7 @@ class HrmsLeaveService:
             LeaveAdjustmentHistoryRead(
                 id=a.id,
                 employee_id=a.employee_id,
-                employee_name=emp_name,
+                employee_name=emp_names.get(a.employee_id, "Employee"),
                 leave_type_id=a.leave_type_id,
                 leave_type_name=lt_names.get(a.leave_type_id, "Leave"),
                 adjustment_type=a.adjustment_type,
@@ -1188,6 +1384,9 @@ class HrmsLeaveService:
                 previous_balance=a.previous_balance,
                 new_balance=a.new_balance,
                 reason=a.reason,
+                remarks=a.remarks,
+                source=a.source or "MANUAL",
+                effective_date=a.effective_date,
                 adjusted_by=a.adjusted_by,
                 adjusted_by_name=user_names.get(a.adjusted_by, "Admin") if a.adjusted_by else "Admin",
                 created_at=a.created_at,
@@ -1334,6 +1533,20 @@ class HrmsLeaveService:
             return True
         return False
 
+    async def is_user_authorized_to_adjust(self, user_id: uuid.UUID) -> bool:
+        if await self.is_user_admin(user_id):
+            return True
+        perm_codes = (
+            await self.db.scalars(
+                select(Permission.code)
+                .join(RolePermission, RolePermission.permission_id == Permission.id)
+                .join(UserRole, UserRole.role_id == RolePermission.role_id)
+                .where(UserRole.user_id == user_id)
+            )
+        ).all()
+        perm_set = set(perm_codes)
+        return any(p in perm_set for p in ("hrms.adjust", "hrms.manage", "hrms:admin"))
+
     async def get_managed_employee_ids(self, manager_user_id: uuid.UUID) -> set[uuid.UUID]:
         """Return IDs of employees reporting to this manager or in their department."""
         direct_reports = (
@@ -1451,7 +1664,31 @@ class HrmsLeaveService:
                 select(HrmsEmployeeLeaveBalance).where(HrmsEmployeeLeaveBalance.id == bal.id)
             )
             if raw_bal:
+                lt = await self.get_leave_type(req.leave_type_id)
+                new_avail = round(raw_bal.allocated + raw_bal.adjusted - (raw_bal.consumed + req.number_of_days), 2)
+                if lt and not getattr(lt, "allow_negative_balance", False) and new_avail < 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Approval would result in negative leave balance ({new_avail}) for {lt.name}, which is not permitted.",
+                    )
+                prev_available = raw_bal.available
                 raw_bal.consumed = round(raw_bal.consumed + req.number_of_days, 2)
+                raw_bal.available = round(raw_bal.allocated + raw_bal.adjusted - raw_bal.consumed, 2)
+
+                audit = HrmsLeaveAdjustment(
+                    employee_id=req.employee_id,
+                    leave_type_id=req.leave_type_id,
+                    adjustment_type="LEAVE_APPROVED",
+                    amount=-req.number_of_days,
+                    previous_balance=prev_available,
+                    new_balance=raw_bal.available,
+                    reason=f"Leave Request #{req.id} approved ({req.number_of_days} days)",
+                    remarks=remarks,
+                    source="LEAVE_APPROVAL",
+                    effective_date=req.from_date,
+                    adjusted_by=reviewer_id,
+                )
+                self.db.add(audit)
 
         req.approval_status = "APPROVED"
         req.status = "APPROVED"
@@ -1495,7 +1732,24 @@ class HrmsLeaveService:
                 )
             )
             if raw_bal:
+                prev_available = raw_bal.available
                 raw_bal.consumed = max(0.0, round(raw_bal.consumed - req.number_of_days, 2))
+                raw_bal.available = round(raw_bal.allocated + raw_bal.adjusted - raw_bal.consumed, 2)
+
+                reversal_audit = HrmsLeaveAdjustment(
+                    employee_id=req.employee_id,
+                    leave_type_id=req.leave_type_id,
+                    adjustment_type="LEAVE_REVERSED",
+                    amount=req.number_of_days,
+                    previous_balance=prev_available,
+                    new_balance=raw_bal.available,
+                    reason=f"Reversal of approved Leave Request #{req.id} (Rejected)",
+                    remarks=remarks,
+                    source="LEAVE_REVERSAL",
+                    effective_date=req.from_date,
+                    adjusted_by=reviewer_id,
+                )
+                self.db.add(reversal_audit)
 
         req.approval_status = "REJECTED"
         req.status = "REJECTED"
@@ -1534,7 +1788,24 @@ class HrmsLeaveService:
                 )
             )
             if raw_bal:
+                prev_available = raw_bal.available
                 raw_bal.consumed = max(0.0, round(raw_bal.consumed - req.number_of_days, 2))
+                raw_bal.available = round(raw_bal.allocated + raw_bal.adjusted - raw_bal.consumed, 2)
+
+                reversal_audit = HrmsLeaveAdjustment(
+                    employee_id=req.employee_id,
+                    leave_type_id=req.leave_type_id,
+                    adjustment_type="LEAVE_REVERSED",
+                    amount=req.number_of_days,
+                    previous_balance=prev_available,
+                    new_balance=raw_bal.available,
+                    reason=f"Reversal of approved Leave Request #{req.id} (Cancelled)",
+                    remarks=None,
+                    source="LEAVE_REVERSAL",
+                    effective_date=req.from_date,
+                    adjusted_by=user_id,
+                )
+                self.db.add(reversal_audit)
 
         req.status = "CANCELLED"
         req.approval_status = "CANCELLED"

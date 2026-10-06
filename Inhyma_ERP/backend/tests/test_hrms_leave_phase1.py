@@ -19,7 +19,7 @@ Validates:
 """
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import delete, select
@@ -329,3 +329,15 @@ async def test_hrms_leave_phase1_full_workflow(client: AsyncClient):
     bal_after_cancel = next(b for b in bal_res5.json()["data"] if b["leave_type_id"] == target_lt_id)
     assert bal_after_cancel["consumed"] == cur_consumed
     assert bal_after_cancel["available"] == round(cur_avail + 1.0, 2)
+
+    # Cleanup test leave type, plan, holiday, and test user
+    await client.delete(f"/api/v1/hrms/leave/types/{lt_id}")
+    await client.delete(f"/api/v1/hrms/leave/plans/{plan_id}")
+    await client.delete(f"/api/v1/hrms/leave/holidays/{created_hol['id']}")
+
+    async with sessionmaker() as session:
+        u = await session.get(User, non_admin_id)
+        if u:
+            u.deleted_at = datetime.now(timezone.utc)
+            u.is_active = False
+        await session.commit()

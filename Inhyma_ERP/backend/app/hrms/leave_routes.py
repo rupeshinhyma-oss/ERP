@@ -56,59 +56,14 @@ def get_leave_service(db: AsyncSession = Depends(get_db_session)) -> HrmsLeaveSe
     return HrmsLeaveService(db)
 
 
+from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
+
+
 async def get_current_user_context(
-    request: Request,
-    db: AsyncSession = Depends(get_db_session),
-    auth_service: AuthService = Depends(get_auth_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ) -> tuple[uuid.UUID, bool]:
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        try:
-            token = auth_header.split(" ", 1)[1]
-            token_payload = {}
-            try:
-                from app.auth.security import decode_token, TokenType
-                token_payload = decode_token(token, expected_type=TokenType.ACCESS)
-            except Exception:
-                pass
-            token_perms = set(token_payload.get("permissions") or [])
-            user = await auth_service.verify_access_token(token)
-            if user:
-                perms = (getattr(user, "permissions", set()) or set()) | token_perms
-                uname = (getattr(user, "username", "") or "").lower()
-                is_admin = bool(
-                    getattr(user, "is_super_admin", False)
-                    or "*" in perms
-                    or "hrms.manage" in perms
-                    or "hrms.approve" in perms
-                    or "hrms:admin" in perms
-                    or "hrms:approval" in perms
-                    or uname in ("admin", "super_admin")
-                    or uname.startswith("admin")
-                )
-                return user.id, is_admin
-        except Exception:
-            pass
-
-    from app.users.models import User
-    res = await db.execute(
-        select(User).where(User.is_active.is_(True)).order_by(User.created_at.asc()).limit(1)
-    )
-    usr = res.scalar_one_or_none()
-    if usr:
-        return usr.id, True
-
-    dummy_user = User(
-        email="employee.leave@inhyma.com",
-        first_name="Inhyma",
-        last_name="Employee",
-        password_hash="mock_hash",
-        is_active=True,
-    )
-    db.add(dummy_user)
-    await self.db.commit() if hasattr(self, "db") else await db.commit()
-    await db.refresh(dummy_user)
-    return dummy_user.id, True
+    ctx.require_module_access("leave")
+    return ctx.user_id, ctx.is_admin or ctx.is_hr
 
 
 # ===========================================================================
@@ -409,11 +364,13 @@ async def get_employee_balances(
 ):
     user_id, is_admin = ctx
     if employee_id and employee_id != user_id and not is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Employees cannot view other employees' leave balances.",
-        )
-    target_emp = employee_id if (employee_id and is_admin) else user_id
+        is_mgr = await service.is_reviewer_authorized_for_employee(user_id, employee_id)
+        if not is_mgr:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Employees cannot view other employees' leave balances.",
+            )
+    target_emp = employee_id if (employee_id and is_admin) else (employee_id or user_id)
     balances = await service.get_or_create_employee_balances(target_emp, year=year)
     return build_success_response(
         data=[b.model_dump(mode="json") for b in balances],
@@ -421,13 +378,49 @@ async def get_employee_balances(
     )
 
 
+@router.get("/balances/{employee_id}")
+async def get_employee_balances_by_id(
+    employee_id: uuid.UUID,
+    year: int = Query(default=2026),
+    service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+):
+    user_id, is_admin = ctx
+    if employee_id != user_id and not is_admin:
+        is_mgr = await service.is_reviewer_authorized_for_employee(user_id, employee_id)
+        if not is_mgr:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Employees cannot view other employees' leave balances.",
+            )
+    balances = await service.get_or_create_employee_balances(employee_id, year=year)
+    return build_success_response(
+        data=[b.model_dump(mode="json") for b in balances],
+        message="Employee leave balances retrieved successfully.",
+    )
+
+
+@router.get("/matrix")
 @router.get("/adjustments/matrix")
 async def get_leave_adjustment_matrix(
     year: int = Query(default=2026),
     search: Optional[str] = Query(default=None),
+    department: Optional[str] = Query(default=None),
+    branch: Optional[str] = Query(default=None),
+    employee_id: Optional[uuid.UUID] = Query(default=None),
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
-    matrix = await service.get_leave_adjustment_matrix(year=year, search=search)
+    user_id, is_admin = ctx
+    matrix = await service.get_leave_adjustment_matrix(
+        year=year,
+        search=search,
+        department=department,
+        branch=branch,
+        employee_id=employee_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
     return build_success_response(
         data=[row.model_dump(mode="json") for row in matrix],
         message="Leave adjustment matrix retrieved successfully.",
@@ -441,7 +434,8 @@ async def create_leave_adjustment(
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
     user_id, is_admin = ctx
-    if not is_admin:
+    can_adjust = is_admin or (await service.is_user_authorized_to_adjust(user_id))
+    if not can_adjust:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Employees cannot adjust leave balances.",
@@ -453,13 +447,72 @@ async def create_leave_adjustment(
     )
 
 
-@router.get("/adjustments/history")
-async def get_adjustment_history(
-    employee_id: uuid.UUID = Query(...),
+@router.get("/adjustments")
+async def get_adjustments(
+    employee_id: Optional[uuid.UUID] = Query(default=None),
     leave_type_id: Optional[uuid.UUID] = Query(default=None),
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
-    history = await service.get_adjustment_history(employee_id, leave_type_id=leave_type_id)
+    user_id, is_admin = ctx
+    if employee_id:
+        if employee_id != user_id and not is_admin:
+            is_mgr = await service.is_reviewer_authorized_for_employee(user_id, employee_id)
+            if not is_mgr:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Employees cannot view other employees' adjustment history.",
+                )
+        target = employee_id
+    else:
+        target = None if is_admin else user_id
+
+    history = await service.get_adjustment_history(employee_id=target, leave_type_id=leave_type_id)
+    return build_success_response(
+        data=[h.model_dump(mode="json") for h in history],
+        message="Adjustment audit history retrieved successfully.",
+    )
+
+
+@router.get("/adjustments/history")
+async def get_adjustment_history(
+    employee_id: Optional[uuid.UUID] = Query(default=None),
+    leave_type_id: Optional[uuid.UUID] = Query(default=None),
+    service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+):
+    user_id, is_admin = ctx
+    target = employee_id or (None if is_admin else user_id)
+    if target and target != user_id and not is_admin:
+        is_mgr = await service.is_reviewer_authorized_for_employee(user_id, target)
+        if not is_mgr:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Employees cannot view other employees' adjustment history.",
+            )
+    history = await service.get_adjustment_history(employee_id=target, leave_type_id=leave_type_id)
+    return build_success_response(
+        data=[h.model_dump(mode="json") for h in history],
+        message="Adjustment audit history retrieved successfully.",
+    )
+
+
+@router.get("/adjustments/{employee_id}")
+async def get_adjustments_by_employee(
+    employee_id: uuid.UUID,
+    leave_type_id: Optional[uuid.UUID] = Query(default=None),
+    service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+):
+    user_id, is_admin = ctx
+    if employee_id != user_id and not is_admin:
+        is_mgr = await service.is_reviewer_authorized_for_employee(user_id, employee_id)
+        if not is_mgr:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Employees cannot view other employees' adjustment history.",
+            )
+    history = await service.get_adjustment_history(employee_id=employee_id, leave_type_id=leave_type_id)
     return build_success_response(
         data=[h.model_dump(mode="json") for h in history],
         message="Adjustment audit history retrieved successfully.",
@@ -516,16 +569,12 @@ async def create_leave_request(
     payload: LeaveRequestCreate,
     employee_id: Optional[uuid.UUID] = Query(default=None),
     service: HrmsLeaveService = Depends(get_leave_service),
-    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
-    user_id, is_admin = ctx
-    if employee_id and employee_id != user_id and not is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Employees cannot create leave requests for other employees.",
-        )
-    target_emp = employee_id if (employee_id and is_admin) else user_id
-    req = await service.create_leave_request(target_emp, payload, user_id=user_id)
+    ctx.require_module_access("leave")
+    target_emp = employee_id or payload.employee_id or ctx.user_id
+    ctx.require_employee_access(target_emp)
+    req = await service.create_leave_request(target_emp, payload, user_id=ctx.user_id)
     return build_success_response(
         data=req.model_dump(mode="json"),
         message="Leave request submitted successfully.",

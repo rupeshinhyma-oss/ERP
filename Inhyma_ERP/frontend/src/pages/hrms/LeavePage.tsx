@@ -108,7 +108,10 @@ interface EmployeeBalance {
 interface MatrixRow {
   employee_id: string;
   employee_name: string;
+  employee_code?: string;
   employee_email?: string;
+  branch?: string;
+  department?: string;
   balances: Record<
     string,
     {
@@ -116,6 +119,7 @@ interface MatrixRow {
       consumed: number;
       adjusted: number;
       available: number;
+      total_leave?: number;
     }
   >;
 }
@@ -123,15 +127,18 @@ interface MatrixRow {
 interface LeaveAdjustmentAudit {
   id: string;
   employee_id: string;
-  employee_name: string;
+  employee_name?: string;
   leave_type_id: string;
-  leave_type_name: string;
-  adjustment_type: "ADD" | "DEDUCT" | "CORRECTION";
+  leave_type_name?: string;
+  adjustment_type: string;
   amount: number;
   previous_balance: number;
   new_balance: number;
   reason: string;
-  adjusted_by_name: string;
+  remarks?: string | null;
+  source?: string;
+  effective_date?: string | null;
+  adjusted_by_name?: string | null;
   created_at: string;
 }
 
@@ -252,11 +259,21 @@ export function LeavePage() {
   // Leave Adjustment Form State
   const [adjEmployeeId, setAdjEmployeeId] = useState<string>("");
   const [adjEmployeeName, setAdjEmployeeName] = useState<string>("");
+  const [adjEmployeeCode, setAdjEmployeeCode] = useState<string>("");
   const [adjLeaveTypeId, setAdjLeaveTypeId] = useState<string>("");
   const [adjType, setAdjType] = useState<"ADD" | "DEDUCT" | "CORRECTION">("ADD");
   const [adjAmount, setAdjAmount] = useState<number>(1);
+  const [adjEffectiveDate, setAdjEffectiveDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [adjReason, setAdjReason] = useState<string>("");
+  const [adjRemarks, setAdjRemarks] = useState<string>("");
   const [adjHistory, setAdjHistory] = useState<LeaveAdjustmentAudit[]>([]);
+
+  // Leave Adjustment Filters State
+  const [adjDepartmentFilter, setAdjDepartmentFilter] = useState<string>("ALL");
+  const [adjBranchFilter, setAdjBranchFilter] = useState<string>("ALL");
+  const [adjLeaveTypeFilter, setAdjLeaveTypeFilter] = useState<string>("ALL");
+  const [adjEmployeeFilter, setAdjEmployeeFilter] = useState<string>("ALL");
+  const [adjEmployeeDepartment, setAdjEmployeeDepartment] = useState<string>("General");
 
   // Apply Leave Form State
   const [applyLeaveTypeId, setApplyLeaveTypeId] = useState<string>("");
@@ -415,6 +432,9 @@ export function LeavePage() {
     }
   };
 
+  const [dbDepartments, setDbDepartments] = useState<string[]>([]);
+  const [dbBranches, setDbBranches] = useState<string[]>([]);
+
   const fetchAdjustmentHistory = async (empId: string, ltId?: string) => {
     try {
       let url = `/hrms/leave/adjustments/history?employee_id=${empId}`;
@@ -429,9 +449,38 @@ export function LeavePage() {
     }
   };
 
+  const fetchOrgDepartmentsAndBranches = async () => {
+    try {
+      const [rolesRes, locsRes] = await Promise.allSettled([
+        apiGet<any>("/rbac/roles"),
+        apiGet<any>("/hrms/setup/locations"),
+      ]);
+      if (rolesRes.status === "fulfilled") {
+        const roles = Array.isArray(rolesRes.value.data) ? rolesRes.value.data : rolesRes.value.data?.data || [];
+        if (Array.isArray(roles)) {
+          const depts = roles.map((r: any) => {
+            const n = r.name || "";
+            return n === "super_admin" ? "Admin" : (n === "user" ? "User" : n);
+          }).filter(Boolean);
+          setDbDepartments(Array.from(new Set(depts)));
+        }
+      }
+      if (locsRes.status === "fulfilled") {
+        const locs = Array.isArray(locsRes.value.data) ? locsRes.value.data : locsRes.value.data?.data || [];
+        if (Array.isArray(locs)) {
+          const branches = locs.map((l: any) => l.name).filter(Boolean);
+          setDbBranches(Array.from(new Set(branches)));
+        }
+      }
+    } catch {
+      // quiet failover
+    }
+  };
+
   // Initial load
   useEffect(() => {
     fetchLeaveTypes();
+    fetchOrgDepartmentsAndBranches();
   }, []);
 
   // Tab driven fetching
@@ -446,6 +495,7 @@ export function LeavePage() {
       fetchHolidays();
     } else if (activeTab === "adjustments") {
       fetchMatrix();
+      fetchOrgDepartmentsAndBranches();
     } else if (activeTab === "leave-types") {
       fetchLeaveTypes();
     }
@@ -616,11 +666,15 @@ export function LeavePage() {
   const handleOpenAdjustment = (row: MatrixRow) => {
     setAdjEmployeeId(row.employee_id);
     setAdjEmployeeName(row.employee_name);
-    const firstLt = leaveTypes[0]?.id || "";
+    setAdjEmployeeCode(row.employee_code || "");
+    setAdjEmployeeDepartment(row.department || "General");
+    const firstLt = activeLeaveTypes[0]?.id || leaveTypes[0]?.id || "";
     setAdjLeaveTypeId(firstLt);
     setAdjType("ADD");
     setAdjAmount(1);
+    setAdjEffectiveDate(new Date().toISOString().split("T")[0]);
     setAdjReason("");
+    setAdjRemarks("");
     fetchAdjustmentHistory(row.employee_id, firstLt);
     setActiveModal("adjustment");
   };
@@ -645,6 +699,8 @@ export function LeavePage() {
         adjustment_type: adjType,
         amount: adjAmount,
         reason: adjReason.trim(),
+        remarks: adjRemarks.trim() || undefined,
+        effective_date: adjEffectiveDate || undefined,
         year: selectedYear,
       };
       await apiPost<LeaveAdjustmentAudit>("/hrms/leave/adjustments", payload);
@@ -869,27 +925,58 @@ export function LeavePage() {
   // Computed values
   // -------------------------------------------------------------------------
 
-  // Matrix calculation
-  const standardLeaveTypeNames = [
-    "Casual Leave",
-    "Compensatory Off",
-    "Earned Leave",
-    "Leave Without Pay",
-    "Sick Leave",
-    "Maternity Leave",
-    "Paternity Leave",
-    "Sabbatical Leave",
-  ];
+  // Matrix calculation with dynamic leave types and filters
+  const activeLeaveTypes = useMemo(() => {
+    return leaveTypes.filter((lt) => lt.is_active);
+  }, [leaveTypes]);
+
+  const matrixDepartments = useMemo(() => {
+    const set = new Set<string>(dbDepartments);
+    matrixRows.forEach((r) => {
+      if (r.department && r.department.trim()) set.add(r.department.trim());
+    });
+    return Array.from(set).sort();
+  }, [dbDepartments, matrixRows]);
+
+  const matrixBranches = useMemo(() => {
+    const set = new Set<string>(dbBranches);
+    matrixRows.forEach((r) => {
+      if (r.branch && r.branch.trim()) set.add(r.branch.trim());
+    });
+    return Array.from(set).sort();
+  }, [dbBranches, matrixRows]);
 
   const filteredMatrix = useMemo(() => {
-    if (!adjSearch.trim()) return matrixRows;
-    const term = adjSearch.toLowerCase();
-    return matrixRows.filter(
-      (r) =>
-        r.employee_name.toLowerCase().includes(term) ||
-        (r.employee_email && r.employee_email.toLowerCase().includes(term))
-    );
-  }, [matrixRows, adjSearch]);
+    return matrixRows.filter((r) => {
+      if (adjEmployeeFilter !== "ALL" && r.employee_id !== adjEmployeeFilter) {
+        return false;
+      }
+      if (adjSearch.trim()) {
+        const term = adjSearch.toLowerCase();
+        const matchesName = r.employee_name.toLowerCase().includes(term);
+        const matchesCode = r.employee_code && r.employee_code.toLowerCase().includes(term);
+        const matchesEmail = r.employee_email && r.employee_email.toLowerCase().includes(term);
+        if (!matchesName && !matchesCode && !matchesEmail) return false;
+      }
+      if (adjDepartmentFilter !== "ALL") {
+        const target = adjDepartmentFilter.toLowerCase().trim();
+        const rowDept = (r.department || "").toLowerCase().trim();
+        const isMatch = (
+          rowDept === target ||
+          (target === "admin" && (rowDept === "super_admin" || rowDept === "admin")) ||
+          (target === "super_admin" && (rowDept === "admin" || rowDept === "super_admin")) ||
+          (target === "user" && rowDept === "user")
+        );
+        if (!isMatch) return false;
+      }
+      if (adjBranchFilter !== "ALL") {
+        const target = adjBranchFilter.toLowerCase().trim();
+        const rowBranch = (r.branch || "").toLowerCase().trim();
+        if (rowBranch !== target) return false;
+      }
+      return true;
+    });
+  }, [matrixRows, adjEmployeeFilter, adjSearch, adjDepartmentFilter, adjBranchFilter]);
 
   const filteredApprovals = useMemo(() => {
     return approvals.filter((a) => {
@@ -923,7 +1010,7 @@ export function LeavePage() {
     if (!row) return 0;
     const lt = leaveTypes.find((t) => t.id === adjLeaveTypeId);
     if (!lt) return 0;
-    const balObj = row.balances[lt.name];
+    const balObj = row.balances[lt.id] || row.balances[lt.name];
     return balObj ? balObj.available : 0;
   }, [adjEmployeeId, adjLeaveTypeId, matrixRows, leaveTypes]);
 
@@ -1057,6 +1144,16 @@ export function LeavePage() {
               <span>Leave Approvals</span>
             </button>
           )}
+          {canManageLeaveTypes && (
+            <button
+              type="button"
+              className={`hrms-tab-btn ${activeTab === "leave-types" ? "active" : ""}`}
+              onClick={() => setActiveTab("leave-types")}
+            >
+              <IconFileText />
+              <span>Leave Types</span>
+            </button>
+          )}
           {canManageHolidays && (
             <button
               type="button"
@@ -1075,16 +1172,6 @@ export function LeavePage() {
             >
               <IconRefresh />
               <span>Leave Adjustment</span>
-            </button>
-          )}
-          {canManageLeaveTypes && (
-            <button
-              type="button"
-              className={`hrms-tab-btn ${activeTab === "leave-types" ? "active" : ""}`}
-              onClick={() => setActiveTab("leave-types")}
-            >
-              <IconFileText />
-              <span>Leave Types</span>
             </button>
           )}
         </div>
@@ -1570,24 +1657,83 @@ export function LeavePage() {
         {/* =================================================================== */}
         {/* TAB 4: LEAVE ADJUSTMENT MATRIX                                      */}
         {/* =================================================================== */}
+        {/* =================================================================== */}
+        {/* TAB 4: LEAVE ADJUSTMENT                                             */}
+        {/* =================================================================== */}
         {activeTab === "adjustments" && (
           <div className="card">
-            <div className="card-header">
+            <div className="card-header" style={{ flexWrap: "wrap", gap: 12 }}>
               <div>
                 <h2 className="hrms-section-title">Leave Adjustment</h2>
                 <div className="hrms-section-desc">
-                  Employee-wise matrix showing consumed, available, and total leaves with sticky navigation and audited adjustments
+                  Employee balance overview with audited manual balance adjustments
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <input
                   type="text"
-                  placeholder="Search employee..."
+                  placeholder="Search employee or code..."
                   className="input"
-                  style={{ width: 220 }}
+                  style={{ width: 170 }}
                   value={adjSearch}
                   onChange={(e) => setAdjSearch(e.target.value)}
                 />
+                <select
+                  className="form-control"
+                  style={{ width: 150 }}
+                  value={adjDepartmentFilter}
+                  onChange={(e) => setAdjDepartmentFilter(e.target.value)}
+                  title="Department Filter"
+                >
+                  <option value="ALL">All Departments</option>
+                  {matrixDepartments.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="form-control"
+                  style={{ width: 140 }}
+                  value={adjBranchFilter}
+                  onChange={(e) => setAdjBranchFilter(e.target.value)}
+                  title="Branch Filter"
+                >
+                  <option value="ALL">All Branches</option>
+                  {matrixBranches.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="form-control"
+                  style={{ width: 160 }}
+                  value={adjEmployeeFilter}
+                  onChange={(e) => setAdjEmployeeFilter(e.target.value)}
+                  title="Employee Filter"
+                >
+                  <option value="ALL">All Employees</option>
+                  {matrixRows.map((r) => (
+                    <option key={r.employee_id} value={r.employee_id}>
+                      {r.employee_name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="form-control"
+                  style={{ width: 150 }}
+                  value={adjLeaveTypeFilter}
+                  onChange={(e) => setAdjLeaveTypeFilter(e.target.value)}
+                  title="Leave Type Filter"
+                >
+                  <option value="ALL">All Leave Types</option>
+                  {activeLeaveTypes.map((lt) => (
+                    <option key={lt.id} value={lt.id}>
+                      {lt.name}
+                    </option>
+                  ))}
+                </select>
                 <span className="hrms-badge-shell">{filteredMatrix.length} Employees</span>
               </div>
             </div>
@@ -1599,80 +1745,89 @@ export function LeavePage() {
                 </div>
                 <h3 className="hrms-placeholder-title">No Leave Balances Found</h3>
                 <p className="hrms-placeholder-text">
-                  Employee balances will be initialized when employees are assigned to Leave Plans.
+                  No employee balances match the selected filters. Check back or change filter options.
                 </p>
               </div>
             ) : (
-              <div className="hrms-matrix-wrapper">
-                <table className="hrms-matrix-table">
+              <div className="hrms-approval-table-wrapper">
+                <table className="hrms-approval-table">
                   <thead>
                     <tr>
-                      <th className="hrms-sticky-left" rowSpan={2} style={{ minWidth: 200 }}>
-                        Employee
-                      </th>
-                      {standardLeaveTypeNames.map((name) => (
-                        <th key={name} colSpan={3} style={{ borderLeft: "1px solid var(--color-border)" }}>
-                          {name}
-                        </th>
-                      ))}
-                      <th className="hrms-sticky-right" rowSpan={2} style={{ minWidth: 100 }}>
-                        Action
-                      </th>
-                    </tr>
-                    <tr>
-                      {standardLeaveTypeNames.map((name) => (
-                        <React.Fragment key={`sub-${name}`}>
-                          <th style={{ borderLeft: "1px solid var(--color-border)" }}>Consumed</th>
-                          <th>Available</th>
-                          <th>Total</th>
-                        </React.Fragment>
-                      ))}
+                      <th style={{ width: "24%" }}>Employee</th>
+                      <th style={{ width: "16%" }}>Department</th>
+                      <th style={{ width: "48%" }}>Leave Balance Summary</th>
+                      <th style={{ width: "12%", textAlign: "center" }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredMatrix.map((row) => (
-                      <tr key={row.employee_id}>
-                        <td className="hrms-sticky-left">
-                          <div style={{ fontWeight: 600 }}>{row.employee_name}</div>
-                          {row.employee_email && (
-                            <div style={{ fontSize: 11, color: "var(--color-muted)" }}>
-                              {row.employee_email}
+                    {filteredMatrix.map((row) => {
+                      const activeBalances = activeLeaveTypes
+                        .filter((lt) => {
+                          if (adjLeaveTypeFilter !== "ALL" && lt.id !== adjLeaveTypeFilter) {
+                            return false;
+                          }
+                          return true;
+                        })
+                        .map((lt) => {
+                          const bal = row.balances[lt.id] || row.balances[lt.name];
+                          const avail = bal ? bal.available : 0;
+                          return { lt, avail };
+                        });
+
+                      return (
+                        <tr key={row.employee_id}>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{row.employee_name}</div>
+                            <div style={{ fontSize: 11, color: "var(--color-muted)", display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                              {row.employee_code && <span>ID: {row.employee_code}</span>}
+                              {row.branch && row.branch !== "All Branches" && <span>• {row.branch}</span>}
                             </div>
-                          )}
-                        </td>
-                        {standardLeaveTypeNames.map((ltName) => {
-                          const bal = row.balances[ltName] || {
-                            consumed: 0,
-                            available: 0,
-                            allocated: 0,
-                            adjusted: 0,
-                          };
-                          const total = bal.allocated + bal.adjusted;
-                          return (
-                            <React.Fragment key={`data-${row.employee_id}-${ltName}`}>
-                              <td
-                                className="hrms-matrix-num consumed"
-                                style={{ borderLeft: "1px solid var(--color-border)" }}
-                              >
-                                {bal.consumed}
-                              </td>
-                              <td className="hrms-matrix-num available">{bal.available}</td>
-                              <td className="hrms-matrix-num">{total}</td>
-                            </React.Fragment>
-                          );
-                        })}
-                        <td className="hrms-sticky-right">
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            style={{ fontSize: 11, padding: "4px 8px" }}
-                            onClick={() => handleOpenAdjustment(row)}
-                          >
-                            Adjust
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td>
+                            <span className="hrms-badge" style={{ background: "#f1f5f9", color: "#334155" }}>
+                              {row.department || "General"}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                              {activeBalances.length === 0 ? (
+                                <span style={{ fontSize: 12, color: "var(--color-muted)" }}>No active allocations</span>
+                              ) : (
+                                activeBalances.map(({ lt, avail }) => (
+                                  <span
+                                    key={lt.id}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 4,
+                                      padding: "3px 8px",
+                                      background: avail > 0 ? "#f0fdf4" : "#f8fafc",
+                                      border: `1px solid ${avail > 0 ? "#bbf7d0" : "#e2e8f0"}`,
+                                      borderRadius: 6,
+                                      fontSize: 12,
+                                    }}
+                                  >
+                                    <span style={{ color: "#334155", fontWeight: 500 }}>{lt.name}:</span>
+                                    <strong style={{ color: avail > 0 ? "#166534" : "#64748b" }}>{avail}</strong>
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ fontSize: 11, padding: "4px 12px" }}
+                              onClick={() => handleOpenAdjustment(row)}
+                              title={`Adjust balance for ${row.employee_name}`}
+                            >
+                              Adjust
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2203,12 +2358,15 @@ export function LeavePage() {
         {/* =================================================================== */}
         {/* DRAWER: LEAVE ADJUSTMENT WITH AUDIT TRAIL                          */}
         {/* =================================================================== */}
+        {/* =================================================================== */}
+        {/* MODAL: LEAVE ADJUSTMENT WITH AUDIT TRAIL                           */}
+        {/* =================================================================== */}
         {activeModal === "adjustment" && (
           <div className="hrms-modal-overlay">
             <div
               className="hrms-action-modal-card"
               style={{
-                maxWidth: 620,
+                maxWidth: 580,
                 maxHeight: "90vh",
                 overflowY: "auto",
               }}
@@ -2217,7 +2375,7 @@ export function LeavePage() {
                 <div>
                   <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Adjust Leave Balance</h3>
                   <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 2 }}>
-                    Employee: <strong>{adjEmployeeName}</strong>
+                    Adjust employee leave balance with authoritative audit trail
                   </div>
                 </div>
                 <button
@@ -2232,51 +2390,84 @@ export function LeavePage() {
 
               <form onSubmit={handleSaveAdjustment}>
                 <div className="hrms-action-modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontWeight: 600 }}>Leave Type *</label>
-                    <select
-                      className="form-control"
-                      style={{ width: "100%" }}
-                      value={adjLeaveTypeId}
-                      onChange={(e) => {
-                        setAdjLeaveTypeId(e.target.value);
-                        fetchAdjustmentHistory(adjEmployeeId, e.target.value);
-                      }}
-                      required
-                    >
-                      {leaveTypes.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600 }}>Employee</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        style={{ width: "100%", background: "#f8fafc", color: "#1e293b", fontWeight: 600 }}
+                        readOnly
+                        value={`${adjEmployeeName}${adjEmployeeCode ? ` (${adjEmployeeCode})` : ""}`}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600 }}>Department</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        style={{ width: "100%", background: "#f8fafc", color: "#1e293b" }}
+                        readOnly
+                        value={adjEmployeeDepartment || "General"}
+                      />
+                    </div>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label" style={{ fontWeight: 600 }}>Adjustment Action *</label>
+                      <label className="form-label" style={{ fontWeight: 600 }}>Leave Type *</label>
+                      <select
+                        className="form-control"
+                        style={{ width: "100%" }}
+                        value={adjLeaveTypeId}
+                        onChange={(e) => {
+                          setAdjLeaveTypeId(e.target.value);
+                          fetchAdjustmentHistory(adjEmployeeId, e.target.value);
+                        }}
+                        required
+                      >
+                        {activeLeaveTypes.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600 }}>Current Balance</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        style={{ width: "100%", background: "#f8fafc", fontWeight: 700, color: "#0f766e" }}
+                        readOnly
+                        value={`${currentAdjTargetBalance} Days`}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600 }}>Adjustment Type *</label>
                       <select
                         className="form-control"
                         style={{ width: "100%" }}
                         value={adjType}
                         onChange={(e) =>
-                          setAdjType(e.target.value as "ADD" | "DEDUCT" | "CORRECTION")
+                          setAdjType(e.target.value as "ADD" | "DEDUCT")
                         }
                       >
-                        <option value="ADD">Add Leave (+)</option>
-                        <option value="DEDUCT">Deduct Leave (-)</option>
-                        <option value="CORRECTION">Set / Correct Balance (=)</option>
+                        <option value="ADD">Add (+)</option>
+                        <option value="DEDUCT">Deduct (-)</option>
                       </select>
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label" style={{ fontWeight: 600 }}>
-                        {adjType === "CORRECTION" ? "New Balance Target *" : "Amount (Days) *"}
-                      </label>
+                      <label className="form-label" style={{ fontWeight: 600 }}>Adjustment *</label>
                       <input
                         type="number"
                         step="0.5"
-                        min="0"
+                        min="0.5"
                         className="form-control"
                         style={{ width: "100%" }}
                         value={adjAmount}
@@ -2293,7 +2484,7 @@ export function LeavePage() {
                       <span className="hrms-calc-step-val">{currentAdjTargetBalance}</span>
                     </div>
                     <span className="hrms-calc-operator">
-                      {adjType === "ADD" ? "+" : adjType === "DEDUCT" ? "-" : "→"}
+                      {adjType === "ADD" ? "+" : "-"}
                     </span>
                     <div className="hrms-calc-step">
                       <span className="hrms-calc-step-lbl">Adjustment</span>
@@ -2302,18 +2493,18 @@ export function LeavePage() {
                     <span className="hrms-calc-operator">=</span>
                     <div className="hrms-calc-step">
                       <span className="hrms-calc-step-lbl">Resulting Available</span>
-                      <span className="hrms-calc-step-val" style={{ color: "#047857" }}>
-                        {previewResultingBalance}
+                      <span className="hrms-calc-step-val" style={{ color: "#047857", fontWeight: 800 }}>
+                        {previewResultingBalance} Days
                       </span>
                     </div>
                   </div>
 
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontWeight: 600 }}>Adjustment Reason (Strict Audit Requirement) *</label>
+                    <label className="form-label" style={{ fontWeight: 600 }}>Reason *</label>
                     <textarea
                       className="form-control"
-                      style={{ width: "100%", height: 70 }}
-                      placeholder="e.g. Prior year carry forward credits, overtime comp-off credit, HR policy correction..."
+                      style={{ width: "100%", height: 65 }}
+                      placeholder="e.g. Monthly earned leave correction, overtime comp-off credit..."
                       value={adjReason}
                       onChange={(e) => setAdjReason(e.target.value)}
                       required
@@ -2321,7 +2512,7 @@ export function LeavePage() {
                   </div>
 
                   {/* Chronological Audit Trail History Table */}
-                  <div style={{ marginTop: 10 }}>
+                  <div style={{ marginTop: 6 }}>
                     <div
                       style={{
                         fontSize: 12.5,
@@ -2342,12 +2533,12 @@ export function LeavePage() {
                           borderRadius: 6,
                         }}
                       >
-                        No prior manual balance adjustments recorded for this employee and leave type.
+                        No prior balance adjustments recorded for this employee and leave type.
                       </div>
                     ) : (
                       <div
                         style={{
-                          maxHeight: 180,
+                          maxHeight: 160,
                           overflowY: "auto",
                           border: "1px solid #e2e8f0",
                           borderRadius: 6,
@@ -2358,39 +2549,43 @@ export function LeavePage() {
                             <tr>
                               <th>Date</th>
                               <th>Type</th>
-                              <th>Amount</th>
-                              <th>Prev</th>
+                              <th>Previous</th>
+                              <th>Adjustment</th>
                               <th>New</th>
                               <th>Reason</th>
                               <th>Adjusted By</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {adjHistory.map((h) => (
-                              <tr key={h.id}>
-                                <td>{h.created_at.split("T")[0]}</td>
-                                <td>
-                                  <span
-                                    className="hrms-badge"
-                                    style={{
-                                      background: h.adjustment_type === "ADD" ? "#dcfce7" : "#fee2e2",
-                                      color: h.adjustment_type === "ADD" ? "#166534" : "#991b1b",
-                                    }}
-                                  >
-                                    {h.adjustment_type}
-                                  </span>
-                                </td>
-                                <td>
-                                  <strong>{h.amount > 0 ? `+${h.amount}` : h.amount}</strong>
-                                </td>
-                                <td>{h.previous_balance}</td>
-                                <td>{h.new_balance}</td>
-                                <td style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-                                  {h.reason}
-                                </td>
-                                <td>{h.adjusted_by_name}</td>
-                              </tr>
-                            ))}
+                            {adjHistory.map((h) => {
+                              const isPositive = h.amount > 0 || h.adjustment_type.includes("ADD") || h.adjustment_type.includes("CREDIT");
+                              return (
+                                <tr key={h.id}>
+                                  <td>{h.created_at.split("T")[0]}</td>
+                                  <td>
+                                    <span
+                                      className="hrms-badge"
+                                      style={{
+                                        background: isPositive ? "#dcfce7" : "#fee2e2",
+                                        color: isPositive ? "#166534" : "#991b1b",
+                                        fontSize: 10,
+                                      }}
+                                    >
+                                      {h.adjustment_type}
+                                    </span>
+                                  </td>
+                                  <td>{h.previous_balance}</td>
+                                  <td style={{ fontWeight: 600, color: isPositive ? "#166534" : "#991b1b" }}>
+                                    {isPositive ? `+${h.amount}` : h.amount}
+                                  </td>
+                                  <td style={{ fontWeight: 600 }}>{h.new_balance}</td>
+                                  <td style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {h.reason}
+                                  </td>
+                                  <td>{h.adjusted_by_name || "Admin"}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -2407,7 +2602,7 @@ export function LeavePage() {
                     Cancel
                   </button>
                   <button type="submit" className="btn btn-primary" disabled={loading}>
-                    {loading ? "Recording..." : "Save Adjustment"}
+                    {loading ? "Saving..." : "Save Adjustment"}
                   </button>
                 </div>
               </form>

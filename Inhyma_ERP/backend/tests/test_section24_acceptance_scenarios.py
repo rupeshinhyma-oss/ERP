@@ -340,3 +340,20 @@ async def test_section_24_full_acceptance_criteria(client: AsyncClient):
     assert christmas_day["status"] == "HOLIDAY"
     assert christmas_day["can_regularize"] is False
     assert christmas_day["holiday_name"] == "Christmas Day"
+
+    # Cleanup test leave types, holiday, and test users
+    await client.delete(f"/api/v1/hrms/leave/types/{el_type['id']}")
+    await client.delete(f"/api/v1/hrms/leave/types/{sl_type['id']}")
+    await client.delete(f"/api/v1/hrms/leave/types/{cl_type['id']}")
+    hol_json = hol_res.json()
+    if isinstance(hol_json, dict) and "data" in hol_json and isinstance(hol_json["data"], dict) and "id" in hol_json["data"]:
+        await client.delete(f"/api/v1/hrms/leave/holidays/{hol_json['data']['id']}")
+
+    from datetime import datetime, timezone
+    async with sessionmaker() as session:
+        for uid in [admin_id, mgr_id, emp_a_id, emp_b_id]:
+            u = await session.get(User, uid)
+            if u:
+                u.deleted_at = datetime.now(timezone.utc)
+                u.is_active = False
+        await session.commit()

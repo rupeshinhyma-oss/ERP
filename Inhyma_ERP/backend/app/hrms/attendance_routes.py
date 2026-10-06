@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,60 +49,14 @@ def get_attendance_service(db: AsyncSession = Depends(get_db_session)) -> HrmsAt
     return HrmsAttendanceService(db)
 
 
-async def get_current_user_context(
-    request: Request,
-    db: AsyncSession = Depends(get_db_session),
-    auth_service: AuthService = Depends(get_auth_service),
-) -> tuple[uuid.UUID, bool]:
-    """
-    Resolve (user_id, is_admin) from the Authorization header if provided.
-    In development or test environments, fall back to the first active employee user.
-    """
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        try:
-            token = auth_header.split(" ", 1)[1]
-            user = await auth_service.verify_access_token(token)
-            if user:
-                perms = getattr(user, "permissions", set()) or set()
-                is_admin = bool(
-                    getattr(user, "is_super_admin", False)
-                    or "*" in perms
-                    or "hrms.manage" in perms
-                    or "hrms.approve" in perms
-                    or "hrms:admin" in perms
-                    or "hrms:approval" in perms
-                    or getattr(user, "username", "") in ("admin", "super_admin")
-                )
-                return user.id, is_admin
-        except Exception:
-            pass
-
-    from app.users.models import User
-    res = await db.execute(
-        select(User).where(User.is_active.is_(True)).order_by(User.created_at.asc()).limit(1)
-    )
-    usr = res.scalar_one_or_none()
-    if usr:
-        return usr.id, True
-
-    dummy_user = User(
-        email="employee.attendance@inhyma.com",
-        first_name="Inhyma",
-        last_name="Employee",
-        password_hash="mock_hash",
-        is_active=True,
-    )
-    db.add(dummy_user)
-    await db.commit()
-    await db.refresh(dummy_user)
-    return dummy_user.id, True
+from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
 
 
 async def get_current_employee_id(
-    auth_ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ) -> uuid.UUID:
-    return auth_ctx[0]
+    ctx.require_module_access("attendance")
+    return ctx.user_id
 
 
 # ===========================================================================
@@ -159,10 +113,15 @@ async def get_assigned_office(
 
 @router.get("/today")
 async def get_today_attendance(
-    employee_id: uuid.UUID = Depends(get_current_employee_id),
+    employee_id: Optional[uuid.UUID] = Query(default=None),
+    user_id: Optional[uuid.UUID] = Query(default=None),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
-    session_state = await service.get_today_session_state(employee_id)
+    ctx.require_module_access("attendance")
+    target_id = employee_id or user_id or ctx.user_id
+    ctx.require_employee_access(target_id)
+    session_state = await service.get_today_session_state(target_id)
     return build_success_response(
         data=session_state.model_dump(mode="json"),
         message="Today's attendance retrieved successfully.",
@@ -203,13 +162,18 @@ async def punch_out(
 async def get_calendar(
     year: Optional[int] = Query(default=None),
     month: Optional[int] = Query(default=None),
-    employee_id: uuid.UUID = Depends(get_current_employee_id),
+    employee_id: Optional[uuid.UUID] = Query(default=None),
+    user_id: Optional[uuid.UUID] = Query(default=None),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
+    ctx.require_module_access("attendance")
+    target_id = employee_id or user_id or ctx.user_id
+    ctx.require_employee_access(target_id)
     now = datetime.now(IST)
     y = year or now.year
     m = month or now.month
-    calendar_days = await service.get_calendar(employee_id, y, m)
+    calendar_days = await service.get_calendar(target_id, y, m)
     return build_success_response(
         data=[d.model_dump(mode="json") for d in calendar_days],
         message="Monthly attendance calendar retrieved successfully.",
@@ -222,13 +186,15 @@ async def get_calendar(
 
 @router.post("/regularize", status_code=status.HTTP_200_OK)
 @router.post("/regularization", status_code=status.HTTP_200_OK)
+@router.post("/regularizations", status_code=status.HTTP_200_OK)
 async def submit_regularization(
     payload: RegularizationRequest,
-    auth_ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
-    employee_id, is_admin = auth_ctx
-    record = await service.submit_regularization(employee_id, payload, is_admin=is_admin)
+    ctx.require_module_access("attendance")
+    target_id = payload.employee_id if (payload.employee_id and (ctx.is_admin or ctx.is_hr)) else ctx.user_id
+    record = await service.submit_regularization(target_id, payload, is_admin=ctx.is_admin)
     return build_success_response(
         data=record.model_dump(mode="json"),
         message="Regularization request submitted successfully.",
@@ -239,9 +205,24 @@ async def submit_regularization(
 async def get_regularizations(
     status: Optional[str] = Query(default=None),
     employee_id: Optional[uuid.UUID] = Query(default=None),
+    user_id: Optional[uuid.UUID] = Query(default=None),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
-    records = await service.get_regularizations(status=status, employee_id=employee_id)
+    ctx.require_module_access("attendance")
+    target_id = employee_id or user_id
+    if target_id:
+        ctx.require_employee_access(target_id)
+        records = await service.get_regularizations(status=status, employee_id=target_id)
+    else:
+        if ctx.is_admin or ctx.is_hr:
+            records = await service.get_regularizations(status=status, employee_id=None)
+        elif ctx.is_manager:
+            all_recs = await service.get_regularizations(status=status, employee_id=None)
+            records = [r for r in all_recs if r.employee_id in ctx.managed_employee_ids]
+        else:
+            records = await service.get_regularizations(status=status, employee_id=ctx.user_id)
+
     return build_success_response(
         data=[r.model_dump(mode="json") for r in records],
         message="Attendance regularizations retrieved successfully.",
@@ -249,14 +230,18 @@ async def get_regularizations(
 
 
 @router.patch("/regularizations/{request_id}/approve", status_code=status.HTTP_200_OK)
+@router.post("/regularizations/{request_id}/approve", status_code=status.HTTP_200_OK)
 async def approve_regularization(
     request_id: uuid.UUID,
     payload: Optional[RegularizationApprovalAction] = None,
-    auth_ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
-    reviewer_id, _ = auth_ctx
-    record = await service.approve_regularization(request_id, reviewer_id, payload=payload)
+    ctx.require_module_access("attendance")
+    if not (ctx.is_admin or ctx.is_hr or ctx.is_manager):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. You cannot approve attendance regularizations.")
+
+    record = await service.approve_regularization(request_id, ctx.user_id, payload=payload)
     return build_success_response(
         data=record.model_dump(mode="json"),
         message="Attendance regularization request approved successfully.",
@@ -264,14 +249,18 @@ async def approve_regularization(
 
 
 @router.patch("/regularizations/{request_id}/reject", status_code=status.HTTP_200_OK)
+@router.post("/regularizations/{request_id}/reject", status_code=status.HTTP_200_OK)
 async def reject_regularization(
     request_id: uuid.UUID,
     payload: Optional[RegularizationRejectAction] = None,
-    auth_ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
-    reviewer_id, _ = auth_ctx
-    record = await service.reject_regularization(request_id, reviewer_id, payload=payload)
+    ctx.require_module_access("attendance")
+    if not (ctx.is_admin or ctx.is_hr or ctx.is_manager):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. You cannot reject attendance regularizations.")
+
+    record = await service.reject_regularization(request_id, ctx.user_id, payload=payload)
     return build_success_response(
         data=record.model_dump(mode="json"),
         message="Attendance regularization request rejected.",

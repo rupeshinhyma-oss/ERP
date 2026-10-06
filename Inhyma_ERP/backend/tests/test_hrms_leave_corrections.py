@@ -10,7 +10,7 @@ Validates:
 """
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select, delete
@@ -213,3 +213,15 @@ async def test_admin_self_approval_and_scenarios(client: AsyncClient):
     assert leave_day["status"] == "LEAVE"
     assert leave_day["leave_type_name"] == lt_payload["name"]
     assert leave_day["can_regularize"] is False
+
+    # Cleanup test leave type
+    await client.delete(f"/api/v1/hrms/leave/types/{lt_id}", headers=admin_headers)
+
+    # Cleanup test users so dev DB does not accumulate duplicates
+    async with sessionmaker() as session:
+        for uid in [admin_id, emp_id]:
+            u = await session.get(User, uid)
+            if u:
+                u.deleted_at = datetime.now(timezone.utc)
+                u.is_active = False
+        await session.commit()

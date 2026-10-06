@@ -214,11 +214,11 @@ describe("HRMS Leave Management — Phase 1 Component Tests", () => {
     fireEvent.click(screen.getByText("Leave Adjustment"));
 
     await waitFor(() => {
-      expect(screen.getByText("Somil Shah")).toBeDefined();
-      const adjustBtn = screen.getByText("Adjust");
-      expect(adjustBtn).toBeDefined();
-      fireEvent.click(adjustBtn);
+      expect(screen.getAllByText("Somil Shah").length).toBeGreaterThan(0);
     });
+    const adjustBtn = screen.getByText("Adjust");
+    expect(adjustBtn).toBeDefined();
+    fireEvent.click(adjustBtn);
 
     await waitFor(() => {
       expect(screen.getByText("Adjust Leave Balance")).toBeDefined();

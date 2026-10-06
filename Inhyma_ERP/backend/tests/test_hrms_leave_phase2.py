@@ -22,7 +22,7 @@ Plus attachment upload and employee data isolation security.
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import delete, select
@@ -380,3 +380,15 @@ async def test_hrms_leave_phase2_comprehensive_workflow(client: AsyncClient):
     upload_data = upload_res.json()["data"]
     assert "file_url" in upload_data
     assert upload_data["file_name"] == "medical_cert.pdf"
+
+    # Cleanup unassigned test leave type
+    await client.delete(f"/api/v1/hrms/leave/types/{unassigned_id}")
+
+    # Cleanup test users so dev DB does not accumulate duplicates
+    async with sessionmaker() as session:
+        for uid in [emp1_id, emp2_id]:
+            u = await session.get(User, uid)
+            if u:
+                u.deleted_at = datetime.now(timezone.utc)
+                u.is_active = False
+        await session.commit()

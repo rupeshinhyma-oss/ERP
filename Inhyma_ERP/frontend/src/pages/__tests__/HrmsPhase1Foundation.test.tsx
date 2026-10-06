@@ -27,12 +27,13 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
     it("includes HRMS section with exactly 6 modules in NAV_SECTIONS", () => {
       const hrmsSection = NAV_SECTIONS.find((s) => s.label === "HRMS");
       expect(hrmsSection).toBeDefined();
-      expect(hrmsSection?.items).toHaveLength(6);
+      expect(hrmsSection?.items).toHaveLength(7);
 
       const itemKeys = hrmsSection?.items.map((i) => i.key);
       expect(itemKeys).toEqual([
         "hrms-attendance",
         "hrms-leave",
+        "hrms-assets",
         "hrms-expenses",
         "hrms-site-visit",
         "hrms-payroll",
@@ -43,6 +44,7 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
       expect(itemPaths).toEqual([
         "/hrms/attendance",
         "/hrms/leave",
+        "/hrms/assets",
         "/hrms/expenses",
         "/hrms/site-visit",
         "/hrms/payroll",
@@ -53,6 +55,7 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
       expect(itemLabels).toEqual([
         "Attendance",
         "Leave",
+        "Asset Management",
         "Expense Management",
         "Site Visit",
         "Payroll",
@@ -144,7 +147,7 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
   });
 
   describe("Phase 5 — Expense Management Shell", () => {
-    it("renders Expense Summary, New Claim, and Recent Claims sections", () => {
+    it("renders Expense Management page with summary, tabs, and table", () => {
       render(
         <MemoryRouter>
           <ExpensesPage />
@@ -155,12 +158,9 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
       expect(shell.getAttribute("data-active-key")).toBe("hrms-expenses");
 
       expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Expense Management");
-      expect(screen.getByText("Expense Summary")).toBeDefined();
-      expect(screen.getByText("Expense Claims Summary")).toBeDefined();
-      expect(screen.getByText("New Claim")).toBeDefined();
-      expect(screen.getByText("New Expense Claim Form")).toBeDefined();
-      expect(screen.getByText("Recent Claims")).toBeDefined();
-      expect(screen.getByText("No Recent Claims")).toBeDefined();
+      expect(screen.getByRole("button", { name: /\+ Add Expense/i })).toBeDefined();
+      expect(screen.getByText("My Expenses")).toBeDefined();
+      expect(screen.getByText("My Expense Claims")).toBeDefined();
     });
   });
 
@@ -186,7 +186,7 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
   });
 
   describe("Phase 7 — Payroll Shell", () => {
-    it("renders Current Payslip, Salary Structure, and Payroll History sections", () => {
+    it("renders Payroll Management page and active navigation key", () => {
       render(
         <MemoryRouter>
           <PayrollPage />
@@ -197,12 +197,7 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
       expect(shell.getAttribute("data-active-key")).toBe("hrms-payroll");
 
       expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Payroll");
-      expect(screen.getByText("Current Payslip")).toBeDefined();
-      expect(screen.getByText("Current Payslip Statement")).toBeDefined();
-      expect(screen.getByText("Salary Structure")).toBeDefined();
-      expect(screen.getByText("Salary Structure Overview")).toBeDefined();
-      expect(screen.getByText("Payroll History")).toBeDefined();
-      expect(screen.getByText("No Payroll History Available")).toBeDefined();
+      expect(screen.getByText("My Approved Salary Slips")).toBeDefined();
     });
   });
 

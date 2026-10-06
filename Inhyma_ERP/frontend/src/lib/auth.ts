@@ -120,6 +120,10 @@ export const Auth = {
     if (this.isSuperAdmin()) return true;
     if (!Array.isArray(profile.permissions)) return false;
     const perms = profile.permissions;
+
+    // Explicit deny or block check
+    if (perms.includes(`deny:${code}`) || perms.includes(`block:${code}`)) return false;
+
     if (perms.includes("*") || perms.includes(code)) return true;
 
     // View <-> Read compatibility alias
@@ -132,6 +136,25 @@ export const Auth = {
       if (perms.includes(viewAlias)) return true;
     }
 
+    // HRMS module defaults
+    const isHr = Array.isArray(profile.roles) && (profile.roles.includes("HR") || profile.roles.some((r: any) => String(r).toLowerCase() === "hr"));
+    if (isHr) {
+      if (code === "hrms.setup") return perms.includes("hrms.manage") || perms.includes("hrms.setup");
+      if (code.startsWith("hrms.")) {
+        // HR permissions are explicitly granted in role_permissions.
+        // If an Admin explicitly revokes a module permission from HR, it is removed from perms.
+        const baseCode = code.replace(/\.view$/, "").replace(/\.read$/, "");
+        return perms.includes(code) || perms.includes(baseCode) || perms.includes(baseCode + "s");
+      }
+      return false;
+    }
+
+    // Normal employee & manager access to core self-service HRMS modules
+    const hrmsUserModules = ["hrms.attendance", "hrms.leave", "hrms.assets", "hrms.expenses", "hrms.site_visits", "hrms.payroll"];
+    if (hrmsUserModules.includes(code)) {
+      return true;
+    }
+
     return false;
   },
 
@@ -140,6 +163,8 @@ export const Auth = {
     return this.hasPermission(`${page}.${action}`);
   },
 };
+
+export const auth = Auth;
 
 /** Two-letter initials, matching user full name or username. */
 export function initials(name?: string | null): string {
