@@ -33,6 +33,7 @@ export function SaleProcessDetailModal({
   const [activeDocTab, setActiveDocTab] = useState<"overview" | "ci" | "pl">("overview");
   const [tradeDetails, setTradeDetails] = useState<any>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [ciViewMode, setCiViewMode] = useState<"standard" | "costing">("costing");
 
   useEffect(() => {
     let mounted = true;
@@ -188,7 +189,7 @@ export function SaleProcessDetailModal({
         <tr>
           <td style="text-align:center; padding: 5px 4px;">${it.sr_no}</td>
           <td style="padding: 5px 8px;">${it.description}</td>
-          <td style="text-align:center; padding: 5px 6px;">${it.hs_code}</td>
+          <td style="text-align:center; padding: 5px 6px;">${it.hs_code || "—"}</td>
           <td style="text-align:center; padding: 5px 6px;">${it.uom}</td>
           <td style="text-align:right; padding: 5px 6px;">${Number(it.quantity).toLocaleString()}</td>
           <td style="text-align:right; padding: 5px 6px;">$${Number(it.unit_price_usd).toFixed(2)}</td>
@@ -409,11 +410,11 @@ export function SaleProcessDetailModal({
                   <strong>Email:</strong> ${docData.shipper.email}
                 </td>
                 <td style="vertical-align: top; width: 50%;">
-                  <strong>${docData.recipient.company_name}</strong><br />
-                  <span style="white-space: pre-line;">${docData.recipient.address}</span><br />
-                  <strong>Contact:</strong> ${docData.recipient.contact_person}<br />
-                  <strong>Phone:</strong> ${docData.recipient.phone}<br />
-                  <strong>Email:</strong> ${docData.recipient.email}
+                  <strong>${docData.recipient.company_name || "—"}</strong><br />
+                  <span style="white-space: pre-line;">${docData.recipient.address || "—"}</span><br />
+                  <strong>Contact:</strong> ${docData.recipient.contact_person || "—"}<br />
+                  <strong>Phone:</strong> ${docData.recipient.phone || "—"}<br />
+                  <strong>Email:</strong> ${docData.recipient.email || "—"}
                 </td>
               </tr>
             </table>
@@ -513,11 +514,11 @@ export function SaleProcessDetailModal({
       email: "sales.yinglima@gmail.com",
     },
     recipient: {
-      company_name: order.buyer_name || "INHYMA SOLUTIONS LLP",
-      address: order.buyer_branch_name ? `${order.buyer_branch_name}, India\nGSTIN/UIN: 27AAKFI9869H1ZL` : "Ground Floor, Godown No:2,3,4, Prerna Complex, Bhiwandi, Thane, Maharashtra, 421302, INDIA\nGSTIN/UIN: 27AAKFI9869H1ZL",
-      contact_person: "Mr. Prathamesh Bangar",
-      phone: "+91 95619 14519",
-      email: "sales@inhyma.com",
+      company_name: order.buyer_name || "",
+      address: order.buyer_branch_name ? `${order.buyer_branch_name}` : "",
+      contact_person: "",
+      phone: "",
+      email: "",
     },
     bank_details: {
       bank_name: "INDUSTRIAL AND COMMERCIAL BANK OF CHINA, ZHEJIANG BRANCH",
@@ -530,25 +531,45 @@ export function SaleProcessDetailModal({
     items: (order.items || []).map((it, idx) => ({
       sr_no: idx + 1,
       description: it.product_name,
-      hs_code: it.hsn_code || "8422.30.00",
-      uom: "NOS",
+      product_code: it.product_code || "",
+      hs_code: it.hsn_code || "",
+      uom: it.uom || "NOS",
       quantity: Number(it.quantity),
       unit_price_usd: Number(it.unit_rate),
       total_amount_usd: Number(it.item_total),
       unit_price_rmb: Number(it.unit_rate) * 7.14,
-      packages: Math.max(1, Math.ceil(Number(it.quantity) / 10)),
-      net_weight: Number(it.quantity) * 1.5,
-      gross_weight: Number(it.quantity) * 1.8,
-      cbm: 0.05,
+      packages: Math.max(1, Math.ceil(Number(it.quantity) || 1)),
+      net_weight: 0,
+      gross_weight: 0,
+      cbm: Number(it.total_cbm) || 0,
+      supplier_id: it.supplier_id || null,
+      supplier_name: it.supplier_name || "—",
+      unit_price_rmb_with_vat: Number(it.unit_price_rmb_with_vat) || 0,
+      unit_price_rmb_ex_vat: Number(it.unit_price_rmb_ex_vat) || 0,
+      profit_percent: Number(it.profit_percent) || 3.0,
+      fob_price_usd: Number(it.fob_price_usd) || 0,
+      freight_unit_usd: Number(it.freight_unit_usd) || 0,
+      cfr_price_usd: Number(it.cfr_price_usd) || Number(it.unit_rate),
+      cbm_per_unit: Number(it.cbm_per_unit) || 0,
+      total_cbm: Number(it.total_cbm) || 0,
+      total_supplier_amount_rmb: Number(it.total_supplier_amount_rmb) || 0,
+      remarks: it.remarks || "",
     })),
     totals: {
       quantity: Number(order.total_quantity),
-      packages: Math.max(1, Math.ceil(Number(order.total_quantity) / 10)),
+      packages: Math.max(1, Math.ceil(Number(order.total_quantity) || 1)),
       total_amount_usd: Number(order.total_amount),
       total_amount_rmb: Number(order.total_amount) * 7.14,
-      net_weight: Number(order.total_quantity) * 1.5,
-      gross_weight: Number(order.total_quantity) * 1.8,
-      cbm: 0.5,
+      net_weight: 0,
+      gross_weight: 0,
+      cbm: Number(order.total_container_cbm) || 0,
+      costing: {
+        ocean_freight_usd: Number(order.ocean_freight_usd) || 0,
+        local_charges_coc_usd: Number(order.local_charges_coc_usd) || 0,
+        usd_exchange_rate: Number(order.usd_exchange_rate) || 6.70,
+        profit_percent: Number(order.profit_percent) || 3.0,
+        total_container_cbm: Number(order.total_container_cbm) || 0,
+      },
     },
   } : null);
 
@@ -1401,182 +1422,427 @@ export function SaleProcessDetailModal({
             )}
 
             {/* TAB: COMMERCIAL INVOICE (CI) */}
-            {activeDocTab === "ci" && effectiveDoc && (
-              <div
-                id="printable-trade-doc"
-                style={{
-                  background: "#ffffff",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "8px",
-                  padding: "36px 40px",
-                  maxWidth: "960px",
-                  margin: "0 auto 30px auto",
-                  boxShadow: "0 4px 15px rgba(0,0,0,0.06)",
-                  color: "#0f172a",
-                  fontFamily: "'Segoe UI', Roboto, sans-serif",
-                }}
-              >
-                {/* Header Letterhead */}
-                <div style={{ textAlign: "center", borderBottom: "2px solid #1e3a8a", paddingBottom: "12px", marginBottom: "16px" }}>
-                  <h1 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#1e3a8a", letterSpacing: "0.5px" }}>
-                    {effectiveDoc.shipper.company_name}
-                  </h1>
-                  <div style={{ fontSize: "11px", color: "#475569", marginTop: "4px" }}>
-                    Email: {effectiveDoc.shipper.email} | Mobile: {effectiveDoc.shipper.phone} | WeChat: {effectiveDoc.shipper.wechat}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#475569", marginTop: "2px" }}>
-                    Address: {effectiveDoc.shipper.address}
-                  </div>
-                </div>
+            {activeDocTab === "ci" && effectiveDoc && (() => {
+              const costingParams = effectiveDoc.totals?.costing || {
+                ocean_freight_usd: Number(order?.ocean_freight_usd) || 0,
+                local_charges_coc_usd: Number(order?.local_charges_coc_usd) || 0,
+                usd_exchange_rate: Number(order?.usd_exchange_rate) || 6.70,
+                profit_percent: Number(order?.profit_percent) || 3.0,
+                total_container_cbm: Number(order?.total_container_cbm) || 0,
+              };
+              const totalFreightUsd = (Number(costingParams.ocean_freight_usd) || 0) + (Number(costingParams.local_charges_coc_usd) || 0);
+              const containerCbm = Number(costingParams.total_container_cbm) || Number(effectiveDoc.totals.cbm) || 0;
+              const freightPerCbm = containerCbm > 0 ? totalFreightUsd / containerCbm : 0;
+              const totalSupplierPayableRmb = (effectiveDoc.items || []).reduce(
+                (sum: number, it: any) => sum + (Number(it.total_supplier_amount_rmb) || (Number(it.unit_price_rmb_with_vat || 0) * Number(it.quantity || 0))),
+                0
+              );
+              const totalItemCbm = (effectiveDoc.items || []).reduce((sum: number, it: any) => sum + (Number(it.total_cbm) || 0), 0);
+              const totalCfrAmountUsd = (effectiveDoc.items || []).reduce(
+                (sum: number, it: any) => sum + ((Number(it.cfr_price_usd) || Number(it.unit_price_usd) || 0) * Number(it.quantity || 0)),
+                0
+              );
 
-                {/* Document Title Banner */}
-                <div style={{ background: "#f1f5f9", padding: "8px 0", textAlign: "center", borderRadius: "4px", marginBottom: "14px", border: "1px solid #e2e8f0" }}>
-                  <h2 style={{ margin: 0, fontSize: "16px", fontWeight: 800, letterSpacing: "1px", color: "#0f172a" }}>
-                    COMMERCIAL INVOICE
-                  </h2>
-                </div>
-
-                {/* Invoice No & Date */}
-                <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "12px", fontSize: "12px" }}>
-                  <tbody>
-                    <tr>
-                      <td style={{ border: "1px solid #94a3b8", padding: "6px 10px", width: "25%", fontWeight: 700, background: "#f8fafc" }}>
-                        Commercial Invoice No
-                      </td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "6px 10px", width: "40%", fontWeight: 700 }}>
-                        {effectiveDoc.consignment_code}
-                      </td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "6px 10px", width: "15%", fontWeight: 700, background: "#f8fafc", textAlign: "center" }}>
-                        Date
-                      </td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "6px 10px", width: "20%", fontWeight: 700, textAlign: "right" }}>
-                        {effectiveDoc.order_date}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* Shipper & Recipient 2-Column Box */}
-                <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "12px", fontSize: "11.5px" }}>
-                  <thead>
-                    <tr style={{ background: "#e2e8f0", fontWeight: 700 }}>
-                      <th colSpan={2} style={{ border: "1px solid #94a3b8", padding: "6px 10px", textAlign: "left", width: "50%" }}>
-                        Shipper's Information
-                      </th>
-                      <th colSpan={2} style={{ border: "1px solid #94a3b8", padding: "6px 10px", textAlign: "left", width: "50%" }}>
-                        Recipient's Information
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, width: "18%", background: "#f8fafc" }}>Company Name</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", width: "32%" }}>{effectiveDoc.shipper.company_name}</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, width: "18%", background: "#f8fafc" }}>Company Name</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", width: "32%", fontWeight: 700 }}>{effectiveDoc.recipient.company_name}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Address</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontSize: "10.5px" }}>{effectiveDoc.shipper.address}</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Address</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontSize: "10.5px", whiteSpace: "pre-line" }}>{effectiveDoc.recipient.address}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Contact Person</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.contact_person}</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Contact Person</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.contact_person}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Phone Number</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.phone}</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Phone Number</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.phone}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Email</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.email}</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Email ID</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.email}</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* Trade Terms */}
-                <div style={{ border: "1px solid #94a3b8", padding: "6px 12px", marginBottom: "12px", fontSize: "11px", lineHeight: "1.6" }}>
-                  <div><strong>Terms of Payment:</strong> {effectiveDoc.payment_terms}</div>
-                  <div><strong>Shipping Terms:</strong> {effectiveDoc.shipping_terms}</div>
-                  <div><strong>Delivery Time:</strong> {effectiveDoc.delivery_time}</div>
-                </div>
-
-                {/* Items Table */}
-                <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "14px", fontSize: "11px" }}>
-                  <thead>
-                    <tr style={{ background: "#1e3a8a", color: "#ffffff", textAlign: "center" }}>
-                      <th style={{ border: "1px solid #94a3b8", padding: "6px 4px", width: "5%" }}>Sr.No</th>
-                      <th style={{ border: "1px solid #94a3b8", padding: "6px 8px", textAlign: "left", width: "42%" }}>Description</th>
-                      <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", width: "15%" }}>China HS Code</th>
-                      <th style={{ border: "1px solid #94a3b8", padding: "6px 4px", width: "8%" }}>UOM</th>
-                      <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", width: "10%" }}>Quantity</th>
-                      <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", width: "10%" }}>Unit Price (USD)</th>
-                      <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", width: "10%" }}>Total Amount (USD)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {effectiveDoc.items.map((item: any, i: number) => (
-                      <tr key={i}>
-                        <td style={{ border: "1px solid #94a3b8", padding: "5px 4px", textAlign: "center" }}>{item.sr_no}</td>
-                        <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{item.description}</td>
-                        <td style={{ border: "1px solid #94a3b8", padding: "5px 6px", textAlign: "center" }}>{item.hs_code}</td>
-                        <td style={{ border: "1px solid #94a3b8", padding: "5px 4px", textAlign: "center" }}>{item.uom}</td>
-                        <td style={{ border: "1px solid #94a3b8", padding: "5px 6px", textAlign: "right" }}>{Number(item.quantity).toLocaleString()}</td>
-                        <td style={{ border: "1px solid #94a3b8", padding: "5px 6px", textAlign: "right" }}>${Number(item.unit_price_usd).toFixed(2)}</td>
-                        <td style={{ border: "1px solid #94a3b8", padding: "5px 6px", textAlign: "right", fontWeight: 700 }}>${Number(item.total_amount_usd).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                    {/* Total Row */}
-                    <tr style={{ background: "#fef08a", fontWeight: 800 }}>
-                      <td colSpan={4} style={{ border: "1px solid #94a3b8", padding: "6px 10px", textAlign: "right" }}>
-                        Total Price CIF INDIA:
-                      </td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "6px 6px", textAlign: "right" }}>
-                        {Number(effectiveDoc.totals.quantity).toLocaleString()}
-                      </td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "6px 6px" }}></td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "6px 6px", textAlign: "right" }}>
-                        ${Number(effectiveDoc.totals.total_amount_usd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* Bank Details & Signature Grid */}
-                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "14px", border: "1px solid #94a3b8", padding: "12px", marginBottom: "10px", fontSize: "10.5px" }}>
-                  <div>
-                    <div style={{ fontWeight: 800, color: "#1e3a8a", marginBottom: "4px" }}>
-                      BANK ACCOUNT DETAILS FOR INWARD REMITTANCE USD
+              return (
+                <div style={{ maxWidth: ciViewMode === "costing" ? "100%" : "960px", margin: "0 auto 30px auto", width: "100%" }}>
+                  {/* View Mode Toggle Bar (No Print) */}
+                  <div
+                    className="no-print"
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "14px",
+                      background: "#ffffff",
+                      padding: "8px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      flexWrap: "wrap",
+                      gap: "10px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span style={{ fontSize: "12px", fontWeight: 700, color: "#334155", marginRight: "4px" }}>
+                        CI View Mode:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCiViewMode("costing")}
+                        style={{
+                          padding: "5px 12px",
+                          borderRadius: "6px",
+                          border: ciViewMode === "costing" ? "1px solid #1e3a8a" : "1px solid #cbd5e1",
+                          background: ciViewMode === "costing" ? "#1e3a8a" : "#ffffff",
+                          color: ciViewMode === "costing" ? "#ffffff" : "#475569",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                        }}
+                      >
+                        📊 Full Costing & Supplier Engine (16 Columns - Excel Replica)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCiViewMode("standard")}
+                        style={{
+                          padding: "5px 12px",
+                          borderRadius: "6px",
+                          border: ciViewMode === "standard" ? "1px solid #1e3a8a" : "1px solid #cbd5e1",
+                          background: ciViewMode === "standard" ? "#1e3a8a" : "#ffffff",
+                          color: ciViewMode === "standard" ? "#ffffff" : "#475569",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                        }}
+                      >
+                        📄 Standard Customer CI (7 Columns)
+                      </button>
                     </div>
-                    <div><strong>RECEIVING BANK:</strong> {effectiveDoc.bank_details.bank_name}</div>
-                    <div><strong>SWIFT BIC:</strong> {effectiveDoc.bank_details.swift_bic}</div>
-                    <div><strong>BENEFICIARY NAME:</strong> {effectiveDoc.bank_details.beneficiary_name}</div>
-                    <div><strong>A/C NO:</strong> {effectiveDoc.bank_details.account_no}</div>
-                    <div style={{ fontSize: "9.5px", color: "#475569", marginTop: "2px" }}>{effectiveDoc.bank_details.address}</div>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "flex-end", textAlign: "right" }}>
-                    <div style={{ fontWeight: 700 }}>Shipper's Signature and Stamp:</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "6px" }}>
-                      <img src="/yinglima_signature.png" alt="Signature" style={{ height: "48px", objectFit: "contain" }} />
-                      <img src="/yinglima_stamp.jpeg" alt="Stamp" style={{ height: "55px", objectFit: "contain" }} />
+                    <div style={{ fontSize: "11.5px", color: "#059669", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>✓ Supplier & Price sourced from Confirmed Local Purchase</span>
+                      <span style={{ color: "#94a3b8" }}>|</span>
+                      <span>HSN Refund VAT: 13.00%</span>
                     </div>
                   </div>
-                </div>
 
-                {/* Declaration */}
-                <div style={{ textAlign: "center", fontSize: "11px", fontWeight: 700, color: "#334155", marginTop: "8px" }}>
-                  {effectiveDoc.declaration}
+                  <div
+                    id="printable-trade-doc"
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      padding: ciViewMode === "costing" ? "20px 24px" : "36px 40px",
+                      boxShadow: "0 4px 15px rgba(0,0,0,0.06)",
+                      color: "#0f172a",
+                      fontFamily: "'Segoe UI', Roboto, sans-serif",
+                      overflowX: "auto",
+                    }}
+                  >
+                    {/* Header Letterhead */}
+                    <div style={{ textAlign: "center", borderBottom: "2px solid #1e3a8a", paddingBottom: "12px", marginBottom: "16px" }}>
+                      <h1 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "#1e3a8a", letterSpacing: "0.5px" }}>
+                        {effectiveDoc.shipper.company_name}
+                      </h1>
+                      <div style={{ fontSize: "11px", color: "#475569", marginTop: "4px" }}>
+                        Email: {effectiveDoc.shipper.email} | Mobile: {effectiveDoc.shipper.phone} | WeChat: {effectiveDoc.shipper.wechat}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#475569", marginTop: "2px" }}>
+                        Address: {effectiveDoc.shipper.address}
+                      </div>
+                    </div>
+
+                    {/* Document Title Banner */}
+                    <div style={{ background: "#f1f5f9", padding: "8px 0", textAlign: "center", borderRadius: "4px", marginBottom: "14px", border: "1px solid #e2e8f0" }}>
+                      <h2 style={{ margin: 0, fontSize: "16px", fontWeight: 800, letterSpacing: "1px", color: "#0f172a" }}>
+                        COMMERCIAL INVOICE {ciViewMode === "costing" && "(COSTING & CFR CALCULATION ENGINE)"}
+                      </h2>
+                    </div>
+
+                    {/* Invoice No & Date */}
+                    <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "12px", fontSize: "12px" }}>
+                      <tbody>
+                        <tr>
+                          <td style={{ border: "1px solid #94a3b8", padding: "6px 10px", width: "25%", fontWeight: 700, background: "#f8fafc" }}>
+                            Commercial Invoice No
+                          </td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "6px 10px", width: "40%", fontWeight: 700 }}>
+                            {effectiveDoc.consignment_code}
+                          </td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "6px 10px", width: "15%", fontWeight: 700, background: "#f8fafc", textAlign: "center" }}>
+                            Date
+                          </td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "6px 10px", width: "20%", fontWeight: 700, textAlign: "right" }}>
+                            {effectiveDoc.order_date}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Shipper & Recipient 2-Column Box */}
+                    <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "12px", fontSize: "11.5px" }}>
+                      <thead>
+                        <tr style={{ background: "#e2e8f0", fontWeight: 700 }}>
+                          <th colSpan={2} style={{ border: "1px solid #94a3b8", padding: "6px 10px", textAlign: "left", width: "50%" }}>
+                            Shipper's Information
+                          </th>
+                          <th colSpan={2} style={{ border: "1px solid #94a3b8", padding: "6px 10px", textAlign: "left", width: "50%" }}>
+                            Recipient's Information
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, width: "18%", background: "#f8fafc" }}>Company Name</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", width: "32%" }}>{effectiveDoc.shipper.company_name}</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, width: "18%", background: "#f8fafc" }}>Company Name</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", width: "32%", fontWeight: 700 }}>{effectiveDoc.recipient.company_name || "—"}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Address</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontSize: "10.5px" }}>{effectiveDoc.shipper.address}</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Address</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontSize: "10.5px", whiteSpace: "pre-line" }}>{effectiveDoc.recipient.address || "—"}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Contact Person</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.contact_person}</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Contact Person</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.contact_person || "—"}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Phone Number</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.phone}</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Phone Number</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.phone || "—"}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Email</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.email}</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Email ID</td>
+                          <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.email || "—"}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Trade Terms */}
+                    <div style={{ border: "1px solid #94a3b8", padding: "6px 12px", marginBottom: "12px", fontSize: "11px", lineHeight: "1.6" }}>
+                      <div><strong>Terms of Payment:</strong> {effectiveDoc.payment_terms}</div>
+                      <div><strong>Shipping Terms:</strong> {effectiveDoc.shipping_terms}</div>
+                      <div><strong>Delivery Time:</strong> {effectiveDoc.delivery_time}</div>
+                    </div>
+
+                    {/* Costing Engine Parameters Banner */}
+                    {ciViewMode === "costing" && (
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                          gap: "8px",
+                          background: "#f8fafc",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "6px",
+                          padding: "10px 14px",
+                          marginBottom: "14px",
+                          fontSize: "11px",
+                        }}
+                      >
+                        <div>
+                          <span style={{ color: "#64748b", display: "block" }}>Ocean Freight:</span>
+                          <strong style={{ color: "#0f172a" }}>${Number(costingParams.ocean_freight_usd || 0).toLocaleString()}</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b", display: "block" }}>Local Charges / COC:</span>
+                          <strong style={{ color: "#0f172a" }}>${Number(costingParams.local_charges_coc_usd || 0).toLocaleString()}</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b", display: "block" }}>Total Freight:</span>
+                          <strong style={{ color: "#0284c7" }}>${Number(totalFreightUsd).toLocaleString()}</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b", display: "block" }}>Container CBM:</span>
+                          <strong style={{ color: "#0f172a" }}>{Number(containerCbm).toFixed(3)} m³</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b", display: "block" }}>Freight / CBM:</span>
+                          <strong style={{ color: "#0284c7" }}>${freightPerCbm.toFixed(2)} / m³</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b", display: "block" }}>USD Exch. Rate:</span>
+                          <strong style={{ color: "#0f172a" }}>{Number(costingParams.usd_exchange_rate || 6.70).toFixed(2)}</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b", display: "block" }}>Default Profit:</span>
+                          <strong style={{ color: "#16a34a" }}>{Number(costingParams.profit_percent || 3.0).toFixed(1)}%</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b", display: "block" }}>Total Supplier Payable:</span>
+                          <strong style={{ color: "#059669" }}>
+                            ¥ {totalSupplierPayableRmb.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Items Table: 16 Columns (Costing) or 7 Columns (Standard) */}
+                    {ciViewMode === "costing" ? (
+                      <div style={{ overflowX: "auto", marginBottom: "14px" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "10.5px", whiteSpace: "nowrap" }}>
+                          <thead>
+                            <tr style={{ background: "#1e3a8a", color: "#ffffff", textAlign: "center" }}>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 4px", width: "35px" }}>Sr.No</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 8px", textAlign: "left", minWidth: "180px" }}>Description</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "80px", whiteSpace: "normal", lineHeight: 1.25 }}>HS CODE AS<br />PER CHINA</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "70px" }}>UOM</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "55px" }}>Quantity</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "80px", whiteSpace: "normal", lineHeight: 1.25 }}>Unit Price<br />(USD)</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "95px", whiteSpace: "normal", lineHeight: 1.25 }}>Total Amount<br />(USD)</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "90px", whiteSpace: "normal", lineHeight: 1.25 }}>Unit Price(RMB)<br />Including VAT</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "90px", whiteSpace: "normal", lineHeight: 1.25 }}>Unit Price(RMB)<br />Excluding VAT</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "80px", whiteSpace: "normal", lineHeight: 1.25 }}>Including<br />Profit {Number(costingParams.profit_percent || 3).toFixed(0)}%</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "90px", whiteSpace: "normal", lineHeight: 1.25 }}>FOB PRICE<br />(USD Conversion @{Number(costingParams.usd_exchange_rate || 6.7)})</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "85px", whiteSpace: "normal", lineHeight: 1.25 }}>Freight, Local<br />charges, COC</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "80px", whiteSpace: "normal", lineHeight: 1.25 }}>CFR<br />Price/Unit</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 8px", textAlign: "left", minWidth: "130px" }}>Supplier</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "60px", whiteSpace: "normal", lineHeight: 1.25 }}>Total<br />CBM</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "100px", whiteSpace: "normal", lineHeight: 1.25 }}>Total Supplier<br />Amount</th>
+                              <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", minWidth: "100px" }}>Remarks</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {effectiveDoc.items.map((item: any, i: number) => {
+                              const qty = Number(item.quantity) || 0;
+                              const rmbInclVat = Number(item.unit_price_rmb_with_vat) || 0;
+                              const rmbExVat = Number(item.unit_price_rmb_ex_vat) || (rmbInclVat > 0 ? Math.round((rmbInclVat / 1.13) * 100) / 100 : 0);
+                              const profitPct = Number(item.profit_percent) || 3.0;
+                              const priceWithProfit = Math.round(rmbExVat * (1 + profitPct / 100) * 100) / 100;
+                              const exchRate = Number(costingParams.usd_exchange_rate) || 6.70;
+                              const fobUsd = Number(item.fob_price_usd) || (exchRate > 0 ? Math.round((priceWithProfit / exchRate) * 10000) / 10000 : 0);
+                              const itemCbm = Number(item.total_cbm) || Number(item.cbm) || 0;
+                              const freightUnitUsd = Number(item.freight_unit_usd) || (qty > 0 && freightPerCbm > 0 ? Math.round((freightPerCbm * itemCbm / qty) * 10000) / 10000 : 0);
+                              const cfrUnitUsd = Number(item.cfr_price_usd) || (fobUsd + freightUnitUsd);
+                              const unitPriceUsd = Number(item.unit_price_usd) || cfrUnitUsd;
+                              const totalAmountUsd = Math.round(unitPriceUsd * qty * 100) / 100;
+                              const totalSupRmb = Number(item.total_supplier_amount_rmb) || Math.round(rmbInclVat * qty * 100) / 100;
+                              const cell = { border: "1px solid #cbd5e1", padding: "5px 6px", textAlign: "right" as const };
+
+                              return (
+                                <tr key={i} style={{ background: i % 2 === 0 ? "#ffffff" : "#f8fafc" }}>
+                                  <td style={{ ...cell, textAlign: "center" }}>{item.sr_no}</td>
+                                  <td style={{ ...cell, textAlign: "left", fontWeight: 600 }}>{item.description}</td>
+                                  <td style={{ ...cell, textAlign: "center", color: "#64748b" }}>{item.hs_code || "—"}</td>
+                                  <td style={{ ...cell, textAlign: "center" }}>{item.uom || "NOS"}</td>
+                                  <td style={{ ...cell, fontWeight: 700 }}>{qty.toLocaleString()}</td>
+                                  <td style={{ ...cell, fontWeight: 700, color: "#1d4ed8" }}>USD {unitPriceUsd.toFixed(2)}</td>
+                                  <td style={{ ...cell, fontWeight: 700, color: "#1d4ed8" }}>
+                                    USD {totalAmountUsd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                  <td style={{ ...cell, background: "#fef9c3" }}>¥ {rmbInclVat.toFixed(2)}</td>
+                                  <td style={{ ...cell, color: "#64748b" }}>¥ {rmbExVat.toFixed(2)}</td>
+                                  <td style={{ ...cell, color: "#16a34a" }}>¥ {priceWithProfit.toFixed(2)}</td>
+                                  <td style={{ ...cell, color: "#0284c7" }}>USD {fobUsd.toFixed(3)}</td>
+                                  <td style={{ ...cell, color: "#64748b" }}>USD {freightUnitUsd.toFixed(3)}</td>
+                                  <td style={{ ...cell, fontWeight: 700, color: "#1d4ed8" }}>USD {cfrUnitUsd.toFixed(2)}</td>
+                                  <td style={{ ...cell, textAlign: "left", padding: "5px 8px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                      <span style={{ fontWeight: 600, color: "#0f172a" }}>{item.supplier_name || "—"}</span>
+                                      {item.supplier_name && item.supplier_name !== "—" && (
+                                        <span style={{ fontSize: "9px", background: "#ecfdf5", color: "#059669", padding: "1px 4px", borderRadius: "3px", fontWeight: 700 }}>
+                                          ✓ Local Purchase
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td style={{ ...cell, color: "#0891b2" }}>{itemCbm.toFixed(3)}</td>
+                                  <td style={{ ...cell, fontWeight: 700, color: "#059669" }}>
+                                    ¥ {totalSupRmb.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                  <td style={{ ...cell, textAlign: "left", fontSize: "10px", color: "#64748b" }}>{item.remarks || "—"}</td>
+                                </tr>
+                              );
+                            })}
+                            {/* Costing Totals Row */}
+                            <tr style={{ background: "#fef08a", fontWeight: 800 }}>
+                              <td colSpan={4} style={{ border: "1px solid #94a3b8", padding: "6px 8px", textAlign: "right" }}>
+                                TOTALS:
+                              </td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "6px 6px", textAlign: "right" }}>
+                                {Number(effectiveDoc.totals.quantity).toLocaleString()}
+                              </td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "6px 6px" }}></td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "6px 6px", textAlign: "right", color: "#1d4ed8" }}>
+                                USD {totalCfrAmountUsd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td colSpan={7} style={{ border: "1px solid #94a3b8", padding: "6px 6px" }}></td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "6px 6px", textAlign: "right", color: "#0891b2" }}>
+                                {totalItemCbm.toFixed(3)} m³
+                              </td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "6px 6px", textAlign: "right", color: "#059669" }}>
+                                ¥ {totalSupplierPayableRmb.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "6px 6px" }}></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      /* Standard 7 Columns Table */
+                      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "14px", fontSize: "11px" }}>
+                        <thead>
+                          <tr style={{ background: "#1e3a8a", color: "#ffffff", textAlign: "center" }}>
+                            <th style={{ border: "1px solid #94a3b8", padding: "6px 4px", width: "5%" }}>Sr.No</th>
+                            <th style={{ border: "1px solid #94a3b8", padding: "6px 8px", textAlign: "left", width: "42%" }}>Description</th>
+                            <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", width: "15%" }}>China HS Code</th>
+                            <th style={{ border: "1px solid #94a3b8", padding: "6px 4px", width: "8%" }}>UOM</th>
+                            <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", width: "10%" }}>Quantity</th>
+                            <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", width: "10%" }}>Unit Price (USD)</th>
+                            <th style={{ border: "1px solid #94a3b8", padding: "6px 6px", width: "10%" }}>Total Amount (USD)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {effectiveDoc.items.map((item: any, i: number) => (
+                            <tr key={i}>
+                              <td style={{ border: "1px solid #94a3b8", padding: "5px 4px", textAlign: "center" }}>{item.sr_no}</td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{item.description}</td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "5px 6px", textAlign: "center" }}>{item.hs_code || "—"}</td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "5px 4px", textAlign: "center" }}>{item.uom}</td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "5px 6px", textAlign: "right" }}>{Number(item.quantity).toLocaleString()}</td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "5px 6px", textAlign: "right" }}>${Number(item.unit_price_usd).toFixed(2)}</td>
+                              <td style={{ border: "1px solid #94a3b8", padding: "5px 6px", textAlign: "right", fontWeight: 700 }}>${Number(item.total_amount_usd).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                          {/* Total Row */}
+                          <tr style={{ background: "#fef08a", fontWeight: 800 }}>
+                            <td colSpan={4} style={{ border: "1px solid #94a3b8", padding: "6px 10px", textAlign: "right" }}>
+                              Total Price CIF INDIA:
+                            </td>
+                            <td style={{ border: "1px solid #94a3b8", padding: "6px 6px", textAlign: "right" }}>
+                              {Number(effectiveDoc.totals.quantity).toLocaleString()}
+                            </td>
+                            <td style={{ border: "1px solid #94a3b8", padding: "6px 6px" }}></td>
+                            <td style={{ border: "1px solid #94a3b8", padding: "6px 6px", textAlign: "right" }}>
+                              ${Number(effectiveDoc.totals.total_amount_usd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    )}
+
+                    {/* Bank Details & Signature Grid */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "14px", border: "1px solid #94a3b8", padding: "12px", marginBottom: "10px", fontSize: "10.5px" }}>
+                      <div>
+                        <div style={{ fontWeight: 800, color: "#1e3a8a", marginBottom: "4px" }}>
+                          BANK ACCOUNT DETAILS FOR INWARD REMITTANCE USD
+                        </div>
+                        <div><strong>RECEIVING BANK:</strong> {effectiveDoc.bank_details.bank_name}</div>
+                        <div><strong>SWIFT BIC:</strong> {effectiveDoc.bank_details.swift_bic}</div>
+                        <div><strong>BENEFICIARY NAME:</strong> {effectiveDoc.bank_details.beneficiary_name}</div>
+                        <div><strong>A/C NO:</strong> {effectiveDoc.bank_details.account_no}</div>
+                        <div style={{ fontSize: "9.5px", color: "#475569", marginTop: "2px" }}>{effectiveDoc.bank_details.address}</div>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "flex-end", textAlign: "right" }}>
+                        <div style={{ fontWeight: 700 }}>Shipper's Signature and Stamp:</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "6px" }}>
+                          <img src="/yinglima_signature.png" alt="Signature" style={{ height: "48px", objectFit: "contain" }} />
+                          <img src="/yinglima_stamp.jpeg" alt="Stamp" style={{ height: "55px", objectFit: "contain" }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Declaration */}
+                    <div style={{ textAlign: "center", fontSize: "11px", fontWeight: 700, color: "#334155", marginTop: "8px" }}>
+                      {effectiveDoc.declaration}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
+            {/* TAB: PACKING LIST (PL) */}
 
             {/* TAB: PACKING LIST (PL) */}
             {activeDocTab === "pl" && effectiveDoc && (
@@ -1651,31 +1917,31 @@ export function SaleProcessDetailModal({
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, width: "18%", background: "#f8fafc" }}>Company Name</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", width: "32%" }}>{effectiveDoc.shipper.company_name}</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, width: "18%", background: "#f8fafc" }}>Company Name</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", width: "32%", fontWeight: 700 }}>{effectiveDoc.recipient.company_name}</td>
+                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", width: "32%", fontWeight: 700 }}>{effectiveDoc.recipient.company_name || "—"}</td>
                     </tr>
                     <tr>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Address</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontSize: "10.5px" }}>{effectiveDoc.shipper.address}</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Address</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontSize: "10.5px", whiteSpace: "pre-line" }}>{effectiveDoc.recipient.address}</td>
+                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontSize: "10.5px", whiteSpace: "pre-line" }}>{effectiveDoc.recipient.address || "—"}</td>
                     </tr>
                     <tr>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Contact Person</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.contact_person}</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Contact Person</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.contact_person}</td>
+                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.contact_person || "—"}</td>
                     </tr>
                     <tr>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Phone Number</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.phone}</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Phone Number</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.phone}</td>
+                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.phone || "—"}</td>
                     </tr>
                     <tr>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Email</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.shipper.email}</td>
                       <td style={{ border: "1px solid #94a3b8", padding: "5px 8px", fontWeight: 700, background: "#f8fafc" }}>Email ID</td>
-                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.email}</td>
+                      <td style={{ border: "1px solid #94a3b8", padding: "5px 8px" }}>{effectiveDoc.recipient.email || "—"}</td>
                     </tr>
                   </tbody>
                 </table>

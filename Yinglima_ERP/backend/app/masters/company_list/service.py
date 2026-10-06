@@ -166,16 +166,14 @@ class CompanyService:
         companies = await self.repository.list_all()
         rows = [
             {
-                "id": str(c.id),
-                "name": c.name,
-                "code": c.code,
-                "description": c.description,
-                "branch_count": len(c.branches) if c.branches else 0,
-                "status": c.status.value,
-                "created_at": c.created_at.isoformat(),
-                "updated_at": c.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "Organization Name": c.name,
+                "Code": c.code or "",
+                "Operating Branches": len(c.branches) if c.branches else 0,
+                "Description": c.description or "",
+                "Status": c.status.value.capitalize(),
             }
-            for c in companies
+            for idx, c in enumerate(companies)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)

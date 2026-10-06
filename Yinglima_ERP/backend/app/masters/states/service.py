@@ -181,18 +181,19 @@ class StateService:
     async def export_file(self, file_format: str) -> bytes:
         """Export every state to CSV or XLSX bytes."""
         states = await self.repository.list_all()
+        countries = await self.country_repository.list_all()
+        country_map = {c.id: c.name for c in countries}
+
         rows = [
             {
-                "id": str(s.id),
-                "country_id": str(s.country_id),
-                "name": s.name,
-                "code": s.code,
-                "status": s.status.value,
-                "created_at": s.created_at.isoformat(),
-                "updated_at": s.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "Province Name": s.name,
+                "Province Code": s.code or "",
+                "Country": country_map.get(s.country_id, ""),
+                "Status": s.status.value.capitalize(),
             }
-            for s in states
+            for idx, s in enumerate(states)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)
-        return build_excel_export(EXPORT_HEADERS, rows, sheet_title="States")
+        return build_excel_export(EXPORT_HEADERS, rows, sheet_title="Provinces")

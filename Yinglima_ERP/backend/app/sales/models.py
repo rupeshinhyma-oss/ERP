@@ -19,6 +19,7 @@ import app.users.models  # noqa: F401
 import app.buyers.models  # noqa: F401
 import app.masters.company_list.models  # noqa: F401
 import app.planning.models  # noqa: F401
+import app.suppliers.models  # noqa: F401
 
 
 class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
@@ -70,6 +71,13 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     port_of_loading: Mapped[str | None] = mapped_column(String(100), nullable=True)
     port_of_discharge: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # Costing, Freight & Currency Engine (Commercial Invoice Calculation)
+    ocean_freight_usd: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
+    local_charges_coc_usd: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
+    usd_exchange_rate: Mapped[float] = mapped_column(Numeric(8, 4), default=6.70, nullable=False)
+    profit_percent: Mapped[float] = mapped_column(Numeric(6, 2), default=3.0, nullable=False)
+    total_container_cbm: Mapped[float] = mapped_column(Numeric(12, 4), default=0.0, nullable=False)
+
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -110,6 +118,21 @@ class SaleOrderItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     tax_percent: Mapped[float] = mapped_column(Numeric(6, 2), default=0.0, nullable=False)
     tax_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
     item_total: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
+
+    # Commercial Invoice Costing Engine Fields
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True
+    )
+    supplier_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    unit_price_rmb_with_vat: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
+    unit_price_rmb_ex_vat: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
+    profit_percent: Mapped[float] = mapped_column(Numeric(6, 2), default=3.0, nullable=False)
+    fob_price_usd: Mapped[float] = mapped_column(Numeric(15, 4), default=0.0, nullable=False)
+    freight_unit_usd: Mapped[float] = mapped_column(Numeric(15, 4), default=0.0, nullable=False)
+    cfr_price_usd: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
+    cbm_per_unit: Mapped[float] = mapped_column(Numeric(12, 6), default=0.0, nullable=False)
+    total_cbm: Mapped[float] = mapped_column(Numeric(12, 4), default=0.0, nullable=False)
+    total_supplier_amount_rmb: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
 
     planning_row_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("planning_rows.id"), nullable=True

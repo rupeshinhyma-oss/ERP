@@ -29,11 +29,6 @@ export function LocalPurchaseFormPage() {
   const toast = useToast();
 
   // Form Fields
-  const [organizationId, setOrganizationId] = useState("");
-  const [organizationName, setOrganizationName] = useState("");
-  const [branchId, setBranchId] = useState("");
-  const [branchName, setBranchName] = useState("");
-
   const [supplierId, setSupplierId] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [invoiceNo, setInvoiceNo] = useState("");
@@ -81,7 +76,17 @@ export function LocalPurchaseFormPage() {
   // Product Search state
   const [productSearch, setProductSearch] = useState("");
   const [productSearchResults, setProductSearchResults] = useState<
-    Array<{ id: string; product_name: string; product_code?: string; hsn_id?: string; hsn_code?: string; refund_vat_percent?: number; standard_cost?: number }>
+    Array<{
+      id: string;
+      product_name: string;
+      product_code?: string;
+      hsn_id?: string;
+      hsn_code?: string;
+      refund_vat_percent?: number;
+      standard_cost?: number;
+      packaging_quantity?: number;
+      minimum_order_quantity?: number;
+    }>
   >([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
@@ -91,10 +96,6 @@ export function LocalPurchaseFormPage() {
   const [initialLoading, setInitialLoading] = useState(isEdit);
 
   // Lookups
-  const orgLookup = useLookup<{ id: string; name: string; branches?: { id: string; name: string }[] | null }>(
-    "/masters/company-list/lookup",
-    250
-  );
   const supplierLookup = useLookup<{ id: string; company_name: string }>(
     "/suppliers?page_size=1000",
     500
@@ -108,16 +109,9 @@ export function LocalPurchaseFormPage() {
     hsn_code?: string;
     refund_vat_percent?: number;
     standard_cost?: number;
-    organization_id?: string;
-    organization_ids?: string[];
+    packaging_quantity?: number;
+    minimum_order_quantity?: number;
   }>("/masters/products", 1000);
-
-  // Dynamic branches based on selected Organization
-  const availableBranches = useMemo(() => {
-    if (!organizationId || !orgLookup.items) return [];
-    const org = orgLookup.items.find((o: { id: string; name: string }) => o.id === organizationId);
-    return org?.branches || [];
-  }, [organizationId, orgLookup.items]);
 
   // Load existing purchase for Edit mode
   useEffect(() => {
@@ -127,10 +121,6 @@ export function LocalPurchaseFormPage() {
       try {
         const { data } = await apiGet<LocalPurchaseDetail>(`/purchases/local/${id}`);
         if (data) {
-          setOrganizationId(data.organization_id);
-          setOrganizationName(data.organization_name);
-          setBranchId(data.branch_id);
-          setBranchName(data.branch_name);
           setSupplierId(data.supplier_id);
           setSupplierName(data.supplier_name);
           setInvoiceNo(data.invoice_no);
@@ -154,61 +144,69 @@ export function LocalPurchaseFormPage() {
     loadPurchase();
   }, [id, isEdit, toast]);
 
-  // Handle Organization selection with item reset warning & error clearance
-  // Handle Organization selection with auto item reset & error clearance
-  const handleSelectOrg = (orgId: string) => {
-    setOrganizationId(orgId);
-    const org = orgLookup.items?.find((o: { id: string; name: string }) => o.id === orgId);
-    setOrganizationName(org?.name || "");
-    // Reset branch
-    setBranchId("");
-    setBranchName("");
-    // Reset items and planning info so previous items don't linger across organizations
-    setItems([]);
-    setPlanningInfo(null);
-    lastFetchedPlanningKeyRef.current = "";
-    // Reset all validation errors so previous errors don't linger
-    setSubmitAttempted(false);
-    setErrors({});
-  };
-
-  // Handle Branch selection with auto item reset & error clearance
-  const handleSelectBranch = (brId: string) => {
-    setBranchId(brId);
-    const br = availableBranches.find((b: { id: string; name: string }) => b.id === brId);
-    setBranchName(br?.name || "");
-    // Reset items and planning info so previous branch items don't linger
-    setItems([]);
-    setPlanningInfo(null);
-    lastFetchedPlanningKeyRef.current = "";
-    // Reset all validation errors so previous errors don't linger
-    setSubmitAttempted(false);
-    setErrors({});
-  };
-
-  // Handle Supplier selection with auto item reset & error clearance
-  const handleSelectSupplier = (supId: string) => {
+  // Handle Supplier selection with error clearance and smart quote refresh
+  const handleSelectSupplier = async (supId: string) => {
     setSupplierId(supId);
     const sup = supplierLookup.items?.find((s: { id: string; company_name: string }) => s.id === supId);
     setSupplierName(sup?.company_name || "");
-    // Reset items and planning info so previous supplier items don't linger
-    setItems([]);
-    setPlanningInfo(null);
-    lastFetchedPlanningKeyRef.current = "";
-    // Reset all validation errors so previous errors don't linger
-    setSubmitAttempted(false);
-    setErrors({});
+    if (errors.supplier_id) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.supplier_id;
+        return next;
+      });
+    }
+
+    // Auto-update existing lines that have unit_rate === 0 if quotes exist for this supplier
+    if (supId && items.length > 0) {
+      const pendingItems = items.filter((it) => it.product_id && (!it.unit_rate || Number(it.unit_rate) <= 0));
+      if (pendingItems.length > 0) {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.product_id && (!it.unit_rate || Number(it.unit_rate) <= 0)) {
+            try {
+              const res = await apiGet<Array<{ supplier_id: string; unit_price?: number | null; moq?: number | null }>>(
+                `/inventory/product-prices/${it.product_id}/suppliers`
+              );
+              const quotes = Array.isArray(res.data) ? res.data : [];
+              const match = quotes.find((q) => q.supplier_id === supId);
+              if (match && match.unit_price != null && Number(match.unit_price) > 0) {
+                setItems((prev) => {
+                  const next = [...prev];
+                  if (next[i]) {
+                    const newQty =
+                      (next[i].quantity === "" || !next[i].quantity || Number(next[i].quantity) <= 0) &&
+                      match.moq &&
+                      Number(match.moq) > 0
+                        ? Number(match.moq)
+                        : next[i].quantity;
+                    next[i] = {
+                      ...next[i],
+                      unit_rate: Number(match.unit_price),
+                      quantity: newQty,
+                    };
+                  }
+                  return next;
+                });
+              }
+            } catch {
+              // quiet
+            }
+          }
+        }
+      }
+    }
   };
 
-  // Auto-fetch planned items from Shipment Planning for selected Org, Branch & Supplier
+  // Auto-fetch planned items from Shipment Planning for selected Supplier
   useEffect(() => {
     if (isEdit) return;
-    if (!organizationId || (!branchId && !branchName) || (!supplierId && !supplierName)) {
+    if (!supplierId && !supplierName) {
       setPlanningInfo(null);
       return;
     }
 
-    const key = `${organizationId}_${branchId || branchName}_${supplierId || supplierName}`;
+    const key = `${supplierId || supplierName}`;
     if (key === lastFetchedPlanningKeyRef.current) return;
     lastFetchedPlanningKeyRef.current = key;
 
@@ -216,9 +214,6 @@ export function LocalPurchaseFormPage() {
       setPlanningLoading(true);
       try {
         const queryParams = new URLSearchParams({
-          organization_id: organizationId,
-          branch_id: branchId || "",
-          branch_name: branchName || "",
           supplier_name: supplierName || "",
           supplier_id: supplierId || "",
         });
@@ -235,30 +230,24 @@ export function LocalPurchaseFormPage() {
           const count = res.data.count;
 
           setPlanningInfo({ sheetName, count, items: plannedItems });
-          setItems(plannedItems);
-          // Clear any stale errors from previous supplier
+          // Only auto-fill if current items list is empty, preserving extracted bill items
+          setItems((prev) => (prev.length === 0 ? plannedItems : prev));
           setSubmitAttempted(false);
           setErrors({});
           toast(`✨ Auto-populated ${count} planned product(s) for ${supplierName || "supplier"} from ${sheetName}`, "info");
         } else {
-          const sheetName = res.data?.sheet_name || branchName || "Shipment Planning";
-          setPlanningInfo({ sheetName, count: 0, items: [] });
-          setItems([]);
-          if (supplierName) {
-            toast(`ℹ️ No planned products found for ${supplierName} in ${sheetName}.`, "info");
-          }
+          setPlanningInfo({ sheetName: "Shipment Planning", count: 0, items: [] });
         }
       } catch (err) {
         console.error("Failed to fetch shipment planning items:", err);
         setPlanningInfo(null);
-        setItems([]);
       } finally {
         setPlanningLoading(false);
       }
     };
 
     fetchPlanningItems();
-  }, [organizationId, branchId, branchName, supplierId, supplierName, isEdit, toast]);
+  }, [supplierId, supplierName, isEdit, toast]);
 
   const handleLoadPlannedProducts = () => {
     if (!planningInfo || planningInfo.items.length === 0) return;
@@ -279,20 +268,13 @@ export function LocalPurchaseFormPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Products filtered strictly by selected Organization (Zero NULL leaks)
+  // All active catalog products (unrestricted)
   const availableProducts = useMemo(() => {
-    const allProds = productLookup.items || [];
-    if (!organizationId) return []; // STRICT: Return empty if no organization selected!
-    return allProds.filter((p: any) => {
-      if (p.organization_id && p.organization_id === organizationId) return true;
-      if (Array.isArray(p.organization_ids) && p.organization_ids.includes(organizationId)) return true;
-      return false;
-    });
-  }, [productLookup.items, organizationId]);
+    return productLookup.items || [];
+  }, [productLookup.items]);
 
   // Instant client-side search across availableProducts (0ms latency)
   const displayedSearchResults = useMemo(() => {
-    if (!organizationId) return [];
     const q = productSearch.trim().toLowerCase();
     if (!q) {
       return availableProducts.slice(0, 35);
@@ -305,21 +287,20 @@ export function LocalPurchaseFormPage() {
         return name.includes(q) || code.includes(q) || barcode.includes(q);
       })
       .slice(0, 40);
-  }, [availableProducts, productSearch, organizationId]);
+  }, [availableProducts, productSearch]);
 
-  // Background fallback search for queries not matched in local cache (strictly scoped to org)
+  // Background fallback search for queries not matched in local cache
   useEffect(() => {
     const query = productSearch.trim();
-    if (!query || !organizationId || displayedSearchResults.length > 0) {
+    if (!query || displayedSearchResults.length > 0) {
       setProductSearchResults([]);
       return;
     }
     const timer = setTimeout(async () => {
       setSearchLoading(true);
       try {
-        const orgParam = `organization_id=${encodeURIComponent(organizationId)}&`;
         const { data } = await apiGet<any>(
-          `/masters/products?${orgParam}search=${encodeURIComponent(query)}&page=1&page_size=20&status=active`
+          `/masters/products?search=${encodeURIComponent(query)}&page=1&page_size=20&status=active`
         );
         const list = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
         setProductSearchResults(
@@ -331,6 +312,8 @@ export function LocalPurchaseFormPage() {
             hsn_code: it.hsn_code,
             refund_vat_percent: it.refund_vat_percent,
             standard_cost: it.standard_cost,
+            packaging_quantity: it.packaging_quantity != null ? Number(it.packaging_quantity) : undefined,
+            minimum_order_quantity: it.minimum_order_quantity != null ? Number(it.minimum_order_quantity) : undefined,
           }))
         );
       } catch {
@@ -341,15 +324,15 @@ export function LocalPurchaseFormPage() {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [productSearch, organizationId, displayedSearchResults.length]);
+  }, [productSearch, displayedSearchResults.length]);
 
   const finalSearchResults = useMemo(() => {
     if (displayedSearchResults.length > 0) return displayedSearchResults;
     return productSearchResults;
   }, [displayedSearchResults, productSearchResults]);
 
-  // Add Product to line items
-  const handleAddProduct = (prod: {
+  // Add Product to line items with Supplier Quote & MOQ / Pack Qty priority
+  const handleAddProduct = async (prod: {
     id: string;
     product_name: string;
     product_code?: string;
@@ -357,30 +340,99 @@ export function LocalPurchaseFormPage() {
     hsn_code?: string;
     refund_vat_percent?: number;
     standard_cost?: number;
+    packaging_quantity?: number;
+    minimum_order_quantity?: number;
   }) => {
-    if (!organizationId) {
-      toast("Please select an Organization first in Card 1.", "warning");
-      return;
-    }
     const resolvedHsn =
       prod.hsn_code ||
       (prod.hsn_id ? hsnLookup.items?.find((h) => h.id === prod.hsn_id)?.code : undefined) ||
       null;
+
+    let quotePrice: number | undefined = undefined;
+    let quoteMoq: number | undefined = undefined;
+
+    try {
+      const res = await apiGet<Array<{
+        supplier_id: string;
+        unit_price?: number | null;
+        currency?: string;
+        moq?: number | null;
+        is_preferred?: boolean;
+      }>>(`/inventory/product-prices/${prod.id}/suppliers`);
+
+      const quotes = Array.isArray(res.data) ? res.data : [];
+      if (quotes.length > 0) {
+        // Priority 1: Match the currently selected supplier on the purchase invoice
+        const match = supplierId ? quotes.find((q) => q.supplier_id === supplierId) : undefined;
+        if (match && match.unit_price != null && Number(match.unit_price) > 0) {
+          quotePrice = Number(match.unit_price);
+          if (match.moq != null && Number(match.moq) > 0) {
+            quoteMoq = Number(match.moq);
+          }
+        } else {
+          // Priority 2: Fallback to preferred supplier quote, or first available quote with price > 0
+          const preferred = quotes.find((q) => q.is_preferred && q.unit_price != null && Number(q.unit_price) > 0);
+          const fallback = preferred || quotes.find((q) => q.unit_price != null && Number(q.unit_price) > 0);
+          if (fallback && fallback.unit_price != null && Number(fallback.unit_price) > 0) {
+            quotePrice = Number(fallback.unit_price);
+            if (fallback.moq != null && Number(fallback.moq) > 0) {
+              quoteMoq = Number(fallback.moq);
+            }
+          }
+        }
+      }
+    } catch {
+      // quiet fallback
+    }
+
+    // Unit Rate resolution:
+    // Only check Product Prices quotes (Priority 1: Selected Supplier, Priority 2: Preferred/Available quote).
+    // If no supplier quote exists in Product Prices, do NOT check Product Master: leave as "" so user writes their own price directly.
+    const resolvedRate: number | "" =
+      quotePrice !== undefined && quotePrice > 0
+        ? quotePrice
+        : "";
+
+    // Quantity resolution rules:
+    // Priority 1: Supplier Quote MOQ if > 0
+    // Priority 2: Product Master Packaging Quantity if > 0 (or minimum_order_quantity)
+    // Priority 3: If both are 0 or empty, do NOT default to 1! Leave as "" so user writes on their own
+    let resolvedQuantity: number | "" = "";
+    if (quoteMoq && quoteMoq > 0) {
+      resolvedQuantity = quoteMoq;
+    } else if (prod.packaging_quantity && Number(prod.packaging_quantity) > 0) {
+      resolvedQuantity = Number(prod.packaging_quantity);
+    } else if (prod.minimum_order_quantity && Number(prod.minimum_order_quantity) > 0) {
+      resolvedQuantity = Number(prod.minimum_order_quantity);
+    } else {
+      resolvedQuantity = "";
+    }
+
+    const vatRate =
+      prod.refund_vat_percent !== undefined && prod.refund_vat_percent !== null
+        ? Number(prod.refund_vat_percent)
+        : 0;
+
+    const initialQty = typeof resolvedQuantity === "number" ? resolvedQuantity : 0;
+    const initialRate = typeof resolvedRate === "number" ? resolvedRate : 0;
+    const initialItemTotal = Number((initialQty * initialRate).toFixed(2));
+    const initialVatAmount = Number(((initialItemTotal * vatRate) / 100).toFixed(2));
 
     const newItem: LocalPurchaseItem = {
       product_id: prod.id,
       product_name: prod.product_name,
       product_code: prod.product_code || null,
       hsn_code: resolvedHsn,
-      quantity: 1,
-      unit_rate: prod.standard_cost && prod.standard_cost > 0 ? prod.standard_cost : 0,
-      vat_rate: prod.refund_vat_percent !== undefined && prod.refund_vat_percent !== null ? Number(prod.refund_vat_percent) : 0,
-      item_total: 0,
-      vat_amount: 0,
+      quantity: resolvedQuantity,
+      unit_rate: resolvedRate,
+      vat_rate: vatRate,
+      item_total: initialItemTotal,
+      vat_amount: initialVatAmount,
       expense_per_unit: 0,
-      unit_landing_rate: 0,
-      total_landing_rate: 0,
+      unit_landing_rate: initialRate,
+      total_landing_rate: initialItemTotal,
     };
+
     setItems((prev) => {
       // If there is currently only 1 row and it is completely blank (no product name and 0 unit rate), replace it
       if (prev.length === 1 && !prev[0].product_name && (!prev[0].unit_rate || prev[0].unit_rate === 0)) {
@@ -449,6 +501,19 @@ export function LocalPurchaseFormPage() {
         });
       }
 
+      // When quantity is updated, re-evaluate quantities error dynamically
+      if (field === "quantity") {
+        const anyInvalidQty = next.some((it) => it.quantity === "" || it.quantity == null || Number(it.quantity) <= 0);
+        setErrors((errs) => {
+          const e = { ...errs };
+          if (!anyInvalidQty) {
+            delete e.quantities;
+          }
+          delete e.discrepancy;
+          return e;
+        });
+      }
+
       return next;
     });
   };
@@ -484,9 +549,9 @@ export function LocalPurchaseFormPage() {
 
       return {
         ...it,
-        quantity: qty,
-        unit_rate: rate,
-        vat_rate: vatRate,
+        quantity: it.quantity,
+        unit_rate: it.unit_rate,
+        vat_rate: it.vat_rate,
         item_total: basicItemTotal,
         vat_amount: vatAmount,
         gross_total: grossItemTotal,
@@ -505,9 +570,11 @@ export function LocalPurchaseFormPage() {
     // 3. Distribute expenses proportionally
     let itemsTotalLanding = 0;
     const calculatedItems = baseCalculations.map((it) => {
-      const expensePerUnit = Number((it.unit_rate * expenseRatio).toFixed(2));
-      const unitLandingRate = Number((it.unit_rate + expensePerUnit).toFixed(2));
-      const totalLandingRate = Number((it.quantity * unitLandingRate).toFixed(2));
+      const rate = Number(it.unit_rate) || 0;
+      const qty = Number(it.quantity) || 0;
+      const expensePerUnit = Number((rate * expenseRatio).toFixed(2));
+      const unitLandingRate = Number((rate + expensePerUnit).toFixed(2));
+      const totalLandingRate = Number((qty * unitLandingRate).toFixed(2));
 
       itemsTotalLanding += totalLandingRate;
 
@@ -676,12 +743,6 @@ export function LocalPurchaseFormPage() {
   // Comprehensive Form Validation (Product Master Visual Style)
   const validateForm = (): Record<string, string> => {
     const errs: Record<string, string> = {};
-    if (!organizationId) {
-      errs.organization_id = "Organization is required.";
-    }
-    if (!branchId) {
-      errs.branch_id = "Operating Branch is required.";
-    }
     if (!supplierId) {
       errs.supplier_id = "Supplier is required.";
     }
@@ -710,6 +771,17 @@ export function LocalPurchaseFormPage() {
         } else {
           const sample = invalidItems.slice(0, 3).map((inv) => `#${inv.rowNum}`).join(", ");
           errs.unit_rates = `Unit Rate must be greater than 0 for all items. Missing on ${invalidItems.length} items (e.g., Rows ${sample}, and ${invalidItems.length - 3} more).`;
+        }
+      }
+
+      const invalidQtyItems = items
+        .map((it, idx) => ({ ...it, rowNum: idx + 1 }))
+        .filter((it) => it.quantity === "" || it.quantity == null || Number(it.quantity) <= 0);
+      if (invalidQtyItems.length > 0) {
+        if (invalidQtyItems.length === 1) {
+          errs.quantities = `Quantity must be greater than 0. Missing on Row #${invalidQtyItems[0].rowNum} (${invalidQtyItems[0].product_name || "Custom Product"}).`;
+        } else {
+          errs.quantities = `Quantity must be greater than 0 for all items. Missing on ${invalidQtyItems.length} items.`;
         }
       }
     }
@@ -745,6 +817,9 @@ export function LocalPurchaseFormPage() {
       if (validationErrors.unit_rates) {
         const invalidCount = items.filter((it) => !it.unit_rate || Number(it.unit_rate) <= 0).length;
         toastMsg = `Unit Rate (> 0) is required for ${invalidCount} item${invalidCount > 1 ? "s" : ""}. Please check highlighted rows below.`;
+      } else if (validationErrors.quantities) {
+        const invalidQtyCount = items.filter((it) => it.quantity === "" || it.quantity == null || Number(it.quantity) <= 0).length;
+        toastMsg = `Quantity (> 0) is required for ${invalidQtyCount} item${invalidQtyCount > 1 ? "s" : ""}. Please enter your required quantities.`;
       } else if (toastMsg.length > 120) {
         toastMsg = toastMsg.substring(0, 117) + "...";
       }
@@ -755,10 +830,6 @@ export function LocalPurchaseFormPage() {
     setSubmitting(true);
     try {
       const payload = {
-        organization_id: organizationId,
-        organization_name: organizationName,
-        branch_id: branchId,
-        branch_name: branchName,
         supplier_id: supplierId,
         supplier_name: supplierName,
         invoice_no: invoiceNo.trim(),
@@ -777,9 +848,9 @@ export function LocalPurchaseFormPage() {
           product_name: it.product_name,
           product_code: it.product_code,
           hsn_code: it.hsn_code,
-          quantity: it.quantity,
-          unit_rate: it.unit_rate,
-          vat_rate: it.vat_rate,
+          quantity: Number(it.quantity) || 0,
+          unit_rate: Number(it.unit_rate) || 0,
+          vat_rate: Number(it.vat_rate) || 0,
         })),
       };
 
@@ -934,90 +1005,11 @@ export function LocalPurchaseFormPage() {
             }}
           >
             <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "16px", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ color: "#0061f2" }}>🏢</span> Procurement & Organization Essentials
+              <span style={{ color: "#0061f2" }}>📄</span> Procurement & Invoice Essentials
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "16px" }}>
-              {/* 1. Organization List (Replaces plain warehouse) */}
-              <div>
-                <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
-                  Organization List <span style={{ color: "#ef4444" }}>*</span>
-                </label>
-                <select
-                  value={organizationId}
-                  onChange={(e) => handleSelectOrg(e.target.value)}
-                  required
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: "6px",
-                    border: errors.organization_id ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                    boxShadow: errors.organization_id ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-                    background: errors.organization_id ? "#fff5f5" : "#ffffff",
-                    fontSize: "13px",
-                    color: "#0f172a",
-                    fontWeight: 500,
-                  }}
-                >
-                  <option value="">Select Organization</option>
-                  {orgLookup.items?.map((org: { id: string; name: string }) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
-                  ))}
-                </select>
-                {errors.organization_id ? (
-                  <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span>▲</span> {errors.organization_id}
-                  </div>
-                ) : (
-                  <span style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "block" }}>
-                    Master enterprise operating entity
-                  </span>
-                )}
-              </div>
-
-              {/* 2. Branch of Organization (Dynamically populated) */}
-              <div>
-                <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
-                  Branch <span style={{ color: "#ef4444" }}>*</span>
-                </label>
-                <select
-                  value={branchId}
-                  onChange={(e) => handleSelectBranch(e.target.value)}
-                  disabled={!organizationId || availableBranches.length === 0}
-                  required
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: "6px",
-                    border: errors.branch_id ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                    boxShadow: errors.branch_id ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-                    fontSize: "13px",
-                    background: errors.branch_id ? "#fff5f5" : !organizationId ? "#f8fafc" : "#ffffff",
-                    color: !organizationId ? "#94a3b8" : "#0f172a",
-                    fontWeight: 500,
-                  }}
-                >
-                  <option value="">{organizationId ? "Select Branch" : "Select Org first"}</option>
-                  {availableBranches.map((br: { id: string; name: string }) => (
-                    <option key={br.id} value={br.id}>
-                      {br.name}
-                    </option>
-                  ))}
-                </select>
-                {errors.branch_id ? (
-                  <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span>▲</span> {errors.branch_id}
-                  </div>
-                ) : (
-                  <span style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "block" }}>
-                    Receiving location / operating branch
-                  </span>
-                )}
-              </div>
-
-              {/* 3. Supplier */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "16px" }}>
+              {/* 1. Supplier */}
               <div>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Supplier <span style={{ color: "#ef4444" }}>*</span>
@@ -1422,33 +1414,19 @@ export function LocalPurchaseFormPage() {
               <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                 PRODUCT SEARCH
               </div>
-              {organizationName ? (
-                <div style={{ fontSize: "12px", color: "#0061f2", fontWeight: 600 }}>
-                  Scoped to Organization: <strong>{organizationName}</strong>
-                </div>
-              ) : (
-                <div style={{ fontSize: "12px", color: "#ef4444", fontWeight: 600 }}>
-                  🔒 Organization Required First
-                </div>
-              )}
+              <div style={{ fontSize: "12px", color: "#64748b" }}>
+                Search and select any active product from catalog or let AI bill extraction fill items
+              </div>
             </div>
 
             <div ref={searchContainerRef} style={{ position: "relative" }}>
               <div style={{ position: "relative" }}>
                 <input
                   type="text"
-                  disabled={!organizationId}
-                  placeholder={
-                    !organizationId
-                      ? "🔒 Select Organization in Card 1 above to unlock product search..."
-                      : `Search products in ${organizationName || "organization"} (Name, Model, Code)...`
-                  }
+                  placeholder="Search products (Name, Model, Code, Barcode)..."
                   value={productSearch}
-                  onFocus={() => {
-                    if (organizationId) setShowSearchResults(true);
-                  }}
+                  onFocus={() => setShowSearchResults(true)}
                   onChange={(e) => {
-                    if (!organizationId) return;
                     setProductSearch(e.target.value);
                     setShowSearchResults(true);
                   }}
@@ -1456,19 +1434,15 @@ export function LocalPurchaseFormPage() {
                     width: "100%",
                     padding: "10px 38px 10px 14px",
                     borderRadius: "6px",
-                    border: !organizationId
-                      ? "1.5px dashed #cbd5e1"
-                      : showSearchResults
-                      ? "1.5px solid #0061f2"
-                      : "1.5px solid #3b82f6",
+                    border: showSearchResults ? "1.5px solid #0061f2" : "1.5px solid #3b82f6",
                     fontSize: "13.5px",
                     fontWeight: 500,
                     boxSizing: "border-box",
                     outline: "none",
-                    background: !organizationId ? "#f8fafc" : "#ffffff",
-                    color: !organizationId ? "#94a3b8" : "#0f172a",
-                    cursor: !organizationId ? "not-allowed" : "text",
-                    boxShadow: showSearchResults && organizationId ? "0 0 0 3px rgba(59, 130, 246, 0.15)" : "none",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    cursor: "text",
+                    boxShadow: showSearchResults ? "0 0 0 3px rgba(59, 130, 246, 0.15)" : "none",
                   }}
                 />
                 {searchLoading && (
@@ -1478,30 +1452,8 @@ export function LocalPurchaseFormPage() {
                 )}
               </div>
 
-              {!organizationId && (
-                <div
-                  style={{
-                    marginTop: "8px",
-                    padding: "8px 12px",
-                    background: "#eff6ff",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: "6px",
-                    fontSize: "12px",
-                    color: "#1e40af",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <span style={{ fontSize: "14px" }}>🔒</span>
-                  <span>
-                    <strong>Organization Required:</strong> Please choose an Organization in <strong>Card 1</strong> above. Product catalog search and line item entry are strictly restricted to products belonging to the active organization.
-                  </span>
-                </div>
-              )}
-
               {/* Autocomplete Results Dropdown Opening Strictly Below */}
-              {showSearchResults && organizationId && (
+              {showSearchResults && (
                 <div
                   style={{
                     position: "absolute",
@@ -1558,7 +1510,7 @@ export function LocalPurchaseFormPage() {
                     ))
                   ) : (
                     <div style={{ padding: "16px", color: "#64748b", fontSize: "13px", textAlign: "center" }}>
-                      No products found matching "<strong>{productSearch}</strong>" in <strong>{organizationName}</strong>.
+                      No products found matching "<strong>{productSearch}</strong>".
                     </div>
                   )}
                 </div>
@@ -1622,7 +1574,7 @@ export function LocalPurchaseFormPage() {
               {planningInfo && planningInfo.count === 0 && supplierName && (
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ fontSize: "12px", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", padding: "3px 10px", borderRadius: "6px", fontWeight: 500 }}>
-                    ℹ️ 0 planned items for <strong>{supplierName}</strong> in {planningInfo.sheetName || branchName || "this branch"}
+                    ℹ️ 0 planned items for <strong>{supplierName}</strong> in {planningInfo.sheetName || "planning sheet"}
                   </span>
                 </div>
               )}
@@ -1718,6 +1670,12 @@ export function LocalPurchaseFormPage() {
               </div>
             )}
 
+            {errors.quantities && (
+              <div style={{ padding: "10px 18px", background: "#fef2f2", borderBottom: "1px solid #fecaca", color: "#dc2626", fontSize: "12.5px", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>▲</span> {errors.quantities}
+              </div>
+            )}
+
             {/* Unregistered Products Notice Banner (Consolidated) */}
             {items.length > 0 && items.some((it) => !it.product_id) && (
               <div
@@ -1782,7 +1740,7 @@ export function LocalPurchaseFormPage() {
                         <div style={{ fontSize: "12.5px" }}>
                           {planningInfo && planningInfo.count === 0 && supplierName ? (
                             <span>
-                              No planned products found for <strong>{supplierName}</strong> in <strong>{planningInfo.sheetName || branchName || "this branch"}</strong>. You can use the <strong>PRODUCT SEARCH</strong> bar above to add products manually.
+                              No planned products found for <strong>{supplierName}</strong> in <strong>{planningInfo.sheetName || "Shipment Planning"}</strong>. You can use the <strong>PRODUCT SEARCH</strong> bar above to add products manually.
                             </span>
                           ) : (
                             <span>
@@ -1932,19 +1890,35 @@ export function LocalPurchaseFormPage() {
                             type="number"
                             step="0.01"
                             min="0.01"
-                            value={item.quantity}
+                            value={item.quantity === "" ? "" : item.quantity}
                             onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
                             onFocus={(e) => e.currentTarget.select()}
                             onWheel={(e) => e.currentTarget.blur()}
-                            onBlur={(e) => {
-                              if (e.target.value === "" || Number(e.target.value) <= 0) {
-                                handleItemChange(idx, "quantity", 1);
-                              }
-                            }}
-                            placeholder="1"
+                            placeholder="0"
                             required
-                            style={{ width: "100%", padding: "5px 6px", borderRadius: "4px", border: "1px solid #cbd5e1", fontSize: "12.5px", fontWeight: 700, textAlign: "right", boxSizing: "border-box" }}
+                            style={{
+                              width: "100%",
+                              padding: "5px 6px",
+                              borderRadius: "4px",
+                              border:
+                                submitAttempted && (item.quantity === "" || Number(item.quantity) <= 0)
+                                  ? "1.5px solid #ef4444"
+                                  : "1px solid #cbd5e1",
+                              boxShadow:
+                                submitAttempted && (item.quantity === "" || Number(item.quantity) <= 0)
+                                  ? "0 0 0 2px rgba(239, 68, 68, 0.15)"
+                                  : undefined,
+                              fontSize: "12.5px",
+                              fontWeight: 700,
+                              textAlign: "right",
+                              boxSizing: "border-box",
+                            }}
                           />
+                          {submitAttempted && (item.quantity === "" || Number(item.quantity) <= 0) && (
+                            <div style={{ color: "#dc2626", fontSize: "10.5px", fontWeight: 700, marginTop: "2px", textAlign: "right" }}>
+                              ▲ Qty &gt; 0 req.
+                            </div>
+                          )}
                         </td>
 
                         {/* Unit Rate */}
@@ -1954,15 +1928,10 @@ export function LocalPurchaseFormPage() {
                             type="number"
                             step="0.01"
                             min="0.01"
-                            value={item.unit_rate}
+                            value={item.unit_rate === "" ? "" : item.unit_rate}
                             onChange={(e) => handleItemChange(idx, "unit_rate", e.target.value)}
                             onFocus={(e) => e.currentTarget.select()}
                             onWheel={(e) => e.currentTarget.blur()}
-                            onBlur={(e) => {
-                              if (e.target.value === "") {
-                                handleItemChange(idx, "unit_rate", 0);
-                              }
-                            }}
                             placeholder="0.00"
                             required
                             style={{

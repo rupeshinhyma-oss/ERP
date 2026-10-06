@@ -21,6 +21,7 @@ from app.masters.product_prices.schemas import (
     PriceImportSummary,
     ProductPriceItem,
     ProductPriceSupplierItem,
+    ProductTradeHistoryResponse,
     UpdatePricePayload,
 )
 
@@ -76,6 +77,10 @@ class ProductPriceService:
 
     async def delete_price(self, link_id: uuid.UUID) -> None:
         await self.repo.delete_supplier_price(link_id)
+        await self.session.flush()
+
+    async def set_preferred_supplier(self, product_id: uuid.UUID, supplier_id: uuid.UUID | None) -> None:
+        await self.repo.set_preferred_supplier(product_id, supplier_id)
         await self.session.flush()
 
     async def export_prices(
@@ -439,3 +444,9 @@ class ProductPriceService:
 
         await self.session.flush()
         return summary
+
+    async def get_trade_history(self, product_id: uuid.UUID) -> ProductTradeHistoryResponse:
+        """Retrieve complete purchase and sales trade history for a product."""
+        data = await self.repo.get_product_trade_history(product_id)
+        return ProductTradeHistoryResponse.model_validate(data)
+

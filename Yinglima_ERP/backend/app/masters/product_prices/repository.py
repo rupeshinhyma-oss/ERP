@@ -156,7 +156,8 @@ class ProductPriceRepository:
                         p.sub_category_id,
                         p.brand_id,
                         p.uom_id,
-                        p.images
+                        p.images,
+                        p.supplier_id
                     FROM products p
                     WHERE {where_sql}
                     ORDER BY {order_sql}
@@ -182,7 +183,8 @@ class ProductPriceRepository:
                     best.supplier_id AS primary_supplier_id,
                     best.company_name AS primary_supplier_name,
                     best.unit_price AS best_price,
-                    best.currency AS best_currency
+                    best.currency AS best_currency,
+                    COALESCE(best.is_preferred, false) AS is_preferred
                 FROM paged p
                 LEFT JOIN product_categories pc ON pc.id = p.category_id
                 LEFT JOIN product_sub_categories psc ON psc.id = p.sub_category_id
@@ -204,12 +206,17 @@ class ProductPriceRepository:
                         spl.supplier_id,
                         s.company_name,
                         spl.unit_price,
-                        spl.currency
+                        spl.currency,
+                        (CASE WHEN spl.supplier_id = p2.supplier_id THEN true ELSE false END) AS is_preferred
                     FROM supplier_product_links spl
+                    JOIN paged p2 ON p2.id = spl.product_id
                     JOIN suppliers s ON s.id = spl.supplier_id AND s.deleted_at IS NULL
-                    WHERE spl.product_id IN (SELECT id FROM paged)
-                      AND spl.unit_price IS NOT NULL
-                    ORDER BY spl.product_id, {norm_spl_price_sql} ASC, spl.updated_at DESC
+                    WHERE spl.unit_price IS NOT NULL
+                    ORDER BY 
+                        spl.product_id, 
+                        (CASE WHEN spl.supplier_id = p2.supplier_id THEN 0 ELSE 1 END) ASC,
+                        {norm_spl_price_sql} ASC, 
+                        spl.updated_at DESC
                 ) best ON best.product_id = p.id
                 ORDER BY {order_sql};
             """
@@ -236,7 +243,8 @@ class ProductPriceRepository:
                     best.supplier_id AS primary_supplier_id,
                     best.company_name AS primary_supplier_name,
                     best.unit_price AS best_price,
-                    best.currency AS best_currency
+                    best.currency AS best_currency,
+                    COALESCE(best.is_preferred, false) AS is_preferred
                 FROM products p
                 LEFT JOIN product_categories pc ON pc.id = p.category_id
                 LEFT JOIN product_sub_categories psc ON psc.id = p.sub_category_id
@@ -257,11 +265,17 @@ class ProductPriceRepository:
                         spl.supplier_id,
                         s.company_name,
                         spl.unit_price,
-                        spl.currency
+                        spl.currency,
+                        (CASE WHEN spl.supplier_id = p2.supplier_id THEN true ELSE false END) AS is_preferred
                     FROM supplier_product_links spl
+                    JOIN products p2 ON p2.id = spl.product_id
                     JOIN suppliers s ON s.id = spl.supplier_id AND s.deleted_at IS NULL
                     WHERE spl.unit_price IS NOT NULL
-                    ORDER BY spl.product_id, {norm_spl_price_sql} ASC, spl.updated_at DESC
+                    ORDER BY 
+                        spl.product_id, 
+                        (CASE WHEN spl.supplier_id = p2.supplier_id THEN 0 ELSE 1 END) ASC,
+                        {norm_spl_price_sql} ASC, 
+                        spl.updated_at DESC
                 ) best ON best.product_id = p.id
                 WHERE {where_sql}
                 ORDER BY {order_sql}
@@ -297,6 +311,7 @@ class ProductPriceRepository:
                     primary_link_id=m["primary_link_id"],
                     supplier_count=int(m["supplier_count"] or 0),
                     has_price=m["best_price"] is not None,
+                    is_preferred=bool(m.get("is_preferred", False)),
                 )
             )
 
@@ -328,19 +343,23 @@ class ProductPriceRepository:
                 spl.moq,
                 spl.notes,
                 spl.updated_at,
-                spl.created_at
+                spl.created_at,
+                (CASE WHEN spl.supplier_id = p.supplier_id THEN true ELSE false END) AS is_preferred
             FROM supplier_product_links spl
+            JOIN products p ON p.id = spl.product_id
             JOIN suppliers s ON s.id = spl.supplier_id AND s.deleted_at IS NULL
             LEFT JOIN cities c ON c.id = s.city_id
             LEFT JOIN states st ON st.id = s.state_id
             LEFT JOIN countries co ON co.id = s.country_id
             WHERE spl.product_id = :product_id
-            ORDER BY (CASE 
-                        WHEN UPPER(COALESCE(spl.currency, 'USD')) IN ('CNY', 'RMB') THEN spl.unit_price / :cny_rate
-                        WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'EUR' THEN spl.unit_price / :eur_rate
-                        WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'INR' THEN spl.unit_price / :inr_rate
-                        ELSE spl.unit_price
-                      END) ASC NULLS LAST, spl.updated_at DESC;
+            ORDER BY 
+                (CASE WHEN spl.supplier_id = p.supplier_id THEN 0 ELSE 1 END) ASC,
+                (CASE 
+                    WHEN UPPER(COALESCE(spl.currency, 'USD')) IN ('CNY', 'RMB') THEN spl.unit_price / :cny_rate
+                    WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'EUR' THEN spl.unit_price / :eur_rate
+                    WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'INR' THEN spl.unit_price / :inr_rate
+                    ELSE spl.unit_price
+                  END) ASC NULLS LAST, spl.updated_at DESC;
         """)
 
         res = await self.session.execute(query, {"product_id": str(product_id), "cny_rate": cny_rate, "eur_rate": eur_rate, "inr_rate": inr_rate})
@@ -368,6 +387,7 @@ class ProductPriceRepository:
                     notes=m["notes"],
                     updated_at=m["updated_at"],
                     created_at=m["created_at"],
+                    is_preferred=bool(m.get("is_preferred", False)),
                 )
             )
         return items
@@ -413,7 +433,31 @@ class ProductPriceRepository:
         row = res.fetchone()
         if not row:
             raise NotFoundException("Failed to assign supplier price link")
+
+        if payload.is_preferred:
+            await self.set_preferred_supplier(payload.product_id, payload.supplier_id)
+
         return row[0]
+
+    async def set_preferred_supplier(self, product_id: uuid.UUID, supplier_id: uuid.UUID | None) -> None:
+        """Set or clear the preferred supplier for a product."""
+        query = text("""
+            UPDATE products
+            SET supplier_id = :supplier_id,
+                updated_at = :updated_at
+            WHERE id = :product_id AND deleted_at IS NULL
+            RETURNING id;
+        """)
+        res = await self.session.execute(
+            query,
+            {
+                "product_id": str(product_id),
+                "supplier_id": str(supplier_id) if supplier_id else None,
+                "updated_at": _utcnow(),
+            },
+        )
+        if not res.fetchone():
+            raise NotFoundException("Product not found")
 
     async def update_supplier_price(self, link_id: uuid.UUID, payload: UpdatePricePayload) -> None:
         """Inline update of a supplier link's unit price, currency, moq, or notes."""
@@ -477,4 +521,250 @@ class ProductPriceRepository:
             {"id": str(r[0]), "company_name": r[1], "supplier_type": r[2]}
             for r in res.fetchall()
         ]
+
+    async def get_product_trade_history(self, product_id: uuid.UUID) -> dict[str, Any]:
+        """
+        Fetch full 360-degree trade history:
+        1. Product details & UOM
+        2. Purchase history (Invoices, Quotations, Catalog quotes)
+        3. Sales history (Sales Orders, Buyer inquiries)
+        4. Metrics (latest buy vs latest sell rate, profit margin, volume totals)
+        """
+        from app.common.currency import get_active_rates
+
+        rates = await get_active_rates()
+
+        def to_usd(amount: float | None, curr: str | None) -> float | None:
+            if amount is None:
+                return None
+            c = (curr or "USD").upper().strip()
+            rate = float(rates.get(c, 1.0))
+            return amount / rate if rate > 0 else amount
+
+        # 1. Product metadata
+        prod_query = text("""
+            SELECT p.id, p.product_code, p.product_name, p.product_name_tally, u.code AS uom_code
+            FROM products p
+            LEFT JOIN units_of_measurement u ON u.id = p.uom_id
+            WHERE p.id = :product_id AND p.deleted_at IS NULL;
+        """)
+        prod_res = await self.session.execute(prod_query, {"product_id": str(product_id)})
+        prod_row = prod_res.fetchone()
+        if not prod_row:
+            raise NotFoundException("Product not found")
+
+        prod_m = prod_row._mapping
+
+        # 2. Purchase history
+        # 2a. Vendor Invoices (local_purchases)
+        lp_query = text("""
+            SELECT
+                'invoice' AS record_type,
+                CAST(lpi.id AS text) AS item_id,
+                CAST(lp.id AS text) AS doc_id,
+                lp.invoice_no AS doc_number,
+                CAST(lp.invoice_date AS text) AS record_date,
+                CAST(lp.supplier_id AS text) AS supplier_id,
+                lp.supplier_name,
+                CAST(lpi.quantity AS float) AS quantity,
+                CAST(lpi.unit_rate AS float) AS unit_rate,
+                CAST(lpi.unit_landing_rate AS float) AS unit_landing_rate,
+                lp.currency,
+                CAST(lpi.item_total AS float) AS total_amount,
+                lp.status,
+                lp.remarks
+            FROM local_purchase_items lpi
+            JOIN local_purchases lp ON lp.id = lpi.purchase_id
+            WHERE lpi.product_id = :product_id AND lp.deleted_at IS NULL
+            ORDER BY lp.invoice_date DESC, lpi.created_at DESC;
+        """)
+        lp_res = await self.session.execute(lp_query, {"product_id": str(product_id)})
+        invoices = [dict(r._mapping) for r in lp_res.fetchall()]
+
+        # 2b. Supplier Quotations
+        quote_query = text("""
+            SELECT
+                'quote' AS record_type,
+                CAST(q.id AS text) AS item_id,
+                CAST(q.id AS text) AS doc_id,
+                q.quote_number AS doc_number,
+                CAST(CAST(q.created_at AS date) AS text) AS record_date,
+                CAST(q.supplier_id AS text) AS supplier_id,
+                s.company_name AS supplier_name,
+                CAST(q.quantity AS float) AS quantity,
+                CAST(q.unit_price AS float) AS unit_rate,
+                NULL AS unit_landing_rate,
+                q.currency,
+                CAST(q.total_cost AS float) AS total_amount,
+                CAST(q.status AS text) AS status,
+                q.remarks
+            FROM quotations q
+            JOIN inquiry_items ii ON ii.id = q.inquiry_item_id AND ii.deleted_at IS NULL
+            JOIN suppliers s ON s.id = q.supplier_id AND s.deleted_at IS NULL
+            WHERE ii.product_id = :product_id AND q.deleted_at IS NULL
+            ORDER BY q.created_at DESC;
+        """)
+        quote_res = await self.session.execute(quote_query, {"product_id": str(product_id)})
+        quotes = [dict(r._mapping) for r in quote_res.fetchall()]
+
+        # 2c. Active Catalog Quotes (supplier_product_links)
+        catalog_query = text("""
+            SELECT
+                'catalog' AS record_type,
+                CAST(spl.id AS text) AS item_id,
+                CAST(spl.id AS text) AS doc_id,
+                'CATALOG-QUOTE' AS doc_number,
+                CAST(CAST(spl.updated_at AS date) AS text) AS record_date,
+                CAST(spl.supplier_id AS text) AS supplier_id,
+                s.company_name AS supplier_name,
+                CAST(spl.moq AS float) AS quantity,
+                CAST(spl.unit_price AS float) AS unit_rate,
+                NULL AS unit_landing_rate,
+                spl.currency,
+                NULL AS total_amount,
+                'active' AS status,
+                spl.notes AS remarks
+            FROM supplier_product_links spl
+            JOIN suppliers s ON s.id = spl.supplier_id AND s.deleted_at IS NULL
+            WHERE spl.product_id = :product_id AND spl.unit_price IS NOT NULL
+            ORDER BY spl.updated_at DESC;
+        """)
+        cat_res = await self.session.execute(catalog_query, {"product_id": str(product_id)})
+        catalogs = [dict(r._mapping) for r in cat_res.fetchall()]
+
+        purchases = invoices + quotes + catalogs
+
+        # 3. Sales history
+        # 3a. Commercial Sales Orders
+        so_query = text("""
+            SELECT
+                'order' AS record_type,
+                CAST(soi.id AS text) AS item_id,
+                CAST(so.id AS text) AS doc_id,
+                so.order_no AS doc_number,
+                so.consignment_code,
+                CAST(so.order_date AS text) AS record_date,
+                CAST(so.buyer_id AS text) AS buyer_id,
+                so.buyer_name,
+                CAST(soi.quantity AS float) AS quantity,
+                CAST(soi.unit_rate AS float) AS unit_rate,
+                so.currency,
+                CAST(soi.item_total AS float) AS item_total,
+                so.status,
+                soi.remarks
+            FROM sales_order_items soi
+            JOIN sales_orders so ON so.id = soi.order_id
+            WHERE soi.product_id = :product_id AND so.deleted_at IS NULL
+            ORDER BY so.order_date DESC, soi.created_at DESC;
+        """)
+        so_res = await self.session.execute(so_query, {"product_id": str(product_id)})
+        sales_orders = [dict(r._mapping) for r in so_res.fetchall()]
+
+        # 3b. Buyer Inquiries
+        inq_query = text("""
+            SELECT
+                'inquiry' AS record_type,
+                CAST(ii.id AS text) AS item_id,
+                CAST(i.id AS text) AS doc_id,
+                COALESCE(cc.code, 'INQUIRY') AS doc_number,
+                cc.code AS consignment_code,
+                CAST(CAST(ii.proposed_at AS date) AS text) AS record_date,
+                CAST(i.buyer_id AS text) AS buyer_id,
+                b.company_name AS buyer_name,
+                CAST(ii.quantity AS float) AS quantity,
+                0.0 AS unit_rate,
+                'CNY' AS currency,
+                0.0 AS item_total,
+                CAST(ii.status AS text) AS status,
+                ii.product_specs_remarks AS remarks
+            FROM inquiry_items ii
+            JOIN inquiries i ON i.id = ii.inquiry_id AND i.deleted_at IS NULL
+            LEFT JOIN consignment_codes cc ON cc.id = i.consignment_code_id AND cc.deleted_at IS NULL
+            JOIN buyers b ON b.id = i.buyer_id AND b.deleted_at IS NULL
+            WHERE ii.product_id = :product_id AND ii.deleted_at IS NULL
+            ORDER BY ii.proposed_at DESC;
+        """)
+        inq_res = await self.session.execute(inq_query, {"product_id": str(product_id)})
+        inquiries = [dict(r._mapping) for r in inq_res.fetchall()]
+
+        sales = sales_orders + inquiries
+
+        # 4. Metrics & KPI computation
+        # Latest purchase: prioritize confirmed invoice, fallback to quotation or catalog quote
+        latest_purchase = None
+        for p in purchases:
+            if p.get("unit_rate") and float(p["unit_rate"]) > 0:
+                latest_purchase = p
+                break
+
+        latest_sale = None
+        for s in sales_orders:
+            if s.get("unit_rate") and float(s["unit_rate"]) > 0:
+                latest_sale = s
+                break
+
+        latest_purchase_usd = None
+        if latest_purchase:
+            rate_val = float(latest_purchase.get("unit_landing_rate") or latest_purchase["unit_rate"])
+            latest_purchase_usd = to_usd(rate_val, latest_purchase.get("currency"))
+
+        latest_sales_usd = None
+        if latest_sale:
+            latest_sales_usd = to_usd(float(latest_sale["unit_rate"]), latest_sale.get("currency"))
+
+        estimated_margin_pct = None
+        profit_per_unit = None
+        profit_curr = None
+
+        if latest_purchase and latest_sale and latest_purchase_usd and latest_sales_usd and latest_sales_usd > 0:
+            estimated_margin_pct = round(((latest_sales_usd - latest_purchase_usd) / latest_sales_usd) * 100, 2)
+            if latest_purchase.get("currency") == latest_sale.get("currency"):
+                profit_per_unit = round(float(latest_sale["unit_rate"]) - float(latest_purchase["unit_rate"]), 2)
+                profit_curr = latest_sale.get("currency")
+            else:
+                profit_per_unit = round(latest_sales_usd - latest_purchase_usd, 2)
+                profit_curr = "USD"
+
+        # Attach margin_percent to individual sales order items
+        for s in sales:
+            if s.get("record_type") == "order" and s.get("unit_rate") and float(s["unit_rate"]) > 0 and latest_purchase_usd:
+                s_usd = to_usd(float(s["unit_rate"]), s.get("currency"))
+                if s_usd and s_usd > 0:
+                    s["margin_percent"] = round(((s_usd - latest_purchase_usd) / s_usd) * 100, 1)
+
+        total_purchased_qty = sum(float(inv.get("quantity") or 0) for inv in invoices)
+        total_sold_qty = sum(float(so.get("quantity") or 0) for so in sales_orders)
+
+        metrics = {
+            "latest_purchase_rate": float(latest_purchase["unit_rate"]) if latest_purchase else None,
+            "latest_purchase_currency": latest_purchase.get("currency") if latest_purchase else None,
+            "latest_purchase_landing_rate": float(latest_purchase["unit_landing_rate"]) if latest_purchase and latest_purchase.get("unit_landing_rate") else None,
+            "latest_purchase_date": latest_purchase.get("record_date") if latest_purchase else None,
+            "latest_supplier_name": latest_purchase.get("supplier_name") if latest_purchase else None,
+            "latest_purchase_type": latest_purchase.get("record_type") if latest_purchase else None,
+
+            "latest_sales_rate": float(latest_sale["unit_rate"]) if latest_sale else None,
+            "latest_sales_currency": latest_sale.get("currency") if latest_sale else None,
+            "latest_sales_date": latest_sale.get("record_date") if latest_sale else None,
+            "latest_buyer_name": latest_sale.get("buyer_name") if latest_sale else None,
+
+            "estimated_margin_percent": estimated_margin_pct,
+            "estimated_profit_per_unit": profit_per_unit,
+            "profit_currency": profit_curr,
+
+            "total_purchased_qty": total_purchased_qty,
+            "total_sold_qty": total_sold_qty,
+        }
+
+        return {
+            "product_id": prod_m["id"],
+            "product_code": prod_m["product_code"],
+            "product_name": prod_m["product_name"],
+            "product_name_tally": prod_m["product_name_tally"],
+            "uom_code": prod_m["uom_code"],
+            "metrics": metrics,
+            "purchases": purchases,
+            "sales": sales,
+        }
+
 

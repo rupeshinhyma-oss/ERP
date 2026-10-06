@@ -23,6 +23,7 @@ from app.masters.product_prices.schemas import (
     AssignSupplierPricePayload,
     ProductPriceItem,
     ProductPriceSupplierItem,
+    SetPreferredSupplierPayload,
     UpdatePricePayload,
 )
 from app.masters.product_prices.service import ProductPriceService
@@ -105,6 +106,21 @@ async def get_product_suppliers(
     )
 
 
+@router.get("/{product_id}/history", summary="Get complete purchase and sales trade history for a product")
+async def get_product_trade_history(
+    request: Request,
+    product_id: uuid.UUID,
+    service: ProductPriceService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_permission("product_price.view")),
+) -> dict:
+    history = await service.get_trade_history(product_id)
+    return build_success_response(
+        data=history.model_dump(),
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+
 @router.post("/assign", summary="Assign or update supplier price for a product", status_code=status.HTTP_201_CREATED)
 async def assign_supplier_price(
     request: Request,
@@ -115,6 +131,21 @@ async def assign_supplier_price(
     link_id = await service.assign_price(payload)
     return build_success_response(
         data={"link_id": str(link_id), "message": "Supplier price successfully assigned"},
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.put("/{product_id}/preferred-supplier", summary="Set or clear manually preferred supplier for a product")
+async def set_preferred_supplier(
+    request: Request,
+    product_id: uuid.UUID,
+    payload: SetPreferredSupplierPayload,
+    service: ProductPriceService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_permission("product_price.update")),
+) -> dict:
+    await service.set_preferred_supplier(product_id, payload.supplier_id)
+    return build_success_response(
+        data={"message": "Preferred supplier updated successfully"},
         request_id=getattr(request.state, "request_id", "-"),
     )
 

@@ -40,6 +40,7 @@ from app.suppliers.schemas import (
     SupplierContactRead,
     SupplierContactUpdate,
     SupplierCreate,
+    SupplierCurrentStatusUpdate,
     SupplierGradeUpdate,
     SupplierListItemRead,
     SupplierPotentialUpdate,
@@ -375,6 +376,42 @@ async def update_supplier(
         version=getattr(supplier, "version", None),
         user_id=current_user.id,
         changes=changes,
+    )
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.patch("/{supplier_id}/current-status", summary="Update a supplier's current status (list-view inline dropdown)")
+@router.patch("/{supplier_id}/status", summary="Update a supplier's current status (list-view inline dropdown)")
+async def update_supplier_current_status(
+    supplier_id: uuid.UUID,
+    payload: SupplierCurrentStatusUpdate,
+    request: Request,
+    service: SupplierService = Depends(get_supplier_service),
+    current_user: CurrentUser = Depends(require_permission("supplier.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Document: "Current Status (editable dropdown in list)"."""
+    supplier = await service.update_current_status(supplier_id, payload.current_status)
+    data = await _to_supplier_read(service, supplier)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        entity_id=supplier.id,
+        description=f"Updated current status for supplier {supplier.company_name!r}.",
+        new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_supplier_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="supplier.updated",
+        supplier_id=supplier.id,
+        version=getattr(supplier, "version", None),
+        user_id=current_user.id,
+        changes={"current_status": payload.model_dump(mode="json").get("current_status")},
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 

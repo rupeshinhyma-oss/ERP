@@ -182,15 +182,13 @@ class ProductCategoryService:
         categories = await self.repository.list_all()
         rows = [
             {
-                "id": str(c.id),
-                "code": c.code,
-                "name": c.name,
-                "description": c.description,
-                "status": c.status.value,
-                "created_at": c.created_at.isoformat(),
-                "updated_at": c.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "Category Name": c.name,
+                "Code": c.code or "",
+                "Description": c.description or "",
+                "Status": c.status.value.capitalize(),
             }
-            for c in categories
+            for idx, c in enumerate(categories)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)

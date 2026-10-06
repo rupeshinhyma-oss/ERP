@@ -31,8 +31,10 @@ from app.masters.hsn.models import HsnCode
 from app.masters.products.models import Product
 from app.masters.uom.models import UnitOfMeasurement
 from app.planning.models import PlanningCell, PlanningColumn, PlanningRow, PlanningSheet
+from app.purchases.local.models import LocalPurchase, LocalPurchaseItem
 from app.sales.models import SaleOrder, SaleOrderItem
 from app.sales.repository import SaleRepository
+from app.suppliers.models import Supplier, SupplierProductLink
 from app.sales.schemas import (
     ExtractedConsignmentItem,
     PlanningConsignmentColumnResponse,
@@ -298,6 +300,66 @@ class SaleService:
             for h in q_hsn.scalars().all():
                 hsn_map[h.id] = h.code
 
+        # Cache UOM names
+        uom_ids = [p.uom_id for p in prod_map.values() if p.uom_id]
+        uom_map: dict[uuid.UUID, str] = {}
+        if uom_ids:
+            q_uom = await self.session.execute(
+                select(UnitOfMeasurement).where(UnitOfMeasurement.id.in_(uom_ids))
+            )
+            for u in q_uom.scalars().all():
+                uom_map[u.id] = u.short_name or u.code or u.name or "NOS"
+
+        # Fetch suppliers & purchase rates from confirmed Local Purchase (Primary Source of Truth)
+        # NOTE: Local Purchase Unit Rate is the BASIC price (excluding VAT); VAT is added on top there.
+        # So the CI "Unit Price(RMB) Including VAT" = unit_rate x (1 + LP vat_rate / 100).
+        lp_supplier_map: dict[uuid.UUID, tuple[uuid.UUID, str, float]] = {}
+        lp_vat_map: dict[uuid.UUID, float] = {}
+        if prod_ids:
+            q_lp = await self.session.execute(
+                select(
+                    LocalPurchaseItem.product_id,
+                    LocalPurchase.supplier_id,
+                    LocalPurchase.supplier_name,
+                    LocalPurchaseItem.unit_rate,
+                    LocalPurchaseItem.vat_rate,
+                )
+                .join(LocalPurchase, LocalPurchaseItem.purchase_id == LocalPurchase.id)
+                .where(
+                    LocalPurchaseItem.product_id.in_(prod_ids),
+                    LocalPurchase.status == "Confirmed",
+                    LocalPurchase.deleted_at.is_(None),
+                )
+                .order_by(LocalPurchase.invoice_date.desc(), LocalPurchaseItem.created_at.desc())
+            )
+            for pid, s_id, s_name, u_rate, lp_vat in q_lp.all():
+                if pid not in lp_supplier_map:
+                    vat_pct = float(lp_vat) if lp_vat is not None else 13.0
+                    rate_with_vat = round(float(u_rate or 0.0) * (1.0 + vat_pct / 100.0), 2)
+                    lp_supplier_map[pid] = (s_id, s_name, rate_with_vat)
+                    lp_vat_map[pid] = vat_pct
+
+            # Fallback to Product Prices (supplier_product_links) for any products not in local purchase
+            missing_spl_ids = [pid for pid in prod_ids if pid not in lp_supplier_map]
+            if missing_spl_ids:
+                q_spl = await self.session.execute(
+                    select(
+                        SupplierProductLink.product_id,
+                        SupplierProductLink.supplier_id,
+                        Supplier.company_name,
+                        SupplierProductLink.unit_price,
+                    )
+                    .join(Supplier, SupplierProductLink.supplier_id == Supplier.id)
+                    .where(
+                        SupplierProductLink.product_id.in_(missing_spl_ids),
+                        Supplier.deleted_at.is_(None),
+                    )
+                    .order_by(SupplierProductLink.unit_price.asc())
+                )
+                for pid, s_id, s_name, u_rate in q_spl.all():
+                    if pid not in lp_supplier_map:
+                        lp_supplier_map[pid] = (s_id, s_name, float(u_rate or 0.0))
+
         # 6. Build extracted items payload
         extracted_items: list[ExtractedConsignmentItem] = []
         total_quantity = 0.0
@@ -310,8 +372,40 @@ class SaleService:
             prod_name = prod.product_name if prod else (r.label or "Custom Machine/Item")
             prod_code = prod.product_code if prod else None
             hsn = hsn_map.get(prod.hsn_id) if (prod and prod.hsn_id) else None
-            unit_rate = float(prod.standard_cost) if (prod and prod.standard_cost) else 0.0
-            vat_rate = float(prod.refund_vat_percent) if (prod and prod.refund_vat_percent is not None) else 0.0
+            uom_name = uom_map.get(prod.uom_id, "NOS") if (prod and prod.uom_id) else "NOS"
+
+            # Supplier & RMB Unit Price with VAT from Local Purchase
+            sup_info = lp_supplier_map.get(prod.id) if prod else None
+            sup_id = sup_info[0] if sup_info else None
+            sup_name = sup_info[1] if sup_info else None
+            unit_price_rmb_with_vat = (
+                sup_info[2]
+                if sup_info
+                else (float(prod.standard_cost) if prod and prod.standard_cost else 0.0)
+            )
+
+            # Refund VAT rate (use the Local Purchase VAT % when the price came from LP,
+            # so "Excluding VAT" equals the LP basic Unit Rate exactly)
+            if prod and prod.id in lp_vat_map:
+                vat_rate = lp_vat_map[prod.id]
+            else:
+                vat_rate = float(prod.refund_vat_percent) if (prod and prod.refund_vat_percent is not None) else 13.0
+            divisor = 1.0 + (vat_rate / 100.0)
+            unit_price_rmb_ex_vat = round(unit_price_rmb_with_vat / divisor, 2) if divisor > 0 else unit_price_rmb_with_vat
+
+            # Profit %
+            profit_pct = 3.0
+            price_with_profit_rmb = round(unit_price_rmb_ex_vat * (1.0 + profit_pct / 100.0), 2)
+            fob_price_usd = round(price_with_profit_rmb / 6.70, 4) if price_with_profit_rmb > 0 else 0.0
+
+            # CBM
+            cbm_unit = float(prod.packaging_unit_cbm) if (prod and prod.packaging_unit_cbm) else 0.0
+            if cbm_unit == 0.0 and prod and prod.length and prod.width and prod.height:
+                cbm_unit = round((float(prod.length) * float(prod.width) * float(prod.height)) / 1_000_000.0, 6)
+            pack_qty = float(prod.packaging_quantity) if (prod and prod.packaging_quantity and prod.packaging_quantity > 0) else 1.0
+            boxes = math.ceil(qty / pack_qty) if pack_qty > 0 else qty
+            total_cbm = round(cbm_unit * boxes, 4)
+            total_sup_amt_rmb = round(unit_price_rmb_with_vat * qty, 2)
 
             rmk_val = cell_val_map.get((r.id, remarks_col.id)) if remarks_col else None
 
@@ -321,11 +415,23 @@ class SaleService:
                     product_name=prod_name,
                     product_code=prod_code,
                     hsn_code=hsn,
+                    uom=uom_name,
                     quantity=qty,
-                    unit_rate=unit_rate,
+                    unit_rate=fob_price_usd,
                     vat_rate=vat_rate,
                     planning_row_id=r.id,
                     remarks=rmk_val,
+                    supplier_id=sup_id,
+                    supplier_name=sup_name,
+                    unit_price_rmb_with_vat=unit_price_rmb_with_vat,
+                    unit_price_rmb_ex_vat=unit_price_rmb_ex_vat,
+                    profit_percent=profit_pct,
+                    fob_price_usd=fob_price_usd,
+                    freight_unit_usd=0.0,
+                    cfr_price_usd=fob_price_usd,
+                    cbm_per_unit=cbm_unit,
+                    total_cbm=total_cbm,
+                    total_supplier_amount_rmb=total_sup_amt_rmb,
                 )
             )
 
@@ -339,6 +445,129 @@ class SaleService:
             total_quantity=round(total_quantity, 2),
             items=extracted_items,
         )
+
+    async def get_product_costing_info(
+        self,
+        product_id: uuid.UUID,
+        quantity: float = 1.0,
+    ) -> dict[str, Any]:
+        """
+        Fetch supplier, factory purchase price (with VAT in RMB), CBM, and HSN refund VAT.
+        Primary source of truth is the latest confirmed Local Purchase invoice!
+        Fallback is Product Prices preferred quotation.
+        """
+        prod = await self.session.get(Product, product_id)
+        if not prod:
+            raise NotFoundException(f"Product {product_id} not found.")
+
+        # 1. Primary Source of Truth: Confirmed Local Purchase
+        q_lp = await self.session.execute(
+            select(
+                LocalPurchaseItem,
+                LocalPurchase.supplier_id,
+                LocalPurchase.supplier_name,
+            )
+            .join(LocalPurchase, LocalPurchaseItem.purchase_id == LocalPurchase.id)
+            .where(
+                LocalPurchaseItem.product_id == product_id,
+                LocalPurchase.status == "Confirmed",
+                LocalPurchase.deleted_at.is_(None),
+            )
+            .order_by(LocalPurchase.invoice_date.desc(), LocalPurchaseItem.created_at.desc())
+            .limit(1)
+        )
+        lp_row = q_lp.first()
+
+        supplier_id = None
+        supplier_name = None
+        unit_price_rmb_with_vat = 0.0
+        lp_vat_pct: float | None = None
+
+        if lp_row:
+            supplier_id = lp_row[1]
+            supplier_name = lp_row[2]
+            # LP Unit Rate is BASIC (excl. VAT) -> gross up to get "Including VAT"
+            lp_vat_pct = float(lp_row[0].vat_rate) if lp_row[0].vat_rate is not None else 13.0
+            unit_price_rmb_with_vat = round(float(lp_row[0].unit_rate or 0.0) * (1.0 + lp_vat_pct / 100.0), 2)
+        else:
+            # Fallback to Product Prices (supplier_product_links)
+            q_spl = await self.session.execute(
+                select(SupplierProductLink, Supplier.company_name)
+                .join(Supplier, SupplierProductLink.supplier_id == Supplier.id)
+                .where(
+                    SupplierProductLink.product_id == product_id,
+                    Supplier.deleted_at.is_(None),
+                )
+                .order_by(SupplierProductLink.unit_price.asc())
+                .limit(1)
+            )
+            spl_row = q_spl.first()
+            if spl_row:
+                supplier_id = spl_row[0].supplier_id
+                supplier_name = spl_row[1]
+                unit_price_rmb_with_vat = float(spl_row[0].unit_price or 0.0)
+            elif prod.standard_cost:
+                unit_price_rmb_with_vat = float(prod.standard_cost or 0.0)
+
+        # 2. HSN and Refund VAT %
+        refund_vat_percent = float(prod.refund_vat_percent) if prod.refund_vat_percent is not None else 13.0
+        hsn_code_str = None
+        if prod.hsn_id:
+            hsn_obj = await self.session.get(HsnCode, prod.hsn_id)
+            if hsn_obj:
+                hsn_code_str = hsn_obj.code
+                if hsn_obj.refund_vat_percent is not None and hsn_obj.refund_vat_percent > 0:
+                    refund_vat_percent = float(hsn_obj.refund_vat_percent)
+        if lp_vat_pct is not None:
+            # Price came from Local Purchase: divide by the same VAT % it was grossed up with
+            refund_vat_percent = lp_vat_pct
+
+        # UOM
+        uom_str = "NOS"
+        if prod.uom_id:
+            uom_obj = await self.session.get(UnitOfMeasurement, prod.uom_id)
+            if uom_obj:
+                uom_str = uom_obj.short_name or uom_obj.code or uom_obj.name or "NOS"
+
+        # 3. Price Excluding VAT
+        divisor = 1.0 + (refund_vat_percent / 100.0)
+        unit_price_rmb_ex_vat = round(unit_price_rmb_with_vat / divisor, 2) if divisor > 0 else unit_price_rmb_with_vat
+
+        # 4. Packaging CBM
+        cbm_unit = float(prod.packaging_unit_cbm) if prod.packaging_unit_cbm else 0.0
+        if cbm_unit == 0.0 and prod.length and prod.width and prod.height:
+            cbm_unit = round((float(prod.length) * float(prod.width) * float(prod.height)) / 1_000_000.0, 6)
+
+        pack_qty = float(prod.packaging_quantity) if (prod.packaging_quantity and prod.packaging_quantity > 0) else 1.0
+        boxes = math.ceil(quantity / pack_qty) if pack_qty > 0 else quantity
+        total_cbm = round(cbm_unit * boxes, 4)
+
+        # 5. Default profit % and price with profit
+        profit_percent = 3.0
+        price_with_profit_rmb = round(unit_price_rmb_ex_vat * (1.0 + (profit_percent / 100.0)), 2)
+        fob_price_usd = round(price_with_profit_rmb / 6.70, 4) if price_with_profit_rmb > 0 else 0.0
+        total_supplier_amount_rmb = round(unit_price_rmb_with_vat * quantity, 2)
+
+        return {
+            "product_id": str(prod.id),
+            "product_name": prod.product_name,
+            "product_code": prod.product_code,
+            "hsn_code": hsn_code_str,
+            "uom": uom_str,
+            "supplier_id": str(supplier_id) if supplier_id else None,
+            "supplier_name": supplier_name,
+            "unit_price_rmb_with_vat": unit_price_rmb_with_vat,
+            "unit_price_rmb_ex_vat": unit_price_rmb_ex_vat,
+            "refund_vat_percent": refund_vat_percent,
+            "profit_percent": profit_percent,
+            "price_with_profit_rmb": price_with_profit_rmb,
+            "fob_price_usd": fob_price_usd,
+            "freight_unit_usd": 0.0,
+            "cfr_price_usd": fob_price_usd,
+            "cbm_per_unit": cbm_unit,
+            "total_cbm": total_cbm,
+            "total_supplier_amount_rmb": total_supplier_amount_rmb,
+        }
 
     # -----------------------------------------------------------------------
     # Sale Order CRUD & Calculations
@@ -384,6 +613,17 @@ class SaleService:
                     item_total=item_tot,
                     planning_row_id=it.planning_row_id,
                     remarks=it.remarks,
+                    supplier_id=it.supplier_id,
+                    supplier_name=it.supplier_name,
+                    unit_price_rmb_with_vat=float(it.unit_price_rmb_with_vat or 0.0),
+                    unit_price_rmb_ex_vat=float(it.unit_price_rmb_ex_vat or 0.0),
+                    profit_percent=float(it.profit_percent if it.profit_percent is not None else 3.0),
+                    fob_price_usd=float(it.fob_price_usd or 0.0),
+                    freight_unit_usd=float(it.freight_unit_usd or 0.0),
+                    cfr_price_usd=float(it.cfr_price_usd or 0.0),
+                    cbm_per_unit=float(it.cbm_per_unit or 0.0),
+                    total_cbm=float(it.total_cbm or 0.0),
+                    total_supplier_amount_rmb=float(it.total_supplier_amount_rmb or 0.0),
                 )
             )
 
@@ -412,6 +652,11 @@ class SaleService:
             transporter_name=payload.transporter_name,
             port_of_loading=payload.port_of_loading,
             port_of_discharge=payload.port_of_discharge,
+            ocean_freight_usd=float(payload.ocean_freight_usd or 0.0),
+            local_charges_coc_usd=float(payload.local_charges_coc_usd or 0.0),
+            usd_exchange_rate=float(payload.usd_exchange_rate or 6.70),
+            profit_percent=float(payload.profit_percent if payload.profit_percent is not None else 3.0),
+            total_container_cbm=float(payload.total_container_cbm or 0.0),
             remarks=payload.remarks,
             created_by_id=getattr(current_user, "id", None),
             created_by_name=getattr(current_user, "name", getattr(current_user, "username", "Admin")),
@@ -466,6 +711,17 @@ class SaleService:
         if payload.remarks is not None:
             order.remarks = payload.remarks
 
+        if payload.ocean_freight_usd is not None:
+            order.ocean_freight_usd = float(payload.ocean_freight_usd)
+        if payload.local_charges_coc_usd is not None:
+            order.local_charges_coc_usd = float(payload.local_charges_coc_usd)
+        if payload.usd_exchange_rate is not None:
+            order.usd_exchange_rate = float(payload.usd_exchange_rate)
+        if payload.profit_percent is not None:
+            order.profit_percent = float(payload.profit_percent)
+        if payload.total_container_cbm is not None:
+            order.total_container_cbm = float(payload.total_container_cbm)
+
         if payload.items is not None:
             # Replace line items
             order.items.clear()
@@ -502,6 +758,17 @@ class SaleService:
                         item_total=item_tot,
                         planning_row_id=it.planning_row_id,
                         remarks=it.remarks,
+                        supplier_id=it.supplier_id,
+                        supplier_name=it.supplier_name,
+                        unit_price_rmb_with_vat=float(it.unit_price_rmb_with_vat or 0.0),
+                        unit_price_rmb_ex_vat=float(it.unit_price_rmb_ex_vat or 0.0),
+                        profit_percent=float(it.profit_percent if it.profit_percent is not None else 3.0),
+                        fob_price_usd=float(it.fob_price_usd or 0.0),
+                        freight_unit_usd=float(it.freight_unit_usd or 0.0),
+                        cfr_price_usd=float(it.cfr_price_usd or 0.0),
+                        cbm_per_unit=float(it.cbm_per_unit or 0.0),
+                        total_cbm=float(it.total_cbm or 0.0),
+                        total_supplier_amount_rmb=float(it.total_supplier_amount_rmb or 0.0),
                     )
                 )
 
@@ -677,15 +944,15 @@ class SaleService:
             unit_net = float(product.packaging_net_weight or product.weight or 0.0) if product else 0.0
             unit_gr = float(product.packaging_gross_weight or product.weight or 0.0) if product else 0.0
 
-            line_net_wt = round(qty * unit_net, 2) if unit_net > 0 else round(qty * 1.5, 2)
-            line_gr_wt = round(qty * unit_gr, 2) if unit_gr > 0 else round(qty * 1.8, 2)
+            line_net_wt = round(qty * unit_net, 2) if unit_net > 0 else 0.0
+            line_gr_wt = round(qty * unit_gr, 2) if unit_gr > 0 else 0.0
             tot_net_wt += line_net_wt
             tot_gr_wt += line_gr_wt
 
             line_cbm = round(float(product.packaging_unit_cbm or 0.0) * packages, 4) if product and product.packaging_unit_cbm else 0.0
             tot_cbm += line_cbm
 
-            hs_code = item.hsn_code or (product.barcode if product else None) or "8422.30.00"
+            hs_code = item.hsn_code or (product.barcode if product else None) or ""
 
             items_data.append({
                 "sr_no": idx,
@@ -703,15 +970,73 @@ class SaleService:
                 "net_weight": line_net_wt,
                 "gross_weight": line_gr_wt,
                 "cbm": line_cbm,
+                # CI Costing Engine details
+                "supplier_id": str(item.supplier_id) if item.supplier_id else None,
+                "supplier_name": item.supplier_name or (product.supplier_name if product else None) or "—",
+                "unit_price_rmb_with_vat": float(item.unit_price_rmb_with_vat or unit_rmb),
+                "unit_price_rmb_ex_vat": float(item.unit_price_rmb_ex_vat or round(unit_rmb / 1.13, 2)),
+                "profit_percent": float(item.profit_percent if item.profit_percent is not None else 3.0),
+                "fob_price_usd": float(item.fob_price_usd or 0.0),
+                "freight_unit_usd": float(item.freight_unit_usd or 0.0),
+                "cfr_price_usd": float(item.cfr_price_usd or unit_usd),
+                "cbm_per_unit": float(item.cbm_per_unit or 0.0),
+                "total_cbm": float(item.total_cbm or line_cbm),
+                "total_supplier_amount_rmb": float(item.total_supplier_amount_rmb or (float(item.unit_price_rmb_with_vat or unit_rmb) * qty)),
             })
 
-        buyer_address = (buyer.address if buyer and buyer.address else "") or (order.buyer_branch_name or "Maharashtra, India")
-        if buyer and buyer.tax_id_number:
-            buyer_address += f"\nGSTIN/UIN: {buyer.tax_id_number}"
+        # Recipient address resolution (No hardcoded "Maharashtra, India" dummy fallback)
+        buyer_address = ""
+        if buyer and buyer.address and buyer.address.strip():
+            buyer_address = buyer.address.strip()
+        elif order.buyer_branch_name and order.buyer_branch_name.strip():
+            buyer_address = order.buyer_branch_name.strip()
+        elif buyer and buyer.city and buyer.city.strip():
+            buyer_address = buyer.city.strip()
 
-        buyer_contact = (buyer.contact_full_name if buyer and buyer.contact_full_name else None) or "Mr. Prathamesh Bangar"
-        buyer_phone = (buyer.contact_calling_number if buyer and buyer.contact_calling_number else None) or "+91 95619 14519"
-        buyer_email = (buyer.emails[0].email if buyer and buyer.emails else None) or "sales@inhyma.com"
+        if buyer and buyer.tax_id_number:
+            if buyer_address:
+                buyer_address += f"\nGSTIN/UIN: {buyer.tax_id_number}"
+            else:
+                buyer_address = f"GSTIN/UIN: {buyer.tax_id_number}"
+
+        # Contact person: primary or secondary contacts
+        buyer_contact = ""
+        if buyer:
+            if buyer.contact_full_name and buyer.contact_full_name.strip():
+                buyer_contact = buyer.contact_full_name.strip()
+            elif buyer.contacts:
+                for c in buyer.contacts:
+                    c_name = getattr(c, "person_name", None) or getattr(c, "contact_person_name", None)
+                    if c_name and c_name.strip():
+                        salutation = getattr(c, "salutation", "") or ""
+                        buyer_contact = f"{salutation} {c_name}".strip()
+                        break
+
+        # Phone: primary or secondary contacts
+        buyer_phone = ""
+        if buyer:
+            if buyer.contact_calling_number and buyer.contact_calling_number.strip():
+                buyer_phone = buyer.contact_calling_number.strip()
+            elif buyer.contacts:
+                for c in buyer.contacts:
+                    c_phone = getattr(c, "calling_number", None) or getattr(c, "whatsapp_number", None)
+                    if c_phone and c_phone.strip():
+                        buyer_phone = c_phone.strip()
+                        break
+
+        # Email: primary emails or contact emails
+        buyer_email = ""
+        if buyer:
+            if buyer.emails:
+                for em in buyer.emails:
+                    if em.email and em.email.strip():
+                        buyer_email = em.email.strip()
+                        break
+            if not buyer_email and buyer.contacts:
+                for c in buyer.contacts:
+                    if getattr(c, "email", None) and c.email.strip():
+                        buyer_email = c.email.strip()
+                        break
 
         invoice_no = order.consignment_code or f"YL-EXP{order.order_date.year}-{order.order_no.split('/')[-1]}"
 
@@ -734,7 +1059,7 @@ class SaleService:
                 "email": "sales.yinglima@gmail.com",
             },
             "recipient": {
-                "company_name": (buyer.company_name if buyer else order.buyer_name) or "INHYMA SOLUTIONS LLP",
+                "company_name": (buyer.company_name if buyer else order.buyer_name) or "",
                 "address": buyer_address,
                 "contact_person": buyer_contact,
                 "phone": buyer_phone,
@@ -758,6 +1083,13 @@ class SaleService:
                 "net_weight": round(tot_net_wt, 2),
                 "gross_weight": round(tot_gr_wt, 2),
                 "cbm": round(tot_cbm, 4),
+                "costing": {
+                    "ocean_freight_usd": float(order.ocean_freight_usd or 0.0),
+                    "local_charges_coc_usd": float(order.local_charges_coc_usd or 0.0),
+                    "usd_exchange_rate": float(order.usd_exchange_rate or 6.70),
+                    "profit_percent": float(order.profit_percent if order.profit_percent is not None else 3.0),
+                    "total_container_cbm": float(order.total_container_cbm or tot_cbm),
+                },
             },
         }
 
@@ -892,44 +1224,119 @@ class SaleService:
                 ws_ci.cell(r_num, c).border = b_all
 
         # Row 13: Shipment Information Bar
-        ws_ci.merge_cells("A13:G13")
-        ws_ci["A13"] = "SHIPMENT & PRODUCT ITEMS"
+        ws_ci.merge_cells("A13:K13")
+        ws_ci["A13"] = "Shipment Information"
         ws_ci["A13"].font = f_bold
         ws_ci["A13"].fill = fill_head
-        for c in range(1, 8):
+        for c in range(1, 12):
             ws_ci.cell(13, c).border = b_all
 
-        # Row 14: Table Headers
-        ci_headers = ["Sr.No", "Description", "China HS Code", "UOM", "Quantity", "Unit Price (USD)", "Total Amount (USD)"]
+        costing_params = data.get("totals", {}).get("costing", {})
+        ocean_fr = float(costing_params.get("ocean_freight_usd") or 0.0)
+        local_coc = float(costing_params.get("local_charges_coc_usd") or 0.0)
+        usd_rate = float(costing_params.get("usd_exchange_rate") or 6.70)
+        profit_pct = float(costing_params.get("profit_percent") if costing_params.get("profit_percent") is not None else 3.0)
+
+        # Row 14: Table Headers (All 16 columns matching official Yinglima CI template)
+        ci_headers = [
+            "Sr.No",
+            "Description ",
+            "HS CODE AS PER CHINA",
+            "UOM",
+            "Quantity",
+            "Unit Price\n(USD)",
+            "Total Amount\n(USD)",
+            "Unit Price(RMB) Including VAT",
+            "Unit Price(RMB) Excluding VAT",
+            f"Including Profit {int(profit_pct) if profit_pct.is_integer() else profit_pct}%",
+            f"FOB PRICE\n(USD Conversion @{usd_rate})",
+            "Freight, Local charges,COC",
+            "CFR Price/Unit",
+            "Supplier",
+            "Total CBM",
+            "Total Supplier Amount",
+        ]
         for c_idx, h in enumerate(ci_headers, start=1):
             cell = ws_ci.cell(14, c_idx, h)
             cell.font = f_header_white
             cell.fill = fill_blue_head
             cell.alignment = al_center
             cell.border = b_all
-        ws_ci.row_dimensions[14].height = 25
+        ws_ci.row_dimensions[14].height = 28
 
         curr_row = 15
         start_data_row = 15
         for item in data["items"]:
+            # Col 1: Sr.No
             ws_ci.cell(curr_row, 1, item["sr_no"]).alignment = al_center
+            # Col 2: Description
             ws_ci.cell(curr_row, 2, item["description"]).alignment = al_left
+            # Col 3: HS Code
             ws_ci.cell(curr_row, 3, item["hs_code"]).alignment = al_center
+            # Col 4: UOM
             ws_ci.cell(curr_row, 4, item["uom"]).alignment = al_center
 
+            # Col 5: Quantity
             c_qty = ws_ci.cell(curr_row, 5, item["quantity"])
             c_qty.alignment = al_right
             c_qty.number_format = "#,##0"
 
-            c_rate = ws_ci.cell(curr_row, 6, item["unit_price_usd"])
+            # Col 6: Unit Price (USD) = M{curr_row}
+            c_rate = ws_ci.cell(curr_row, 6, f"=M{curr_row}")
             c_rate.alignment = al_right
             c_rate.number_format = "$#,##0.00"
 
-            c_tot = ws_ci.cell(curr_row, 7, f"=E{curr_row}*F{curr_row}")
+            # Col 7: Total Amount (USD) = F{curr_row}*E{curr_row}
+            c_tot = ws_ci.cell(curr_row, 7, f"=F{curr_row}*E{curr_row}")
             c_tot.alignment = al_right
             c_tot.number_format = "$#,##0.00"
 
-            for c in range(1, 8):
+            # Col 8: Unit Price(RMB) Including VAT
+            c_rmb_vat = ws_ci.cell(curr_row, 8, item.get("unit_price_rmb_with_vat", item.get("unit_price_rmb", 0.0)))
+            c_rmb_vat.alignment = al_right
+            c_rmb_vat.number_format = "#,##0.00"
+
+            # Col 9: Unit Price(RMB) Excluding VAT = H{curr_row}/1.13
+            c_rmb_ex = ws_ci.cell(curr_row, 9, f"=H{curr_row}/1.13")
+            c_rmb_ex.alignment = al_right
+            c_rmb_ex.number_format = "#,##0.00"
+
+            # Col 10: Including Profit = (I{curr_row} * (1 + profit_pct/100))
+            p_mult = round(1.0 + (profit_pct / 100.0), 4)
+            c_profit = ws_ci.cell(curr_row, 10, f"=(I{curr_row}*{p_mult})")
+            c_profit.alignment = al_right
+            c_profit.number_format = "#,##0.00"
+
+            # Col 11: FOB Price USD = J{curr_row} / usd_rate
+            c_fob = ws_ci.cell(curr_row, 11, f"=J{curr_row}/{usd_rate}")
+            c_fob.alignment = al_right
+            c_fob.number_format = "$#,##0.000"
+
+            # Col 12: Freight, Local charges, COC = ($L$13*O{curr_row})/E{curr_row}
+            c_fr = ws_ci.cell(curr_row, 12, f"=($L$13*O{curr_row})/E{curr_row}")
+            c_fr.alignment = al_right
+            c_fr.number_format = "$#,##0.000"
+
+            # Col 13: CFR Price/Unit = ROUNDUP(L{curr_row}+K{curr_row},2)
+            c_cfr = ws_ci.cell(curr_row, 13, f"=ROUNDUP(L{curr_row}+K{curr_row},2)")
+            c_cfr.alignment = al_right
+            c_cfr.number_format = "$#,##0.00"
+
+            # Col 14: Supplier
+            c_sup = ws_ci.cell(curr_row, 14, item.get("supplier_name", "—"))
+            c_sup.alignment = al_center
+
+            # Col 15: Total CBM
+            c_cbm = ws_ci.cell(curr_row, 15, item.get("total_cbm", item.get("cbm", 0.0)))
+            c_cbm.alignment = al_right
+            c_cbm.number_format = "#,##0.000"
+
+            # Col 16: Total Supplier Amount = H{curr_row}*E{curr_row}
+            c_sup_amt = ws_ci.cell(curr_row, 16, f"=H{curr_row}*E{curr_row}")
+            c_sup_amt.alignment = al_right
+            c_sup_amt.number_format = "#,##0.00"
+
+            for c in range(1, 17):
                 cell = ws_ci.cell(curr_row, c)
                 cell.font = f_regular
                 cell.border = b_all
@@ -937,6 +1344,13 @@ class SaleService:
             curr_row += 1
 
         end_data_row = curr_row - 1
+        total_row = curr_row
+
+        # Set cell L13 formula with total container CBM cell reference:
+        ws_ci["L13"] = f"=({ocean_fr}+{local_coc})/O{total_row}"
+        ws_ci["L13"].font = f_bold
+        ws_ci["L13"].alignment = al_right
+        ws_ci["L13"].border = b_all
 
         # Total Row
         ws_ci.merge_cells(f"A{curr_row}:D{curr_row}")
@@ -956,7 +1370,22 @@ class SaleService:
         c_sum_tot.alignment = al_right
         c_sum_tot.number_format = "$#,##0.00"
 
-        for c in range(1, 8):
+        for c in range(8, 15):
+            ws_ci.cell(curr_row, c).border = b_all
+
+        # Total CBM in Col 15
+        c_sum_cbm = ws_ci.cell(curr_row, 15, f"=SUM(O{start_data_row}:O{end_data_row})")
+        c_sum_cbm.font = f_header
+        c_sum_cbm.alignment = al_right
+        c_sum_cbm.number_format = "#,##0.000"
+
+        # Total Supplier Amount in Col 16
+        c_sum_sup = ws_ci.cell(curr_row, 16, f"=SUM(P{start_data_row}:P{end_data_row})")
+        c_sum_sup.font = f_header
+        c_sum_sup.alignment = al_right
+        c_sum_sup.number_format = "#,##0.00"
+
+        for c in range(1, 17):
             cell = ws_ci.cell(curr_row, c)
             cell.fill = fill_yellow
             cell.border = b_all

@@ -57,8 +57,6 @@ async def list_local_purchases(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     search: str | None = Query(default=None),
-    organization_id: uuid.UUID | None = Query(default=None),
-    branch_id: str | None = Query(default=None),
     supplier_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
     currency: str | None = Query(default=None),
@@ -70,8 +68,6 @@ async def list_local_purchases(
     offset = (page - 1) * page_size
     records, total = await service.repo.list_with_filters(
         search=search,
-        organization_id=organization_id,
-        branch_id=branch_id,
         supplier_id=supplier_id,
         status=status,
         currency=currency,
@@ -85,10 +81,6 @@ async def list_local_purchases(
     for r in records:
         s = LocalPurchaseSummaryResponse(
             id=r.id,
-            organization_id=r.organization_id,
-            organization_name=r.organization_name,
-            branch_id=r.branch_id,
-            branch_name=r.branch_name,
             supplier_id=r.supplier_id,
             supplier_name=r.supplier_name,
             invoice_no=r.invoice_no,
@@ -184,8 +176,6 @@ async def extract_bill(
 @router.get("/export", summary="Export local purchases to Excel (.xlsx)")
 async def export_local_purchases(
     search: str | None = Query(default=None),
-    organization_id: uuid.UUID | None = Query(default=None),
-    branch_id: str | None = Query(default=None),
     supplier_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
     currency: str | None = Query(default=None),
@@ -196,8 +186,6 @@ async def export_local_purchases(
 ) -> Response:
     records, _ = await service.repo.list_with_filters(
         search=search,
-        organization_id=organization_id,
-        branch_id=branch_id,
         supplier_id=supplier_id,
         status=status,
         currency=currency,
@@ -218,7 +206,7 @@ async def export_local_purchases(
 @router.get("/planning-items", summary="Fetch planned items from Shipment Planning for an Organization, Branch, and Supplier")
 async def get_planning_items(
     request: Request,
-    organization_id: uuid.UUID = Query(..., description="Organization UUID"),
+    organization_id: uuid.UUID | None = Query(default=None, description="Organization UUID"),
     branch_id: str | None = Query(default=None, description="Branch identifier"),
     branch_name: str | None = Query(default=None, description="Branch Name"),
     supplier_name: str | None = Query(default=None, description="Supplier company name"),

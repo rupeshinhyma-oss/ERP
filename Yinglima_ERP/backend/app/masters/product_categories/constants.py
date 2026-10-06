@@ -6,4 +6,4 @@ MODULE_NAME = "product_categories"
 DROPDOWN_CACHE_NAME = "product_categories"
 
 IMPORT_HEADERS = ["code", "name", "description", "status"]
-EXPORT_HEADERS = ["id", "code", "name", "description", "status", "created_at", "updated_at"]
+EXPORT_HEADERS = ["Sr. No.", "Category Name", "Code", "Description", "Status"]

@@ -9,9 +9,9 @@ export interface LocalPurchaseItem {
   product_name: string;
   product_code?: string | null;
   hsn_code?: string | null;
-  quantity: number;
-  unit_rate: number; // in RMB
-  vat_rate: number; // default 13%
+  quantity: number | "";
+  unit_rate: number | ""; // in RMB
+  vat_rate: number | ""; // default 13%
   item_total: number; // Basic total (qty * unit_rate)
   vat_amount: number;
   expense_per_unit: number; // Value-Based allocated expense per unit
@@ -24,10 +24,6 @@ export interface LocalPurchaseItem {
 
 export interface LocalPurchaseSummary {
   id: string;
-  organization_id: string;
-  organization_name: string;
-  branch_id: string;
-  branch_name: string;
   supplier_id: string;
   supplier_name: string;
   invoice_no: string;
@@ -58,10 +54,6 @@ export interface LocalPurchaseDetail extends LocalPurchaseSummary {
 }
 
 export interface LocalPurchasePayload {
-  organization_id: string;
-  organization_name: string;
-  branch_id: string;
-  branch_name: string;
   supplier_id: string;
   supplier_name: string;
   invoice_no: string;

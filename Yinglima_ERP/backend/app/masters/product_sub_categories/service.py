@@ -255,18 +255,19 @@ class ProductSubCategoryService:
     async def export_file(self, file_format: str) -> bytes:
         """Export every sub-category to CSV or XLSX bytes."""
         sub_categories = await self.repository.list_all()
+        categories = await self.category_repository.list_all()
+        category_map = {c.id: c.name for c in categories}
+
         rows = [
             {
-                "id": str(s.id),
-                "category_id": str(s.category_id),
-                "code": s.code,
-                "name": s.name,
-                "description": s.description,
-                "status": s.status.value,
-                "created_at": s.created_at.isoformat(),
-                "updated_at": s.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "Sub-Category Name": s.name,
+                "Category": category_map.get(s.category_id, ""),
+                "Code": s.code or "",
+                "Description": s.description or "",
+                "Status": s.status.value.capitalize(),
             }
-            for s in sub_categories
+            for idx, s in enumerate(sub_categories)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)

@@ -59,6 +59,31 @@ export interface MasterColumn<T> {
   sortValue?: (item: T) => string | number | boolean | null | undefined;
 }
 
+export function pluralizeEntity(name: string): string {
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower === "city") return "Cities";
+  if (lower === "country") return "Countries";
+  if (lower === "category") return "Categories";
+  if (lower === "currency") return "Currencies";
+  if (lower === "state") return "States / Provinces";
+  if (lower === "sub-category" || lower === "subcategory") return "Sub-Categories";
+  if (lower === "unit of measurement" || lower === "uom") return "Units of Measurement";
+  if (lower === "hsn code" || lower === "hsn") return "HSN Codes";
+  if (lower === "supplier type") return "Supplier Types";
+  if (lower === "buyer type") return "Buyer Types";
+  if (lower === "organization") return "Organizations";
+  if (lower === "company") return "Companies";
+  if (lower === "inquiry") return "Inquiries";
+  if (lower.endsWith("y") && !/[aeiou]y$/i.test(lower)) {
+    return trimmed.slice(0, -1) + (trimmed.endsWith("Y") ? "IES" : "ies");
+  }
+  if (lower.endsWith("s") || lower.endsWith("sh") || lower.endsWith("ch") || lower.endsWith("x") || lower.endsWith("z")) {
+    return trimmed + (trimmed.endsWith("S") ? "ES" : "es");
+  }
+  return trimmed + (trimmed.endsWith("s") ? "" : "s");
+}
+
 export interface MasterPageProps<T extends MasterRecord> {
   /** Sidebar nav key, e.g. "masters-countries". */
   activeKey: string;
@@ -1401,14 +1426,14 @@ export function MasterPage<T extends MasterRecord>({
     return (
       <AppShell activeKey={activeKey}>
         <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
-          <Breadcrumb trail={[...breadcrumbTrail, `Import ${entityName}s`]} />
+          <Breadcrumb trail={[...breadcrumbTrail, `Import ${pluralizeEntity(entityName)}`]} />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0, textTransform: "capitalize" }}>
-                Import {entityName}s
+              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+                Import {pluralizeEntity(entityName)}
               </h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                Upload bulk {entityName} records from Excel (.xlsx, .xls) or CSV.
+                Upload bulk {pluralizeEntity(entityName).toLowerCase()} records from Excel (.xlsx, .xls) or CSV.
               </div>
             </div>
             <button
@@ -1679,22 +1704,80 @@ export function MasterPage<T extends MasterRecord>({
                 <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
                 {entityName.toLowerCase() === "brand" ? (
                   <>
-                    <li>Mandatory Columns: <strong>Brand Name</strong>.</li>
+                    <li>Mandatory Columns: <strong>Brand Name</strong>. Optional: <strong>Brand Code</strong>, <strong>Description</strong>.</li>
                     <li><strong>Brand Name</strong> must be unique.</li>
-                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em>.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
                   </>
                 ) : entityName.toLowerCase() === "category" ? (
                   <>
-                    <li>Mandatory Columns: <strong>Category Name</strong>.</li>
+                    <li>Mandatory Columns: <strong>Category Name</strong>. Optional: <strong>Category Code</strong>, <strong>Description</strong>.</li>
                     <li><strong>Category Name</strong> must be unique.</li>
-                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em>.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
                   </>
                 ) : entityName.toLowerCase() === "sub-category" || entityName.toLowerCase() === "subcategory" ? (
                   <>
-                    <li>Mandatory Columns: <strong>Category Name</strong>, <strong>Sub-Category Name</strong>.</li>
+                    <li>Mandatory Columns: <strong>Sub-Category Name</strong>, <strong>Category Name</strong> (or Category Code). Optional: <strong>Sub-Category Code</strong>, <strong>Description</strong>.</li>
                     <li><strong>Category Name</strong> must already exist in the Category Master.</li>
                     <li><strong>Sub-Category Name</strong> must be unique within its Category.</li>
-                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em>.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase() === "city" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>City Name</strong>, <strong>Province / Region</strong> (or State Name), <strong>Country</strong> (or Country Code).</li>
+                    <li><strong>Country</strong> must already exist in the Country Master.</li>
+                    <li><strong>Province / Region</strong> must already exist and belong to the specified Country.</li>
+                    <li><strong>City Name</strong> must be unique within the Province.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase() === "state" || entityName.toLowerCase() === "province" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Province / Region Name</strong> (or State Name), <strong>Country</strong> (or Country Code). Optional: <strong>Province Code</strong>.</li>
+                    <li><strong>Country</strong> must already exist in the Country Master.</li>
+                    <li><strong>Province / Region Name</strong> must be unique within the Country.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase() === "country" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Country Name</strong>, <strong>Country Code</strong> (2-letter ISO, e.g. CN, IN, US). Optional: <strong>Phone Code</strong>, <strong>Currency</strong>, <strong>Nationality</strong>.</li>
+                    <li><strong>Country Name</strong> and <strong>Country Code</strong> must be unique.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase() === "currency" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Currency Name</strong>, <strong>Currency Code</strong> (e.g. USD, INR, RMB). Optional: <strong>Symbol</strong>, <strong>Decimal Places</strong>.</li>
+                    <li><strong>Currency Name</strong> and <strong>Currency Code</strong> must be unique.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase() === "unit of measurement" || entityName.toLowerCase() === "uom" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Name</strong>, <strong>Code</strong> (or Short Name). Optional: <strong>Description</strong>.</li>
+                    <li><strong>Name</strong> and <strong>Code</strong> must be unique.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase().includes("hsn") ? (
+                  <>
+                    <li>Mandatory Columns: <strong>HSN Code</strong>. Optional: <strong>Description</strong>, <strong>GST %</strong>, <strong>Refund VAT %</strong>.</li>
+                    <li><strong>HSN Code</strong> must be unique.</li>
+                    <li><strong>GST %</strong> and <strong>Refund VAT %</strong> must be numbers between 0 and 100.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase() === "supplier type" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Supplier Type Name</strong>. Optional: <strong>Code</strong>, <strong>Description</strong>.</li>
+                    <li><strong>Supplier Type Name</strong> must be unique.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase() === "buyer type" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Buyer Type Name</strong>. Optional: <strong>Code</strong>, <strong>Description</strong>.</li>
+                    <li><strong>Buyer Type Name</strong> must be unique.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
+                  </>
+                ) : entityName.toLowerCase() === "organization" || entityName.toLowerCase() === "company" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Organization Name</strong>. Optional: <strong>Code</strong>, <strong>Description</strong>.</li>
+                    <li><strong>Organization Name</strong> and <strong>Code</strong> must be unique.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
                   </>
                 ) : entityName.toLowerCase().includes("product") ? (
                   <>
@@ -1706,16 +1789,11 @@ export function MasterPage<T extends MasterRecord>({
                     <li><strong>Packaging Gross Weight (kg)</strong> Must Be Greater Than 0.</li>
                     <li><strong>Refund VAT %</strong> Must Be A Number Between 0 and 100.</li>
                   </>
-                ) : entityName.toLowerCase().includes("hsn") ? (
-                  <>
-                    <li>Mandatory Columns: <strong>HSN Code</strong>.</li>
-                    <li><strong>HSN Code</strong> must be unique.</li>
-                    <li><strong>GST %</strong> and <strong>Refund VAT %</strong> must be valid numbers (e.g. 18, 13).</li>
-                  </>
                 ) : (
                   <>
                     <li>Required fields must be mapped to existing columns in the file.</li>
                     <li>Foreign-key referenced fields must already exist in their respective master tables.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em> (defaults to Active).</li>
                   </>
                 )}
                 <li>No Blank Rows, Merged Cells, Or Excel Formulas Allowed.</li>

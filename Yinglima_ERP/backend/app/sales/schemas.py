@@ -28,6 +28,19 @@ class SaleOrderItemCreate(BaseModel):
     planning_row_id: uuid.UUID | None = None
     remarks: str | None = None
 
+    # Commercial Invoice Costing Engine Fields
+    supplier_id: uuid.UUID | None = None
+    supplier_name: str | None = None
+    unit_price_rmb_with_vat: float = 0.0
+    unit_price_rmb_ex_vat: float = 0.0
+    profit_percent: float = 3.0
+    fob_price_usd: float = 0.0
+    freight_unit_usd: float = 0.0
+    cfr_price_usd: float = 0.0
+    cbm_per_unit: float = 0.0
+    total_cbm: float = 0.0
+    total_supplier_amount_rmb: float = 0.0
+
 
 class SaleOrderItemResponse(BaseModel):
     id: uuid.UUID
@@ -43,6 +56,20 @@ class SaleOrderItemResponse(BaseModel):
     item_total: float
     planning_row_id: uuid.UUID | None = None
     remarks: str | None = None
+
+    # Commercial Invoice Costing Engine Fields
+    supplier_id: uuid.UUID | None = None
+    supplier_name: str | None = None
+    unit_price_rmb_with_vat: float = 0.0
+    unit_price_rmb_ex_vat: float = 0.0
+    profit_percent: float = 3.0
+    fob_price_usd: float = 0.0
+    freight_unit_usd: float = 0.0
+    cfr_price_usd: float = 0.0
+    cbm_per_unit: float = 0.0
+    total_cbm: float = 0.0
+    total_supplier_amount_rmb: float = 0.0
+
     created_at: datetime
     updated_at: datetime
 
@@ -76,6 +103,14 @@ class SaleOrderCreate(BaseModel):
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None
+
+    # Costing, Freight & Currency Engine
+    ocean_freight_usd: float = 0.0
+    local_charges_coc_usd: float = 0.0
+    usd_exchange_rate: float = 6.70
+    profit_percent: float = 3.0
+    total_container_cbm: float = 0.0
+
     remarks: str | None = None
 
     items: list[SaleOrderItemCreate] = Field(..., min_length=1)
@@ -102,6 +137,14 @@ class SaleOrderUpdate(BaseModel):
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None
+
+    # Costing, Freight & Currency Engine
+    ocean_freight_usd: float | None = None
+    local_charges_coc_usd: float | None = None
+    usd_exchange_rate: float | None = None
+    profit_percent: float | None = None
+    total_container_cbm: float | None = None
+
     remarks: str | None = None
 
     items: list[SaleOrderItemCreate] | None = None
@@ -147,6 +190,14 @@ class SaleOrderResponse(BaseModel):
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None
+
+    # Costing, Freight & Currency Engine
+    ocean_freight_usd: float = 0.0
+    local_charges_coc_usd: float = 0.0
+    usd_exchange_rate: float = 6.70
+    profit_percent: float = 3.0
+    total_container_cbm: float = 0.0
+
     remarks: str | None = None
 
     created_by_name: str | None = None
@@ -200,11 +251,25 @@ class ExtractedConsignmentItem(BaseModel):
     product_name: str
     product_code: str | None = None
     hsn_code: str | None = None
+    uom: str | None = "NOS"
     quantity: float
     unit_rate: float = 0.0
     vat_rate: float = 0.0
     planning_row_id: uuid.UUID | None = None
     remarks: str | None = None
+
+    # CI Costing Engine details from Local Purchase / Master
+    supplier_id: uuid.UUID | None = None
+    supplier_name: str | None = None
+    unit_price_rmb_with_vat: float = 0.0
+    unit_price_rmb_ex_vat: float = 0.0
+    profit_percent: float = 3.0
+    fob_price_usd: float = 0.0
+    freight_unit_usd: float = 0.0
+    cfr_price_usd: float = 0.0
+    cbm_per_unit: float = 0.0
+    total_cbm: float = 0.0
+    total_supplier_amount_rmb: float = 0.0
 
 
 class PlanningConsignmentItemsResponse(BaseModel):

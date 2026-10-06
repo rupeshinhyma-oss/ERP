@@ -236,6 +236,22 @@ class SupplierUpdate(BaseModel):
 
 
 
+class SupplierCurrentStatusUpdate(BaseModel):
+    """Payload for the list-view inline "editable dropdown" for Current Status."""
+
+    current_status: SupplierCurrentStatus | None = None
+
+    @field_validator("current_status", mode="before")
+    @classmethod
+    def _normalize_current_status(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if not cleaned or cleaned in ("select", "-- select --", "-- select status --"):
+                return None
+            return cleaned
+        return value
+
+
 class SupplierGradeUpdate(BaseModel):
     """Payload for the list-view inline "editable dropdown" for Grade."""
 

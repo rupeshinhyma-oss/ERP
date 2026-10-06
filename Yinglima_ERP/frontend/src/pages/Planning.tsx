@@ -951,7 +951,6 @@ function GridCell({
   onRetrySave,
   onOpenStatusPicker,
   onOpenMumHistory,
-  onOpenLinkPicker,
   isFrozen,
   isLastFrozen,
   stickyLeft,
@@ -977,7 +976,6 @@ function GridCell({
   onRetrySave?: () => void;
   onOpenStatusPicker: (anchor: HTMLElement) => void;
   onOpenMumHistory?: (anchor: HTMLElement) => void;
-  onOpenLinkPicker: () => void;
   isFrozen?: boolean;
   isLastFrozen?: boolean;
   stickyLeft?: number;
@@ -1122,16 +1120,6 @@ function GridCell({
             zIndex: 2,
           }}
         >
-          {sourceType === "linked_lookup" && canEdit && (
-            <button
-              type="button"
-              onClick={onOpenLinkPicker}
-              title="Link this row to a record"
-              style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", fontSize: 11, flexShrink: 0 }}
-            >
-              🔗
-            </button>
-          )}
           {saveStatus === "saving" && (
             <span
               title="Saving…"
@@ -3976,7 +3964,6 @@ export function PlanningPage() {
                               onRetrySave={() => retryCellSave(row.id, col.id)}
                               onOpenStatusPicker={(anchor) => setStatusPicker({ anchor, rowId: row.id, columnId: col.id })}
                               onOpenMumHistory={(anchor) => setMumHistoryPopover({ anchor, rowId: row.id })}
-                              onOpenLinkPicker={() => setLinkPicker({ rowId: row.id, column: col })}
                               isFrozen={isTestColumn(col.name) || isApprovalDateColumn(col.name) || frozenColumnIds.has(col.id)}
                               isLastFrozen={col.id === lastFrozenColumnId}
                               stickyLeft={stickyLeftByColumnId.get(col.id)}

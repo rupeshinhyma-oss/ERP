@@ -22,8 +22,6 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
     searchable_fields = (
         "invoice_no",
         "supplier_name",
-        "organization_name",
-        "branch_name",
         "remarks",
     )
     sortable_fields = (
@@ -36,8 +34,6 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
     )
     filterable_fields = (
         "status",
-        "organization_id",
-        "branch_id",
         "supplier_id",
         "currency",
     )
@@ -62,8 +58,6 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
         self,
         *,
         search: str | None = None,
-        organization_id: uuid.UUID | None = None,
-        branch_id: str | None = None,
         supplier_id: uuid.UUID | None = None,
         status: str | None = None,
         currency: str | None = None,
@@ -75,10 +69,6 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
         """List local purchases with flexible filtering and total count."""
         base_conditions: list[Any] = [LocalPurchase.deleted_at.is_(None)]
 
-        if organization_id:
-            base_conditions.append(LocalPurchase.organization_id == organization_id)
-        if branch_id:
-            base_conditions.append(LocalPurchase.branch_id == branch_id)
         if supplier_id:
             base_conditions.append(LocalPurchase.supplier_id == supplier_id)
         if status:
@@ -95,8 +85,6 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
             search_clause = or_(
                 LocalPurchase.invoice_no.ilike(term),
                 LocalPurchase.supplier_name.ilike(term),
-                LocalPurchase.organization_name.ilike(term),
-                LocalPurchase.branch_name.ilike(term),
                 LocalPurchase.remarks.ilike(term),
             )
             base_conditions.append(search_clause)

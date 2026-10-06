@@ -204,6 +204,22 @@ async def list_sale_orders(
     )
 
 
+@router.get(
+    "/products/{product_id}/costing-info",
+    summary="Get product CI costing details (supplier from Local Purchase, factory RMB price with VAT, CBM, and HSN refund VAT)",
+)
+async def get_product_costing_info(
+    product_id: uuid.UUID,
+    request: Request,
+    quantity: float = Query(default=1.0, ge=0.01),
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-") if request else "-"
+    data = await service.get_product_costing_info(product_id, quantity)
+    return build_success_response(data=data, request_id=req_id)
+
+
 @router.post("/orders", summary="Create a new sale order", status_code=status.HTTP_201_CREATED)
 async def create_sale_order(
     payload: SaleOrderCreate,

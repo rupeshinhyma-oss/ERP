@@ -120,3 +120,31 @@ def test_financial_reconciliation_discrepancy_check():
     diff_large_discrepancy = round(abs(1200.0 - items_gross), 2)
     assert diff_large_discrepancy > 0.05
 
+
+def test_create_local_purchase_without_organization_and_branch():
+    """Verify LocalPurchaseCreate works cleanly without organization and branch fields."""
+    import uuid
+    from datetime import date
+    from app.purchases.local.schemas import LocalPurchaseCreate, LocalPurchaseItemCreate
+
+    payload = LocalPurchaseCreate(
+        supplier_id=uuid.uuid4(),
+        supplier_name="Test Supplier",
+        invoice_no="INV-2026-TEST",
+        invoice_date=date.today(),
+        currency="RMB",
+        invoice_total_value=1130.0,
+        items=[
+            LocalPurchaseItemCreate(
+                product_name="Test Widget",
+                quantity=10,
+                unit_rate=100.0,
+                vat_rate=13.0,
+            )
+        ],
+    )
+    assert not hasattr(payload, "organization_id")
+    assert not hasattr(payload, "branch_id")
+    assert payload.invoice_no == "INV-2026-TEST"
+
+

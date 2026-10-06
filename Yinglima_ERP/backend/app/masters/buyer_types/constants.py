@@ -6,4 +6,4 @@ MODULE_NAME = "buyer_types"
 DROPDOWN_CACHE_NAME = "buyer_types"
 
 IMPORT_HEADERS = ["name", "code", "description", "status"]
-EXPORT_HEADERS = ["id", "name", "code", "description", "status", "created_at", "updated_at"]
+EXPORT_HEADERS = ["Sr. No.", "Buyer Type Name", "Code", "Description", "Status"]

@@ -220,7 +220,9 @@ class SupplierService:
         """
         if new_status is None:
             return
-        if existing_status == SupplierCurrentStatus.EXISTING and new_status == SupplierCurrentStatus.NEW:
+        existing_val = existing_status.value if hasattr(existing_status, "value") else str(existing_status or "").lower()
+        new_val = new_status.value if hasattr(new_status, "value") else str(new_status or "").lower()
+        if existing_val == "existing" and new_val == "new":
             raise ConflictException(
                 "Current Status cannot be changed from 'Existing' back to 'New'."
             )
@@ -387,6 +389,12 @@ class SupplierService:
         if changes:
             await self.repository.update(supplier, **changes)
 
+        # Collect affected product IDs so Shipment Planning stays in sync
+        affected_product_ids = set(product_ids or [])
+        if product_ids is not None or "company_name" in field_values or "city_id" in field_values:
+            old_product_ids = await self.repository.list_all_product_ids(supplier_id)
+            affected_product_ids.update(old_product_ids)
+
         if category_ids is not None:
             await self.repository.replace_category_links(supplier_id, category_ids)
         if sub_category_ids is not None:
@@ -441,7 +449,21 @@ class SupplierService:
         # its stored value refreshed after an edit.
         await notify_source_record_changed("supplier", supplier_id)
         await refresh_planning_cells_for_record(self.repository.session, "supplier", supplier_id)
+        for pid in affected_product_ids:
+            await notify_source_record_changed("product", pid)
+            await refresh_planning_cells_for_record(self.repository.session, "product", pid)
         return await self.get_by_id_or_raise(supplier_id)
+
+    async def update_current_status(self, supplier_id: uuid.UUID, current_status: Any) -> Supplier:
+        """List-view inline "editable dropdown" for Current Status."""
+        supplier = await self.get_by_id_or_raise(supplier_id)
+        if current_status is not None:
+            self._validate_status_transition(supplier.current_status, current_status)
+        await self.repository.update(supplier, current_status=current_status)
+        await self._invalidate_cache()
+        await notify_source_record_changed("supplier", supplier_id)
+        await refresh_planning_cells_for_record(self.repository.session, "supplier", supplier_id)
+        return supplier
 
     async def update_grade(self, supplier_id: uuid.UUID, supplier_grade: Any) -> Supplier:
         """List-view inline "editable dropdown" for Supplier's Grade."""

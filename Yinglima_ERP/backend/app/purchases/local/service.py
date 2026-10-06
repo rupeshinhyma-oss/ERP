@@ -196,10 +196,6 @@ class LocalPurchaseService:
             )
 
         purchase = LocalPurchase(
-            organization_id=payload.organization_id,
-            organization_name=payload.organization_name,
-            branch_id=payload.branch_id,
-            branch_name=payload.branch_name,
             supplier_id=payload.supplier_id,
             supplier_name=payload.supplier_name,
             invoice_no=payload.invoice_no,
@@ -255,14 +251,6 @@ class LocalPurchaseService:
             raise NotFoundException(f"Local purchase with id {purchase_id} not found.")
 
         # Update scalar fields if provided
-        if payload.organization_id is not None:
-            purchase.organization_id = payload.organization_id
-        if payload.organization_name is not None:
-            purchase.organization_name = payload.organization_name
-        if payload.branch_id is not None:
-            purchase.branch_id = payload.branch_id
-        if payload.branch_name is not None:
-            purchase.branch_name = payload.branch_name
         if payload.supplier_id is not None:
             purchase.supplier_id = payload.supplier_id
         if payload.supplier_name is not None:
@@ -763,8 +751,6 @@ class LocalPurchaseService:
         headers = [
             "Invoice No",
             "Invoice Date",
-            "Organization",
-            "Branch",
             "Supplier",
             "Currency",
             "Invoice Total Value",
@@ -805,8 +791,6 @@ class LocalPurchaseService:
             row = [
                 p.invoice_no,
                 p.invoice_date.strftime("%Y-%m-%d") if p.invoice_date else "",
-                p.organization_name,
-                p.branch_name,
                 p.supplier_name,
                 p.currency,
                 float(p.invoice_total_value),
@@ -832,13 +816,13 @@ class LocalPurchaseService:
                     cell.fill = zebra_fill
 
                 # Number formatting
-                if c_idx in (7, 8, 10, 11, 12):
+                if c_idx in (5, 6, 8, 9, 10):
                     cell.number_format = currency_format
                     cell.alignment = Alignment(horizontal="right", vertical="center")
-                elif c_idx in (9, 13):
+                elif c_idx in (7, 11):
                     cell.number_format = "0.00"
                     cell.alignment = Alignment(horizontal="right", vertical="center")
-                elif c_idx in (2, 6, 14, 16):
+                elif c_idx in (2, 4, 12, 14):
                     cell.alignment = Alignment(horizontal="center", vertical="center")
                 else:
                     cell.alignment = Alignment(horizontal="left", vertical="center")
@@ -859,7 +843,7 @@ class LocalPurchaseService:
 
     async def get_planning_items(
         self,
-        organization_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
         branch_id: str | None = None,
         branch_name: str | None = None,
         supplier_name: str | None = None,
@@ -877,16 +861,14 @@ class LocalPurchaseService:
         if not clean_sup:
             return {"items": [], "sheet_name": None, "count": 0, "message": "No supplier specified."}
 
-        # 1. Query sheets for this organization
-        q_sheets = await self.session.execute(
-            select(PlanningSheet).where(
-                PlanningSheet.deleted_at.is_(None),
-                PlanningSheet.organization_id == organization_id,
-            )
-        )
+        # 1. Query sheets
+        stmt = select(PlanningSheet).where(PlanningSheet.deleted_at.is_(None))
+        if organization_id:
+            stmt = stmt.where(PlanningSheet.organization_id == organization_id)
+        q_sheets = await self.session.execute(stmt)
         sheets = q_sheets.scalars().all()
         if not sheets:
-            return {"items": [], "sheet_name": None, "count": 0, "message": "No shipment planning sheets found for this organization."}
+            return {"items": [], "sheet_name": None, "count": 0, "message": "No shipment planning sheets found."}
 
         # 2. Match the sheet by branch_id or branch_name
         matched_sheet: PlanningSheet | None = None

@@ -238,7 +238,7 @@ export function LocalPurchaseDetailModal({
 
           {detail && !loading && (
             <div>
-              {/* SECTION 1: Top 3-Column Info Card */}
+              {/* SECTION 1: Top 2-Column Info Card */}
               <div
                 style={{
                   background: "#ffffff",
@@ -247,7 +247,7 @@ export function LocalPurchaseDetailModal({
                   padding: "12px 16px",
                   marginBottom: "12px",
                   display: "grid",
-                  gridTemplateColumns: "1fr 1.2fr 1.2fr",
+                  gridTemplateColumns: "1fr 1fr",
                   gap: "16px",
                   boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
                 }}
@@ -285,7 +285,7 @@ export function LocalPurchaseDetailModal({
                 </div>
 
                 {/* From (Supplier) */}
-                <div style={{ borderRight: "1px solid #f1f5f9", paddingRight: "10px" }}>
+                <div>
                   <div
                     style={{
                       fontSize: "11px",
@@ -304,44 +304,6 @@ export function LocalPurchaseDetailModal({
                     </div>
                     <div style={{ fontSize: "11.5px", color: "#64748b" }}>
                       Domestic Factory / Vendor
-                    </div>
-                  </div>
-                </div>
-
-                {/* To (Organization / Branch) */}
-                <div>
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      color: "#64748b",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.5px",
-                      marginBottom: "4px",
-                    }}
-                  >
-                    To (Receiving Location)
-                  </div>
-                  <div style={{ fontSize: "12.5px", color: "#1e293b", lineHeight: "1.6" }}>
-                    <div style={{ fontWeight: 700, fontSize: "13.5px", color: "#0f172a" }}>
-                      {detail.organization_name}
-                    </div>
-                    <div>
-                      <span style={{ color: "#64748b" }}>Branch: </span>
-                      <span
-                        style={{
-                          display: "inline-block",
-                          padding: "1px 6px",
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          background: "#f1f5f9",
-                          color: "#334155",
-                          borderRadius: "4px",
-                          border: "1px solid #cbd5e1",
-                        }}
-                      >
-                        📍 {detail.branch_name}
-                      </span>
                     </div>
                   </div>
                 </div>

@@ -12,8 +12,8 @@ def _get_val(raw_row: dict[str, str], *keys: str) -> str:
     """Get the first non-empty value from a list of possible key aliases."""
     for k in keys:
         val = raw_row.get(k)
-        if val is not None and str(val).strip():
-            return str(val).strip()
+        if val is not None and val.strip():
+            return val.strip()
     return ""
 
 

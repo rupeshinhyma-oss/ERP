@@ -551,20 +551,17 @@ The RBAC engine secures every endpoint via `require_permission(code)` dependenci
 - **Route Prefix:** `/api/v1/purchases/local`.
 - **Frontend URLs:** `/purchase/local` (List view), `/purchase/local/new` (Add Purchase form), `/purchase/local/:id/edit` (Edit Purchase form), with legacy alias `/local-purchase`.
 - **Database Tables:**
-  - `local_purchases`: Owns domestic purchase records (`organization_id`, `organization_name`, `branch_id`, `branch_name`, `supplier_id`, `supplier_name`, `invoice_no`, `invoice_date`, `currency` default 'RMB', `invoice_total_value`, `packing_forwarding`, `transport_expense`, `offloading_expense`, `other_expense`, `total_expenses`, `loading_expense_pct`, `items_total_basic`, `items_total_vat`, `items_total_landing`, `total_quantity`, `remarks`, `status`).
+  - `local_purchases`: Owns domestic purchase records (`organization_id` optional, `organization_name` optional, `branch_id` optional, `branch_name` optional, `supplier_id`, `supplier_name`, `invoice_no`, `invoice_date`, `currency` default 'RMB', `invoice_total_value`, `packing_forwarding`, `transport_expense`, `offloading_expense`, `other_expense`, `total_expenses`, `loading_expense_pct`, `items_total_basic`, `items_total_vat`, `items_total_landing`, `total_quantity`, `remarks`, `status`).
   - `local_purchase_items`: Owns line items (`purchase_id`, `product_id`, `product_name`, `product_code`, `hsn_code`, `quantity`, `unit_rate`, `vat_rate`, `item_total`, `vat_amount`, `expense_per_unit`, `unit_landing_rate`, `total_landing_rate`).
-- **Cascading Organization & Branch Scope:**
-  - Replaces legacy plain warehouse dropdowns with two linked controls: **Organization List** (`master_companies` via `/masters/company-list/lookup`) and **Operating Branch** (dynamically filtered to the chosen company's branches JSON array).
-- **Strict Organization Scoping & Multi-Tenant Product Isolation:**
-  - Line-item products are strictly scoped to the chosen organization (`p.organization_id === organizationId || p.organization_ids.includes(organizationId)`).
-  - Products lacking organization assignment (`null` or empty `organization_ids`) are strictly excluded, eliminating cross-tenant product leakage (e.g. `Test Group` vs `Inhyma` vs `Darsh Impex`).
-  - When no organization is selected, product search candidates evaluate strictly to empty (`[]`).
-  - Changing organization when items are already populated prompts the user with a confirmation modal (`Changing the Organization will clear previously added line items...`) and cleanly resets items upon approval to avoid corrupted multi-org orders.
-- **Card 3 Search Lockout & Padlock Guidance:**
-  - The **`PRODUCT SEARCH`** input is completely disabled until an Organization is selected in Card 1 (`disabled={!organizationId}`).
-  - Renders a dashed amber border, padlock icon, and explicit guidance placeholder: `🔒 Select an Organization in Card 1 to enable product search & add items`.
+- **Streamlined Procurement & AI Extraction First Architecture:**
+  - Removed mandatory Organization List and Operating Branch dropdown requirements from the purchase header to enable rapid, zero-friction invoice entry.
+  - Organization and Branch fields are stored as optional/nullable across PostgreSQL and backend APIs, maintaining 100% backward compatibility with legacy orders.
+- **Unrestricted Catalog Search & Instant Entry:**
+  - The **`PRODUCT SEARCH`** card is completely unlocked on mount without requiring organization selection.
+  - Client-side in-memory search instantly filters across all active catalog products with 0ms latency, backed by debounced server-side fallback search.
+  - Automated AI bill extraction directly maps vendor invoices (PDF, Excel `.xlsx`/`.csv`) to suppliers and products without manual organizational prerequisites.
 - **Product Master Visual Style Validation Standard:**
-  - Comprehensive client-side validation (`validateForm`) audits all mandatory fields: `organizationId`, `branchId`, `supplierId`, `invoiceNo`, `invoiceDate`, `invoiceTotalValue > 0`, non-empty `items`, and all items `unit_rate > 0`.
+  - Comprehensive client-side validation (`validateForm`) audits all mandatory fields: `supplierId`, `invoiceNo`, `invoiceDate`, `invoiceTotalValue > 0`, non-empty `items`, and all items `unit_rate > 0`.
   - **Top Error Summary Alert Banner:** Renders a prominent red alert box (`#fef2f2`, border `#ef4444`, text `#991b1b`) listing all missing fields and invalid line items at the top of the form, with smooth auto-scrolling to top on submit failure.
   - **Field-Level Visual Cues:** Invalid inputs display bright red borders (`1.5px solid #ef4444` / `2px solid #ef4444`), red focus glow (`boxShadow: 0 0 0 3px rgba(239,68,68,0.15)`), and soft red background tint (`#fff5f5`).
   - **Contextual Warning Text:** Warning annotations appear underneath invalid fields: `▲ [Field Name] is required`.
