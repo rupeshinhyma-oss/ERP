@@ -62,7 +62,9 @@ def test_proforma_invoice_create_schema():
         status="pending",
     )
     assert payload.company_name == "PRINT WORLD CORPORATION"
-    assert payload.status == "pending"
+    # status, totals and discount are server-controlled: a client-supplied value is ignored
+    for server_field in ("status", "amount_inc_gst", "discount", "created_by"):
+        assert not hasattr(payload, server_field)
 
 
 def test_discount_payment_model_and_schema():

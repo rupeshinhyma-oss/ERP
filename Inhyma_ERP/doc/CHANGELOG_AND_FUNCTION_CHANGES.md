@@ -3,7 +3,80 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
-## [Release 2026-10-05] — Production Deployment Readiness, Zero-LAN URL Decoupling & Multi-Cloud Infrastructure
+## [Release 2026-10-06] — Purchase Order Modules, Database-Driven Workflow Engine, Proforma Invoice Extensions & Company Specification Upgrades
+
+### 1. Purchase Module — Local Purchase Management (`/purchase/local-orders`)
+- **Backend Architecture & Routes (`app/purchase/local_routes.py`):**
+  - Implemented complete CRUD, server-side pagination, search across invoice number/supplier/warehouse, date filters (`date_from`, `date_to`), and status tabs.
+  - **Dynamic Expense Factor Costing Engine (`app/purchase/costing.py`):** Computes `total_expenses = packing_forwarding + transport + offloading` and calculates `loading_percent = (total_expenses / basic_amount) * 100`. Each line item computes `expense_per_unit = round(unit_rate * (loading_percent / 100), 2)` and `unit_landing_value = unit_rate + expense_per_unit`.
+  - **Automated Stock-In Application:** Transitioning a local purchase to `confirmed` status automatically updates warehouse physical inventory (`app/inventory/stock_service.py` / `move_stock`) and marks `stock_applied = True`.
+  - **Database Migration (`l1a2b3c4d5e9_create_purchase_tables.py`):** Creates `local_purchases` and `local_purchase_items` with supplier foreign key links, invoice details, expenses breakdown, and versioning.
+- **Frontend Interface (`LocalPurchasePage.tsx`):**
+  - Interactive table with status counters (`all`, `pending`, `confirmed`), search bar, item limit selector, and dynamic sorting indicators.
+  - **Dynamic Masters Lookups:** Replaced hardcoded dropdowns with live API lookups for active suppliers (`/suppliers`), physical warehouses (`/masters/warehouses`), and units of measurement (`/masters/uom`).
+  - Integrated typeahead search with datalist `<datalist id="local-supplier-options">` and canonical supplier name normalization.
+  - Line-item table automatically renders UOM unit badges and performs live recalculations of landing rates as expenses change.
+  - Full A4 PDF generation integration (`localPurchasePdf.ts`, `LocalPurchasePdfPage.tsx`).
+
+### 2. Purchase Module — Import Purchase Consignments (`/purchase/import-orders`)
+- **Backend Architecture & Routes (`app/purchase/import_routes.py`):**
+  - Consignment tracking with exchange rate (`conversion_rate`), customs valuation rate (`customs_conversion_rate`), import duty percentage, and CBM volumetric calculations.
+  - **Dual Landing Valuation Matrix:** Computes landing rate on both Value Basis (`VB`) and CBM Volume Basis (`CB`), including `landing_diff = unit_landing_cb - unit_landing_vb`.
+  - **Live Preview Endpoint (`POST /purchase/import-orders/preview`):** Provides instant recalculation of CBM, duty, and landing expenses while the user types in the creation/edit drawer.
+  - **Multi-Date Range Filtering:** Supports server-side and client-side filtering across three distinct date ranges: **Expected Arrival Date Range**, **ETD Origin Date Range**, and **ETA Port Date Range**, with presets (Today, Yesterday, Last 7 Days, This Month, Custom).
+  - **Ordered Status Warehouse Restriction:** Automatically hides physical destination warehouses during the `pending` phase, ensuring consignments still in transit can only be routed to non-physical / transit holding locations (e.g. `Mumbai Ordered`, `Ahmedabad Ordered`, `Indore Ordered`).
+- **Frontend Interface (`ImportPurchasePage.tsx`):**
+  - Full consignment management with status tabs (`all`, `pending`, `confirmed`, `received`, `closed`).
+  - Searchable supplier input with datalist (`<datalist id="import-supplier-options">`) and validation requiring selection from the supplier master.
+  - Interactive table showing Consignment No., Ordered Date, Invoice Date, Supplier, Warehouse, Total USD, Total INR, and landing totals.
+  - Detailed side drawer and modal view showing breakdown of shipping line charges, CFS charges, clearing transport, stamp duty, insurance, freight, and misc remarks.
+  - Import Purchase PDF generator (`importPurchasePdf.ts`, `ImportPurchasePdfPage.tsx`).
+
+### 3. Database-Driven Workflow Rules Engine & Resilience Fallbacks
+- **Architecture (`app/common/workflow.py`):**
+  - Workflow transitions, editable rules, deletable permissions, and initial statuses are stored dynamically in the `meta` column of the `option_lists` table (`group_key` = `purchase.local.status`, `purchase.import.status`, `proforma.status`).
+  - Replaces hardcoded transition constants with configurable data rules: `next`, `admin_only_to`, `perm_to`, `reason_required_to`, `edit`, `delete`, and `stock_in`.
+- **Alembic Seeding Migrations:**
+  - `m1a2b3c4d5ea_seed_purchase_rules.py`: Seeds status groups and workflow options for Local and Import Purchases.
+  - `k1a2b3c4d5e8_seed_proforma_rules.py`: Seeds status rules, commercial defaults, and numbering rules for Proforma Invoices.
+- **Alembic Version Desynchronization Resolution:**
+  - Identified and resolved invalid revision identifier `'g1a2b3c4d5e8'` in the database's `alembic_version` table.
+  - Successfully upgraded database to head revision `m1a2b3c4d5ea` (and subsequent `o1a2b3c4d5ec`), restoring full schema alignment across Supabase PostgreSQL.
+- **Client & Server Fallback Resilience:**
+  - Added `FALLBACK_RULES` dictionary in `app/common/workflow.py` and `DEFAULT_LOCAL_PURCHASE_RULES` / `DEFAULT_IMPORT_PURCHASE_RULES` in `frontend/src/lib/workflowRules.ts` to ensure endpoints and pages never fail if database rules are momentarily unseeded.
+
+### 4. Extended Company Profile Specification Upgrades
+- **Database Migrations (`n1a2b3c4d5eb_extend_company_profile.py`, `o1a2b3c4d5ec_seed_company_option_lists.py`):**
+  - Added new columns to `companies`: `monthly_turnover`, `potential_business_per_month`, `direct_import_from_china`, `monthly_import_volume`, `products_needed_for_imports`.
+  - Added new columns to `company_contacts`: `birth_date` and `anniversary_date`.
+  - Seeded option list groups for `company.business_type`, `company.business_category`, `company.monthly_turnover`, `company.potential_business_per_month`, `company.direct_import_from_china`, and `company.monthly_import_volume`.
+- **Backend Validation & Conditional Constraints (`app/companies/schemas.py`, `models.py`):**
+  - **Direct Import from China Cluster:** Strictly restricted to companies where `company_type` (Business Type) is `B2B`.
+  - **Import Volume & Products:** Restricted to when `direct_import_from_china == "Yes"`.
+  - **Potential Reason:** Mandatory when `potential == "no"`.
+  - **Potential Business per Month:** Allowed only when `potential == "yes"`.
+  - **Contact Birth Date & Anniversary Date:** Validated and stored on sub-contacts.
+- **Frontend Enhancements (`Companies.tsx`, `companyFields.ts`):**
+  - Dynamic conditional rendering of Monthly Turnover (when Business Type is selected), Potential Reason (when Potential = No), and Potential Business per Month (when Potential = Yes).
+  - Dedicated Section 2b: **Direct Import from China** with automatic field clearing (`clearInapplicableCompanyFields`) when prerequisites change.
+  - Birth Date and Anniversary Date pickers on Company Sub-Contacts with automated age calculation (`computeAge`).
+
+### 5. Supplier Directory — Mandatory Calling Number
+- **Backend Enforcement (`app/suppliers/schemas.py`, `repository.py`, `service.py`):**
+  - Made `contact_calling_number` a mandatory field (`min_length=1`) on supplier creation.
+  - Added validator `_validate_calling_not_blanked` ensuring updates cannot wipe or blank the calling number.
+- **Frontend Validation (`Suppliers.tsx`):**
+  - Added required red asterisk (`*`) to the Calling Number field in both quick and full supplier creation drawers.
+  - Client-side pre-submission validation flags empty calling numbers immediately with `Calling number is required.`.
+
+### 6. RBAC & Workflow Permission Seeds
+- **Scripts (`scripts/seed_purchase_permissions.py`, `scripts/seed.py`):**
+  - Created and granted permissions: `proforma.approve` (Approve proforma invoices), `localpurchase.update` (Edit pending local purchases), `localpurchase.confirm` (Confirm local purchases & add stock).
+  - Added these permissions directly to `BOOTSTRAP_PERMISSIONS` in `scripts/seed.py`.
+
+---
+
+
 
 ### 1. Quotation Portal URL Parametrization
 - **Eliminated Hardcoded LAN Fallback:** In [`routes.py:1052`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/inquiries/routes.py#L1052), replaced the hardcoded `192.168.1.23:5173` LAN IP fallback with `(request.headers.get("origin") or getattr(settings, "FRONTEND_URL", "http://localhost:5174")).rstrip("/")`. Automated RFQ quotation email links now resolve dynamically to the live production domain.

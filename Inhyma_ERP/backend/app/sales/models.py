@@ -21,7 +21,9 @@ from __future__ import annotations
 import uuid
 from typing import Any, List, Optional
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import (
@@ -69,6 +71,31 @@ class ProformaInvoice(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, S
 
     created_by: Mapped[str] = mapped_column(String(100), default="Admin User", server_default="Admin User", nullable=False)
 
+    # --- commercial terms (Sales & PI spec: payment, transport, delivery, third-party) ---
+    payment_terms: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    transport_name: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    transport_destination: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    delivery_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    delivery_charge: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    third_party_delivery: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    billing_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    shipping_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    terms_and_conditions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # --- computed totals (server-authoritative, recomputed from line items) ---
+    taxable_amount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    gst_amount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+
+    # --- workflow tracking ---
+    below_min_price: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    cancel_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     items: Mapped[List["ProformaInvoiceLineItem"]] = relationship(
         "ProformaInvoiceLineItem",
         back_populates="proforma",
@@ -108,6 +135,15 @@ class ProformaInvoiceLineItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     uom: Mapped[str] = mapped_column(String(50), default="Nos", server_default="Nos", nullable=False)
     rate: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
     amount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+
+    # --- pricing breakdown (Sales & PI spec: unit discount, taxable, GST, total, additional charges) ---
+    unit_discount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    taxable_amount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    gst_percent: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    gst_amount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    total: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    is_additional_charge: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    charge_type: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
 
     proforma: Mapped["ProformaInvoice"] = relationship("ProformaInvoice", back_populates="items")
 
@@ -231,4 +267,3 @@ class DiscountPayment(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin
 
     def __repr__(self) -> str:
         return f"<DiscountPayment {self.payment_no!r} - {self.customer_name!r}>"
-

@@ -12,13 +12,18 @@ rather than the layered masters/* repository+service pattern.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth.dependencies import get_current_user
+from app.auth.service import CurrentUser
+from app.core.exceptions import BadRequestException, ConflictException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.sales.models import (
@@ -26,21 +31,32 @@ from app.sales.models import (
     ProformaInvoice,
     ProformaInvoiceLineItem,
 )
+from app.sales.proforma_service import (
+    check_deletable,
+    check_editable,
+    check_transition,
+    load_status_rules,
+    next_proforma_no,
+    price_items,
+)
 from app.sales.schemas import (
     DiscountPaymentCreate,
     DiscountPaymentResponse,
     ProformaInvoiceCreate,
     ProformaInvoiceUpdate,
-    ProformaLineItemSchema,
+    ProformaStatusUpdate,
 )
 from app.sales.process_routes import router as process_router
 
 router = APIRouter(tags=["Sales - Proforma Invoices"])
 router.include_router(process_router)
 
-# Every status a Proforma Invoice can carry, in the order the legacy ERP's
-# status tabs display them (see the screenshot this module was built from).
-PROFORMA_STATUSES = ["pending", "admin_approved", "confirmed", "cancelled"]
+# Proforma workflow (statuses, transitions, numbering) is configured in the database
+# (option_lists groups ``proforma.status`` / ``proforma.numbering``); see proforma_service.py.
+
+
+def _iso(value: Optional[datetime]) -> Optional[str]:
+    return value.isoformat() if value else None
 
 
 def _serialize_proforma(p: ProformaInvoice) -> dict:
@@ -56,22 +72,50 @@ def _serialize_proforma(p: ProformaInvoice) -> dict:
         "city": p.city,
         "state": p.state,
         "sales_person": p.sales_person,
+        "payment_terms": p.payment_terms,
+        "transport_name": p.transport_name,
+        "transport_destination": p.transport_destination,
+        "delivery_type": p.delivery_type,
+        "delivery_charge": p.delivery_charge,
+        "third_party_delivery": p.third_party_delivery,
+        "billing_address": p.billing_address,
+        "shipping_address": p.shipping_address,
+        "terms_and_conditions": p.terms_and_conditions,
         "amount_inc_gst": float(p.amount_inc_gst),
+        "taxable_amount": float(p.taxable_amount or 0.0),
+        "gst_amount": float(p.gst_amount or 0.0),
         "discount": float(p.discount),
         "status": p.status,
+        "below_min_price": bool(p.below_min_price),
         "remark": p.remark,
+        "cancel_reason": p.cancel_reason,
         "created_by": p.created_by,
+        "approved_by": p.approved_by,
+        "approved_at": _iso(p.approved_at),
+        "confirmed_by": p.confirmed_by,
+        "confirmed_at": _iso(p.confirmed_at),
+        "cancelled_by": p.cancelled_by,
+        "cancelled_at": _iso(p.cancelled_at),
         "items": [
             {
                 "id": str(li.id),
                 "product_name": li.product_name,
                 "product_code": li.product_code,
                 "hsn_code": li.hsn_code,
+                "hsn": li.hsn_code,
                 "gst_rate": li.gst_rate,
+                "gst_percent": li.gst_percent,
+                "gst_amount": li.gst_amount,
                 "quantity": li.quantity,
                 "uom": li.uom,
                 "rate": li.rate,
+                "unit_price": li.rate,
+                "unit_discount": li.unit_discount,
+                "taxable_amount": li.taxable_amount,
                 "amount": li.amount,
+                "total": li.total,
+                "is_additional_charge": li.is_additional_charge,
+                "charge_type": li.charge_type,
             }
             for li in p.items
         ],
@@ -79,7 +123,7 @@ def _serialize_proforma(p: ProformaInvoice) -> dict:
 
 
 async def _resolve_proforma(db: AsyncSession, proforma_id: str) -> ProformaInvoice:
-    """Look a proforma up by UUID or, failing that, its human proforma_no -- same lenient-lookup pattern as update_stock_transfer_status."""
+    """Look a proforma up by UUID or, failing that, its human proforma_no."""
     stmt = select(ProformaInvoice).options(selectinload(ProformaInvoice.items)).where(ProformaInvoice.deleted_at.is_(None))
     try:
         val_uuid = uuid.UUID(proforma_id)
@@ -93,11 +137,45 @@ async def _resolve_proforma(db: AsyncSession, proforma_id: str) -> ProformaInvoi
     return record
 
 
+def _rid(request: Request) -> str:
+    return getattr(request.state, "request_id", "-")
+
+
+def _apply_priced_lines(record: ProformaInvoice, priced) -> None:
+    """Replace the record's line items with the server-priced lines and set the totals."""
+    record.items.clear()
+    for ln in priced.lines:
+        record.items.append(
+            ProformaInvoiceLineItem(
+                product_name=ln.product_name,
+                product_code=ln.product_code,
+                hsn_code=ln.hsn_code,
+                gst_rate=ln.gst_rate,
+                quantity=ln.quantity,
+                uom=ln.uom,
+                rate=ln.rate,
+                amount=ln.amount,
+                unit_discount=ln.unit_discount,
+                taxable_amount=ln.taxable_amount,
+                gst_percent=ln.gst_percent,
+                gst_amount=ln.gst_amount,
+                total=ln.total,
+                is_additional_charge=ln.is_additional_charge,
+                charge_type=ln.charge_type,
+            )
+        )
+    record.taxable_amount = priced.taxable_amount
+    record.gst_amount = priced.gst_amount
+    record.amount_inc_gst = priced.amount_inc_gst
+    record.discount = priced.discount
+    record.below_min_price = priced.below_min_price
+
+
 @router.get("/proforma-invoice/list", summary="List proforma invoices")
 @router.get("/sales/proforma-invoices", summary="Alias for proforma invoice list")
 async def list_proforma_invoices(
     request: Request,
-    status_filter: Optional[str] = Query(None, alias="status", description="'pending' | 'admin_approved' | 'confirmed' | 'cancelled' | 'all'"),
+    status_filter: Optional[str] = Query(None, alias="status", description="A configured proforma status, or 'all'"),
     warehouse: Optional[str] = Query(None, description="Warehouse filter, or 'All'"),
     search: Optional[str] = Query(None, description="Search by proforma no, company, or sales person"),
     proforma_no: Optional[str] = Query(None, description="Filter by proforma number"),
@@ -109,15 +187,14 @@ async def list_proforma_invoices(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db_session),
+    _user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Return paginated proforma invoices with per-status tab counts and ₹ totals."""
+    """Return paginated proforma invoices with per-status tab counts and totals."""
+    rules = await load_status_rules(db)
     base_stmt = select(ProformaInvoice).where(ProformaInvoice.deleted_at.is_(None))
 
-    # Tab counts + amount totals across every status, computed once up
-    # front (unfiltered by the current search/warehouse) so the pill
-    # tabs always show the true totals for the whole list, matching the
-    # legacy ERP screenshot's ALL/PENDING/ADMIN APPROVED/CONFIRMED/
-    # CANCELLED summary cards.
+    # Tab counts + amount totals across every status, computed once up front (unfiltered by
+    # the current search/warehouse) so the tabs always show the true totals for the whole list.
     async def _count_and_sum(stmt) -> tuple[int, float]:
         sub = stmt.subquery()
         row = (
@@ -129,11 +206,10 @@ async def list_proforma_invoices(
 
     all_count, all_amount = await _count_and_sum(base_stmt)
     tab_counts = {"all": {"count": all_count, "amount": all_amount}}
-    for st in PROFORMA_STATUSES:
+    for st in rules:
         c, a = await _count_and_sum(base_stmt.where(ProformaInvoice.status == st))
         tab_counts[st] = {"count": c, "amount": a}
 
-    # Apply filtering for the actual page of rows returned
     query_stmt = base_stmt.options(selectinload(ProformaInvoice.items))
     if status_filter and status_filter.lower() != "all":
         query_stmt = query_stmt.where(ProformaInvoice.status == status_filter.strip().lower())
@@ -175,12 +251,10 @@ async def list_proforma_invoices(
     query_stmt = query_stmt.order_by(ProformaInvoice.created_at.desc()).offset(skip).limit(limit)
     results = (await db.execute(query_stmt)).scalars().all()
 
-    items = [_serialize_proforma(p) for p in results]
-
     return build_success_response(
-        data={"items": items, "tab_counts": tab_counts},
+        data={"items": [_serialize_proforma(p) for p in results], "tab_counts": tab_counts, "status_rules": rules},
         meta={"total": total_filtered, "skip": skip, "limit": limit, "tab_counts": tab_counts},
-        request_id=getattr(request.state, "request_id", "-"),
+        request_id=_rid(request),
     )
 
 
@@ -189,10 +263,18 @@ async def get_proforma_invoice(
     proforma_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    _user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Fetch a single proforma invoice by ID or proforma number."""
     record = await _resolve_proforma(db, proforma_id)
-    return build_success_response(data=_serialize_proforma(record), request_id=getattr(request.state, "request_id", "-"))
+    return build_success_response(data=_serialize_proforma(record), request_id=_rid(request))
+
+
+def _initial_status(rules: dict[str, dict]) -> str:
+    for name, meta in rules.items():
+        if meta.get("initial"):
+            return name
+    raise BadRequestException("Proforma status rules do not define an initial status.")
 
 
 @router.post("/proforma-invoice", status_code=status.HTTP_201_CREATED, summary="Create a proforma invoice")
@@ -200,56 +282,69 @@ async def create_proforma_invoice(
     payload: ProformaInvoiceCreate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Insert a new proforma invoice, auto-numbering it and summing line items for the total if not given explicitly."""
-    calc_amount = payload.amount_inc_gst
-    if calc_amount is None:
-        calc_amount = sum(item.amount for item in payload.items)
+    """Insert a new proforma invoice: server-priced, sequentially numbered, starting in the initial status."""
+    if not payload.items:
+        raise BadRequestException("Add at least one product or additional charge.")
+    rules = await load_status_rules(db)
+    priced = await price_items(db, payload.items)
 
-    total_existing = (await db.execute(select(func.count()).select_from(ProformaInvoice))).scalar() or 0
-    proforma_no = f"PI-{total_existing + 1:04d}"
-
-    record = ProformaInvoice(
-        proforma_no=proforma_no,
-        proforma_date=payload.proforma_date,
-        expected_delivery_date=payload.expected_delivery_date,
-        warehouse=payload.warehouse,
-        lead_source=payload.lead_source,
-        company_name=payload.company_name,
-        city=payload.city,
-        state=payload.state,
-        sales_person=payload.sales_person,
-        amount_inc_gst=calc_amount,
-        discount=payload.discount,
-        status=payload.status.strip().lower(),
-        remark=payload.remark,
-        created_by=payload.created_by,
-    )
-    db.add(record)
-    await db.flush()
-
-    for item in payload.items:
-        db.add(
-            ProformaInvoiceLineItem(
-                proforma_id=record.id,
-                product_name=item.product_name,
-                product_code=item.product_code,
-                hsn_code=item.hsn_code,
-                gst_rate=item.gst_rate,
-                quantity=item.quantity,
-                uom=item.uom,
-                rate=item.rate,
-                amount=item.amount,
-            )
+    header = payload.model_dump(exclude={"items"})
+    for attempt in range(3):
+        record = ProformaInvoice(
+            proforma_no=await next_proforma_no(db),
+            status=_initial_status(rules),
+            created_by=current_user.username,
+            **header,
         )
+        _apply_priced_lines(record, priced)
+        try:
+            async with db.begin_nested():
+                db.add(record)
+                await db.flush()
+            break
+        except IntegrityError:
+            if attempt == 2:
+                raise ConflictException("Could not allocate a proforma number; please retry.")
 
-    await db.flush()
     await db.refresh(record, attribute_names=["items"])
-
     return build_success_response(
         data=_serialize_proforma(record),
         message="Proforma invoice created successfully.",
-        request_id=getattr(request.state, "request_id", "-"),
+        request_id=_rid(request),
+    )
+
+
+@router.patch("/proforma-invoice/{proforma_id}/status", summary="Move a proforma invoice to another status")
+async def update_proforma_status(
+    proforma_id: str,
+    payload: ProformaStatusUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Apply a workflow transition; allowed steps, admin-only steps and reason requirements come from the DB."""
+    record = await _resolve_proforma(db, proforma_id)
+    rules = await load_status_rules(db)
+    target = payload.status.strip().lower()
+    check_transition(rules, record.status, target, current_user, payload.reason)
+
+    now = datetime.now(timezone.utc)
+    record.status = target
+    if target == "admin_approved":
+        record.approved_by, record.approved_at = current_user.username, now
+    elif target == "confirmed":
+        record.confirmed_by, record.confirmed_at = current_user.username, now
+    elif target == "cancelled":
+        record.cancelled_by, record.cancelled_at = current_user.username, now
+        record.cancel_reason = (payload.reason or "").strip()
+    await db.flush()
+    await db.refresh(record, attribute_names=["items"])
+    return build_success_response(
+        data=_serialize_proforma(record),
+        message=f"Proforma invoice moved to '{target}'.",
+        request_id=_rid(request),
     )
 
 
@@ -259,44 +354,27 @@ async def update_proforma_invoice(
     payload: ProformaInvoiceUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Partially update a proforma invoice, replacing its line items wholesale if a new items list is given."""
+    """Edit a proforma invoice (allowed only at stages the DB rules permit); line items are re-priced."""
     record = await _resolve_proforma(db, proforma_id)
-    update_data = payload.model_dump(exclude_unset=True, exclude={"items"})
+    rules = await load_status_rules(db)
+    check_editable(rules, record.status, current_user)
 
-    if "status" in update_data and update_data["status"]:
-        update_data["status"] = update_data["status"].strip().lower()
-
-    for field_name, value in update_data.items():
+    for field_name, value in payload.model_dump(exclude_unset=True, exclude={"items"}).items():
         setattr(record, field_name, value)
 
     if payload.items is not None:
-        record.items.clear()
-        await db.flush()
-        for item in payload.items:
-            db.add(
-                ProformaInvoiceLineItem(
-                    proforma_id=record.id,
-                    product_name=item.product_name,
-                    product_code=item.product_code,
-                    hsn_code=item.hsn_code,
-                    gst_rate=item.gst_rate,
-                    quantity=item.quantity,
-                    uom=item.uom,
-                    rate=item.rate,
-                    amount=item.amount,
-                )
-            )
-        if payload.amount_inc_gst is None:
-            record.amount_inc_gst = sum(item.amount for item in payload.items)
+        if not payload.items:
+            raise BadRequestException("A proforma invoice needs at least one product or additional charge.")
+        _apply_priced_lines(record, await price_items(db, payload.items))
 
     await db.flush()
     await db.refresh(record, attribute_names=["items"])
-
     return build_success_response(
         data=_serialize_proforma(record),
         message="Proforma invoice updated successfully.",
-        request_id=getattr(request.state, "request_id", "-"),
+        request_id=_rid(request),
     )
 
 
@@ -305,15 +383,14 @@ async def delete_proforma_invoice(
     proforma_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    _user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Soft-delete a proforma invoice."""
-    from datetime import datetime, timezone
-
+    """Soft-delete a proforma invoice (only at stages the DB rules permit)."""
     record = await _resolve_proforma(db, proforma_id)
+    check_deletable(await load_status_rules(db), record.status, _user)
     record.deleted_at = datetime.now(timezone.utc)
     await db.flush()
-
-    return build_success_response(data={"deleted": True}, request_id=getattr(request.state, "request_id", "-"))
+    return build_success_response(data={"deleted": True}, request_id=_rid(request))
 
 
 # ==============================================================================
@@ -439,4 +516,3 @@ async def create_discount_payment(
             message="Discount payment recorded successfully.",
             request_id=req_id,
         )
-

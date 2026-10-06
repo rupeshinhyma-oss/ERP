@@ -17,7 +17,18 @@ vi.mock("@/lib/api", () => ({
   InventoryApi: {
     createStockAdjustment: vi.fn().mockResolvedValue({ success: true }),
   },
-  apiGet: vi.fn().mockResolvedValue({ success: true, data: [] }),
+  // client names come from the company master (/companies/lookup)
+  apiGet: vi.fn().mockImplementation((url: string) =>
+    Promise.resolve({
+      success: true,
+      data: url.startsWith("/companies/lookup")
+        ? [
+            { id: "c1", company_name: "Cirkla Technologies Pvt Ltd" },
+            { id: "c2", company_name: "Apex Valves & Automation India Pvt Ltd" },
+          ]
+        : [],
+    })
+  ),
 }));
 
 describe("AddAdjustmentOrderPage", () => {
@@ -103,7 +114,7 @@ describe("AddAdjustmentOrderPage", () => {
     expect(screen.getByText("0.00")).toBeTruthy();
   });
 
-  it("extracts and displays matching companies when typing letters in Client Name for Stock IN and Stock OUT", () => {
+  it("extracts and displays matching companies when typing letters in Client Name for Stock IN and Stock OUT", async () => {
     render(
       <BrowserRouter>
         <AddAdjustmentOrderPage />
@@ -114,11 +125,11 @@ describe("AddAdjustmentOrderPage", () => {
 
     // Focus opens dropdown with companies
     fireEvent.focus(clientInput);
-    expect(screen.getByRole("option", { name: "Cirkla Technologies Pvt Ltd" })).toBeTruthy();
+    expect(await screen.findByRole("option", { name: "Cirkla Technologies Pvt Ltd" })).toBeTruthy();
 
     // Type letters to filter
     fireEvent.change(clientInput, { target: { value: "Apex" } });
-    const suggestion = screen.getByRole("option", { name: "Apex Valves & Automation India Pvt Ltd" });
+    const suggestion = await screen.findByRole("option", { name: "Apex Valves & Automation India Pvt Ltd" });
     expect(suggestion).toBeTruthy();
 
     // Click on suggestion to select

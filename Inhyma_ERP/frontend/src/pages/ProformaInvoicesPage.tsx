@@ -10,25 +10,106 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { DatePicker } from "@/components/DatePicker";
 import { Combobox } from "@/components/Combobox";
+import { ClientNameAutocomplete, type CompanyAutocompleteItem } from "@/components/ClientNameAutocomplete";
 import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, errorMessage as apiErrorText } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useOptions, useMasterNames } from "@/lib/options";
-import type { PaginationMeta, ProformaInvoice, ProformaTabCounts } from "@/types";
+import type { PaginationMeta, ProformaInvoice, ProformaStatusRules, ProformaTabCounts } from "@/types";
 import { numberToIndianWords } from "@/utils/text";
 import "@/styles/stockAdjustment.css";
 
-const PROFORMA_OPTION_GROUPS = ["proforma.status", "common.yes_no", "delivery.type", "delivery.charge"] as const;
+const PROFORMA_OPTION_GROUPS = [
+  "proforma.status",
+  "proforma.defaults",
+  "common.yes_no",
+  "delivery.type",
+  "delivery.charge",
+] as const;
 
-type StatusTab = { key: string; label: string; cardLabel: string; badge: string };
-type CatalogProduct = { product_name: string; hsn: string; rate: number; gst_percent: number };
+type StatusTab = { key: string; label: string; cardLabel: string; badge: string; actionLabel?: string; actionColor?: string };
+type CatalogProduct = { product_name: string; hsn: string; rate: number; gst_percent: number; min_price: number };
+
+const todayDDMMYYYY = () => new Date().toLocaleDateString("en-GB").split("/").join("-");
+
+/** A blank PI form; default values (payment terms, transport, ...) come from the `proforma.defaults` option group. */
+function emptyFormState(defaults: Record<string, string>, salesPerson: string) {
+  return {
+    proforma_date: todayDDMMYYYY(),
+    expected_delivery_date: todayDDMMYYYY(),
+    warehouse: "",
+    payment_terms: defaults.payment_terms || "",
+    sales_person: salesPerson,
+    transport_name: defaults.transport_name || "",
+    third_party_delivery: defaults.third_party_delivery || "",
+    lead_source: "",
+    transport_destination: "",
+    delivery_type: defaults.delivery_type || "",
+    delivery_charge: defaults.delivery_charge || "",
+    company_name: "",
+    city: "",
+    state: "",
+    billing_address: "",
+    shipping_address: "",
+    product_search: "",
+    additional_charges_enabled: true,
+    terms_and_conditions: defaults.terms_and_conditions || "",
+    remarks: "",
+  };
+}
+type FormState = ReturnType<typeof emptyFormState>;
+
+/** The two always-visible additional-charge rows (spec: Transport and Packing & Forwarding). */
+function emptyChargeRows(): any[] {
+  return [1, 2].map((n) => ({
+    id: `charge-${n}-${Date.now()}`,
+    is_additional_charge: true,
+    charge_type: "",
+    product_name: "",
+    hsn: "",
+    quantity: "",
+    unit_price: "",
+    unit_discount: "",
+    taxable_amount: 0,
+    gst_percent: "",
+    gst_amount: 0,
+    total: 0,
+  }));
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Spec formula: taxable = (unit price - unit discount) x quantity. Same rule the server applies. */
+function priceLine(line: any) {
+  const q = parseFloat(String(line.quantity)) || 0;
+  const up = parseFloat(String(line.unit_price)) || 0;
+  const ud = parseFloat(String(line.unit_discount)) || 0;
+  const gstPct = parseFloat(String(line.gst_percent)) || 0;
+  const taxable = Math.max(0, up - ud) * q;
+  const gstAmt = (taxable * gstPct) / 100;
+  return { taxable_amount: round2(taxable), gst_amount: round2(gstAmt), total: round2(taxable + gstAmt) };
+}
+
+function ActionMenuItem({ label, color, onClick }: { label: string; color?: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{ width: "100%", padding: "8px 12px", background: "none", border: "none", textAlign: "left", fontSize: "12.5px", cursor: "pointer", color: color || "#1e293b", display: "flex", alignItems: "center", gap: "6px" }}
+      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
+      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+    >
+      {label}
+    </button>
+  );
+}
 
 function statusBadgeClass(status: string, tabs: StatusTab[]): string {
   return tabs.find((t) => t.key === status)?.badge || "badge badge-neutral";
@@ -91,6 +172,7 @@ export function ProformaInvoicesPage({
   defaultFilterOpen?: boolean;
 } = {}) {
   const navigate = useNavigate();
+  const { id: routeId } = useParams<{ id: string }>();
 
   const [items, setItems] = useState<ProformaInvoice[]>([]);
   const [tabCounts, setTabCounts] = useState<ProformaTabCounts>({});
@@ -105,6 +187,8 @@ export function ProformaInvoicesPage({
         label: o.label,
         cardLabel: o.meta?.card_label || o.label.toUpperCase(),
         badge: o.meta?.badge || "badge badge-neutral",
+        actionLabel: o.meta?.action_label,
+        actionColor: o.meta?.action_color,
       })),
     [optionGroups]
   );
@@ -116,6 +200,17 @@ export function ProformaInvoicesPage({
   const TRANSPORT_NAME_OPTIONS = useMasterNames("/masters/transports");
   const LEAD_SOURCE_OPTIONS = useMasterNames("/masters/lead-sources");
   const ADDITIONAL_CHARGE_TYPES = useMasterNames("/masters/additional-charges");
+  const DEFAULTS = useMemo(
+    () => Object.fromEntries((optionGroups["proforma.defaults"] || []).map((o) => [o.value, o.label])) as Record<string, string>,
+    [optionGroups]
+  );
+  const selfPickupTransport = DEFAULTS.self_pickup_transport || "";
+
+  // Workflow rules (allowed next statuses, who can edit/delete) are configured in the database
+  const [statusRules, setStatusRules] = useState<ProformaStatusRules>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [reasonDialog, setReasonDialog] = useState<{ pi: ProformaInvoice; target: string } | null>(null);
+  const [reasonText, setReasonText] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [perPage, setPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
@@ -149,9 +244,10 @@ export function ProformaInvoicesPage({
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
-  const { profile } = useAuth();
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const isAdmin = isSuperAdmin || profile?.username === "admin" || hasPermission("proforma.approve");
   const loggedInUserName = useMemo(() => {
-    if (!profile) return "Admin";
+    if (!profile) return "";
     return (
       profile.full_name ||
       (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username))
@@ -170,33 +266,11 @@ export function ProformaInvoicesPage({
       .catch(() => { });
   }, []);
 
-  const [formState, setFormState] = useState({
-    proforma_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
-    expected_delivery_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
-    warehouse: "",
-    payment_terms: "",
-    sales_person: loggedInUserName,
-    transport_name: "",
-    third_party_delivery: "No",
-    lead_source: "",
-    transport_destination: "",
-    delivery_type: "",
-    delivery_charge: "",
-
-    company_name: "",
-    billing_address: "",
-    shipping_address: "",
-
-    product_search: "",
-    additional_charges_enabled: true,
-
-    terms_and_conditions: "Make all cheque payable to USER",
-    remarks: "",
-  });
+  const [formState, setFormState] = useState<FormState>(() => emptyFormState({}, ""));
 
   useEffect(() => {
     if (loggedInUserName) {
-      setFormState((prev) => (!prev.sales_person || prev.sales_person === "Rupesh Malla" ? { ...prev, sales_person: loggedInUserName } : prev));
+      setFormState((prev) => (!prev.sales_person ? { ...prev, sales_person: loggedInUserName } : prev));
     }
   }, [loggedInUserName]);
 
@@ -207,36 +281,28 @@ export function ProformaInvoicesPage({
     if (formState.sales_person && formState.sales_person.trim()) set.add(formState.sales_person.trim());
     return Array.from(set);
   }, [loggedInUserName, salesPersonOptions, formState.sales_person]);
-  const [formLineItems, setFormLineItems] = useState<any[]>([
-    {
-      id: "charge-1",
-      is_additional_charge: true,
-      charge_type: "",
-      product_name: "",
-      hsn: "",
-      quantity: "",
-      unit_price: "",
-      unit_discount: "",
-      taxable_amount: 0,
-      gst_percent: "",
-      gst_amount: 0,
-      total: 0,
-    },
-    {
-      id: "charge-2",
-      is_additional_charge: true,
-      charge_type: "",
-      product_name: "",
-      hsn: "",
-      quantity: "",
-      unit_price: "",
-      unit_discount: "",
-      taxable_amount: 0,
-      gst_percent: "",
-      gst_amount: 0,
-      total: 0,
-    },
-  ]);
+  const [formLineItems, setFormLineItems] = useState<any[]>(() => emptyChargeRows());
+
+  // Fill still-blank fields with the DB-configured defaults once they load (new invoices only)
+  useEffect(() => {
+    if (editingId) return;
+    setFormState((prev) => ({
+      ...prev,
+      payment_terms: prev.payment_terms || DEFAULTS.payment_terms || "",
+      transport_name: prev.transport_name || DEFAULTS.transport_name || "",
+      delivery_type: prev.delivery_type || DEFAULTS.delivery_type || "",
+      delivery_charge: prev.delivery_charge || DEFAULTS.delivery_charge || "",
+      third_party_delivery: prev.third_party_delivery || DEFAULTS.third_party_delivery || "",
+      terms_and_conditions: prev.terms_and_conditions || DEFAULTS.terms_and_conditions || "",
+    }));
+  }, [DEFAULTS, editingId]);
+
+  const selfPickup = !!selfPickupTransport && formState.transport_name === selfPickupTransport;
+  const belowMinCount = formLineItems.filter(
+    (it) => !it.is_additional_charge && it.min_price && (parseFloat(String(it.unit_price)) || 0) < it.min_price
+  ).length;
+  const fieldError = (key: string) =>
+    formErrors[key] ? <span style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "4px", display: "block" }}>{formErrors[key]}</span> : null;
   const productSearchSeq = useRef(0);
   const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
 
@@ -263,14 +329,16 @@ export function ProformaInvoicesPage({
       params.set("skip", String((currentPage - 1) * perPage));
       params.set("limit", String(perPage));
 
-      const { data } = await apiGet<{ items: ProformaInvoice[]; tab_counts: ProformaTabCounts }>(
+      const { data } = await apiGet<{ items: ProformaInvoice[]; tab_counts: ProformaTabCounts; status_rules: ProformaStatusRules }>(
         `/proforma-invoice/list?${params.toString()}`
       );
       setItems(data?.items || []);
       setTabCounts(data?.tab_counts || {});
-    } catch {
+      setStatusRules(data?.status_rules || {});
+    } catch (err) {
       setItems([]);
       setTabCounts({});
+      setErrorMessage(apiErrorText(err));
     } finally {
       setLoading(false);
     }
@@ -369,7 +437,7 @@ export function ProformaInvoicesPage({
 
       totalQty += q;
       totalBasic += q * up;
-      totalDiscount += ud;
+      totalDiscount += ud * q;
       totalTaxable += taxable;
       totalTax += gstAmt;
       totalWithTax += tot;
@@ -397,7 +465,7 @@ export function ProformaInvoicesPage({
       const q = parseFloat(String(target.quantity)) || 0;
       const up = parseFloat(String(target.unit_price)) || 0;
       const ud = parseFloat(String(target.unit_discount)) || 0;
-      const taxable = Math.max(0, q * up - ud);
+      const taxable = Math.max(0, up - ud) * q;
       const gstPct = parseFloat(String(target.gst_percent)) || 0;
       const gstAmt = (taxable * gstPct) / 100;
       const tot = taxable + gstAmt;
@@ -411,8 +479,8 @@ export function ProformaInvoicesPage({
     });
   };
 
-  const handleAddProductItem = (prod?: { product_name: string; hsn?: string; rate?: number; gst_percent?: number }) => {
-    const newItem = {
+  const handleAddProductItem = (prod?: { product_name: string; hsn?: string; rate?: number; gst_percent?: number; min_price?: number }) => {
+    const base = {
       id: "prod-" + Date.now() + Math.random().toString(36).substring(2, 5),
       is_additional_charge: false,
       charge_type: "",
@@ -421,12 +489,10 @@ export function ProformaInvoicesPage({
       quantity: 1,
       unit_price: prod?.rate ?? "",
       unit_discount: 0,
-      taxable_amount: prod?.rate || 0,
-      gst_percent: prod?.gst_percent ?? 18,
-      gst_amount: prod?.rate ? Math.round(((prod.rate * (prod.gst_percent ?? 18)) / 100) * 100) / 100 : 0,
-      total: prod?.rate ? Math.round((prod.rate * (1 + (prod.gst_percent ?? 18) / 100)) * 100) / 100 : 0,
+      gst_percent: prod?.gst_percent ?? 0,
+      min_price: prod?.min_price,
     };
-    setFormLineItems((prev) => [newItem, ...prev]);
+    setFormLineItems((prev) => [{ ...base, ...priceLine(base) }, ...prev]);
   };
 
   const handleAddChargeItem = () => {
@@ -467,6 +533,7 @@ export function ProformaInvoicesPage({
             product_name: p.product_name,
             hsn: p.hsn_number || "",
             rate: Number(p.standard_price) || 0,
+            min_price: Number(p.standard_price) || 0,
             gst_percent: Number(p.gst_percent) || 0,
           }))
         );
@@ -485,60 +552,132 @@ export function ProformaInvoicesPage({
   const handleOpenCreate = () => {
     setErrorMessage(null);
     setFormErrors({});
-    setFormState({
-      proforma_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
-      expected_delivery_date: new Date().toLocaleDateString("en-GB").split("/").join("-"),
-      warehouse: "",
-      payment_terms: "",
-      sales_person: loggedInUserName,
-      transport_name: "",
-      third_party_delivery: "No",
-      lead_source: "",
-      transport_destination: "",
-      delivery_type: "",
-      delivery_charge: "",
-
-      company_name: "",
-      billing_address: "",
-      shipping_address: "",
-
-      product_search: "",
-      additional_charges_enabled: true,
-
-      terms_and_conditions: "Make all cheque payable to USER",
-      remarks: "",
-    });
-    setFormLineItems([
-      {
-        id: "charge-1",
-        is_additional_charge: true,
-        charge_type: "",
-        product_name: "",
-        hsn: "",
-        quantity: "",
-        unit_price: "",
-        unit_discount: "",
-        taxable_amount: 0,
-        gst_percent: "",
-        gst_amount: 0,
-        total: 0,
-      },
-      {
-        id: "charge-2",
-        is_additional_charge: true,
-        charge_type: "",
-        product_name: "",
-        hsn: "",
-        quantity: "",
-        unit_price: "",
-        unit_discount: "",
-        taxable_amount: 0,
-        gst_percent: "",
-        gst_amount: 0,
-        total: 0,
-      },
-    ]);
+    setEditingId(null);
+    setFormState(emptyFormState(DEFAULTS, loggedInUserName));
+    setFormLineItems(emptyChargeRows());
     setIsFormOpen(true);
+  };
+
+  const handleOpenEdit = (p: ProformaInvoice) => {
+    setErrorMessage(null);
+    setFormErrors({});
+    setEditingId(p.id);
+    setFormState({
+      ...emptyFormState({}, ""),
+      proforma_date: p.proforma_date,
+      expected_delivery_date: p.expected_delivery_date || "",
+      warehouse: p.warehouse || "",
+      payment_terms: p.payment_terms || "",
+      sales_person: p.sales_person || "",
+      transport_name: p.transport_name || "",
+      third_party_delivery: p.third_party_delivery || "",
+      lead_source: p.lead_source || "",
+      transport_destination: p.transport_destination || "",
+      delivery_type: p.delivery_type || "",
+      delivery_charge: p.delivery_charge || "",
+      company_name: p.company_name || "",
+      city: p.city || "",
+      state: p.state || "",
+      billing_address: p.billing_address || "",
+      shipping_address: p.shipping_address || "",
+      terms_and_conditions: p.terms_and_conditions || "",
+      remarks: p.remark || "",
+    });
+    const lines = (p.items || []).map((it, idx) => {
+      const line = {
+        id: it.id || `item-${idx}`,
+        is_additional_charge: !!it.is_additional_charge,
+        charge_type: it.charge_type || "",
+        product_name: it.product_name,
+        hsn: it.hsn_code || it.hsn || "",
+        quantity: it.quantity,
+        unit_price: it.unit_price ?? it.rate,
+        unit_discount: it.unit_discount ?? 0,
+        gst_percent: it.gst_percent ?? 0,
+      };
+      return { ...line, ...priceLine(line) };
+    });
+    // keep the two always-visible additional-charge rows available while editing
+    const chargeCount = lines.filter((l) => l.is_additional_charge).length;
+    setFormLineItems([...lines, ...emptyChargeRows().slice(chargeCount)]);
+    setIsFormOpen(true);
+  };
+
+  // Opening /proforma-invoice/addedit/:id loads that invoice into the form
+  useEffect(() => {
+    if (!routeId) return;
+    let cancelled = false;
+    apiGet<ProformaInvoice>(`/proforma-invoice/${routeId}`)
+      .then((res) => {
+        if (!cancelled && res?.data) handleOpenEdit(res.data);
+      })
+      .catch((err) => {
+        if (!cancelled) setErrorMessage(apiErrorText(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeId]);
+
+  const handleSelectCompany = (c: CompanyAutocompleteItem) => {
+    const place = [c.address, c.area, c.city_name, c.state_name].filter(Boolean).join(", ");
+    const shipping = [place, c.pincode].filter(Boolean).join(" - ");
+    const contact = [c.contact_full_name, c.contact_calling_number].filter(Boolean).join(" ");
+    const billing = [shipping, contact, c.tax_id_number ? `GST: ${c.tax_id_number}` : ""].filter(Boolean).join(" | ");
+    setFormState((prev) => ({
+      ...prev,
+      company_name: c.company_name,
+      city: c.city_name || "",
+      state: c.state_name || "",
+      billing_address: billing,
+      shipping_address: shipping,
+    }));
+  };
+
+  // ---- workflow actions (rules come from the database) ----
+  const rulesFor = (p: ProformaInvoice) => statusRules[p.status];
+  const canEdit = (p: ProformaInvoice) => {
+    const mode = rulesFor(p)?.edit;
+    return mode === "any" || (mode === "admin" && isAdmin);
+  };
+  const canDelete = (p: ProformaInvoice) => !!rulesFor(p)?.delete;
+  const availableTransitions = (p: ProformaInvoice) => {
+    const r = rulesFor(p);
+    if (!r) return [];
+    return r.next.filter((t) => !(r.admin_only_to || []).includes(t) || isAdmin);
+  };
+
+  const applyTransition = async (p: ProformaInvoice, target: string, reason?: string) => {
+    try {
+      setErrorMessage(null);
+      await apiPatch(`/proforma-invoice/${p.id}/status`, { status: target, reason });
+      await loadProformas();
+    } catch (err) {
+      setErrorMessage(apiErrorText(err));
+    }
+  };
+
+  const startTransition = (p: ProformaInvoice, target: string) => {
+    setOpenActionId(null);
+    if ((rulesFor(p)?.reason_required_to || []).includes(target)) {
+      setReasonText("");
+      setReasonDialog({ pi: p, target });
+      return;
+    }
+    void applyTransition(p, target);
+  };
+
+  const handleDeleteProforma = async (p: ProformaInvoice) => {
+    setOpenActionId(null);
+    if (!window.confirm(`Delete proforma ${p.proforma_no}?`)) return;
+    try {
+      setErrorMessage(null);
+      await apiDelete(`/proforma-invoice/${p.id}`);
+      await loadProformas();
+    } catch (err) {
+      setErrorMessage(apiErrorText(err));
+    }
   };
 
   const handleBack = () => {
@@ -549,11 +688,22 @@ export function ProformaInvoicesPage({
   const handleSaveProforma = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    if (!formState.warehouse || formState.warehouse === "Select") {
-      errs.warehouse = "Warehouse is required.";
+    if (!formState.warehouse || formState.warehouse === "Select") errs.warehouse = "Warehouse is required.";
+    if (!formState.company_name.trim()) errs.company_name = "Company name is required.";
+    if (!formState.payment_terms.trim()) errs.payment_terms = "Payment terms are required.";
+    if (!formState.transport_name.trim()) errs.transport_name = "Transport name is required.";
+    if (!selfPickup) {
+      if (!formState.delivery_type.trim()) errs.delivery_type = "Delivery type is required.";
+      if (!formState.delivery_charge.trim()) errs.delivery_charge = "Delivery charge is required.";
     }
-    if (!formState.company_name.trim()) {
-      errs.company_name = "Company name is required.";
+    if (!formState.billing_address.trim()) errs.billing_address = "Billing address is required.";
+    if (!formState.shipping_address.trim()) errs.shipping_address = "Shipping address is required.";
+
+    const expected = parseDateAny(formState.expected_delivery_date);
+    if (expected) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (expected < today) errs.expected_delivery_date = "Expected delivery date cannot be in the past.";
     }
 
     const validItems = formLineItems.filter(
@@ -561,109 +711,67 @@ export function ProformaInvoicesPage({
     );
     if (validItems.length === 0) {
       errs.items = "Please add at least one product or additional charge item.";
+    } else if (
+      validItems.some((it) => (parseFloat(String(it.unit_discount)) || 0) > (parseFloat(String(it.unit_price)) || 0))
+    ) {
+      errs.items = "A unit discount cannot be more than the unit price.";
     }
 
     if (Object.keys(errs).length > 0) {
       setFormErrors(errs);
+      setErrorMessage(errs.items || "Please fix the highlighted fields.");
       return;
     }
 
     setFormSubmitting(true);
     setErrorMessage(null);
+    setFormErrors({});
 
     try {
       const payload = {
         proforma_date: formState.proforma_date,
         expected_delivery_date: formState.expected_delivery_date.trim() || undefined,
         warehouse: formState.warehouse,
-        payment_terms: formState.payment_terms !== "Select" ? formState.payment_terms : undefined,
-        sales_person: formState.sales_person !== "Select" ? formState.sales_person : undefined,
-        transport_name: formState.transport_name !== "Select" ? formState.transport_name : undefined,
-        third_party_delivery: formState.third_party_delivery,
-        lead_source: formState.lead_source !== "Select" ? formState.lead_source : undefined,
-        transport_destination: formState.transport_destination.trim() || undefined,
-        delivery_type: formState.delivery_type !== "Select" ? formState.delivery_type : undefined,
-        delivery_charge: formState.delivery_charge !== "Select" ? formState.delivery_charge : undefined,
+        payment_terms: formState.payment_terms || undefined,
+        sales_person: formState.sales_person || undefined,
+        transport_name: formState.transport_name || undefined,
+        third_party_delivery: formState.third_party_delivery || undefined,
+        lead_source: formState.lead_source || undefined,
+        transport_destination: selfPickup ? undefined : formState.transport_destination.trim() || undefined,
+        delivery_type: selfPickup ? undefined : formState.delivery_type || undefined,
+        delivery_charge: selfPickup ? undefined : formState.delivery_charge || undefined,
         company_name: formState.company_name.trim(),
+        city: formState.city || undefined,
+        state: formState.state || undefined,
         billing_address: formState.billing_address.trim() || undefined,
         shipping_address: formState.shipping_address.trim() || undefined,
         terms_and_conditions: formState.terms_and_conditions.trim() || undefined,
         remark: formState.remarks.trim() || undefined,
-        discount: totals.totalDiscount,
-        amount_inc_gst: totals.totalWithTax,
-        status: "pending",
+        // totals, status, discount and author are calculated / set by the server
         items: validItems.map((it) => ({
           product_name: it.product_name.trim(),
           hsn_code: it.hsn.trim() || undefined,
           quantity: parseFloat(String(it.quantity)) || 1,
-          uom: "Nos",
-          rate: parseFloat(String(it.unit_price)) || 0,
-          amount: it.total || 0,
           unit_price: parseFloat(String(it.unit_price)) || 0,
           unit_discount: parseFloat(String(it.unit_discount)) || 0,
-          taxable_amount: it.taxable_amount || 0,
           gst_percent: parseFloat(String(it.gst_percent)) || 0,
-          gst_amount: it.gst_amount || 0,
-          total: it.total || 0,
           is_additional_charge: it.is_additional_charge || false,
+          charge_type: it.is_additional_charge ? it.charge_type || it.product_name : undefined,
         })),
       };
 
-      const res = await apiPost<any>("/proforma-invoice", payload);
-      if (res?.data) {
-        setItems((prev) => [res.data, ...prev]);
+      if (editingId) {
+        await apiPatch(`/proforma-invoice/${editingId}`, payload);
       } else {
-        const newRecord: ProformaInvoice = {
-          id: "pi-" + Date.now(),
-          proforma_no: `PI-MH/26-27/${Math.floor(1700 + Math.random() * 50)}`,
-          proforma_date: formState.proforma_date,
-          expected_delivery_date: formState.expected_delivery_date,
-          warehouse: formState.warehouse,
-          company_name: formState.company_name,
-          sales_person: formState.sales_person,
-          amount_inc_gst: totals.totalWithTax,
-          discount: totals.totalDiscount,
-          status: "pending",
-          created_by: formState.sales_person || "Admin User",
-          items: validItems.map((it, idx) => ({
-            id: `item-${idx}`,
-            product_name: it.product_name,
-            quantity: parseFloat(String(it.quantity)) || 1,
-            uom: "Nos",
-            rate: parseFloat(String(it.unit_price)) || 0,
-            amount: it.total,
-          })),
-        };
-        setItems((prev) => [newRecord, ...prev]);
+        await apiPost("/proforma-invoice", payload);
       }
       setIsFormOpen(false);
+      setEditingId(null);
       navigate("/proforma-invoice/list");
-      loadProformas();
-    } catch {
-      const newRecord: ProformaInvoice = {
-        id: "pi-" + Date.now(),
-        proforma_no: `PI-MH/26-27/${Math.floor(1700 + Math.random() * 50)}`,
-        proforma_date: formState.proforma_date,
-        expected_delivery_date: formState.expected_delivery_date,
-        warehouse: formState.warehouse,
-        company_name: formState.company_name,
-        sales_person: formState.sales_person,
-        amount_inc_gst: totals.totalWithTax,
-        discount: totals.totalDiscount,
-        status: "pending",
-        created_by: formState.sales_person || "Admin User",
-        items: validItems.map((it, idx) => ({
-          id: `item-${idx}`,
-          product_name: it.product_name,
-          quantity: parseFloat(String(it.quantity)) || 1,
-          uom: "Nos",
-          rate: parseFloat(String(it.unit_price)) || 0,
-          amount: it.total,
-        })),
-      };
-      setItems((prev) => [newRecord, ...prev]);
-      setIsFormOpen(false);
-      navigate("/proforma-invoice/list");
+      await loadProformas();
+    } catch (err) {
+      // keep the form open and tell the user the truth -- never pretend the save worked
+      setErrorMessage(apiErrorText(err));
     } finally {
       setFormSubmitting(false);
     }
@@ -673,12 +781,12 @@ export function ProformaInvoicesPage({
     return (
       <AppShell activeKey="proforma">
         <main className="page" style={{ maxWidth: "1350px", margin: "0 auto", padding: "16px 24px 60px" }}>
-          <Breadcrumb trail={["Sale", "Proforma", "Add"]} />
+          <Breadcrumb trail={["Sale", "Proforma", editingId ? "Edit" : "Add"]} />
 
           {/* Page Header matching legacy screenshot */}
           <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
-              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a", margin: 0 }}>Add Proforma Invoice</h1>
+              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a", margin: 0 }}>{editingId ? "Edit Proforma Invoice" : "Add Proforma Invoice"}</h1>
             </div>
             <div className="page-header-actions">
               <button
@@ -708,6 +816,12 @@ export function ProformaInvoicesPage({
           {errorMessage && (
             <div style={{ padding: "12px 16px", backgroundColor: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "16px" }}>
               ⚠️ {errorMessage}
+            </div>
+          )}
+
+          {belowMinCount > 0 && (
+            <div style={{ padding: "10px 16px", backgroundColor: "#fef3c7", border: "1px solid #fcd34d", borderRadius: "6px", color: "#92400e", fontSize: "13px", marginBottom: "16px" }}>
+              ⚠ {belowMinCount} item(s) priced below the minimum price. This invoice will need admin approval.
             </div>
           )}
 
@@ -756,6 +870,7 @@ export function ProformaInvoicesPage({
                     value={formState.expected_delivery_date}
                     onChange={(val) => setFormState({ ...formState, expected_delivery_date: val })}
                   />
+                  {fieldError("expected_delivery_date")}
                 </div>
 
                 <div>
@@ -769,6 +884,7 @@ export function ProformaInvoicesPage({
                     options={PAYMENT_TERM_OPTIONS}
                     placeholder="Select Payment Terms"
                   />
+                  {fieldError("payment_terms")}
                 </div>
 
                 <div>
@@ -796,6 +912,7 @@ export function ProformaInvoicesPage({
                     options={TRANSPORT_NAME_OPTIONS}
                     placeholder="Select Transport Name"
                   />
+                  {fieldError("transport_name")}
                 </div>
 
                 <div>
@@ -826,45 +943,51 @@ export function ProformaInvoicesPage({
 
                 <div />
 
-                {/* Row 3 */}
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Transport Destination
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter Destination"
-                    value={formState.transport_destination}
-                    onChange={(e) => setFormState({ ...formState, transport_destination: e.target.value })}
-                    style={{ width: "100%", height: "36px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 10px", fontSize: "13px", background: "#ffffff", color: "#1e293b", outline: "none" }}
-                  />
-                </div>
+                {/* Row 3: hidden when the transport is Self Pick-up (spec) */}
+                {!selfPickup && (
+                  <>
+                    <div>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                        Transport Destination
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Enter Destination"
+                        value={formState.transport_destination}
+                        onChange={(e) => setFormState({ ...formState, transport_destination: e.target.value })}
+                        style={{ width: "100%", height: "36px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 10px", fontSize: "13px", background: "#ffffff", color: "#1e293b", outline: "none" }}
+                      />
+                    </div>
 
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Delivery Type <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <Combobox
-                    ariaLabel="Delivery Type"
-                    value={formState.delivery_type}
-                    onChange={(val) => setFormState({ ...formState, delivery_type: val })}
-                    options={DELIVERY_TYPE_OPTIONS}
-                    placeholder="Select Delivery Type"
-                  />
-                </div>
+                    <div>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                        Delivery Type <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <Combobox
+                        ariaLabel="Delivery Type"
+                        value={formState.delivery_type}
+                        onChange={(val) => setFormState({ ...formState, delivery_type: val })}
+                        options={DELIVERY_TYPE_OPTIONS}
+                        placeholder="Select Delivery Type"
+                      />
+                      {fieldError("delivery_type")}
+                    </div>
 
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Delivery Charge <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <Combobox
-                    ariaLabel="Delivery Charge"
-                    value={formState.delivery_charge}
-                    onChange={(val) => setFormState({ ...formState, delivery_charge: val })}
-                    options={DELIVERY_CHARGE_OPTIONS}
-                    placeholder="Select Delivery Charge"
-                  />
-                </div>
+                    <div>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                        Delivery Charge <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <Combobox
+                        ariaLabel="Delivery Charge"
+                        value={formState.delivery_charge}
+                        onChange={(val) => setFormState({ ...formState, delivery_charge: val })}
+                        options={DELIVERY_CHARGE_OPTIONS}
+                        placeholder="Select Delivery Charge"
+                      />
+                      {fieldError("delivery_charge")}
+                    </div>
+                  </>
+                )}
 
                 <div />
               </div>
@@ -878,27 +1001,23 @@ export function ProformaInvoicesPage({
                   Company <span style={{ color: "#ef4444" }}>*</span>
                 </label>
                 <div style={{ display: "flex", gap: "0px", alignItems: "center" }}>
-                  <input
-                    type="text"
-                    placeholder="Enter Customer Name"
+                  <ClientNameAutocomplete
+                    id="pi-company"
                     value={formState.company_name}
-                    onChange={(e) => setFormState({ ...formState, company_name: e.target.value })}
-                    style={{ flex: 1, height: "34px", border: "1px solid #cbd5e1", borderRight: "none", borderTopLeftRadius: "4px", borderBottomLeftRadius: "4px", padding: "0 10px", fontSize: "13px", outline: "none" }}
+                    onChange={(val) => setFormState((prev) => ({ ...prev, company_name: val }))}
+                    onSelectCompany={handleSelectCompany}
+                    placeholder="Enter Customer Name"
+                    className=""
+                    style={{ flex: 1 }}
+                    inputStyle={{ width: "100%", height: "34px", border: "1px solid #cbd5e1", borderRight: "none", borderTopLeftRadius: "4px", borderBottomLeftRadius: "4px", padding: "0 10px", fontSize: "13px", outline: "none" }}
                   />
                   <button
                     type="button"
                     title="Clear"
-                    onClick={() => setFormState({ ...formState, company_name: "" })}
-                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
+                    onClick={() => setFormState({ ...formState, company_name: "", city: "", state: "", billing_address: "", shipping_address: "" })}
+                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
                   >
                     🗑️
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { if (!formState.company_name) setFormState({ ...formState, company_name: "New Enterprise Ltd." }); }}
-                    style={{ height: "34px", padding: "0 14px", background: "#0061f2", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
-                  >
-                    + Add
                   </button>
                 </div>
                 {formErrors.company_name && <span style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "4px", display: "block" }}>{formErrors.company_name}</span>}
@@ -921,18 +1040,12 @@ export function ProformaInvoicesPage({
                     type="button"
                     title="Clear"
                     onClick={() => setFormState({ ...formState, billing_address: "" })}
-                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
+                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
                   >
                     🗑️
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => { if (!formState.billing_address) setFormState({ ...formState, billing_address: "Plot 42, Industrial Area, Phase II" }); }}
-                    style={{ height: "34px", padding: "0 14px", background: "#0061f2", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
-                  >
-                    + Add
-                  </button>
                 </div>
+                {fieldError("billing_address")}
               </div>
 
               {/* Shipping Address Card */}
@@ -952,18 +1065,12 @@ export function ProformaInvoicesPage({
                     type="button"
                     title="Clear"
                     onClick={() => setFormState({ ...formState, shipping_address: "" })}
-                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
+                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
                   >
                     🗑️
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => { if (!formState.shipping_address) setFormState({ ...formState, shipping_address: formState.billing_address || "Plot 42, Industrial Area, Phase II" }); }}
-                    style={{ height: "34px", padding: "0 14px", background: "#0061f2", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
-                  >
-                    + Add
-                  </button>
                 </div>
+                {fieldError("shipping_address")}
               </div>
             </div>
 
@@ -975,7 +1082,8 @@ export function ProformaInvoicesPage({
               <div style={{ position: "relative" }}>
                 <input
                   type="text"
-                  placeholder="Enter Product Name / Model No"
+                  placeholder={formState.warehouse ? "Enter Product Name / Model No" : "Select a warehouse first"}
+                  disabled={!formState.warehouse}
                   value={formState.product_search}
                   onChange={(e) => handleProductSearchChange(e.target.value)}
                   style={{ width: "100%", height: "36px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 12px", fontSize: "13.5px", outline: "none" }}
@@ -1087,6 +1195,9 @@ export function ProformaInvoicesPage({
                             onChange={(e) => handleUpdateLineItem(idx, "unit_price", e.target.value)}
                             style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 6px", fontSize: "12.5px" }}
                           />
+                          {!row.is_additional_charge && row.min_price > 0 && (parseFloat(String(row.unit_price)) || 0) < row.min_price && (
+                            <div style={{ color: "#b45309", fontSize: "11px", marginTop: "2px" }}>Below min ₹{row.min_price}</div>
+                          )}
                         </td>
                         <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                           <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "3px", overflow: "hidden" }}>
@@ -1824,6 +1935,9 @@ export function ProformaInvoicesPage({
                       </td>
                       <td style={{ textAlign: "center", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
                         <span className={statusBadgeClass(p.status, STATUS_TABS)}>{statusLabel(p.status, STATUS_TABS)}</span>
+                        {p.below_min_price && (
+                          <span title="Priced below the minimum price" style={{ marginLeft: "6px", color: "#b45309" }}>⚠</span>
+                        )}
                         {p.remark && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "2px" }}>{p.remark}</div>}
                       </td>
                       <td style={{ textAlign: "center", position: "relative", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
@@ -1911,60 +2025,28 @@ export function ProformaInvoicesPage({
                             >
                               👁️ View Details
                             </button>
-                            {p.status === "pending" && (
-                              <button
-                                type="button"
+                            {canEdit(p) && (
+                              <ActionMenuItem
+                                label="✏️ Edit"
+                                color="#2563eb"
                                 onClick={() => {
-                                  apiPatch(`/proforma-invoice/${p.id}/status`, { status: "admin_approved" }).catch(() => { });
-                                  setItems(items.map((it) => (it.id === p.id ? { ...it, status: "admin_approved" } : it)));
                                   setOpenActionId(null);
+                                  handleOpenEdit(p);
                                 }}
-                                style={{
-                                  width: "100%",
-                                  padding: "8px 12px",
-                                  background: "none",
-                                  border: "none",
-                                  textAlign: "left",
-                                  fontSize: "12.5px",
-                                  cursor: "pointer",
-                                  color: "#d97706",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "6px",
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#fef3c7")}
-                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                              >
-                                ✓ Approve
-                              </button>
+                              />
                             )}
-                            {p.status === "admin_approved" && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  apiPatch(`/proforma-invoice/${p.id}/status`, { status: "confirmed" }).catch(() => { });
-                                  setItems(items.map((it) => (it.id === p.id ? { ...it, status: "confirmed" } : it)));
-                                  setOpenActionId(null);
-                                }}
-                                style={{
-                                  width: "100%",
-                                  padding: "8px 12px",
-                                  background: "none",
-                                  border: "none",
-                                  textAlign: "left",
-                                  fontSize: "12.5px",
-                                  cursor: "pointer",
-                                  color: "#16a34a",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "6px",
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#dcfce7")}
-                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                              >
-                                ✓ Confirm
-                              </button>
-                            )}
+                            {availableTransitions(p).map((target) => {
+                              const tab = STATUS_TABS.find((t) => t.key === target);
+                              return (
+                                <ActionMenuItem
+                                  key={target}
+                                  label={tab?.actionLabel || tab?.label || target}
+                                  color={tab?.actionColor}
+                                  onClick={() => startTransition(p, target)}
+                                />
+                              );
+                            })}
+                            {canDelete(p) && <ActionMenuItem label="🗑️ Delete" color="#dc2626" onClick={() => void handleDeleteProforma(p)} />}
                           </div>
                         )}
                       </td>
@@ -2021,6 +2103,18 @@ export function ProformaInvoicesPage({
                     { label: "Sales Person", value: selectedProforma.sales_person || "—" },
                     { label: "Lead Source", value: selectedProforma.lead_source || "—" },
                     { label: "Status", value: statusLabel(selectedProforma.status, STATUS_TABS) },
+                    { label: "Payment Terms", value: selectedProforma.payment_terms || "—" },
+                    { label: "Transport", value: selectedProforma.transport_name || "—" },
+                    { label: "Transport Destination", value: selectedProforma.transport_destination || "—" },
+                    { label: "Delivery Type", value: selectedProforma.delivery_type || "—" },
+                    { label: "Delivery Charge", value: selectedProforma.delivery_charge || "—" },
+                    { label: "Third Party Delivery", value: selectedProforma.third_party_delivery || "—" },
+                    { label: "Billing Address", value: selectedProforma.billing_address || "—" },
+                    { label: "Shipping Address", value: selectedProforma.shipping_address || "—" },
+                    { label: "Created By", value: selectedProforma.created_by || "—" },
+                    ...(selectedProforma.approved_by ? [{ label: "Approved By", value: selectedProforma.approved_by }] : []),
+                    ...(selectedProforma.cancel_reason ? [{ label: "Cancel Reason", value: selectedProforma.cancel_reason }] : []),
+                    ...(selectedProforma.below_min_price ? [{ label: "Pricing", value: "Below minimum price: needs admin approval" }] : []),
                   ]}
                 />
               </div>
@@ -2062,6 +2156,45 @@ export function ProformaInvoicesPage({
           )}
         </SideDrawer>
       </main>
+      {reasonDialog && (
+        <div
+          role="dialog"
+          aria-label="Reason required"
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => setReasonDialog(null)}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "8px", width: "420px", maxWidth: "92%", padding: "20px", boxShadow: "0 10px 25px rgba(0,0,0,0.2)" }}>
+            <h3 style={{ fontSize: "15px", fontWeight: 700, margin: "0 0 6px", color: "#1e293b" }}>
+              {STATUS_TABS.find((t) => t.key === reasonDialog.target)?.actionLabel || reasonDialog.target}: {reasonDialog.pi.proforma_no}
+            </h3>
+            <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 10px" }}>Please give a reason.</p>
+            <textarea
+              aria-label="Reason"
+              value={reasonText}
+              onChange={(e) => setReasonText(e.target.value)}
+              rows={3}
+              style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "8px", fontSize: "13px" }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" }}>
+              <button type="button" className="btn" onClick={() => setReasonDialog(null)}>
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-add-new"
+                disabled={!reasonText.trim()}
+                onClick={() => {
+                  const d = reasonDialog;
+                  setReasonDialog(null);
+                  void applyTransition(d.pi, d.target, reasonText.trim());
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }

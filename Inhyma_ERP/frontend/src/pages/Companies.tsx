@@ -40,6 +40,16 @@ import {
 } from "@/lib/api";
 import { createNameResolver } from "@/lib/nameResolver";
 import { useAuth, useSrNoJump, isSrNoQuery, usePendingGuard, useModalHistorySync } from "@/lib/hooks";
+import { useOptions, optionValues } from "@/lib/options";
+import {
+  showsDirectImportCluster,
+  showsImportSubFields,
+  showsMonthlyTurnover,
+  showsPotentialBusinessPerMonth,
+  showsPotentialReason,
+  clearInapplicableCompanyFields,
+  computeAge,
+} from "@/lib/companyFields";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type {
@@ -193,6 +203,11 @@ const EMPTY_SUPPLIER_FORM = {
   products_interested: "",
   gst_registration_date: "",
   age_of_company: "",
+  monthly_turnover: "",
+  potential_business_per_month: "",
+  direct_import_from_china: "",
+  monthly_import_volume: "",
+  products_needed_for_imports: "",
   social_media: [{ platform: "", url: "" }] as Array<{ platform: string; url: string }>,
   overall_remarks: "",
   sales_person_id: "",
@@ -218,7 +233,11 @@ const EMPTY_CONTACT_FORM = {
   whatsapp_number: "",
   wechat_number: "",
   email: "",
+  birth_date: "",
+  anniversary_date: "",
 };
+
+
 
 /** Positive-sounding values read as active; everything else is neutral. */
 function StatusPill({ value }: { value?: string | null }) {
@@ -273,10 +292,10 @@ function parseDateRange(rangeStr: string): { created_after?: string; created_bef
   const separator = rangeStr.includes(" - ")
     ? " - "
     : rangeStr.includes(" to ")
-    ? " to "
-    : rangeStr.includes("-") && !rangeStr.includes("/")
-    ? "-"
-    : " - ";
+      ? " to "
+      : rangeStr.includes("-") && !rangeStr.includes("/")
+        ? "-"
+        : " - ";
   const parts = rangeStr.split(separator).map((s) => s.trim());
   const startStr = parts[0];
   const endStr = parts[1] || parts[0];
@@ -853,7 +872,7 @@ function CompanyNameAutocomplete({
             setRemoteItems(res.data);
           }
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => setIsSearching(false));
     }, 150);
     return () => clearTimeout(timer);
@@ -1146,6 +1165,25 @@ function CompanyNameAutocomplete({
 
 export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defaultAdd?: boolean; defaultFilterOpen?: boolean } = {}) {
   const { profile, hasPermission } = useAuth();
+
+  const COMPANY_OPTION_GROUPS = useMemo(
+    () => [
+      "company.business_type",
+      "company.business_category",
+      "company.monthly_turnover",
+      "company.potential_business_per_month",
+      "company.direct_import_from_china",
+      "company.monthly_import_volume",
+    ],
+    []
+  );
+  const { options: companyOptionGroups } = useOptions(COMPANY_OPTION_GROUPS);
+  const BUSINESS_TYPE_OPTIONS = optionValues(companyOptionGroups, "company.business_type");
+  const BUSINESS_CATEGORY_OPTIONS = optionValues(companyOptionGroups, "company.business_category");
+  const MONTHLY_TURNOVER_OPTIONS = optionValues(companyOptionGroups, "company.monthly_turnover");
+  const POTENTIAL_BUSINESS_OPTIONS = optionValues(companyOptionGroups, "company.potential_business_per_month");
+  const DIRECT_IMPORT_OPTIONS = optionValues(companyOptionGroups, "company.direct_import_from_china");
+  const IMPORT_VOLUME_OPTIONS = optionValues(companyOptionGroups, "company.monthly_import_volume");
   const canCreate = hasPermission("company.create") || hasPermission("supplier.create");
   const canUpdate = hasPermission("company.update") || hasPermission("supplier.update");
   const canDelete = hasPermission("company.delete") || hasPermission("supplier.delete");
@@ -1220,7 +1258,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           setFilterStates([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
     void apiGet<Array<{ id: string; name: string }>>("/masters/product-categories?page_size=250&status=active")
       .then((res) => {
@@ -1228,7 +1266,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           setFilterCategories([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
 
     void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
@@ -1238,7 +1276,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           setSalesPersons(res.data);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
   }, []);
 
@@ -1580,14 +1618,14 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
             setQuickStates([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
           }
         })
-        .catch(() => {});
+        .catch(() => { });
 
       void apiGet<Array<{ id: string; name: string }>>("/masters/countries?search=India&page_size=5")
         .then((res) => {
           const match = res?.data?.find((c) => c.name.toLowerCase().includes("india"));
           if (match) setDefaultIndiaId(match.id);
         })
-        .catch(() => {});
+        .catch(() => { });
 
       void apiGet<Array<{ id: string; name: string }>>("/masters/product-categories?page_size=250&status=active")
         .then((res) => {
@@ -1595,7 +1633,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
             setProductCategories([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
           }
         })
-        .catch(() => {});
+        .catch(() => { });
 
 
       void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
@@ -1620,7 +1658,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 setSalesPersons(mapped);
               }
             })
-            .catch(() => {});
+            .catch(() => { });
         });
     }
   }, [quickDrawerOpen, modalOpen, profile, getLoggedInSalesPersonId]);
@@ -1705,7 +1743,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           setQuickForm((p) => ({ ...p, city_id: match.id }));
           return;
         }
-      } catch {}
+      } catch { }
       const msg = err?.detail || err?.message || "Failed to add custom city.";
       setQuickAlert({ type: "error", message: msg });
     }
@@ -2075,6 +2113,16 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         products_interested: form.products_interested.trim() || null,
         gst_registration_date: form.gst_registration_date.trim() || null,
         age_of_company: form.age_of_company.trim() || null,
+        ...(() => {
+          const cleared = clearInapplicableCompanyFields(form);
+          return {
+            monthly_turnover: cleared.monthly_turnover || null,
+            potential_business_per_month: cleared.potential_business_per_month || null,
+            direct_import_from_china: cleared.direct_import_from_china || null,
+            monthly_import_volume: cleared.monthly_import_volume || null,
+            products_needed_for_imports: cleared.products_needed_for_imports.trim() || null,
+          };
+        })(),
         social_media: cleanSocialMedia.length > 0 ? cleanSocialMedia : null,
         overall_remarks: form.overall_remarks.trim() || null,
         sales_person_id: form.sales_person_id || null,
@@ -2106,7 +2154,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-// phone helpers removed
+  // phone helpers removed
 
   function focusAndScrollToField(fieldId: string) {
     setTimeout(() => {
@@ -2338,7 +2386,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     []
   );
 
-// companyNameFetcher removed
+  // companyNameFetcher removed
 
 
   const fetchNameLabel = useCallback(
@@ -2726,6 +2774,11 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         products_interested: supplier.products_interested || "",
         gst_registration_date: supplier.gst_registration_date || "",
         age_of_company: supplier.age_of_company || "",
+        monthly_turnover: supplier.monthly_turnover || "",
+        potential_business_per_month: supplier.potential_business_per_month || "",
+        direct_import_from_china: supplier.direct_import_from_china || "",
+        monthly_import_volume: supplier.monthly_import_volume || "",
+        products_needed_for_imports: supplier.products_needed_for_imports || "",
         social_media: supplier.social_media && supplier.social_media.length > 0 ? supplier.social_media : [{ platform: "", url: "" }],
         overall_remarks: supplier.overall_remarks || "",
         sales_person_id: supplier.sales_person_id || "",
@@ -2787,6 +2840,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           person_name: contact.person_name,
           designation: contact.designation || "",
           handling_territory: contact.handling_territory || "",
+          birth_date: contact.birth_date || "",
+          anniversary_date: contact.anniversary_date || "",
           calling_number: contact.calling_number || "",
           whatsapp_number: contact.whatsapp_number || "",
           wechat_number: contact.wechat_number || "",
@@ -2821,6 +2876,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       whatsapp_number: contactForm.whatsapp_number.trim() || null,
       wechat_number: contactForm.wechat_number.trim() || null,
       email: contactForm.email.trim() || null,
+      birth_date: contactForm.birth_date || null,
+      anniversary_date: contactForm.anniversary_date || null,
     };
 
     setContactSubmitting(true);
@@ -3745,8 +3802,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                           form.current_status?.toLowerCase() === "existing"
                             ? "Existing"
                             : form.current_status?.toLowerCase() === "new"
-                            ? "New"
-                            : form.current_status || ""
+                              ? "New"
+                              : form.current_status || ""
                         }
                         onChange={(e) => setField("current_status", e.target.value)}
                       >
@@ -3769,12 +3826,14 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                         onChange={(e) => setField("company_type", e.target.value)}
                       >
                         <option value="">Select</option>
-                        <option value="B2B">B2B</option>
-                        <option value="B2C">B2C</option>
-                        {form.company_type &&
-                          !["B2B", "B2C"].includes(form.company_type) && (
-                            <option value={form.company_type}>{form.company_type}</option>
-                          )}
+                        {BUSINESS_TYPE_OPTIONS.map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                        {form.company_type && !BUSINESS_TYPE_OPTIONS.includes(form.company_type) && (
+                          <option value={form.company_type}>{form.company_type}</option>
+                        )}
                       </select>
                     </div>
 
@@ -3829,6 +3888,58 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       </select>
                     </div>
 
+                    {showsPotentialReason(form.potential) && (
+                      <div>
+                        <label style={fieldLabelStyle}>Reason</label>
+                        <input
+                          id="potential_reason"
+                          type="text"
+                          style={inputStyle}
+                          placeholder="Why is this not a potential client?"
+                          value={form.potential_reason}
+                          onChange={(e) => setField("potential_reason", e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    {showsPotentialBusinessPerMonth(form.potential) && (
+                      <div>
+                        <label style={fieldLabelStyle}>Potential For Business Per Month</label>
+                        <select
+                          id="potential_business_per_month"
+                          style={selectStyle}
+                          value={form.potential_business_per_month}
+                          onChange={(e) => setField("potential_business_per_month", e.target.value)}
+                        >
+                          <option value="">Select</option>
+                          {POTENTIAL_BUSINESS_OPTIONS.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {showsMonthlyTurnover(form.company_type) && (
+                      <div>
+                        <label style={fieldLabelStyle}>Monthly Turnover</label>
+                        <select
+                          id="monthly_turnover"
+                          style={selectStyle}
+                          value={form.monthly_turnover}
+                          onChange={(e) => setField("monthly_turnover", e.target.value)}
+                        >
+                          <option value="">Select</option>
+                          {MONTHLY_TURNOVER_OPTIONS.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div>
                       <label style={fieldLabelStyle}>Business Categories</label>
                       <select
@@ -3838,13 +3949,14 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                         onChange={(e) => setField("company_category", e.target.value)}
                       >
                         <option value="">Select</option>
-                        <option value="Manufacturer">Manufacturer</option>
-                        <option value="Trader">Trader</option>
-                        {form.company_category &&
-                          form.company_category !== "Manufacturer" &&
-                          form.company_category !== "Trader" && (
-                            <option value={form.company_category}>{form.company_category}</option>
-                          )}
+                        {BUSINESS_CATEGORY_OPTIONS.map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                        {form.company_category && !BUSINESS_CATEGORY_OPTIONS.includes(form.company_category) && (
+                          <option value={form.company_category}>{form.company_category}</option>
+                        )}
                       </select>
                     </div>
 
@@ -3921,6 +4033,84 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     </div>
                   </div>
                 </div>
+
+                {/* SECTION 2b: Direct Import from China (separate cluster, spec: shown only when Business Type is B2B) */}
+                {showsDirectImportCluster(form.company_type) && (
+                  <div style={{ marginBottom: "28px" }}>
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 700,
+                        color: "#1e293b",
+                        marginBottom: "18px",
+                        paddingBottom: "8px",
+                        borderBottom: "1px solid #e2e8f0",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <span>🚢</span> Direct Import From China
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                        gap: "18px",
+                      }}
+                    >
+                      <div>
+                        <label style={fieldLabelStyle}>Direct Import From China?</label>
+                        <select
+                          id="direct_import_from_china"
+                          style={selectStyle}
+                          value={form.direct_import_from_china}
+                          onChange={(e) => setField("direct_import_from_china", e.target.value)}
+                        >
+                          <option value="">Select</option>
+                          {DIRECT_IMPORT_OPTIONS.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {showsImportSubFields(form.company_type, form.direct_import_from_china) && (
+                        <>
+                          <div>
+                            <label style={fieldLabelStyle}>Monthly Import Volume (INR)</label>
+                            <select
+                              id="monthly_import_volume"
+                              style={selectStyle}
+                              value={form.monthly_import_volume}
+                              onChange={(e) => setField("monthly_import_volume", e.target.value)}
+                            >
+                              <option value="">Select</option>
+                              {IMPORT_VOLUME_OPTIONS.map((v) => (
+                                <option key={v} value={v}>
+                                  {v}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label style={fieldLabelStyle}>Products Needed For Imports</label>
+                            <input
+                              id="products_needed_for_imports"
+                              type="text"
+                              style={inputStyle}
+                              placeholder="Enter products needed for imports"
+                              value={form.products_needed_for_imports}
+                              onChange={(e) => setField("products_needed_for_imports", e.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* SECTION 3: Social Media Details */}
                 <div style={{ marginBottom: "28px" }}>
@@ -4446,6 +4636,48 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                           />
                         </div>
 
+                        {/* Birth Date */}
+                        <div className="field">
+                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Birth Date
+                          </label>
+                          <input
+                            type="date"
+                            value={contactForm.birth_date}
+                            onChange={(e) => setContactForm((f) => ({ ...f, birth_date: e.target.value }))}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                            }}
+                          />
+                        </div>
+
+                        {/* Anniversary Date */}
+                        <div className="field">
+                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Anniversary Date
+                          </label>
+                          <input
+                            type="date"
+                            value={contactForm.anniversary_date}
+                            onChange={(e) => setContactForm((f) => ({ ...f, anniversary_date: e.target.value }))}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                            }}
+                          />
+                        </div>
+
                         {/* Handling Territory */}
                         <div className="field">
                           <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
@@ -4597,6 +4829,11 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                                 <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "2px" }}>{c.designation}</div>
                               ) : (
                                 <div style={{ fontSize: "12px", color: "#cbd5e1" }}>—</div>
+                              )}
+                              {computeAge(c.birth_date) !== null && (
+                                <div style={{ fontSize: "11.5px", color: "#94a3b8", marginTop: "2px" }}>
+                                  Age: {computeAge(c.birth_date)}
+                                </div>
                               )}
                             </td>
 
@@ -5334,8 +5571,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                             ...(isAction
                               ? { width: "70px", minWidth: "70px", textAlign: "center" }
                               : isSrNo
-                              ? { width: "70px", minWidth: "70px", maxWidth: "80px", textAlign: "center" }
-                              : {}),
+                                ? { width: "70px", minWidth: "70px", maxWidth: "80px", textAlign: "center" }
+                                : {}),
                             ...getFreezeStyle(idx, true),
                           }}
                         >
@@ -5844,6 +6081,27 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   { label: "Secondary Website", value: drawerCompany.secondary_website || "—" },
                 ]}
               />
+              {drawerCompany.contacts && drawerCompany.contacts.length > 0 && (
+                <div style={{ marginTop: "16px", borderTop: "1px solid #e2e8f0", paddingTop: "12px" }}>
+                  <h5 style={{ fontSize: "12.5px", fontWeight: 700, margin: "0 0 10px 0", color: "#475569" }}>
+                    Other Contacts
+                  </h5>
+                  {drawerCompany.contacts.map((c) => (
+                    <div
+                      key={c.id}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: "13px" }}
+                    >
+                      <span>
+                        {c.salutation ? `${c.salutation} ` : ""}
+                        {c.person_name}
+                        {c.designation ? ` — ${c.designation}` : ""}
+                        {computeAge(c.birth_date) !== null && ` (Age ${computeAge(c.birth_date)})`}
+                      </span>
+                      <span style={{ color: "#64748b" }}>{c.calling_number || "—"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <DetailFieldGrid
@@ -5851,6 +6109,24 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 { label: "Company Grade", value: drawerCompany.company_grade || "—" },
                 { label: "Current Status", value: <StatusPill value={drawerCompany.current_status} /> },
                 { label: "Potential", value: drawerCompany.potential || "—" },
+                ...(showsPotentialReason(drawerCompany.potential || "")
+                  ? [{ label: "Potential Reason", value: drawerCompany.potential_reason || "—" }]
+                  : []),
+                ...(showsPotentialBusinessPerMonth(drawerCompany.potential || "")
+                  ? [{ label: "Potential Business / Month", value: drawerCompany.potential_business_per_month || "—" }]
+                  : []),
+                ...(showsMonthlyTurnover(drawerCompany.company_type || "")
+                  ? [{ label: "Monthly Turnover", value: drawerCompany.monthly_turnover || "—" }]
+                  : []),
+                ...(showsDirectImportCluster(drawerCompany.company_type || "")
+                  ? [{ label: "Direct Import From China", value: drawerCompany.direct_import_from_china || "—" }]
+                  : []),
+                ...(showsImportSubFields(drawerCompany.company_type || "", drawerCompany.direct_import_from_china || "")
+                  ? [
+                    { label: "Monthly Import Volume", value: drawerCompany.monthly_import_volume || "—" },
+                    { label: "Products Needed For Imports", value: drawerCompany.products_needed_for_imports || "—", fullWidth: true },
+                  ]
+                  : []),
                 { label: "Visited Factory/Office", value: drawerCompany.visited_factory_office ? "Yes" : "No" },
                 { label: "Overall Remarks", value: drawerCompany.overall_remarks || "—", fullWidth: true },
               ]}
