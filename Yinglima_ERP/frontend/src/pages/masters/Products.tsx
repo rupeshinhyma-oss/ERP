@@ -20,7 +20,7 @@ import { useModalHistorySync } from "@/lib/hooks";
 import { MasterPage, type FormState, type MasterPageHandle } from "@/components/MasterPage";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
-import { StatusBadge } from "@/components/ui";
+import { StatusToggleSwitch } from "@/components/StatusToggleSwitch";
 import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import {
@@ -877,7 +877,19 @@ export function ProductsPage() {
         {
           header: "Status",
           sortValue: (p) => p.status,
-          render: (p) => <StatusBadge status={p.status} />,
+          render: (p) => (
+            <StatusToggleSwitch
+              id={p.id}
+              status={p.status}
+              name={p.product_name_tally || p.product_name || undefined}
+              apiBase="/masters/products"
+              onStatusChanged={() => {
+                setTimeout(() => {
+                  setLiveReloadToken((v) => v + 1);
+                }, 350);
+              }}
+            />
+          ),
         },
       ]}
       importHeaders={[

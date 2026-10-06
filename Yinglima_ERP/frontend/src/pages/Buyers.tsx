@@ -33,6 +33,7 @@ import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSample
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup, useLookupNames } from "@/lib/lookups";
 import { usePendingGuard, useModalHistorySync, useAuth } from "@/lib/hooks";
+import { handleFormEnterKeyNavigation } from "@/lib/formUtils";
 import { useLiveConnectionStatus, useLiveModule } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { Country, ImportHeader, ImportSummary, ProductCategory, ProductSubCategory } from "@/types";
@@ -1959,7 +1960,7 @@ export function BuyersPage() {
 
             {/* TAB 1: PROFILE FORM */}
             {editTab === "profile" && (
-              <form onSubmit={handleSubmit} noValidate style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <form onSubmit={handleSubmit} onKeyDown={handleFormEnterKeyNavigation} noValidate style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                 {/* 1. Identity & Business Profile */}
                 <div>
                   <div style={sectionTitleStyle}>Identity &amp; Business Profile</div>
@@ -2516,7 +2517,7 @@ export function BuyersPage() {
                         </button>
                       </div>
 
-                      <form onSubmit={handleSaveContact} style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1, overflowY: "auto" }}>
+                      <form onSubmit={handleSaveContact} onKeyDown={handleFormEnterKeyNavigation} style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1, overflowY: "auto" }}>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "12px" }}>
                           <SelectField
                             id="salutation"

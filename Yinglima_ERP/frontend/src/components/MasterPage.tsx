@@ -48,6 +48,7 @@ import {
 } from "@/lib/api";
 import { useAuth, useSrNoJump, useModalHistorySync } from "@/lib/hooks";
 import { useLiveList } from "@/lib/live/useLiveList";
+import { handleFormEnterKeyNavigation } from "@/lib/formUtils";
 import type { ImportHeader, ImportSummary, MasterRecord, PaginationMeta } from "@/types";
 
 /** Form state is a flat id -> string map, mirroring the original inputs. */
@@ -1899,7 +1900,7 @@ export function MasterPage<T extends MasterRecord>({
           </div>
           <Banner error={error} />
           <div className="card" style={{ padding: "24px", marginBottom: "500px" }}>
-            <form onSubmit={handleSubmit} noValidate>
+            <form onSubmit={handleSubmit} onKeyDown={handleFormEnterKeyNavigation} noValidate>
               {Object.values(validationErrors).some((v) => v && v.includes("already exists")) && (
                 <div
                   style={{
@@ -2709,7 +2710,7 @@ export function MasterPage<T extends MasterRecord>({
                 &times;
               </button>
             </div>
-            <form onSubmit={handleSubmit} noValidate style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 60px)", overflow: "hidden" }}>
+            <form onSubmit={handleSubmit} onKeyDown={handleFormEnterKeyNavigation} noValidate style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 60px)", overflow: "hidden" }}>
               <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
                 {Object.values(validationErrors).some((v) => v && v.includes("already exists")) && (
                   <div

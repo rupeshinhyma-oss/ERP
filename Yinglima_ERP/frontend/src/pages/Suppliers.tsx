@@ -34,6 +34,7 @@ import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, 
 import { useLookup, useLookupNames } from "@/lib/lookups";
 import { useBodyScrollLock } from "@/lib/hooks";
 import { useLiveModule } from "@/lib/live/useLive";
+import { handleFormEnterKeyNavigation } from "@/lib/formUtils";
 
 function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return "";
@@ -2524,7 +2525,7 @@ export function SuppliersPage() {
             )}
             {/* TAB 1: PROFILE FORM (SAME ORIGINAL DATA & FIELDS) */}
             {(editTab === "profile" || modalMode === "quick") && (
-              <form onSubmit={handleSubmit} noValidate>
+              <form onSubmit={handleSubmit} onKeyDown={handleFormEnterKeyNavigation} noValidate>
                 {/* SECTION 1: General & Primary Contact Info (First Data Form) */}
                 <div style={{ marginBottom: "24px" }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
@@ -3364,6 +3365,7 @@ export function SuppliersPage() {
                           id="supplier-contact-drawer-form"
                           autoComplete="none"
                           onSubmit={(e) => { void handleContactSubmit(e); }}
+                          onKeyDown={handleFormEnterKeyNavigation}
                           style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}
                         >
                         {Boolean(drawerError) && (
