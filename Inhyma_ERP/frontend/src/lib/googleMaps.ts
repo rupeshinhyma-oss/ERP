@@ -319,10 +319,69 @@ function createMockGoogleMaps(): typeof google.maps {
     },
   };
 
+  class MockPolyline {
+    path: any[];
+    constructor(opts: any) {
+      this.path = opts?.path || [];
+    }
+    setPath(p: any) {
+      this.path = p;
+    }
+    setMap() {}
+  }
+
+  class MockLatLngBounds {
+    coords: any[] = [];
+    extend(c: any) {
+      this.coords.push(c);
+    }
+    getCenter() {
+      return { lat: () => 18.5204, lng: () => 73.8567 };
+    }
+  }
+
+  class MockInfoWindow {
+    content: string = "";
+    constructor(opts: any) {
+      this.content = opts?.content || "";
+    }
+    open() {}
+    close() {}
+    setContent(c: string) {
+      this.content = c;
+    }
+  }
+
+  class MockLatLng {
+    _lat: number;
+    _lng: number;
+    constructor(lat: number, lng: number) {
+      this._lat = lat;
+      this._lng = lng;
+    }
+    lat() {
+      return this._lat;
+    }
+    lng() {
+      return this._lng;
+    }
+  }
+
   return {
     Map: MockMap,
     Marker: MockMarker,
     Circle: MockCircle,
+    Polyline: MockPolyline,
+    LatLngBounds: MockLatLngBounds,
+    InfoWindow: MockInfoWindow,
+    LatLng: MockLatLng,
+    event: {
+      addListener: (inst: any, ev: string, fn: Function) => {
+        if (inst?.addListener) inst.addListener(ev, fn);
+      },
+      removeListener: () => {},
+      clearListeners: () => {},
+    },
     Geocoder: MockGeocoder,
     GeocoderLocationType: {
       ROOFTOP: "ROOFTOP",

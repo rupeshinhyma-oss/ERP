@@ -214,8 +214,9 @@ async function rawFetch(path: string, options: RequestInit): Promise<RawResponse
     headers["Authorization"] = `Bearer ${token}`;
   }
   let response: Response;
+  const normalizedPath = path.startsWith("/api/v1") ? path.slice(7) : path;
   try {
-    response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    response = await fetch(`${API_BASE}${normalizedPath}`, { ...options, headers });
   } catch (err) {
     // A thrown fetch means the request never reached the server (offline,
     // DNS failure, connection reset, CORS, ...) -- NOT a successful
@@ -507,8 +508,9 @@ export async function apiPostMultipart<T>(
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
     let response: Response;
+    const normalizedPath = path.startsWith("/api/v1") ? path.slice(7) : path;
     try {
-      response = await fetch(`${API_BASE}${path}`, {
+      response = await fetch(`${API_BASE}${normalizedPath}`, {
         method: "POST",
         headers,
         body: formData,

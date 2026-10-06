@@ -53,7 +53,8 @@
 42. [INVENTORY: Client Name Autocomplete in Stock Adjustment](#42-inventory-client-name-autocomplete-in-stock-adjustment)
 43. [LEADS: Lead Inquiries Management & Sales Pipeline](#43-leads-module-lead-inquiries-management--sales-pipeline)
 44. [CALL LOG: Follow Ups Management & Inquiries Tracking](#44-call-log-follow-ups-management--inquiries-tracking)
-45. [MASTERS MODULE: Interactive Status Toggle Switch & Payment Terms Master](#45-masters-module-interactive-status-toggle-switch--payment-terms-master)
+45. [HRMS: Leave Management Module (Phase 1: Foundation & Master Data)](#45-hrms-leave-management-module-phase-1-foundation--master-data)
+46. [MASTERS MODULE: Interactive Status Toggle Switch & Payment Terms Master](#46-masters-module-interactive-status-toggle-switch--payment-terms-master)
 
 ---
 
@@ -2059,7 +2060,79 @@ Checklist to execute:
 
 ---
 
-## 45. MASTERS MODULE: Interactive Status Toggle Switch & Payment Terms Master
+## 45. HRMS: Leave Management Module (Phase 1: Foundation & Master Data)
+
+### Overview & Operational Context
+- **Module Route:** `/hrms/leave` (Accessible via Sidebar: `HRMS` ➔ `Leave Tracker` / `Leave`).
+- **Phase 1 Objective:** Robust master data, entitlement policies, leave plan assignments, branch-aware holiday management, manual adjustments with immutable audit history, dynamic request workflows with holiday/weekend auto-exclusions, and manager approvals.
+- **Core Tabs:**
+  1. `My Leaves` (Self-service leave requests, status tracking, withdrawal/cancellation).
+  2. `Leave Approvals` (Manager/HR approval queue, status filters, approval/rejection with remarks, self-approval prevention).
+  3. `Holiday` (Branch-filtered annual holiday calendar, date spans, branch applicability).
+  4. `Leave Adjustment` (Employee-wise balance matrix, horizontal scrolling with sticky employee name and actions, positive/negative/correction adjustments, audit trail drawer).
+  5. `Leave Plans` (Multi-leave-type policy assignment rules targeted by Branch and Department).
+  6. `Leave Types` (Master catalog configuration: paid/unpaid, annual quota, carry forward ceiling, consecutive day restrictions, monthly accrual).
+
+### Visual & Behavioral Specifications
+1. **Header & Navigation:**
+   - AppShell with `activeKey="hrms-leave"` and breadcrumb `HRMS / Leave Tracker`.
+   - Page header with title "Leave Tracker" and subtitle "Manage leave applications, balances, company holidays, and entitlement policies.".
+   - Primary action buttons:
+     - `+ Request Leave` (Opens Apply Leave Drawer from My Leaves or Leave Approvals).
+     - `+ Add Plan` (Visible on Leave Plans tab).
+     - `+ Add Holiday` (Visible on Holiday tab).
+     - `+ Add Leave Type` (Visible on Leave Types tab).
+2. **Leave Balance Overview Cards (My Leaves):**
+   - Renders summary metric cards showing:
+     - Total Balance: Aggregate available days.
+     - Casual Leave, Sick Leave, Earned Leave, etc.: Quota badges showing `Available / Allocated` with progress indicators.
+3. **Leave Adjustment Employee Matrix:**
+   - **Table Layout:** Two-tier column header with sticky left column for `Employee` (Code, Name, Department) and sticky right column for `Action`.
+   - **Intermediate Columns:** 3-column sub-headers per leave type: `Consumed`, `Available`, `Total Leave`.
+   - **Horizontal Scrolling:** Clean scrolling with fixed boundary columns ensuring high usability across high-density leave catalogs.
+   - **Adjust Action (`⚙️ Adjust`):** Opens Adjustment Drawer with:
+     - Employee & Leave Type selector.
+     - Current Balance metrics preview (`Allocated`, `Consumed`, `Adjustment`, `Available`).
+     - Adjustment Type: `Add (+)` or `Deduct (-)`.
+     - Days input (`number`, minimum 0.5/1.0).
+     - Reason (`text`, required for auditability).
+     - Calculation Preview Box showing real-time `Previous Available` ➔ `New Available`.
+     - Recent Adjustment History log showing Date, Type, Amount, Previous Balance, Resulting Balance, Reason, and Admin Name.
+4. **Leave Application Drawer:**
+   - Employee select (pre-filled with current user).
+   - Leave Type selector (filtered to active types in company).
+   - Date range pickers: `From Date` and `To Date`.
+   - Auto-computed `Number of Days` taking into account:
+     - Date ordering validation (`from_date <= to_date`).
+     - Excluded branch holidays based on employee's registered branch.
+     - Excluded standard weekly offs (Saturdays/Sundays).
+   - Max consecutive days enforcement based on Leave Type configuration.
+   - Reason text field and optional document Attachment URL.
+   - Submit validation: verifies sufficient available balance and blocks overlapping requests.
+5. **Approval Queue:**
+   - Filter controls: Status (`All`, `PENDING`, `APPROVED`, `REJECTED`, `CANCELLED`), Leave Type, Date Range.
+   - Self-approval block: Employees cannot approve or reject their own requests.
+   - Actions: `Approve` (deducts available balance by incrementing consumed) and `Reject` (requires remarks, leaves balance unchanged).
+   - Cancellation: An approved request can be cancelled, which immediately restores previously consumed balance.
+
+### Test Cases
+- [ ] Verify navigating to `/hrms/leave` loads the page with all 6 tabs and displays active tab "My Leaves".
+- [ ] Verify the 8 initial leave types are seeded and visible under "Leave Types" (Casual Leave, Compensatory Off, Earned Leave, Leave Without Pay, Maternity Leave, Paternity Leave, Sabbatical Leave, Sick Leave).
+- [ ] Verify creating a new Leave Plan assigns multiple leave types with specific branch and department applicability.
+- [ ] Verify creating a Holiday assigns specific branch applicability and does not apply globally unless explicitly configured.
+- [ ] Verify creating a leave request auto-calculates calendar days while excluding branch holidays and weekly offs.
+- [ ] Verify leave request is blocked if date range overlaps an existing pending or approved request.
+- [ ] Verify leave request is blocked if exceeding maximum consecutive days permitted by leave type.
+- [ ] Verify employee cannot approve their own leave request (HTTP 403 Forbidden).
+- [ ] Verify manager approval transitions status to `APPROVED` and consumes employee balance.
+- [ ] Verify manager rejection transitions status to `REJECTED` and does not alter employee balance.
+- [ ] Verify cancelling an approved leave request restores consumed balance back to available.
+- [ ] Verify manual Leave Adjustment (+ or -) creates an immutable audit record and updates available balance via `available = allocated + adjusted - consumed`.
+- [ ] Verify all automated tests in `test_hrms_leave_phase1.py`, `HrmsPhase1Foundation.test.tsx`, and `HrmsLeavePhase1.test.tsx` pass 100%.
+
+---
+
+## 46. MASTERS MODULE: Interactive Status Toggle Switch & Payment Terms Master
 
 ### Overview & Visual Specification
 - **Component:** `StatusToggle.tsx` integrated with `MasterPage.tsx`
@@ -2096,4 +2169,4 @@ Checklist to execute:
 - [ ] Verify non-master modules (Leads, Users, Inquiries, Sales, HRMS) remain completely unaffected and retain their standard status badges.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 5, 2026 (Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, and Follow Ups Module).*
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 6, 2026 (Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, and HRMS Full Suite).*

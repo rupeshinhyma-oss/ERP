@@ -94,12 +94,13 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "HRMS",
     items: [
-      { key: "hrms-attendance", label: "Attendance", path: "/hrms/attendance", icon: "userCheck" },
-      { key: "hrms-leave", label: "Leave", path: "/hrms/leave", icon: "calendar" },
-      { key: "hrms-expenses", label: "Expense Management", path: "/hrms/expenses", icon: "receipt" },
-      { key: "hrms-site-visit", label: "Site Visit", path: "/hrms/site-visit", icon: "map" },
-      { key: "hrms-payroll", label: "Payroll", path: "/hrms/payroll", icon: "coins" },
-      { key: "hrms-setup", label: "Setup", path: "/hrms/setup", icon: "userCog" },
+      { key: "hrms-attendance", label: "Attendance", path: "/hrms/attendance", icon: "userCheck", permission: "hrms.attendance" },
+      { key: "hrms-leave", label: "Leave", path: "/hrms/leave", icon: "calendar", permission: "hrms.leave" },
+      { key: "hrms-assets", label: "Asset Management", path: "/hrms/assets", icon: "barcode", permission: "hrms.assets" },
+      { key: "hrms-expenses", label: "Expense Management", path: "/hrms/expenses", icon: "receipt", permission: "hrms.expenses" },
+      { key: "hrms-site-visit", label: "Site Visit", path: "/hrms/site-visit", icon: "map", permission: "hrms.site_visits" },
+      { key: "hrms-payroll", label: "Payroll", path: "/hrms/payroll", icon: "coins", permission: "hrms.payroll" },
+      { key: "hrms-setup", label: "Setup", path: "/hrms/setup", icon: "userCog", permission: "hrms.setup" },
     ],
   },
   {
@@ -247,6 +248,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "follow-up-list": "Follow Ups",
   "hrms-attendance": "Attendance",
   "hrms-leave": "Leave",
+  "hrms-assets": "Asset Management",
   "hrms-expenses": "Expense Management",
   "hrms-site-visit": "Site Visit",
   "hrms-payroll": "Payroll",

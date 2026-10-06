@@ -119,6 +119,8 @@ interface CalendarDay {
   regularization_status: string;
   can_regularize: boolean;
   attendance_id: string | null;
+  holiday_name?: string | null;
+  leave_type_name?: string | null;
 }
 
 interface RegularizationItem {
@@ -311,6 +313,30 @@ export function AttendancePage() {
     profile?.username === "admin"
   );
 
+  const isPrivileged = Boolean(
+    isAdmin ||
+    String((profile as any)?.role || "").toLowerCase() === "hr" ||
+    String((profile as any)?.role || "").toLowerCase() === "department_manager" ||
+    profile?.roles?.some((r: any) => ["admin", "hr", "department_manager", "manager"].includes(String(r.name || r).toLowerCase())) ||
+    hasPermission("hrms:admin") ||
+    hasPermission("hrms") ||
+    hasPermission("hrms.manage") ||
+    hasPermission("hrms:approval")
+  );
+
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("");
+
+  useEffect(() => {
+    if (isPrivileged) {
+      apiGet<any[]>("/hrms/employees").then((res) => {
+        if (res?.data) {
+          setEmployees(res.data);
+        }
+      }).catch((err) => console.error("Failed to load employees for attendance selector", err));
+    }
+  }, [isPrivileged]);
+
   // Master data
   const [policy, setPolicy] = useState<AttendancePolicy | null>(null);
   const [office, setOffice] = useState<AssignedOffice | null>(null);
@@ -396,6 +422,26 @@ export function AttendancePage() {
     action: "APPROVE" | "REJECT_LOP" | "ADJUST_LEAVE";
     remarks: string;
   } | null>(null);
+
+  // Regularization Evidence Modal State (Site Visit + Live Tracking Evidence)
+  const [evidenceModal, setEvidenceModal] = useState<{
+    isOpen: boolean;
+    item: RegularizationItem | null;
+    loading: boolean;
+    remarks: string;
+    evidence: {
+      employee_id: string;
+      employee_name?: string | null;
+      date: string;
+      reason?: string | null;
+      attendance_issue?: string | null;
+      site_visits: any[];
+      tracking_sessions: any[];
+    } | null;
+  } | null>(null);
+
+  // Route View Modal State
+  const [viewRouteSession, setViewRouteSession] = useState<any | null>(null);
 
   // Auto-calculated Grace End and Late Starts
   const computedTimings = useMemo(() => {
@@ -547,9 +593,10 @@ export function AttendancePage() {
   }, [activeTab, loadRegularizations]);
 
   // 3. Fetch Calendar Days
-  const loadCalendar = useCallback(async (year: number, month: number) => {
+  const loadCalendar = useCallback(async (year: number, month: number, empId?: string) => {
     try {
-      const res = await apiGet<CalendarDay[]>(`/hrms/attendance/calendar?year=${year}&month=${month}`);
+      const q = empId ? `&employee_id=${empId}` : "";
+      const res = await apiGet<CalendarDay[]>(`/hrms/attendance/calendar?year=${year}&month=${month}${q}`);
       if (res?.data) {
         setCalendarDays(res.data);
       }
@@ -559,8 +606,8 @@ export function AttendancePage() {
   }, []);
 
   useEffect(() => {
-    loadCalendar(selectedYear, selectedMonth);
-  }, [selectedYear, selectedMonth, loadCalendar]);
+    loadCalendar(selectedYear, selectedMonth, selectedEmployeeId);
+  }, [selectedYear, selectedMonth, selectedEmployeeId, loadCalendar]);
 
   // 4. Geolocation Acquisition
   const requestRealGps = useCallback(() => {
@@ -866,6 +913,68 @@ export function AttendancePage() {
       await handleAdjustLeaveRequest(item.id, remarks);
     }
     setApprovalModal(null);
+  };
+
+  const handleOpenEvidenceModal = async (item: RegularizationItem) => {
+    setEvidenceModal({
+      isOpen: true,
+      item,
+      loading: true,
+      remarks: "Verified against site visit and live tracking records",
+      evidence: null,
+    });
+    try {
+      const res = await apiGet<any>(`/hrms/attendance/regularizations/${item.id}/evidence`);
+      if (res?.data) {
+        setEvidenceModal({
+          isOpen: true,
+          item,
+          loading: false,
+          remarks: "Verified against site visit and live tracking records",
+          evidence: res.data,
+        });
+        return;
+      }
+    } catch {
+      // Fallback
+    }
+
+    try {
+      const fallbackRes = await apiGet<any>(
+        `/hrms/site-visits/evidence?employee_id=${item.employee_id}&date=${item.attendance_date}`
+      );
+      setEvidenceModal({
+        isOpen: true,
+        item,
+        loading: false,
+        remarks: "Verified against site visit and live tracking records",
+        evidence: fallbackRes?.data || {
+          employee_id: item.employee_id,
+          employee_name: item.employee_name,
+          date: item.attendance_date,
+          reason: item.reason,
+          attendance_issue: "Missing Punch",
+          site_visits: [],
+          tracking_sessions: [],
+        },
+      });
+    } catch {
+      setEvidenceModal({
+        isOpen: true,
+        item,
+        loading: false,
+        remarks: "Verified against site visit and live tracking records",
+        evidence: {
+          employee_id: item.employee_id,
+          employee_name: item.employee_name,
+          date: item.attendance_date,
+          reason: item.reason,
+          attendance_issue: "Missing Punch",
+          site_visits: [],
+          tracking_sessions: [],
+        },
+      });
+    }
   };
 
   const handleSavePolicy = async (e?: React.FormEvent) => {
@@ -1376,6 +1485,28 @@ export function AttendancePage() {
                     <div className="hrms-section-desc">Attendance calendar will appear here.</div>
                   </div>
 
+                  {isPrivileged && employees.length > 0 && (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                      <label htmlFor="attendance-emp-select" style={{ fontSize: "12px", fontWeight: 700, color: "#475569" }}>
+                        Employee:
+                      </label>
+                      <select
+                        id="attendance-emp-select"
+                        value={selectedEmployeeId}
+                        onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                        className="form-control"
+                        style={{ width: "auto", minWidth: "200px", fontWeight: 600, padding: "5px 10px", fontSize: "13px" }}
+                      >
+                        <option value="">My Attendance</option>
+                        {employees.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.first_name} {emp.last_name} ({emp.department || "No Dept"})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   <div className="hrms-cal-nav">
                     <button type="button" className="hrms-cal-nav-btn" onClick={handlePrevMonth}>
                       ‹ Prev
@@ -1479,6 +1610,7 @@ export function AttendancePage() {
                     else if (day.status === "WEEKEND") badgeClass = "status-weekend";
                     else if (day.status === "ABSENT") badgeClass = "status-absent";
                     else if (day.status === "HOLIDAY") badgeClass = "status-holiday";
+                    else if (day.status === "LEAVE" || day.status === "APPROVED_LEAVE") badgeClass = "status-leave";
 
                     if (day.regularization_status === "PENDING") {
                       badgeClass = "status-pending";
@@ -1516,11 +1648,15 @@ export function AttendancePage() {
                         {/* Middle: Status badge */}
                         <div className="hrms-cal-day-middle">
                           {day.status !== "FUTURE" && day.status !== "NOT_PUNCHED" ? (
-                            <span className={`hrms-cal-status-badge ${badgeClass}`}>
+                            <span className={`hrms-cal-status-badge ${badgeClass}`} title={day.status === "HOLIDAY" && day.holiday_name ? day.holiday_name : (day.leave_type_name || "")}>
                               {day.regularization_status === "PENDING"
                                 ? "Pending Regularization"
                                 : day.regularization_status === "APPROVED"
                                 ? "APPROVED"
+                                : day.status === "HOLIDAY"
+                                ? (day.holiday_name ? `HOLIDAY: ${day.holiday_name}` : "HOLIDAY")
+                                : (day.status === "LEAVE" || day.status === "APPROVED_LEAVE")
+                                ? (day.leave_type_name || "LEAVE")
                                 : day.status === "HALF_DAY"
                                 ? "Half Day"
                                 : day.status === "MISSING_PUNCH"
@@ -1688,6 +1824,7 @@ export function AttendancePage() {
                         >
                           <option value="Work From Home">Work From Home</option>
                           <option value="Missing Punch">Missing Punch</option>
+                          <option value="Customer site visit">Customer site visit</option>
                           <option value="Client Meeting">Client Meeting</option>
                           <option value="Medical Emergency">Medical Emergency</option>
                           <option value="Traffic Delay">Traffic Delay</option>
@@ -1840,6 +1977,26 @@ export function AttendancePage() {
                               </td>
                               <td>
                                 <div className="hrms-approval-actions">
+                                  <button
+                                    type="button"
+                                    className="hrms-cal-nav-btn"
+                                    onClick={() => handleOpenEvidenceModal(item)}
+                                    data-testid={`review-evidence-btn-${item.id}`}
+                                    title="Review site visit and live tracking evidence"
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "5px",
+                                      background: item.reason === "Customer site visit" ? "#ecfdf5" : undefined,
+                                      borderColor: item.reason === "Customer site visit" ? "#10b981" : undefined,
+                                      color: item.reason === "Customer site visit" ? "#065f46" : undefined,
+                                      fontWeight: 600,
+                                      fontSize: "12px",
+                                      padding: "5px 10px",
+                                    }}
+                                  >
+                                    📍 Evidence
+                                  </button>
                                   <button
                                     type="button"
                                     className="hrms-btn-approve"
@@ -2046,6 +2203,426 @@ export function AttendancePage() {
                       style={{ padding: "8px 16px" }}
                     >
                       {actionLoading ? "Processing..." : "Confirm Action"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Regularization Evidence Modal (Site Visit + Live Tracking Evidence) */}
+            {evidenceModal && evidenceModal.isOpen && evidenceModal.item && (
+              <div className="hrms-modal-backdrop" onClick={() => setEvidenceModal(null)}>
+                <div
+                  className="hrms-action-modal-card"
+                  style={{ maxWidth: "680px", width: "95%" }}
+                  onClick={(e) => e.stopPropagation()}
+                  data-testid="regularization-evidence-modal"
+                >
+                  <div className="hrms-action-modal-header">
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
+                        Attendance Regularization
+                      </h3>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                        Review site visit verification &amp; live GPS tracking evidence
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEvidenceModal(null)}
+                      style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="hrms-action-modal-body" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+                    {/* Basic details */}
+                    <div style={{ background: "#f8fafc", padding: "14px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "16px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px" }}>
+                        <div>
+                          <span style={{ color: "#64748b" }}>Employee: </span>
+                          <strong style={{ color: "#0f172a" }}>{evidenceModal.item.employee_name}</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b" }}>Date: </span>
+                          <strong style={{ color: "#0f172a" }}>{evidenceModal.item.attendance_date}</strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b" }}>Attendance Issue: </span>
+                          <strong style={{ color: "#b45309" }}>
+                            {evidenceModal.evidence?.attendance_issue || evidenceModal.item.request_type || "Missing Punch"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span style={{ color: "#64748b" }}>Employee Reason: </span>
+                          <strong style={{ color: "#2563eb" }}>{evidenceModal.item.reason}</strong>
+                        </div>
+                      </div>
+                      {evidenceModal.item.notes && (
+                        <div style={{ marginTop: "8px", fontSize: "12px", color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: "6px" }}>
+                          <span style={{ fontWeight: 600 }}>Remarks: </span>
+                          {evidenceModal.item.notes}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Site Visit Evidence Section */}
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "14px", marginBottom: "16px", background: "#fff" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                        <h4 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                          📍 Site Visit Evidence
+                        </h4>
+                        <span style={{ fontSize: "11px", fontWeight: 600, color: "#059669", background: "#ecfdf5", padding: "2px 8px", borderRadius: "12px" }}>
+                          {(evidenceModal.evidence?.site_visits?.length || 0)} Found
+                        </span>
+                      </div>
+
+                      {evidenceModal.loading ? (
+                        <div style={{ fontSize: "13px", color: "#64748b", padding: "12px 0", textAlign: "center" }}>
+                          Loading site visit evidence...
+                        </div>
+                      ) : !evidenceModal.evidence?.site_visits || evidenceModal.evidence.site_visits.length === 0 ? (
+                        <div style={{ fontSize: "12.5px", color: "#64748b", padding: "8px", background: "#f8fafc", borderRadius: "6px" }}>
+                          No scheduled site visits found for this employee on this date.
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                          {evidenceModal.evidence.site_visits.map((sv: any) => (
+                            <div
+                              key={sv.id}
+                              style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px", fontSize: "12.5px" }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+                                <div>
+                                  <span style={{ color: "#64748b" }}>Customer: </span>
+                                  <strong style={{ color: "#0f172a", fontSize: "13.5px" }}>{sv.customer_site_name}</strong>
+                                </div>
+                                <span
+                                  className={`status-badge-${sv.status === "COMPLETED" ? "approved" : sv.status === "CHECKED_IN" ? "pending" : "scheduled"}`}
+                                  style={{ fontSize: "11px", padding: "2px 8px" }}
+                                >
+                                  {sv.status}
+                                </span>
+                              </div>
+                              <div style={{ color: "#475569", marginBottom: "8px" }}>
+                                Scheduled: <strong>{sv.planned_start_time || "—"} – {sv.planned_end_time || "—"}</strong>
+                                {sv.site_address && ` | Location: ${sv.site_address}`}
+                              </div>
+
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", background: "#fff", padding: "8px 10px", borderRadius: "6px", border: "1px solid #f1f5f9" }}>
+                                <div>
+                                  <div>Check-in: <strong>{sv.check_in_time ? formatDateTimeIST(sv.check_in_time) : "—"}</strong></div>
+                                  <div style={{ fontSize: "11.5px", color: sv.check_in_latitude ? "#059669" : "#64748b" }}>
+                                    Check-in Location: {sv.check_in_latitude ? `Captured (${sv.check_in_latitude.toFixed(4)}, ${sv.check_in_longitude.toFixed(4)})` : "Not captured"}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div>Check-out: <strong>{sv.check_out_time ? formatDateTimeIST(sv.check_out_time) : "—"}</strong></div>
+                                  <div style={{ fontSize: "11.5px", color: sv.check_out_latitude ? "#059669" : "#64748b" }}>
+                                    Check-out Location: {sv.check_out_latitude ? `Captured (${sv.check_out_latitude.toFixed(4)}, ${sv.check_out_longitude.toFixed(4)})` : "Not captured"}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Live Tracking Evidence Section */}
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "14px", marginBottom: "16px", background: "#fff" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                        <h4 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                          🛰️ Live Tracking Evidence
+                        </h4>
+                        <span style={{ fontSize: "11px", fontWeight: 600, color: "#2563eb", background: "#eff6ff", padding: "2px 8px", borderRadius: "12px" }}>
+                          {(evidenceModal.evidence?.tracking_sessions?.length || 0)} Sessions
+                        </span>
+                      </div>
+
+                      {evidenceModal.loading ? (
+                        <div style={{ fontSize: "13px", color: "#64748b", padding: "12px 0", textAlign: "center" }}>
+                          Loading tracking evidence...
+                        </div>
+                      ) : !evidenceModal.evidence?.tracking_sessions || evidenceModal.evidence.tracking_sessions.length === 0 ? (
+                        <div style={{ fontSize: "12.5px", color: "#64748b", padding: "8px", background: "#f8fafc", borderRadius: "6px" }}>
+                          No live tracking recorded for this employee on this date.
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                          {evidenceModal.evidence.tracking_sessions.map((ts: any) => {
+                            const hours = Math.floor((ts.total_duration_seconds || 0) / 3600);
+                            const mins = Math.floor(((ts.total_duration_seconds || 0) % 3600) / 60);
+                            const durationStr = `${hours}h ${mins}m`;
+                            return (
+                              <div
+                                key={ts.id}
+                                style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px", fontSize: "12.5px" }}
+                              >
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginBottom: "10px" }}>
+                                  <div>
+                                    <div style={{ color: "#64748b", fontSize: "11px" }}>Started</div>
+                                    <strong style={{ color: "#0f172a" }}>{ts.start_time ? formatDateTimeIST(ts.start_time) : "—"}</strong>
+                                  </div>
+                                  <div>
+                                    <div style={{ color: "#64748b", fontSize: "11px" }}>Stopped</div>
+                                    <strong style={{ color: "#0f172a" }}>{ts.end_time ? formatDateTimeIST(ts.end_time) : (ts.is_active ? "In Progress" : "—")}</strong>
+                                  </div>
+                                  <div>
+                                    <div style={{ color: "#64748b", fontSize: "11px" }}>Duration</div>
+                                    <strong style={{ color: "#0f172a" }}>{durationStr}</strong>
+                                  </div>
+                                  <div>
+                                    <div style={{ color: "#64748b", fontSize: "11px" }}>Distance</div>
+                                    <strong style={{ color: "#059669" }}>{(ts.approximate_distance_km || 0).toFixed(1)} km</strong>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                                  <button
+                                    type="button"
+                                    className="hrms-cal-nav-btn"
+                                    onClick={() => setViewRouteSession(ts)}
+                                    data-testid={`view-route-btn-${ts.id}`}
+                                    style={{
+                                      fontSize: "12px",
+                                      padding: "5px 12px",
+                                      background: "#2563eb",
+                                      color: "#fff",
+                                      borderColor: "#2563eb",
+                                      fontWeight: 600,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    🗺️ View Route
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Manager Remarks */}
+                    <div className="hrms-field-group">
+                      <label className="hrms-field-label">Manager Remarks / Action Justification</label>
+                      <textarea
+                        rows={2}
+                        className="hrms-field-input"
+                        value={evidenceModal.remarks}
+                        onChange={(e) => setEvidenceModal({ ...evidenceModal, remarks: e.target.value })}
+                        placeholder="Verified against site visit and live tracking records..."
+                        data-testid="evidence-manager-remarks-input"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="hrms-action-modal-footer" style={{ display: "flex", justifyContent: "space-between" }}>
+                    <button
+                      type="button"
+                      className="hrms-cal-nav-btn"
+                      onClick={() => setEvidenceModal(null)}
+                      disabled={actionLoading}
+                      data-testid="close-evidence-modal-btn"
+                    >
+                      Close
+                    </button>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        type="button"
+                        className="hrms-btn-adjust"
+                        onClick={async () => {
+                          const id = evidenceModal.item!.id;
+                          const r = evidenceModal.remarks || "Adjusted against leave balance";
+                          setEvidenceModal(null);
+                          await handleAdjustLeaveRequest(id, r);
+                        }}
+                        disabled={actionLoading}
+                        data-testid="evidence-adjust-leave-btn"
+                        style={{ padding: "8px 14px", fontSize: "12.5px" }}
+                      >
+                        Adjust Against Leave
+                      </button>
+                      <button
+                        type="button"
+                        className="hrms-btn-reject"
+                        onClick={async () => {
+                          const id = evidenceModal.item!.id;
+                          const r = evidenceModal.remarks || "Rejected (Mark LOP)";
+                          setEvidenceModal(null);
+                          await handleRejectRequest(id, r);
+                        }}
+                        disabled={actionLoading}
+                        data-testid="evidence-reject-btn"
+                        style={{ padding: "8px 14px", fontSize: "12.5px" }}
+                      >
+                        Reject / Mark LOP
+                      </button>
+                      <button
+                        type="button"
+                        className="hrms-btn-approve"
+                        onClick={async () => {
+                          const id = evidenceModal.item!.id;
+                          const r = evidenceModal.remarks || "Approved based on site visit & tracking evidence";
+                          setEvidenceModal(null);
+                          await handleApproveRequest(id, r);
+                        }}
+                        disabled={actionLoading}
+                        data-testid="evidence-approve-btn"
+                        style={{ padding: "8px 16px", fontSize: "12.5px" }}
+                      >
+                        Approve
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Route Map & Waypoints Modal */}
+            {viewRouteSession && (
+              <div className="hrms-modal-backdrop" onClick={() => setViewRouteSession(null)}>
+                <div
+                  className="hrms-action-modal-card"
+                  style={{ maxWidth: "700px", width: "95%" }}
+                  onClick={(e) => e.stopPropagation()}
+                  data-testid="route-detail-modal"
+                >
+                  <div className="hrms-action-modal-header">
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+                        Travel Route &amp; GPS Checkpoints
+                      </h3>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                        {viewRouteSession.employee_name || "Employee"} • {viewRouteSession.session_date}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setViewRouteSession(null)}
+                      style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="hrms-action-modal-body" style={{ maxHeight: "65vh", overflowY: "auto" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginBottom: "14px" }}>
+                      <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>Total Duration</div>
+                        <div style={{ fontSize: "15px", fontWeight: 700, color: "#0f172a" }}>
+                          {Math.floor(viewRouteSession.total_duration_seconds / 3600)}h {Math.floor((viewRouteSession.total_duration_seconds % 3600) / 60)}m
+                        </div>
+                      </div>
+                      <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>Distance</div>
+                        <div style={{ fontSize: "15px", fontWeight: 700, color: "#2563eb" }}>
+                          {viewRouteSession.approximate_distance_km.toFixed(1)} km
+                        </div>
+                      </div>
+                      <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>GPS Waypoints</div>
+                        <div style={{ fontSize: "15px", fontWeight: 700, color: "#059669" }}>
+                          {viewRouteSession.route_summary?.length || 0} Points
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Route Vector Visualization */}
+                    <div style={{ background: "#0f172a", borderRadius: "8px", padding: "16px", color: "#fff", marginBottom: "14px" }}>
+                      <div style={{ fontSize: "12px", color: "#94a3b8", marginBottom: "10px", display: "flex", justifyContent: "space-between" }}>
+                        <span>📍 Route Plot (Waypoints Sequence)</span>
+                        <span>{viewRouteSession.route_summary?.length ? "Route Recorded" : "No GPS trail"}</span>
+                      </div>
+                      <div style={{ height: "160px", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                        {viewRouteSession.route_summary && viewRouteSession.route_summary.length >= 2 ? (
+                          <svg width="100%" height="100%" viewBox="0 0 400 140" preserveAspectRatio="none">
+                            <defs>
+                              <linearGradient id="routeLineGradEvidence" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stopColor="#3b82f6" />
+                                <stop offset="50%" stopColor="#10b981" />
+                                <stop offset="100%" stopColor="#f59e0b" />
+                              </linearGradient>
+                            </defs>
+                            {(() => {
+                              const points = viewRouteSession.route_summary;
+                              const minLat = Math.min(...points.map((p: any) => p.lat));
+                              const maxLat = Math.max(...points.map((p: any) => p.lat));
+                              const minLng = Math.min(...points.map((p: any) => p.lng));
+                              const maxLng = Math.max(...points.map((p: any) => p.lng));
+                              const latSpan = maxLat - minLat || 0.001;
+                              const lngSpan = maxLng - minLng || 0.001;
+                              const coords = points.map((p: any) => {
+                                const x = 30 + ((p.lng - minLng) / lngSpan) * 340;
+                                const y = 120 - ((p.lat - minLat) / latSpan) * 100;
+                                return `${x},${y}`;
+                              });
+                              return (
+                                <>
+                                  <polyline fill="none" stroke="url(#routeLineGradEvidence)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" points={coords.join(" ")} />
+                                  {coords.map((pt: string, idx: number) => {
+                                    const [cx, cy] = pt.split(",");
+                                    const isFirst = idx === 0;
+                                    const isLast = idx === coords.length - 1;
+                                    return (
+                                      <circle
+                                        key={idx}
+                                        cx={cx}
+                                        cy={cy}
+                                        r={isFirst || isLast ? 6 : 3}
+                                        fill={isFirst ? "#22c55e" : isLast ? "#ef4444" : "#60a5fa"}
+                                        stroke="#ffffff"
+                                        strokeWidth="1.5"
+                                      />
+                                    );
+                                  })}
+                                </>
+                              );
+                            })()}
+                          </svg>
+                        ) : (
+                          <div style={{ color: "#64748b", fontSize: "12px" }}>
+                            Insufficient route points to render map path
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#94a3b8", marginTop: "8px" }}>
+                        <span style={{ color: "#22c55e" }}>🟢 Start Point</span>
+                        <span style={{ color: "#60a5fa" }}>🔵 Waypoints</span>
+                        <span style={{ color: "#ef4444" }}>🔴 End Point</span>
+                      </div>
+                    </div>
+
+                    {/* Waypoints Sequence List */}
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", padding: "10px" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#0f172a", marginBottom: "6px" }}>
+                        Recorded Waypoint Coordinates
+                      </div>
+                      <div style={{ maxHeight: "150px", overflowY: "auto", fontSize: "11.5px", fontFamily: "monospace" }}>
+                        {viewRouteSession.route_summary && viewRouteSession.route_summary.length > 0 ? (
+                          viewRouteSession.route_summary.map((pt: any, i: number) => (
+                            <div key={i} style={{ padding: "4px 6px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between" }}>
+                              <span>#{i + 1} &bull; Lat: {pt.lat?.toFixed(5)}, Lng: {pt.lng?.toFixed(5)}</span>
+                              <span style={{ color: "#64748b" }}>{pt.time ? formatDateTimeIST(pt.time) : "—"}</span>
+                            </div>
+                          ))
+                        ) : (
+                          <div style={{ color: "#94a3b8", padding: "6px" }}>No detailed coordinates saved.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="hrms-action-modal-footer">
+                    <button
+                      type="button"
+                      className="hrms-cal-nav-btn"
+                      onClick={() => setViewRouteSession(null)}
+                      style={{ padding: "6px 14px" }}
+                      data-testid="close-route-modal-btn"
+                    >
+                      Close
                     </button>
                   </div>
                 </div>

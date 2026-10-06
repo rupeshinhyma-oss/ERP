@@ -19,10 +19,18 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import { setUnauthorizedHandler } from "@/lib/api";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
 
+import { auth } from "@/lib/auth";
 import { LoginPage } from "@/pages/Login";
 import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { DashboardPage } from "@/pages/Dashboard";
 import { ForbiddenPage } from "@/pages/Forbidden";
+
+function HrmsRouteGuard({ permission, children }: { permission: string; children: React.ReactNode }) {
+  if (!auth.hasPermission(permission)) {
+    return <ForbiddenPage />;
+  }
+  return <>{children}</>;
+}
 import { OrganizationPage } from "@/pages/Organization";
 import { AuditPage } from "@/pages/Audit";
 import { UsersPage } from "@/pages/Users";
@@ -52,6 +60,7 @@ import { ExpensesPage } from "@/pages/hrms/ExpensesPage";
 import { SiteVisitPage } from "@/pages/hrms/SiteVisitPage";
 import { PayrollPage } from "@/pages/hrms/PayrollPage";
 import { SetupPage } from "@/pages/hrms/SetupPage";
+import { AssetPage } from "@/pages/hrms/AssetPage";
 
 import { CountriesPage } from "@/pages/masters/Countries";
 import { StatesPage } from "@/pages/masters/States";
@@ -342,13 +351,16 @@ export function App() {
           <Route path="/marketing-tasks" element={<Navigate to="/marketing-task/list" replace />} />
 
           {/* HRMS routes */}
-          <Route path="/hrms" element={<AttendancePage />} />
-          <Route path="/hrms/attendance" element={<AttendancePage />} />
-          <Route path="/hrms/leave" element={<LeavePage />} />
-          <Route path="/hrms/expenses" element={<ExpensesPage />} />
-          <Route path="/hrms/site-visit" element={<SiteVisitPage />} />
-          <Route path="/hrms/payroll" element={<PayrollPage />} />
-          <Route path="/hrms/setup" element={<SetupPage />} />
+          <Route path="/hrms" element={<HrmsRouteGuard permission="hrms.attendance"><AttendancePage /></HrmsRouteGuard>} />
+          <Route path="/hrms/attendance" element={<HrmsRouteGuard permission="hrms.attendance"><AttendancePage /></HrmsRouteGuard>} />
+          <Route path="/hrms/regularization" element={<Navigate to="/hrms/attendance" replace />} />
+          <Route path="/hrms/leave" element={<HrmsRouteGuard permission="hrms.leave"><LeavePage /></HrmsRouteGuard>} />
+          <Route path="/hrms/assets" element={<HrmsRouteGuard permission="hrms.assets"><AssetPage /></HrmsRouteGuard>} />
+          <Route path="/hrms/expenses" element={<HrmsRouteGuard permission="hrms.expenses"><ExpensesPage /></HrmsRouteGuard>} />
+          <Route path="/hrms/site-visit" element={<HrmsRouteGuard permission="hrms.site_visits"><SiteVisitPage /></HrmsRouteGuard>} />
+          <Route path="/hrms/site-visits" element={<Navigate to="/hrms/site-visit" replace />} />
+          <Route path="/hrms/payroll" element={<HrmsRouteGuard permission="hrms.payroll"><PayrollPage /></HrmsRouteGuard>} />
+          <Route path="/hrms/setup" element={<HrmsRouteGuard permission="hrms.setup"><SetupPage /></HrmsRouteGuard>} />
 
           <Route path="/masters/company-list" element={<CompanyListPage />} />
           <Route path="/masters/countries" element={<CountriesPage />} />

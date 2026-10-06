@@ -68,46 +68,124 @@ class HrmsSetupService:
             self.db.add(default_office)
 
         # 2. Default Leave Types
-        leave_res = await self.db.execute(
-            select(func.count(HrmsLeaveType.id)).where(HrmsLeaveType.deleted_at.is_(None))
+        existing_types_res = await self.db.execute(
+            select(HrmsLeaveType.name).where(HrmsLeaveType.deleted_at.is_(None))
         )
-        if leave_res.scalar() == 0:
-            seed_leaves = [
-                HrmsLeaveType(
-                    name="Casual Leave",
-                    code="CL",
-                    leave_type="REGULAR",
-                    is_paid=True,
-                    annual_balance=12.0,
-                    carry_forward_days=0.0,
-                    max_consecutive_days=3,
-                    monthly_accrual=False,
-                    is_active=True,
-                ),
-                HrmsLeaveType(
-                    name="Sick Leave",
-                    code="SL",
-                    leave_type="REGULAR",
-                    is_paid=True,
-                    annual_balance=12.0,
-                    carry_forward_days=0.0,
-                    max_consecutive_days=7,
-                    monthly_accrual=False,
-                    is_active=True,
-                ),
-                HrmsLeaveType(
-                    name="Privilege Leave",
-                    code="PL",
-                    leave_type="REGULAR",
-                    is_paid=True,
-                    annual_balance=18.0,
-                    carry_forward_days=10.0,
-                    max_consecutive_days=15,
-                    monthly_accrual=False,
-                    is_active=True,
-                ),
-            ]
-            self.db.add_all(seed_leaves)
+        existing_names = {row[0].strip().lower() for row in existing_types_res.all()}
+
+        seed_leaves = [
+            HrmsLeaveType(
+                name="Casual Leave",
+                code="CL",
+                leave_type="REGULAR",
+                is_paid=True,
+                annual_balance=12.0,
+                carry_forward_allowed=False,
+                carry_forward_days=0.0,
+                max_consecutive_days=3,
+                monthly_accrual=False,
+                is_active=True,
+            ),
+            HrmsLeaveType(
+                name="Compensatory Off",
+                code="CO",
+                leave_type="REGULAR",
+                is_paid=True,
+                annual_balance=0.0,
+                carry_forward_allowed=False,
+                carry_forward_days=0.0,
+                max_consecutive_days=2,
+                monthly_accrual=False,
+                is_active=True,
+            ),
+            HrmsLeaveType(
+                name="Earned Leave",
+                code="EL",
+                leave_type="REGULAR",
+                is_paid=True,
+                annual_balance=18.0,
+                carry_forward_allowed=True,
+                carry_forward_days=15.0,
+                max_consecutive_days=15,
+                monthly_accrual=True,
+                is_active=True,
+            ),
+            HrmsLeaveType(
+                name="Leave Without Pay",
+                code="LWP",
+                leave_type="SPECIAL",
+                is_paid=False,
+                annual_balance=0.0,
+                carry_forward_allowed=False,
+                carry_forward_days=0.0,
+                max_consecutive_days=30,
+                monthly_accrual=False,
+                is_active=True,
+            ),
+            HrmsLeaveType(
+                name="Maternity Leave",
+                code="ML",
+                leave_type="SPECIAL",
+                is_paid=True,
+                annual_balance=180.0,
+                carry_forward_allowed=False,
+                carry_forward_days=0.0,
+                max_consecutive_days=180,
+                monthly_accrual=False,
+                is_active=True,
+            ),
+            HrmsLeaveType(
+                name="Paternity Leave",
+                code="PL",
+                leave_type="SPECIAL",
+                is_paid=True,
+                annual_balance=15.0,
+                carry_forward_allowed=False,
+                carry_forward_days=0.0,
+                max_consecutive_days=15,
+                monthly_accrual=False,
+                is_active=True,
+            ),
+            HrmsLeaveType(
+                name="Sabbatical Leave",
+                code="SL",
+                leave_type="SPECIAL",
+                is_paid=False,
+                annual_balance=365.0,
+                carry_forward_allowed=False,
+                carry_forward_days=0.0,
+                max_consecutive_days=365,
+                monthly_accrual=False,
+                is_active=True,
+            ),
+            HrmsLeaveType(
+                name="Sick Leave",
+                code="SKL",
+                leave_type="REGULAR",
+                is_paid=True,
+                annual_balance=12.0,
+                carry_forward_allowed=False,
+                carry_forward_days=0.0,
+                max_consecutive_days=7,
+                monthly_accrual=False,
+                is_active=True,
+            ),
+            HrmsLeaveType(
+                name="Privilege Leave",
+                code="PLV",
+                leave_type="REGULAR",
+                is_paid=True,
+                annual_balance=18.0,
+                carry_forward_allowed=True,
+                carry_forward_days=10.0,
+                max_consecutive_days=15,
+                monthly_accrual=False,
+                is_active=True,
+            ),
+        ]
+        to_add = [l for l in seed_leaves if l.name.strip().lower() not in existing_names]
+        if to_add:
+            self.db.add_all(to_add)
 
         # 3. Default Expense Categories
         cat_res = await self.db.execute(
@@ -329,12 +407,25 @@ class HrmsSetupService:
         leave = HrmsLeaveType(
             name=payload.name.strip(),
             code=payload.code.strip() if payload.code else None,
+            description=payload.description.strip() if payload.description else None,
             leave_type=payload.leave_type or "REGULAR",
             is_paid=payload.is_paid,
             annual_balance=payload.annual_balance,
+            carry_forward_allowed=payload.carry_forward_allowed or (payload.carry_forward_days > 0),
             carry_forward_days=payload.carry_forward_days,
             max_consecutive_days=payload.max_consecutive_days,
             monthly_accrual=payload.monthly_accrual,
+            accrual_amount=payload.accrual_amount,
+            min_notice_days=payload.min_notice_days,
+            allow_half_day=payload.allow_half_day,
+            allow_backdated=payload.allow_backdated,
+            require_attachment=payload.require_attachment,
+            attendance_based_accrual=payload.attendance_based_accrual,
+            attendance_based_condition=payload.attendance_based_condition,
+            attendance_based_reward=payload.attendance_based_reward,
+            attendance_based_departments=payload.attendance_based_departments,
+            min_attendance_percentage=payload.min_attendance_percentage,
+            min_working_days=payload.min_working_days,
             is_active=payload.is_active,
         )
         self.db.add(leave)
@@ -348,18 +439,46 @@ class HrmsSetupService:
             leave.name = payload.name.strip()
         if payload.code is not None:
             leave.code = payload.code.strip() if payload.code else None
+        if payload.description is not None:
+            leave.description = payload.description.strip() if payload.description else None
         if payload.leave_type is not None:
             leave.leave_type = payload.leave_type
         if payload.is_paid is not None:
             leave.is_paid = payload.is_paid
         if payload.annual_balance is not None:
             leave.annual_balance = payload.annual_balance
+        if payload.carry_forward_allowed is not None:
+            leave.carry_forward_allowed = payload.carry_forward_allowed
         if payload.carry_forward_days is not None:
             leave.carry_forward_days = payload.carry_forward_days
+            if payload.carry_forward_days > 0:
+                leave.carry_forward_allowed = True
         if payload.max_consecutive_days is not None:
             leave.max_consecutive_days = payload.max_consecutive_days
         if payload.monthly_accrual is not None:
             leave.monthly_accrual = payload.monthly_accrual
+        if payload.accrual_amount is not None:
+            leave.accrual_amount = payload.accrual_amount
+        if payload.min_notice_days is not None:
+            leave.min_notice_days = payload.min_notice_days
+        if payload.allow_half_day is not None:
+            leave.allow_half_day = payload.allow_half_day
+        if payload.allow_backdated is not None:
+            leave.allow_backdated = payload.allow_backdated
+        if payload.require_attachment is not None:
+            leave.require_attachment = payload.require_attachment
+        if payload.attendance_based_accrual is not None:
+            leave.attendance_based_accrual = payload.attendance_based_accrual
+        if payload.attendance_based_condition is not None:
+            leave.attendance_based_condition = payload.attendance_based_condition
+        if payload.attendance_based_reward is not None:
+            leave.attendance_based_reward = payload.attendance_based_reward
+        if payload.attendance_based_departments is not None:
+            leave.attendance_based_departments = payload.attendance_based_departments
+        if payload.min_attendance_percentage is not None:
+            leave.min_attendance_percentage = payload.min_attendance_percentage
+        if payload.min_working_days is not None:
+            leave.min_working_days = payload.min_working_days
         if payload.is_active is not None:
             leave.is_active = payload.is_active
 

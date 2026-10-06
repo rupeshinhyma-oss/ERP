@@ -43,7 +43,7 @@ ALLOWED_EXTENSIONS: set[str] = {
 MAX_FILE_SIZE: int = 50 * 1024 * 1024
 
 # Buckets intended for public access; all other buckets default to private/confidential
-PUBLIC_BUCKETS: set[str] = {"product-images", "supplier-media", "public-assets"}
+PUBLIC_BUCKETS: set[str] = {"product-images", "supplier-media", "public-assets", "expense-receipts"}
 
 
 def is_bucket_public(bucket: str) -> bool:

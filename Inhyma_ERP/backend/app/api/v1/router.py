@@ -73,10 +73,23 @@ from app.inventory.routes import router as inventory_router
 from app.sales.routes import router as sales_router
 from app.hrms.routes import router as hrms_router
 from app.hrms.attendance_routes import router as hrms_attendance_router
+from app.hrms.leave_routes import router as hrms_leave_router
+from app.hrms.asset_routes import router as hrms_asset_router
+from app.hrms.expense_routes import router as hrms_expense_router
+from app.hrms.site_visit_routes import router as hrms_site_visit_router
+from app.hrms.payroll_routes import router as hrms_payroll_router
+from app.hrms.employee_routes import router as hrms_employee_router
 
 api_router = APIRouter()
 api_router.include_router(hrms_router)
+api_router.include_router(hrms_employee_router)
 api_router.include_router(hrms_attendance_router)
+api_router.include_router(hrms_leave_router)
+api_router.include_router(hrms_asset_router)
+api_router.include_router(hrms_expense_router)
+api_router.include_router(hrms_site_visit_router)
+api_router.include_router(hrms_payroll_router)
+
 
 api_router.include_router(health_router)
 api_router.include_router(auth_router)
