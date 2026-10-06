@@ -395,7 +395,7 @@ export function SaleProcessFormPage() {
     let supplierId: string | null = null;
     let supplierName: string | null = null;
     let uomName = p.uom || "NOS";
-    let priceRmbWithVat = Number(p.standard_cost) || 0;
+    let priceRmbWithVat = 0;
     let priceRmbExVat = 0;
     let cbmPerUnit = 0;
     let totalCbm = 0;
@@ -412,8 +412,8 @@ export function SaleProcessFormPage() {
         const cd = costRes.data;
         supplierId = cd.supplier_id || null;
         supplierName = cd.supplier_name || null;
-        priceRmbWithVat = cd.unit_price_rmb_with_vat || priceRmbWithVat;
-        priceRmbExVat = cd.unit_price_rmb_ex_vat || priceRmbExVat;
+        priceRmbWithVat = typeof cd.unit_price_rmb_with_vat === "number" ? cd.unit_price_rmb_with_vat : 0;
+        priceRmbExVat = typeof cd.unit_price_rmb_ex_vat === "number" ? cd.unit_price_rmb_ex_vat : 0;
         cbmPerUnit = cd.cbm_per_unit || 0;
         totalCbm = cd.total_cbm || 0;
         fobPriceUsd = cd.fob_price_usd || 0;
@@ -427,7 +427,7 @@ export function SaleProcessFormPage() {
     }
 
     const qty = 1;
-    let rate = Number(p.standard_cost) || 0;
+    let rate = 0;
     if (currency === "USD" && cfrPriceUsd > 0) {
       rate = cfrPriceUsd;
     } else if (currency === "RMB" && priceRmbWithVat > 0) {
@@ -467,7 +467,7 @@ export function SaleProcessFormPage() {
     setItems((prev) => [...prev, newItem]);
     setProductSearch("");
     setShowSearchResults(false);
-    toast(`Added ${p.product_name}${supplierName ? ` (Supplier: ${supplierName})` : ""}`, "success");
+    toast(`Added ${p.product_name}${supplierName ? ` (Supplier: ${supplierName})` : " (No Confirmed LP)"}`, "success");
   };
 
   // Helper to recompute all line items with CI Costing & CFR rates

@@ -490,24 +490,10 @@ class SaleService:
             lp_vat_pct = float(lp_row[0].vat_rate) if lp_row[0].vat_rate is not None else 13.0
             unit_price_rmb_with_vat = round(float(lp_row[0].unit_rate or 0.0) * (1.0 + lp_vat_pct / 100.0), 2)
         else:
-            # Fallback to Product Prices (supplier_product_links)
-            q_spl = await self.session.execute(
-                select(SupplierProductLink, Supplier.company_name)
-                .join(Supplier, SupplierProductLink.supplier_id == Supplier.id)
-                .where(
-                    SupplierProductLink.product_id == product_id,
-                    Supplier.deleted_at.is_(None),
-                )
-                .order_by(SupplierProductLink.unit_price.asc())
-                .limit(1)
-            )
-            spl_row = q_spl.first()
-            if spl_row:
-                supplier_id = spl_row[0].supplier_id
-                supplier_name = spl_row[1]
-                unit_price_rmb_with_vat = float(spl_row[0].unit_price or 0.0)
-            elif prod.standard_cost:
-                unit_price_rmb_with_vat = float(prod.standard_cost or 0.0)
+            # Strict Local Purchase enforcement: NO fallback to quotes or standard cost
+            supplier_id = None
+            supplier_name = None
+            unit_price_rmb_with_vat = 0.0
 
         # 2. HSN and Refund VAT %
         refund_vat_percent = float(prod.refund_vat_percent) if prod.refund_vat_percent is not None else 13.0
