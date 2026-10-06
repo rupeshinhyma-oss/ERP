@@ -92,7 +92,7 @@
 | `PRC-07` | **MOQ Auto-Inheritance** | 1. Supplier quote has MOQ = `50`.<br>2. Add product to Local Purchase. | Quantity initializes to `50` units matching MOQ. | [ ] PASS<br>[ ] FAIL | |
 | `PRC-08` | **Delete Quotation** | 1. Delete an outdated factory quote from accordion. | Quote removed; remaining quotes re-evaluated for lowest badge. | [ ] PASS<br>[ ] FAIL | |
 | `PRC-09` | **Export Price Directory** | 1. Click `Export Price Matrix`. | Downloads complete quotation benchmark report across all suppliers. | [ ] PASS<br>[ ] FAIL | |
-| `PRC-10` | **Quote Fallback in Sale Process** | 1. Load consignment with product that has NO confirmed Local Purchase but HAS a quote. | Sourcing falls back cleanly to preferred supplier quotation rate. | [ ] PASS<br>[ ] FAIL | |
+| `PRC-10` | **Strict Local Purchase Sourcing in Sale Process** | 1. Load item with NO confirmed Local Purchase (even if it has quotes). | Supplier and RMB costing remain blank/0.00; strictly requires confirmed Local Purchase as single source of truth. | [ ] PASS<br>[ ] FAIL | |
 
 ---
 
