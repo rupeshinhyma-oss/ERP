@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** September 2026  
+> **Last Updated:** October 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
 > **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
@@ -329,8 +329,13 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Cycle Prevention:** Strict validation prevents assigning an ancestor as a child or vice-versa.
 
 ### 8.4. Master Data & Generic Catalogs
-- **Modules:** Brands, Categories, Sub-Categories, Countries, States, Cities, Currencies, Units of Measurement (UOM), HSN/SAC Codes, Operating Companies, Taxes, Additional Charges, Social Media, Agent Types, Company Categories, Company Sectors, and Warehouses.
+- **Modules:** Payment Terms, Brands, Categories, Sub-Categories, Countries, States, Districts, Cities, Currencies, Units of Measurement (UOM), HSN/SAC Codes, Operating Companies, Taxes, Additional Charges, Social Media, Agent Types, Company Categories, Company Sectors, Warehouses, Billing Companies, Technicians, Banks, Transport, Lead Sources, Adjustment Purposes, and Call Types.
 - **Features:** Built on the unified `MasterPage.tsx` engine providing uniform search, pagination, validation, modal creation, cached lookup resolution (`nameResolver.ts`), and bulk activate/deactivate/delete.
+  - **Interactive Status Toggle Switches (`StatusToggle.tsx`):** All Master module tables render high-fidelity, interactive toggle switches in place of static status badges in the main table list.
+    - *Visual State:* Active entries display a vibrant emerald green pill (`#10b981`) with thumb slid right (`translateX(20px)`); Inactive entries display a soft neutral slate pill (`#cbd5e1`) with thumb slid left (`translateX(0)`).
+    - *Instant & Optimistic Update:* Clicking the switch flips state immediately with 220ms bezier transitions; the underlying master service triggers `toggleMasterStatus(apiBase, id, newStatus)`.
+    - *Network Resilience & Error Rollback:* Shows a micro-spinner inside the switch thumb while mutation is in-flight, suppresses duplicate clicks, and reverts to previous state with error banner if the server request fails.
+    - *Dual-Method Backend Compatibility:* All backend master routers support both `PATCH` and `POST` routes for `/{id}/activate` and `/{id}/deactivate`, preventing HTTP 405 Method Not Allowed errors across all client transports.
   - **Company Categories:** Configurable business classifications supporting B2B and B2C corporate tiers, status toggles, bulk deletion, and legacy route resolution (`/company/category/list` -> `/masters/company-categories`).
   - **Company Sectors:** Industry vertical classifications (e.g., Agriculture, Pharma & Healthcare, Packaging, FMCG, Metals & Mining, Chemical, Textile, Electronics, Automobile), status toggles, bulk deletion, CSV/Excel import/export, and legacy route resolution (`/company/sector/list` -> `/masters/company-sectors`).
   - **Warehouses:** Inventory hubs, transit depots, and storage facilities with Billing Company associations, Over Selling permissions, Primary status flags, Main Warehouse hierarchy links, color indicators, bulk deletion, and legacy route resolution (`/warehouse/list` -> `/masters/warehouses`).

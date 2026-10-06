@@ -255,6 +255,7 @@ async def update_company_sector(
 
 
 @router.patch("/{company_sector_id}/activate", summary="Activate a company sector")
+@router.post("/{company_sector_id}/activate", summary="Activate alias")
 async def activate_company_sector(
     company_sector_id: uuid.UUID,
     request: Request,
@@ -287,6 +288,7 @@ async def activate_company_sector(
 
 
 @router.patch("/{company_sector_id}/deactivate", summary="Deactivate a company sector")
+@router.post("/{company_sector_id}/deactivate", summary="Deactivate alias")
 async def deactivate_company_sector(
     company_sector_id: uuid.UUID,
     request: Request,

@@ -78,6 +78,8 @@ export function StatusBadge({ status, isActive }: { status?: string; isActive?: 
   return <span className={`badge ${cls}`}>{display}</span>;
 }
 
+export { StatusToggle, type StatusToggleProps } from "./StatusToggle";
+
 /* ------------------------------------------------------------------ */
 /* Modal                                                              */
 /* ------------------------------------------------------------------ */

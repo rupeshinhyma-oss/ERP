@@ -257,6 +257,7 @@ async def update_agent_type(
 
 
 @router.patch("/{agent_type_id}/activate", summary="Activate an agent type")
+@router.post("/{agent_type_id}/activate", summary="Activate alias")
 async def activate_agent_type(
     agent_type_id: uuid.UUID,
     request: Request,
@@ -289,6 +290,7 @@ async def activate_agent_type(
 
 
 @router.patch("/{agent_type_id}/deactivate", summary="Deactivate an agent type")
+@router.post("/{agent_type_id}/deactivate", summary="Deactivate alias")
 async def deactivate_agent_type(
     agent_type_id: uuid.UUID,
     request: Request,

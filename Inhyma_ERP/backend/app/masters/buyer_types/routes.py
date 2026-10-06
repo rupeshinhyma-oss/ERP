@@ -175,6 +175,52 @@ async def update_buyer_type(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.patch("/{buyer_type_id}/activate", summary="Activate buyer type")
+@router.post("/{buyer_type_id}/activate", summary="Activate buyer type (POST alias)")
+async def activate_buyer_type(
+    buyer_type_id: uuid.UUID,
+    request: Request,
+    service: BuyerTypeService = Depends(get_buyer_type_service),
+    current_user: CurrentUser = Depends(require_permission("buyertype.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    item = await service.activate(buyer_type_id)
+    data = BuyerTypeRead.model_validate(item).model_dump(mode="json")
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        entity_id=buyer_type_id,
+        description=f"Activated buyer type {item.name!r}.",
+        new_values={"status": item.status.value if hasattr(item.status, "value") else str(item.status)},
+    )
+    return build_success_response(data=data, request_id=request.state.request_id, message="Buyer type activated.")
+
+
+@router.patch("/{buyer_type_id}/deactivate", summary="Deactivate buyer type")
+@router.post("/{buyer_type_id}/deactivate", summary="Deactivate buyer type (POST alias)")
+async def deactivate_buyer_type(
+    buyer_type_id: uuid.UUID,
+    request: Request,
+    service: BuyerTypeService = Depends(get_buyer_type_service),
+    current_user: CurrentUser = Depends(require_permission("buyertype.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    item = await service.deactivate(buyer_type_id)
+    data = BuyerTypeRead.model_validate(item).model_dump(mode="json")
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        entity_id=buyer_type_id,
+        description=f"Deactivated buyer type {item.name!r}.",
+        new_values={"status": item.status.value if hasattr(item.status, "value") else str(item.status)},
+    )
+    return build_success_response(data=data, request_id=request.state.request_id, message="Buyer type deactivated.")
+
+
 @router.delete("/{buyer_type_id}", status_code=status.HTTP_200_OK, summary="Delete buyer type")
 async def delete_buyer_type(
     buyer_type_id: uuid.UUID,

@@ -122,9 +122,22 @@ cd Yinglima_ERP/backend && python server.py
 cd Inhyma_ERP/backend && python server.py
 ```
 
-### F. Run Full Production Container Stack (Docker Compose)
+### F. Run Full Ecosystem Production Container Stack (All 3 Systems)
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+# Spins up ERP_Main (8000/5170), Yinglima (8001/5173), and Inhyma (8002/5174) with healthchecks:
+docker compose -f docker-compose.ecosystem.yml up -d --build
 ```
+
+---
+
+## 5. Cloud Deployment Guide (DigitalOcean, Render, AWS)
+
+A comprehensive, production-tested deployment manual is available in **[`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md)**:
+
+- **Render.com Blueprints:** Ready-to-deploy blueprints located at [`Inhyma_ERP/render.yaml`](Inhyma_ERP/render.yaml), [`Yinglima_ERP/render.yaml`](Yinglima_ERP/render.yaml), and [`ERP_Main/render.yaml`](ERP_Main/render.yaml).
+- **DigitalOcean:** Multi-service Droplet setup via `docker-compose.ecosystem.yml` or DigitalOcean App Platform PaaS.
+- **Amazon Web Services (AWS):** AWS ECS Fargate, AWS App Runner, and EC2 containerized topologies.
+- **Production URL & Port Decoupling:** Fully parametric URL resolution (zero hardcoded LAN IPs or localhost references).
+- **Cross-Subdomain SSO & Cookie Sync:** Unified session propagation via `VITE_COOKIE_DOMAIN` and central ecosystem sessions.
 
 

@@ -1849,3 +1849,35 @@
   width: 1%;
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------------------ */
+/* Masters Module: Status Toggle Switch                               */
+/* ------------------------------------------------------------------ */
+.status-toggle-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+.status-toggle-btn {
+  transition: background-color 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.status-toggle-btn:focus-visible {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0061f2 !important;
+}
+
+.status-toggle-btn.is-active:hover:not(:disabled) {
+  background-color: #059669 !important;
+}
+
+.status-toggle-btn.is-inactive:hover:not(:disabled) {
+  background-color: #94a3b8 !important;
+}
+
+@keyframes status-toggle-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

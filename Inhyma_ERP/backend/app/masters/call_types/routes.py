@@ -237,6 +237,7 @@ async def delete_call_type(
 
 
 @router.post("/{call_type_id}/activate", summary="Activate a call type")
+@router.patch("/{call_type_id}/activate", summary="Activate alias")
 async def activate_call_type(
     request: Request,
     call_type_id: uuid.UUID,
@@ -269,6 +270,7 @@ async def activate_call_type(
 
 
 @router.post("/{call_type_id}/deactivate", summary="Deactivate a call type")
+@router.patch("/{call_type_id}/deactivate", summary="Deactivate alias")
 async def deactivate_call_type(
     request: Request,
     call_type_id: uuid.UUID,

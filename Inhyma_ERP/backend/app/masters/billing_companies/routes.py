@@ -268,6 +268,7 @@ async def update_billing_company(
 
 
 @router.patch("/{company_id}/activate", summary="Activate a billing company")
+@router.post("/{company_id}/activate", summary="Activate alias")
 async def activate_billing_company(
     company_id: uuid.UUID,
     request: Request,
@@ -301,6 +302,7 @@ async def activate_billing_company(
 
 
 @router.patch("/{company_id}/deactivate", summary="Deactivate a billing company")
+@router.post("/{company_id}/deactivate", summary="Deactivate alias")
 async def deactivate_billing_company(
     company_id: uuid.UUID,
     request: Request,

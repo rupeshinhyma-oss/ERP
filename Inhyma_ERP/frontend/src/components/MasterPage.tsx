@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
-import { Banner, Can, ModalAlert, StatusBadge, TableMessageRow } from "./ui";
+import { Banner, Can, ModalAlert, StatusBadge, StatusToggle, TableMessageRow } from "./ui";
 import { Pagination } from "./Pagination";
 import {
   ImpExpDropdown,
@@ -45,6 +45,7 @@ import {
   errorMessage,
   toQueryString,
 } from "@/lib/api";
+import { toggleMasterStatus } from "@/lib/masters";
 import { useAuth, useSrNoJump, useModalHistorySync } from "@/lib/hooks";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { ImportHeader, ImportSummary, MasterRecord, PaginationMeta } from "@/types";
@@ -553,6 +554,46 @@ export function MasterPage<T extends MasterRecord>({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const handleToggleStatus = async (item: T, newStatus: "active" | "inactive") => {
+    if (!canUpdate) return;
+    if (togglingId === item.id) return;
+
+    const previousStatus = (item as any).status;
+    const updatedItem = { ...item, status: newStatus };
+
+    setRows((prev) => prev.map((r) => (r.id === item.id ? updatedItem : r)));
+    setAllRecords((prev) => prev.map((r) => (r.id === item.id ? updatedItem : r)));
+    if (drawerItem && (drawerItem as any).id === item.id) {
+      setDrawerItem(updatedItem);
+    }
+
+    setTogglingId(item.id);
+    setError(null);
+
+    try {
+      const res = await toggleMasterStatus<T>(apiBase, item.id, newStatus);
+      if (res && res.data) {
+        const serverItem = { ...item, ...res.data };
+        setRows((prev) => prev.map((r) => (r.id === item.id ? serverItem : r)));
+        setAllRecords((prev) => prev.map((r) => (r.id === item.id ? serverItem : r)));
+        if (drawerItem && (drawerItem as any).id === item.id) {
+          setDrawerItem(serverItem);
+        }
+      }
+    } catch (err) {
+      const revertedItem = { ...item, status: previousStatus };
+      setRows((prev) => prev.map((r) => (r.id === item.id ? revertedItem : r)));
+      setAllRecords((prev) => prev.map((r) => (r.id === item.id ? revertedItem : r)));
+      if (drawerItem && (drawerItem as any).id === item.id) {
+        setDrawerItem(revertedItem);
+      }
+      setError(err);
+    } finally {
+      setTogglingId(null);
+    }
+  };
   const [pageSize, setPageSize] = useState(50);
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
@@ -1235,7 +1276,7 @@ export function MasterPage<T extends MasterRecord>({
   async function handleBulkActivate() {
     if (!selectedIds.length) return;
     try {
-      await Promise.all(selectedIds.map((id) => apiPost(`${apiBase}/${id}/activate`)));
+      await Promise.all(selectedIds.map((id) => toggleMasterStatus(apiBase, id, "active")));
       setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "active" } : row)));
       setAllRecords((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "active" } : row)));
       setSelectedIds([]);
@@ -1247,7 +1288,7 @@ export function MasterPage<T extends MasterRecord>({
   async function handleBulkDeactivate() {
     if (!selectedIds.length) return;
     try {
-      await Promise.all(selectedIds.map((id) => apiPost(`${apiBase}/${id}/deactivate`)));
+      await Promise.all(selectedIds.map((id) => toggleMasterStatus(apiBase, id, "inactive")));
       setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "inactive" } : row)));
       setAllRecords((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "inactive" } : row)));
       setSelectedIds([]);
@@ -1771,6 +1812,74 @@ export function MasterPage<T extends MasterRecord>({
     const label = (columnHeaders ?? columns.map((col) => col.header))[mIdx];
     const isPinned = Boolean(pinnedCols[idx]);
     const isSorted = sortColIndex === idx;
+    const isStatusHeader = label?.trim().toLowerCase() === "status";
+
+    if (isStatusHeader) {
+      return (
+        <th
+          key={`col-${mIdx}-${label}`}
+          style={{
+            ...getFreezeStyle(idx, true),
+            width: "95px",
+            minWidth: "95px",
+            maxWidth: "115px",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
+            <div
+              onClick={() => handleHeaderSort(idx)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                cursor: "pointer",
+                userSelect: "none",
+                padding: "2px 0",
+              }}
+              title={
+                isSorted
+                  ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                  : `Sort by ${label} (Ascending)`
+              }
+            >
+              <span>{label}</span>
+              {isSorted ? (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    color: "#0284c7",
+                    fontSize: "10px",
+                    fontWeight: 800,
+                    background: "#e0f2fe",
+                    padding: "1px 4px",
+                    borderRadius: "3px",
+                    border: "1px solid #bae6fd",
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  {sortDirection === "asc" ? "▲" : "▼"}
+                </span>
+              ) : (
+                <span
+                  style={{
+                    fontSize: "10px",
+                    color: "#94a3b8",
+                    opacity: 0.45,
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  ↕
+                </span>
+              )}
+            </div>
+          </div>
+        </th>
+      );
+    }
 
     return (
       <th key={`col-${mIdx}-${label}`} style={getFreezeStyle(idx, true)}>
@@ -1994,6 +2103,40 @@ export function MasterPage<T extends MasterRecord>({
 
     const mIdx = idx - 2;
     const col = columns[mIdx];
+    const isStatusCol = col?.header?.trim().toLowerCase() === "status";
+
+    if (isStatusCol) {
+      const currentStatus = String((item as any).status || "").toLowerCase();
+      const isActive = currentStatus === "active" || (item as any).is_active === true;
+      return (
+        <td
+          key={`cell-${mIdx}-${col?.header}`}
+          style={{
+            ...cellStyle,
+            width: "95px",
+            minWidth: "95px",
+            maxWidth: "115px",
+            textAlign: "center",
+          }}
+        >
+          <StatusToggle
+            checked={isActive}
+            disabled={!canUpdate}
+            loading={togglingId === item.id}
+            title={
+              canUpdate
+                ? isActive
+                  ? "Active — Click to turn off (inactive)"
+                  : "Inactive — Click to turn on (active)"
+                : "You do not have permission to modify status"
+            }
+            onChange={(nextActive) => {
+              handleToggleStatus(item, nextActive ? "active" : "inactive");
+            }}
+          />
+        </td>
+      );
+    }
     return (
       <td key={`cell-${mIdx}-${col?.header}`} style={cellStyle}>
         {mIdx === 0 && detailFields ? (

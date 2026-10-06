@@ -40,10 +40,22 @@ export interface EcosystemErpEntry {
 
 export const getEcosystemErps = (): EcosystemErpEntry[] => {
   const host = getHost();
+  const controlPlaneHost =
+    import.meta.env.VITE_CONTROL_PLANE_URL ||
+    (typeof window !== "undefined" && window.location.origin ? `${window.location.origin}/dashboard` : `http://${host}:5170/dashboard`);
+  const controlPlaneApi =
+    import.meta.env.VITE_API_ORIGIN
+      ? `${import.meta.env.VITE_API_ORIGIN.replace(/\/+$/, "")}/api/v1`
+      : `http://${host}:8000/api/v1`;
+  const yinglimaHost = import.meta.env.VITE_YINGLIMA_URL || `http://${host}:5173/dashboard`;
+  const yinglimaApi = import.meta.env.VITE_YINGLIMA_API_URL || `http://${host}:8001/api/v1`;
+  const inhymaHost = import.meta.env.VITE_INHYMA_URL || `http://${host}:5174/dashboard`;
+  const inhymaApi = import.meta.env.VITE_INHYMA_API_URL || `http://${host}:8002/api/v1`;
+
   return [
-    { key: "control-plane", id: "control-plane", name: "ERP Dashboard", hostUrl: `http://${host}:5170/dashboard`, apiUrl: `http://${host}:8000/api/v1`, badge: "Control Plane" },
-    { key: "yinglima", id: "erp-02", name: "ERP 2", hostUrl: `http://${host}:5173/dashboard`, apiUrl: `http://${host}:8001/api/v1`, badge: "Active Port 5173" },
-    { key: "inhyma", id: "erp-01", name: "ERP 1", hostUrl: `http://${host}:5174/dashboard`, apiUrl: `http://${host}:8002/api/v1`, badge: "Active Port 5174" },
+    { key: "control-plane", id: "control-plane", name: "ERP Dashboard", hostUrl: controlPlaneHost, apiUrl: controlPlaneApi, badge: "Control Plane" },
+    { key: "yinglima", id: "erp-02", name: "ERP 2", hostUrl: yinglimaHost, apiUrl: yinglimaApi, badge: "Yinglima ERP" },
+    { key: "inhyma", id: "erp-01", name: "ERP 1", hostUrl: inhymaHost, apiUrl: inhymaApi, badge: "Inhyma ERP" },
   ];
 };
 
@@ -133,13 +145,13 @@ export function resolveSingleErpDirectUrl(
   let targetHostUrl = "";
   let cleanErpKey = "";
   if (erpKey.includes("yinglima")) {
-    targetHostUrl = `http://${host}:5173/dashboard`;
+    targetHostUrl = import.meta.env.VITE_YINGLIMA_URL || `http://${host}:5173/dashboard`;
     cleanErpKey = "yinglima";
   } else if (erpKey.includes("inhyma")) {
-    targetHostUrl = `http://${host}:5174/dashboard`;
+    targetHostUrl = import.meta.env.VITE_INHYMA_URL || `http://${host}:5174/dashboard`;
     cleanErpKey = "inhyma";
   } else {
-    const matched = ECOSYSTEM_ERPS.find(
+    const matched = getEcosystemErps().find(
       (e) => e.key !== "control-plane" && (e.key.toLowerCase().includes(erpKey) || erpKey.includes(e.key.toLowerCase()))
     );
     if (matched) {

@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  # -----------------------------------------------------------------------------
+  # Backend API & Workers
+  # -----------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inhyma-erp-backend
+    restart: always
+    env_file:
+      - ./backend/.env
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - PORT=8002
+    ports:
+      - "8002:8002"
+    volumes:
+      - backend-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health/live"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # -----------------------------------------------------------------------------
+  # Frontend SPA Web Client
+  # -----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_ORIGIN: ${VITE_API_ORIGIN:-}
+        VITE_CONTROL_PLANE_URL: ${VITE_CONTROL_PLANE_URL:-}
+        VITE_CENTRAL_AUTH_API: ${VITE_CENTRAL_AUTH_API:-}
+        VITE_COOKIE_DOMAIN: ${VITE_COOKIE_DOMAIN:-}
+    container_name: inhyma-erp-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  backend-uploads:
+    driver: local

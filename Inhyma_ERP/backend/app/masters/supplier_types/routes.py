@@ -177,6 +177,7 @@ async def update_supplier_type(
 
 
 @router.post("/{supplier_type_id}/activate", summary="Activate a supplier type")
+@router.patch("/{supplier_type_id}/activate", summary="Activate alias")
 async def activate_supplier_type(
     supplier_type_id: uuid.UUID,
     request: Request,
@@ -198,6 +199,7 @@ async def activate_supplier_type(
 
 
 @router.post("/{supplier_type_id}/deactivate", summary="Deactivate a supplier type")
+@router.patch("/{supplier_type_id}/deactivate", summary="Deactivate alias")
 async def deactivate_supplier_type(
     supplier_type_id: uuid.UUID,
     request: Request,
