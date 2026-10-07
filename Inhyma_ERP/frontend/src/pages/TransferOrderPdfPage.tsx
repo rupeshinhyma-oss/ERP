@@ -10,23 +10,27 @@ export function TransferOrderPdfPage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [liveItem, setLiveItem] = useState<StockTransferItem | null>(null);
 
-  // Fallback or static item from INITIAL_TRANSFERS
+  // Fallback or static item from INITIAL_TRANSFERS only in test mode
   const staticItem = useMemo(() => {
-    if (!id) return INITIAL_TRANSFERS[0];
-    const found = INITIAL_TRANSFERS.find(
-      (item) =>
-        String(item.sr_no) === String(id) ||
-        item.id === id ||
-        item.transfer_no === id ||
-        item.id === `trf-${id}`
-    );
-    return found || INITIAL_TRANSFERS[0];
+    if (import.meta.env.MODE === "test") {
+      if (!id) return INITIAL_TRANSFERS[0];
+      const found = INITIAL_TRANSFERS.find(
+        (item) =>
+          String(item.sr_no) === String(id) ||
+          item.id === id ||
+          item.transfer_no === id ||
+          item.id === `trf-${id}`
+      );
+      return found || INITIAL_TRANSFERS[0];
+    }
+    return null;
   }, [id]);
 
   // Fetch live item from database if available
   useEffect(() => {
     let cancelled = false;
-    const lookupId = id || "52";
+    const lookupId = id || (import.meta.env.MODE === "test" ? "52" : "");
+    if (!lookupId) return;
 
     InventoryApi.listStockTransfers({ limit: 100 })
       .then((res) => {
@@ -209,6 +213,10 @@ export function TransferOrderPdfPage() {
             title={`Transfer No : ${trfNo}`}
             style={{ width: "100%", height: "100%", border: "none" }}
           />
+        ) : !currentItem ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#cbd5e1" }}>
+            Stock transfer not found.
+          </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#cbd5e1" }}>
             Generating Stock Transfer PDF...

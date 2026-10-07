@@ -92,9 +92,10 @@ describe("TechnicalTasksPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/All\s*\(\s*1\s*\)/)).toBeTruthy();
-      expect(screen.getByText(/Pending\s*\(\s*0\s*\)/)).toBeTruthy();
-      expect(screen.getByText(/Approved\s*\(\s*1\s*\)/)).toBeTruthy();
+      expect(screen.getByText(/^All\s*\(\s*1\s*\)$/)).toBeTruthy();
+      expect(screen.getByText(/^Pending\s*\(\s*0\s*\)$/)).toBeTruthy();
+      expect(screen.getByText(/^Approved\s*\(\s*1\s*\)$/)).toBeTruthy();
+      expect(screen.getByText(/^Payment Pending\s*\(\s*0\s*\)$/)).toBeTruthy();
     });
   });
 

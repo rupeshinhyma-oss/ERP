@@ -146,6 +146,7 @@ class CompanyCreate(BaseModel):
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
     company_category: str | None = Field(default=None, max_length=150)
+    business_category: str | None = Field(default=None, max_length=100)
     sector: str | None = Field(default=None, max_length=150)
     monthly_turnover: str | None = Field(default=None, max_length=50, description="Monthly Turnover (shown only when Business Type is set).")
     product_manufacture_or_supply: str | None = None
@@ -253,6 +254,7 @@ class CompanyUpdate(BaseModel):
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
     company_category: str | None = Field(default=None, max_length=150)
+    business_category: str | None = Field(default=None, max_length=100)
     sector: str | None = Field(default=None, max_length=150)
     monthly_turnover: str | None = Field(default=None, max_length=50)
     product_manufacture_or_supply: str | None = None
@@ -350,6 +352,7 @@ class CompanyRead(BaseModel):
     primary_website: str | None
     secondary_website: str | None
     company_category: str | None = None
+    business_category: str | None = None
     sector: str | None = None
     monthly_turnover: str | None = None
     product_manufacture_or_supply: str | None = None
@@ -408,7 +411,14 @@ class CompanyListItemRead(BaseModel):
     brand_description: str | None = None
     company_type: str | None = None
     company_category: str | None = None
+    business_category: str | None = None
     sector: str | None = None
+    monthly_turnover: str | None = None
+    potential_business_per_month: str | None = None
+    potential_reason: str | None = None
+    direct_import_from_china: str | None = None
+    monthly_import_volume: str | None = None
+    products_needed_for_imports: str | None = None
     product_manufacture_or_supply: str | None = None
     machines_buying_from: str | None = None
     spares_buying_from: str | None = None

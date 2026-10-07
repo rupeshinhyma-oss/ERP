@@ -102,12 +102,16 @@ import { initGlobalAutocompleteBlocker } from "@/lib/autocompleteBlocker";
 import { ComingSoonPage } from "@/components/ComingSoon";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ProductStockPage } from "@/pages/ProductStockPage";
+import { ProductReorderPage } from "@/pages/ProductReorderPage";
+import { DeletedOrdersPage } from "@/pages/DeletedOrdersPage";
 import { StockAdjustmentPage } from "@/pages/StockAdjustmentPage";
 import { AdjustmentOrderPdfPage } from "@/pages/AdjustmentOrderPdfPage";
 import { AddAdjustmentOrderPage } from "@/pages/AddAdjustmentOrderPage";
 import { StockTransferPage } from "@/pages/StockTransferPage";
 import { TransferOrderPdfPage } from "@/pages/TransferOrderPdfPage";
 import { AddTransferOrderPage } from "@/pages/AddTransferOrderPage";
+import { AgentsPage } from "@/pages/AgentsPage";
+import { IndustrialZonesPage } from "@/pages/IndustrialZonesPage";
 
 export function App() {
   const navigate = useNavigate();
@@ -182,6 +186,18 @@ export function App() {
           <Route path="/companies/addedit/:id" element={<CompaniesPage defaultAdd={true} />} />
           <Route path="/user/addEdit" element={<CompaniesPage defaultAdd={true} />} />
           <Route path="/user/addedit" element={<CompaniesPage defaultAdd={true} />} />
+
+          {/* AGENTS routes */}
+          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/agent/list" element={<Navigate to="/agents" replace />} />
+          <Route path="/agents/list" element={<Navigate to="/agents" replace />} />
+
+          {/* INDUSTRIAL ZONES routes */}
+          <Route path="/industrial/zones/list" element={<IndustrialZonesPage />} />
+          <Route path="/industrial-zones" element={<Navigate to="/industrial/zones/list" replace />} />
+          <Route path="/industrial/zones" element={<Navigate to="/industrial/zones/list" replace />} />
+          <Route path="/industrial-zone/list" element={<Navigate to="/industrial/zones/list" replace />} />
+
           {/* SUPPLIERS routes under /purchase/suppliers */}
           <Route path="/purchase/suppliers" element={<SuppliersPage />} />
           <Route path="/purchase/suppliers/add" element={<SuppliersPage defaultAdd={true} />} />
@@ -280,42 +296,22 @@ export function App() {
           <Route path="/purchase/import/bill-file/:id" element={<ImportPurchasePdfPage />} />
 
           {/* REPORTS routes */}
-          <Route
-            path="/reports/re-order"
-            element={
-              <ComingSoonPage
-                activeKey="reports-re-order"
-                title="Re-Order Report"
-                subtitle="Review low stock triggers and items requiring replenishment"
-                breadcrumbLabel="Re-Order"
-                featureName="Re-Order Report"
-              />
-            }
-          />
-          <Route
-            path="/reports/stock-transactions"
-            element={
-              <ComingSoonPage
-                activeKey="reports-stock-transactions"
-                title="Stock Transactions"
-                subtitle="Audit inventory inflows, outflows, transfers, and adjustments"
-                breadcrumbLabel="Stock Transactions"
-                featureName="Stock Transactions"
-              />
-            }
-          />
-          <Route
-            path="/reports/deleted-orders"
-            element={
-              <ComingSoonPage
-                activeKey="reports-deleted-orders"
-                title="Deleted Orders"
-                subtitle="Review records and logs of cancelled or deleted order items"
-                breadcrumbLabel="Deleted Orders"
-                featureName="Deleted Orders"
-              />
-            }
-          />
+          <Route path="/reports/re-order" element={<ProductReorderPage />} />
+          <Route path="/product-reorder/list" element={<ProductReorderPage />} />
+          <Route path="/product-reorder" element={<Navigate to="/reports/re-order" replace />} />
+          <Route path="/re-order" element={<Navigate to="/reports/re-order" replace />} />
+
+          <Route path="/reports/stock-transactions" element={<ProductStockPage />} />
+          <Route path="/transaction_report/list" element={<ProductStockPage />} />
+          <Route path="/transaction-report/list" element={<Navigate to="/reports/stock-transactions" replace />} />
+          <Route path="/stock-transactions" element={<Navigate to="/reports/stock-transactions" replace />} />
+          <Route path="/product-stock" element={<Navigate to="/reports/stock-transactions" replace />} />
+
+          <Route path="/reports/deleted-orders" element={<DeletedOrdersPage />} />
+          <Route path="/delete_order_report/list" element={<DeletedOrdersPage />} />
+          <Route path="/delete-order-report/list" element={<Navigate to="/reports/deleted-orders" replace />} />
+          <Route path="/deleted-orders" element={<Navigate to="/reports/deleted-orders" replace />} />
+
           <Route
             path="/reports/general"
             element={
@@ -336,19 +332,8 @@ export function App() {
           <Route path="/tasks/calendar" element={<Navigate to="/tasks?tab=calendar" replace />} />
           <Route path="/technical-task/list" element={<TechnicalTasksPage />} />
           <Route path="/technical-tasks" element={<Navigate to="/technical-task/list" replace />} />
-          <Route
-            path="/marketing-task/list"
-            element={
-              <ComingSoonPage
-                activeKey="marketing-tasks"
-                title="Marketing Tasks"
-                subtitle="Track and manage client outreach and marketing activities"
-                breadcrumbLabel="Marketing Tasks"
-                featureName="Marketing Tasks"
-              />
-            }
-          />
-          <Route path="/marketing-tasks" element={<Navigate to="/marketing-task/list" replace />} />
+          <Route path="/marketing-task/list" element={<Navigate to="/tasks" replace />} />
+          <Route path="/marketing-tasks" element={<Navigate to="/tasks" replace />} />
 
           {/* HRMS routes */}
           <Route path="/hrms" element={<HrmsRouteGuard permission="hrms.attendance"><AttendancePage /></HrmsRouteGuard>} />
@@ -385,6 +370,10 @@ export function App() {
           <Route path="/product-stock" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock/list" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock" element={<Navigate to="/product-stock/list" replace />} />
+          <Route path="/product-reorder/list" element={<ProductReorderPage />} />
+          <Route path="/product-reorder" element={<Navigate to="/product-reorder/list" replace />} />
+          <Route path="/product_reorder/list" element={<Navigate to="/product-reorder/list" replace />} />
+          <Route path="/product_reorder" element={<Navigate to="/product-reorder/list" replace />} />
           <Route path="/stock-adjustment" element={<StockAdjustmentPage />} />
           <Route path="/stock-adjustment/add" element={<AddAdjustmentOrderPage />} />
           <Route path="/adjustment/list" element={<StockAdjustmentPage />} />

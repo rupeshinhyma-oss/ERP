@@ -519,6 +519,13 @@
   border: 1px solid #f5c6cb;
 }
 
+.badge-status-payment-pending,
+.page-technical-tasks .badge-status-payment-pending {
+  background-color: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
 .page-technical-tasks .status-date {
   font-size: 11px;
   color: #155724;

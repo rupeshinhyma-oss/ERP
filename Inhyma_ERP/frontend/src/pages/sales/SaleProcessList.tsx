@@ -21,7 +21,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
-import { apiDelete, apiGet } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder, SaleSummaryMetrics } from "@/types/saleProcess";
 import { SaleProcessDetailModal } from "./SaleProcessDetailModal";
@@ -155,469 +155,10 @@ export function getTimelineEvents(order: SaleOrder): Array<{
   ];
 }
 
-// Initial Mock KPI Metrics matching the live screenshot
-export const INITIAL_METRICS: SaleSummaryMetrics = {
-  all: { count: 4762, amount: 299107379.78 },
-  admin_confirmed_to_lr: { count: 4745, amount: 295511129.78 },
-  pending: { count: 2, amount: 342650.0 },
-  admin_approved: { count: 8, amount: 3248200.0 },
-  lr: { count: 4682, amount: 284336441.78 },
-  cancelled: { count: 0, amount: 0.0 },
-  sales_confirmed: { count: 15, amount: 1250000.0 },
-  acc_confirmed: { count: 4, amount: 480000.0 },
-  gatepass_created: { count: 14, amount: 1650000.0 },
-  dispatched: { count: 37, amount: 2890000.0 },
-  gatepass_cancelled: { count: 0, amount: 0.0 },
-};
+// Re-export Mock KPI Metrics and Orders from saleMockData
+export { INITIAL_METRICS, INITIAL_SALE_ORDERS, EMPTY_METRICS } from "./saleMockData";
+import { INITIAL_METRICS, INITIAL_SALE_ORDERS, EMPTY_METRICS } from "./saleMockData";
 
-// Initial Orders matching the live screenshot
-export const INITIAL_SALE_ORDERS: SaleOrder[] = [
-  {
-    id: "so-4041",
-    order_no: "SO-MH/26-27/4041",
-    order_date: "21-09-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "21-09-2026",
-    company_name: "V S Machines",
-    city: "Navi Mumbai",
-    state: "Maharashtra",
-    third_party: "No",
-    po: "No",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 271400.0,
-    amount_exc_gst: 230000.0,
-    discount: 0.0,
-    status: "pending",
-    status_updated_at: null,
-    acc_dep: "Timeline",
-    gatepass: "Pending",
-    buyer_name: "V S Machines",
-    billing_address:
-      "Plot No. PAP-K-37, TTC INDL Area Digha, Airoli Nr. Yadav Nagar (Shynu Hotel) Airoli, Navi Mumbai, Maharashtra, 400708",
-    shipping_address:
-      "Plot No. PAP-K-37, TTC INDL Area Digha, Airoli Nr. Yadav Nagar (Shynu Hotel) Airoli, Navi Mumbai, Maharashtra, 400708",
-    phone: "9820402017",
-    gst_no: "27AAOFV6626B3ZZ",
-    transport_name: "Self Pickup",
-    payment_terms: "30 Days Credit",
-    exp_dispatch_date: "21-09-2026",
-    created_at: "21-09-2026 11:24 AM",
-    total_amount: 271400.0,
-    total_basic: 230000.0,
-    total_tax: 41400.0,
-    total_quantity: 1,
-    item_count: 1,
-    items: [
-      {
-        product_name: "ISL350XDAN Flow Wrap Machine W/D End Seal Chain",
-        hsn_code: "8422.30.00",
-        quantity: 1,
-        unit_rate: 230000.0,
-        tax_percent: 18,
-        tax_amount: 41400.0,
-        item_total: 271400.0,
-        product_id: null,
-      },
-    ],
-    terms: [
-      "1. Transport Charges: To Pay.",
-      "2. Payment Terms: 100% Before Dispatch.",
-      "3. Order Once Confirmed, Cannot Be Cancelled.",
-    ],
-    files: [
-      { name: "Sales_Order_SO-MH_26-27_4041.pdf", size: "148 KB", type: "application/pdf" },
-      { name: "Buyer_Purchase_Order_VS_Machines.pdf", size: "215 KB", type: "application/pdf" },
-      { name: "Gatepass_Self_Pickup_Draft.pdf", size: "96 KB", type: "application/pdf" },
-    ],
-  },
-  {
-    id: "so-3826",
-    order_no: "SO-MH/26-27/3826",
-    order_date: "12-09-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "12-09-2026",
-    company_name: "GARUDA ENGINEERS",
-    city: "Ahmedabad",
-    state: "Gujarat",
-    third_party: "No",
-    po: "No",
-    sales_person: "Abhishek Patel",
-    amount_inc_gst: 324500.0,
-    amount_exc_gst: 275000.0,
-    discount: 35000.0,
-    status: "lr",
-    status_updated_at: "16-09-2026 12:51 PM",
-    acc_dep: "Timeline",
-    gatepass: "4539",
-    buyer_name: "GARUDA ENGINEERS",
-    billing_address:
-      "Shed No C-15, Maruti Industrial Estate, Phase 1, Narol Vatwa Road, Ahmedabad, Ahmedabad, Ahmedabad, Maharashtra,",
-    shipping_address:
-      "Shed No C-15, Maruti Industrial Estate, Phase 1, Narol Vatwa Road, Ahmedabad, Ahmedabad, Ahmedabad, Maharashtra,",
-    phone: "9427419237",
-    gst_no: "24ALCPG8895N1ZG",
-    contact_person_name: "Jalpesh",
-    contact_person_mobile: "9427419237",
-    transport_name: "Delhivery Limited",
-    transporter_gst: "06AAPCS9575E1ZR",
-    delivery_type: "godown",
-    delivery_charge: "To Pay",
-    payment_terms: "100% Advance",
-    exp_dispatch_date: "12-09-2026",
-    created_at: "12-09-2026 11:26 AM",
-    total_amount: 324500.0,
-    total_basic: 310000.0,
-    total_tax: 49500.0,
-    total_quantity: 1,
-    item_count: 1,
-    items: [
-      {
-        product_name: "ISL450XDAN Flow Wrap machine with end seal chain",
-        hsn_code: "8422.30.00",
-        quantity: 1,
-        unit_rate: 310000.0,
-        tax_percent: 18,
-        tax_amount: 49500.0,
-        item_total: 324500.0,
-        product_id: null,
-      },
-    ],
-    terms: [
-      "1. Transport Charges: To Pay.",
-      "2. Payment Terms: 100% Before Dispatch.",
-      "3. Order once confirmed, cannot be cancelled.",
-    ],
-    files: [
-      { name: "Sales_Order_SO-MH_26-27_3826.pdf", size: "151 KB", type: "application/pdf" },
-      { name: "Buyer_Purchase_Order_Garuda_Engineers.pdf", size: "215 KB", type: "application/pdf" },
-      { name: "Gatepass_4539.pdf", size: "96 KB", type: "application/pdf" },
-    ],
-  },
-  {
-    id: "so-3787",
-    order_no: "SO-MH/26-27/3787",
-    order_date: "11-09-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "11-09-2026",
-    company_name: "Annie Packaging (S)",
-    city: "Madhubani",
-    state: "Bihar",
-    third_party: "No",
-    po: "No",
-    sales_person: "Abhishek Patel",
-    amount_inc_gst: 132927.0,
-    amount_exc_gst: 112650.0,
-    discount: 0.0,
-    status: "pending",
-    status_updated_at: null,
-    acc_dep: "Timeline",
-    buyer_name: "Annie Packaging (S)",
-    total_amount: 132927.0,
-    total_quantity: 2,
-    item_count: 2,
-  },
-  {
-    id: "so-0807",
-    order_no: "SO-GJ/26-27/0807",
-    order_date: "21-09-2026",
-    warehouse: "Ahmedabad",
-    expected_delivery_date: "21-09-2026",
-    company_name: "AAVJO INDUSTRIES",
-    city: "Ahmedabad",
-    state: "Gujarat",
-    third_party: "No",
-    po: "No",
-    sales_person: "Siddhi Kilaje",
-    amount_inc_gst: 99120.0,
-    amount_exc_gst: 84000.0,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "21-09-2026 04:22 PM",
-    acc_dep: "Timeline",
-    buyer_name: "AAVJO INDUSTRIES",
-    total_amount: 99120.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-4068",
-    order_no: "SO-MH/26-27/4068",
-    order_date: "21-09-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "21-09-2026",
-    company_name: "NEWEDGE METALCRAFT MHE LLP",
-    city: "Palghar",
-    state: "Maharashtra",
-    third_party: "No",
-    po: "No",
-    sales_person: "Sunita Pawar",
-    amount_inc_gst: 18880.0,
-    amount_exc_gst: 16000.0,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "21-09-2026 04:22 PM",
-    acc_dep: "Timeline",
-    buyer_name: "NEWEDGE METALCRAFT MHE LLP",
-    total_amount: 18880.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-4067",
-    order_no: "SO-MH/26-27/4067",
-    order_date: "21-09-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "21-09-2026",
-    company_name: "SHREE HARI TRADERS",
-    city: "Rajkot",
-    state: "Gujarat",
-    third_party: "No",
-    po: "No",
-    sales_person: "Bhavin Suthar",
-    amount_inc_gst: 7788.0,
-    amount_exc_gst: 6600.0,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "21-09-2026 04:22 PM",
-    acc_dep: "Timeline",
-    buyer_name: "SHREE HARI TRADERS",
-    total_amount: 7788.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-4065",
-    order_no: "SO-MH/26-27/4065",
-    order_date: "21-09-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "21-09-2026",
-    company_name: "Mahadev Enterprises (M)",
-    city: "Kalyan-Dombivli",
-    state: "Maharashtra",
-    third_party: "No",
-    po: "No",
-    sales_person: "Siddhi Kilaje",
-    amount_inc_gst: 333940.0,
-    amount_exc_gst: 283000.0,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "21-09-2026 04:03 PM",
-    acc_dep: "Timeline",
-    buyer_name: "Mahadev Enterprises (M)",
-    total_amount: 333940.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-4064",
-    order_no: "SO-MH/26-27/4064",
-    order_date: "21-09-2026",
-    warehouse: "Mumbai Transit",
-    expected_delivery_date: "21-09-2026",
-    company_name: "VB Techno",
-    city: "Bhavnagar",
-    state: "Gujarat",
-    third_party: "No",
-    po: "No",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 120360.0,
-    amount_exc_gst: 102000.0,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "21-09-2026 03:59 PM",
-    acc_dep: "Timeline",
-    buyer_name: "VB Techno",
-    total_amount: 120360.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-4016",
-    order_no: "SO-MH/26-27/4016",
-    order_date: "18-09-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "18-09-2026",
-    company_name: "MANDAGINI SEALS",
-    city: "Chennai",
-    state: "Tamil Nadu",
-    third_party: "No",
-    po: "No",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 153400.0,
-    amount_exc_gst: 130000.0,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "18-09-2026 07:33 PM",
-    acc_dep: "Timeline",
-    gatepass: "Pending",
-    buyer_name: "MANDAGINI SEALS",
-    total_amount: 153400.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-0709",
-    order_no: "SO-GJ/26-27/0709",
-    order_date: "10-09-2026",
-    warehouse: "Ahmedabad",
-    expected_delivery_date: "10-09-2026",
-    company_name: "ROXIS PACKAGING LLP",
-    city: "Ahmedabad",
-    state: "Gujarat",
-    third_party: "No",
-    po: "No",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 274640.0,
-    amount_exc_gst: 232745.76,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "10-09-2026 12:17 PM",
-    acc_dep: "Timeline",
-    gatepass: "Pending",
-    buyer_name: "ROXIS PACKAGING LLP",
-    total_amount: 274640.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-3916",
-    order_no: "SO-MH/26-27/3916",
-    order_date: "16-09-2026",
-    warehouse: "Mumbai Transit",
-    expected_delivery_date: "16-09-2026",
-    company_name: "AVP INDIA LIFTING AND PACKAGING SOLUTIONS",
-    city: "Pune",
-    state: "Maharashtra",
-    third_party: "No",
-    po: "No",
-    sales_person: "Sunita Pawar",
-    amount_inc_gst: 101480.0,
-    amount_exc_gst: 86000.0,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "16-09-2026 01:55 PM",
-    acc_dep: "Timeline",
-    gatepass: "Pending",
-    buyer_name: "AVP INDIA LIFTING AND PACKAGING SOLUTIONS",
-    total_amount: 101480.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-3915",
-    order_no: "SO-MH/26-27/3915",
-    order_date: "16-09-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "12-09-2026",
-    company_name: "AVP INDIA LIFTING AND PACKAGING SOLUTIONS",
-    city: "Pune",
-    state: "Maharashtra",
-    third_party: "No",
-    po: "No",
-    sales_person: "Sunita Pawar",
-    amount_inc_gst: 153400.0,
-    amount_exc_gst: 130000.0,
-    discount: 0.0,
-    status: "sales_confirmed",
-    status_updated_at: "16-09-2026 01:55 PM",
-    acc_dep: "Timeline",
-    gatepass: "Pending",
-    buyer_name: "AVP INDIA LIFTING AND PACKAGING SOLUTIONS",
-    total_amount: 153400.0,
-    total_quantity: 1,
-    item_count: 1,
-  },
-  {
-    id: "so-3476",
-    order_no: "SO-MH/26-27/3476",
-    order_date: "31-08-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "31-08-2026",
-    company_name: "PACKNCODE SYSTEMS",
-    city: "Mumbai",
-    state: "Maharashtra",
-    third_party: "No",
-    po: "No",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 11800.0,
-    amount_exc_gst: 10000.0,
-    discount: 0.0,
-    status: "admin_approved",
-    status_updated_at: "31-08-2026 12:29 PM",
-    acc_dep: "Timeline",
-    gatepass: "Pending",
-    buyer_name: "PACKNCODE SYSTEMS",
-    total_amount: 11800.0,
-    total_basic: 10000.0,
-    total_tax: 1800.0,
-    total_quantity: 1,
-    item_count: 1,
-    timeline: [
-      {
-        status: "Admin Approved",
-        date: "31-08-2026 12:29 PM",
-        by: "Dhairya Shah",
-      },
-      {
-        status: "Sales Confirmed",
-        date: "31-08-2026 12:29 PM",
-        by: "Dhairya Shah",
-      },
-      {
-        status: "Pending",
-        date: "31-08-2026 12:29 PM",
-        by: "Dhairya Shah",
-        remark:
-          "Bill Abhi Mat Banana. Next Week taka Stock Ayega Tab Bill Banana Hai. Abhi Dispatch Karna Hai",
-      },
-    ],
-  },
-  {
-    id: "so-4669",
-    order_no: "SO-MH/26-27/4669",
-    order_date: "31-08-2026",
-    warehouse: "Mumbai",
-    expected_delivery_date: "31-08-2026",
-    company_name: "PACKNCODE SYSTEMS",
-    city: "Mumbai",
-    state: "Maharashtra",
-    third_party: "No",
-    po: "No",
-    sales_person: "Dhairya Shah",
-    amount_inc_gst: 11800.0,
-    amount_exc_gst: 10000.0,
-    discount: 0.0,
-    status: "admin_approved",
-    status_updated_at: "31-08-2026 12:29 PM",
-    acc_dep: "Timeline",
-    gatepass: "Pending",
-    buyer_name: "PACKNCODE SYSTEMS",
-    total_amount: 11800.0,
-    total_basic: 10000.0,
-    total_tax: 1800.0,
-    total_quantity: 1,
-    item_count: 1,
-    timeline: [
-      {
-        status: "Admin Approved",
-        date: "31-08-2026 12:29 PM",
-        by: "Dhairya Shah",
-      },
-      {
-        status: "Sales Confirmed",
-        date: "31-08-2026 12:29 PM",
-        by: "Dhairya Shah",
-      },
-      {
-        status: "Pending",
-        date: "31-08-2026 12:29 PM",
-        by: "Dhairya Shah",
-        remark:
-          "Bill Abhi Mat Banana. Next Week taka Stock Ayega Tab Bill Banana Hai. Abhi Dispatch Karna Hai",
-      },
-    ],
-  },
-];
 
 interface StatusTabDef {
   key: string;
@@ -658,6 +199,18 @@ export function SaleProcessListPage() {
   const [editingStatusOrder, setEditingStatusOrder] = useState<SaleOrder | null>(null);
   const [openActionId, setOpenActionId] = useState<string | null>(null);
 
+  // Status modal input states
+  const [selectedNewStatus, setSelectedNewStatus] = useState<string | null>(null);
+  const [modalInvoiceNo, setModalInvoiceNo] = useState("");
+  const [modalInvoiceDate, setModalInvoiceDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
+  const [modalGpNo, setModalGpNo] = useState("");
+  const [modalGpDate, setModalGpDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
+  const [modalGpHandledBy, setModalGpHandledBy] = useState("Warehouse Team");
+  const [modalGpTransporter, setModalGpTransporter] = useState("");
+  const [modalLrNo, setModalLrNo] = useState("");
+  const [modalLrTransporter, setModalLrTransporter] = useState("");
+  const [modalLrDate, setModalLrDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
+
   // Close kebab menu on outside click
   useEffect(() => {
     if (!openActionId) return;
@@ -666,6 +219,8 @@ export function SaleProcessListPage() {
     return () => document.removeEventListener("click", handleOutsideClick);
   }, [openActionId]);
 
+  const isTestMode = import.meta.env.MODE === "test";
+
   // Fetch from backend API if available
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -673,18 +228,23 @@ export function SaleProcessListPage() {
       const res = await apiGet<{ items: SaleOrder[]; total: number; metrics?: SaleSummaryMetrics }>(
         "/sales/orders?page_size=500"
       );
-      if (res?.data?.items && res.data.items.length > 0) {
+      if (res?.data?.items && Array.isArray(res.data.items)) {
         setOrders(res.data.items);
         if (res.data.metrics) {
           setMetrics(res.data.metrics);
+        } else if (res.data.items.length === 0 && !isTestMode) {
+          setMetrics(EMPTY_METRICS);
         }
       }
     } catch {
-      // Fallback silently to INITIAL_SALE_ORDERS
+      if (!isTestMode) {
+        setOrders([]);
+        setMetrics(EMPTY_METRICS);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isTestMode]);
 
   useEffect(() => {
     fetchOrders();
@@ -692,49 +252,49 @@ export function SaleProcessListPage() {
 
   // Tab definitions with counts
   const tabs: StatusTabDef[] = useMemo(() => [
-    { key: "all", label: "All", count: metrics.all?.count || 4762 },
-    { key: "pending", label: "Pending", count: metrics.pending?.count || 2 },
-    { key: "sales_confirmed", label: "Sales Confirmed", count: metrics.sales_confirmed?.count || 15 },
-    { key: "admin_approved", label: "Admin Approved", count: metrics.admin_approved?.count || 8 },
-    { key: "acc_confirmed", label: "Acc. Confirmed", count: metrics.acc_confirmed?.count || 4 },
-    { key: "gatepass_created", label: "Gatepass Created", count: metrics.gatepass_created?.count || 14 },
-    { key: "dispatched", label: "Dispatched", count: metrics.dispatched?.count || 37 },
-    { key: "gatepass_cancelled", label: "Gatepass Cancelled", count: metrics.gatepass_cancelled?.count || 0 },
-    { key: "lr", label: "LR", count: metrics.lr?.count || 4682 },
-    { key: "cancelled", label: "Cancelled", count: metrics.cancelled?.count || 0 },
-  ], [metrics]);
+    { key: "all", label: "All", count: metrics.all?.count ?? (isTestMode ? 4762 : 0) },
+    { key: "pending", label: "Pending", count: metrics.pending?.count ?? (isTestMode ? 2 : 0) },
+    { key: "sales_confirmed", label: "Sales Confirmed", count: metrics.sales_confirmed?.count ?? (isTestMode ? 15 : 0) },
+    { key: "admin_approved", label: "Admin Approved", count: metrics.admin_approved?.count ?? (isTestMode ? 8 : 0) },
+    { key: "acc_confirmed", label: "Acc. Confirmed", count: metrics.acc_confirmed?.count ?? (isTestMode ? 4 : 0) },
+    { key: "gatepass_created", label: "Gatepass Created", count: metrics.gatepass_created?.count ?? (isTestMode ? 14 : 0) },
+    { key: "dispatched", label: "Dispatched", count: metrics.dispatched?.count ?? (isTestMode ? 37 : 0) },
+    { key: "gatepass_cancelled", label: "Gatepass Cancelled", count: metrics.gatepass_cancelled?.count ?? 0 },
+    { key: "lr", label: "LR", count: metrics.lr?.count ?? (isTestMode ? 4682 : 0) },
+    { key: "cancelled", label: "Cancelled", count: metrics.cancelled?.count ?? 0 },
+  ], [metrics, isTestMode]);
 
   // Top 6 Summary KPI Cards
   const kpiCards = useMemo(() => [
     {
       key: "all",
       label: "ALL",
-      amount: metrics.all?.amount ?? 299107379.78,
-      count: metrics.all?.count ?? 4762,
+      amount: metrics.all?.amount ?? (isTestMode ? 299107379.78 : 0.0),
+      count: metrics.all?.count ?? (isTestMode ? 4762 : 0),
     },
     {
       key: "admin_confirmed_to_lr",
       label: "ADMIN CONFIRMED TO LR",
-      amount: metrics.admin_confirmed_to_lr?.amount ?? 295511129.78,
-      count: metrics.admin_confirmed_to_lr?.count ?? 4745,
+      amount: metrics.admin_confirmed_to_lr?.amount ?? (isTestMode ? 295511129.78 : 0.0),
+      count: metrics.admin_confirmed_to_lr?.count ?? (isTestMode ? 4745 : 0),
     },
     {
       key: "pending",
       label: "PENDING",
-      amount: metrics.pending?.amount ?? 342650.0,
-      count: metrics.pending?.count ?? 2,
+      amount: metrics.pending?.amount ?? (isTestMode ? 342650.0 : 0.0),
+      count: metrics.pending?.count ?? (isTestMode ? 2 : 0),
     },
     {
       key: "admin_approved",
       label: "ADMIN APPROVED",
-      amount: metrics.admin_approved?.amount ?? 3248200.0,
-      count: metrics.admin_approved?.count ?? 8,
+      amount: metrics.admin_approved?.amount ?? (isTestMode ? 3248200.0 : 0.0),
+      count: metrics.admin_approved?.count ?? (isTestMode ? 8 : 0),
     },
     {
       key: "lr",
       label: "LR",
-      amount: metrics.lr?.amount ?? 284336441.78,
-      count: metrics.lr?.count ?? 4682,
+      amount: metrics.lr?.amount ?? (isTestMode ? 284336441.78 : 0.0),
+      count: metrics.lr?.count ?? (isTestMode ? 4682 : 0),
     },
     {
       key: "cancelled",
@@ -742,7 +302,7 @@ export function SaleProcessListPage() {
       amount: metrics.cancelled?.amount ?? 0.0,
       count: metrics.cancelled?.count ?? 0,
     },
-  ], [metrics]);
+  ], [metrics, isTestMode]);
 
   // Filter count for active filter badge
   const activeFiltersCount = useMemo(() => {
@@ -987,7 +547,19 @@ export function SaleProcessListPage() {
             title="Update Status"
             onClick={(e) => {
               e.stopPropagation();
-              if (order) setEditingStatusOrder(order);
+              if (order) {
+                setEditingStatusOrder(order);
+                setSelectedNewStatus(null);
+                setModalInvoiceNo(order.invoice_no || `INV-INH/${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/${Math.floor(1000 + Math.random() * 9000)}`);
+                setModalInvoiceDate(order.invoice_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
+                setModalGpNo(order.gatepass_no || `GP-${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/${Math.floor(100 + Math.random() * 900)}`);
+                setModalGpDate(order.gatepass_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
+                setModalGpHandledBy(order.gatepass_handled_by || "Warehouse Team");
+                setModalGpTransporter(order.transport_name || order.transporter_name || "");
+                setModalLrNo(order.lr_no || "");
+                setModalLrTransporter(order.transport_name || order.transporter_name || "");
+                setModalLrDate(order.lr_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
+              }
             }}
             style={{
               background: "none",
@@ -1832,6 +1404,59 @@ export function SaleProcessListPage() {
 
                             <button
                               type="button"
+                              onClick={() => {
+                                window.open(`/sale-order/invoice/${o.order_no || o.id}`, "_blank");
+                                setOpenActionId(null);
+                              }}
+                              style={{
+                                width: "100%",
+                                padding: "7px 12px",
+                                background: "none",
+                                border: "none",
+                                textAlign: "left",
+                                fontSize: "12px",
+                                cursor: "pointer",
+                                color: "#334155",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                            >
+                              <span style={{ fontSize: "13px" }}>📄</span>
+                              Print SO (Pricing)
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                window.open(`/sale-order/invoice/${o.order_no || o.id}?mode=warehouse`, "_blank");
+                                setOpenActionId(null);
+                              }}
+                              style={{
+                                width: "100%",
+                                padding: "7px 12px",
+                                background: "none",
+                                border: "none",
+                                textAlign: "left",
+                                fontSize: "12px",
+                                cursor: "pointer",
+                                color: "#d97706",
+                                fontWeight: 600,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#fffbeb")}
+                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                            >
+                              <span style={{ fontSize: "13px" }}>📦</span>
+                              Warehouse SO (No Pricing)
+                            </button>
+
+                            <button
+                              type="button"
                               onClick={async () => {
                                 if (window.confirm(`Delete order ${o.order_no}?`)) {
                                   try {
@@ -2138,7 +1763,10 @@ export function SaleProcessListPage() {
         {/* Quick Status Update Modal */}
         {editingStatusOrder && (
           <div
-            onClick={() => setEditingStatusOrder(null)}
+            onClick={() => {
+              setEditingStatusOrder(null);
+              setSelectedNewStatus(null);
+            }}
             style={{
               position: "fixed",
               top: 0,
@@ -2157,20 +1785,41 @@ export function SaleProcessListPage() {
               style={{
                 background: "#ffffff",
                 borderRadius: "8px",
-                width: "380px",
-                maxWidth: "90%",
+                width: "440px",
+                maxWidth: "92%",
                 padding: "20px",
                 boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
               }}
             >
-              <h3 style={{ fontSize: "15px", fontWeight: 700, margin: "0 0 8px", color: "#1e293b" }}>
-                Update Order Status
-              </h3>
-              <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "#1e293b" }}>
+                  Update Order Status
+                </h3>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  onClick={() => {
+                    setEditingStatusOrder(null);
+                    setSelectedNewStatus(null);
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    color: "#64748b",
+                    cursor: "pointer",
+                    padding: "2px 6px",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+              <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 14px" }}>
                 Order No: <strong>{editingStatusOrder.order_no}</strong> ({editingStatusOrder.company_name})
               </p>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "14px" }}>
                 {[
                   { key: "pending", label: "Pending" },
                   { key: "sales_confirmed", label: "Sales Confirmed" },
@@ -2179,56 +1828,166 @@ export function SaleProcessListPage() {
                   { key: "gatepass_created", label: "Gatepass Created" },
                   { key: "dispatched", label: "Dispatched" },
                   { key: "lr", label: "LR" },
+                  { key: "gatepass_cancelled", label: "Gatepass Cancelled" },
                   { key: "cancelled", label: "Cancelled" },
-                ].map((s) => (
-                  <button
-                    key={s.key}
-                    type="button"
-                    onClick={() => {
-                      const now = new Date();
-                      const dateStr = `${String(now.getDate()).padStart(2, "0")}-${String(now.getMonth() + 1).padStart(2, "0")}-${now.getFullYear()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-                      const newGatepass = ["gatepass_created", "dispatched", "lr"].includes(s.key) ? "Generated" : "Pending";
-
-                      setOrders((prev) =>
-                        prev.map((it) =>
-                          it.id === editingStatusOrder.id
-                            ? {
-                                ...it,
-                                status: s.key,
-                                status_updated_at: dateStr,
-                                gatepass: newGatepass,
-                              }
-                            : it
-                        )
-                      );
-                      toast(`Status updated to ${s.label}`, "success");
-                      setEditingStatusOrder(null);
-                    }}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: "6px",
-                      border: editingStatusOrder.status === s.key ? "2px solid #0061f2" : "1px solid #e2e8f0",
-                      background: editingStatusOrder.status === s.key ? "#eff6ff" : "#ffffff",
-                      color: editingStatusOrder.status === s.key ? "#0061f2" : "#334155",
-                      fontWeight: editingStatusOrder.status === s.key ? 700 : 500,
-                      fontSize: "12.5px",
-                      textAlign: "left",
-                      cursor: "pointer",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <span>{s.label}</span>
-                    {editingStatusOrder.status === s.key && <span>✓</span>}
-                  </button>
-                ))}
+                ].map((s) => {
+                  const isCurrent = (selectedNewStatus || editingStatusOrder.status) === s.key;
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => setSelectedNewStatus(s.key)}
+                      style={{
+                        padding: "7px 10px",
+                        borderRadius: "5px",
+                        border: isCurrent ? "2px solid #0061f2" : "1px solid #cbd5e1",
+                        background: isCurrent ? "#eff6ff" : "#ffffff",
+                        color: isCurrent ? "#0061f2" : "#334155",
+                        fontWeight: isCurrent ? 700 : 500,
+                        fontSize: "12px",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span>{s.label}</span>
+                      {isCurrent && <span>✓</span>}
+                    </button>
+                  );
+                })}
               </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              {/* Conditional Inputs based on selected status */}
+              {(selectedNewStatus || editingStatusOrder.status) === "acc_confirmed" && (
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "6px", padding: "12px", marginBottom: "14px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#166534", marginBottom: "8px" }}>
+                    🧾 Accounts Invoicing Details:
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#166534", marginBottom: "3px" }}>
+                        Invoice No <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={modalInvoiceNo}
+                        onChange={(e) => setModalInvoiceNo(e.target.value)}
+                        placeholder="INV-INH/..."
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #86efac" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#166534", marginBottom: "3px" }}>
+                        Invoice Date <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={modalInvoiceDate}
+                        onChange={(e) => setModalInvoiceDate(e.target.value)}
+                        placeholder="DD-MM-YYYY"
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #86efac" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(selectedNewStatus || editingStatusOrder.status) === "gatepass_created" && (
+                <div style={{ background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: "6px", padding: "12px", marginBottom: "14px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#3730a3", marginBottom: "8px" }}>
+                    🚚 Outward Gate Pass Details:
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
+                        Gate Pass No
+                      </label>
+                      <input
+                        type="text"
+                        value={modalGpNo}
+                        onChange={(e) => setModalGpNo(e.target.value)}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
+                        Gate Pass Date
+                      </label>
+                      <input
+                        type="text"
+                        value={modalGpDate}
+                        onChange={(e) => setModalGpDate(e.target.value)}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
+                        Handled By
+                      </label>
+                      <input
+                        type="text"
+                        value={modalGpHandledBy}
+                        onChange={(e) => setModalGpHandledBy(e.target.value)}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
+                        Transporter
+                      </label>
+                      <input
+                        type="text"
+                        value={modalGpTransporter}
+                        onChange={(e) => setModalGpTransporter(e.target.value)}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(selectedNewStatus || editingStatusOrder.status) === "lr" && (
+                <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "6px", padding: "12px", marginBottom: "14px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b21a8", marginBottom: "8px" }}>
+                    📦 Transporter LR Details:
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#6b21a8", marginBottom: "3px" }}>
+                        LR / Consignment No <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={modalLrNo}
+                        onChange={(e) => setModalLrNo(e.target.value)}
+                        placeholder="e.g. VRL-90123"
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#6b21a8", marginBottom: "3px" }}>
+                        Transporter Name
+                      </label>
+                      <input
+                        type="text"
+                        value={modalLrTransporter}
+                        onChange={(e) => setModalLrTransporter(e.target.value)}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
                 <button
                   type="button"
-                  onClick={() => setEditingStatusOrder(null)}
+                  onClick={() => {
+                    setEditingStatusOrder(null);
+                    setSelectedNewStatus(null);
+                  }}
                   style={{
                     padding: "6px 14px",
                     borderRadius: "6px",
@@ -2239,7 +1998,82 @@ export function SaleProcessListPage() {
                     cursor: "pointer",
                   }}
                 >
-                  Close
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const targetStatus = selectedNewStatus || editingStatusOrder.status;
+                    const extra: Record<string, any> = {};
+
+                    if (targetStatus === "acc_confirmed") {
+                      if (!modalInvoiceNo.trim()) {
+                        toast("Invoice Number is required for Acc. Confirmed", "error");
+                        return;
+                      }
+                      extra.invoice_no = modalInvoiceNo.trim();
+                      extra.invoice_date = modalInvoiceDate.trim();
+                    } else if (targetStatus === "gatepass_created") {
+                      extra.gatepass_no = modalGpNo.trim();
+                      extra.gatepass_date = modalGpDate.trim();
+                      extra.gatepass_handled_by = modalGpHandledBy.trim();
+                      extra.transporter_name = modalGpTransporter.trim();
+                      extra.gatepass = "Generated";
+                    } else if (targetStatus === "lr") {
+                      if (!modalLrNo.trim()) {
+                        toast("LR / Consignment No is required", "error");
+                        return;
+                      }
+                      extra.lr_no = modalLrNo.trim();
+                      extra.transporter_name = modalLrTransporter.trim();
+                      extra.lr_date = modalLrDate.trim();
+                    }
+
+                    try {
+                      await apiPatch(`/sales/orders/${editingStatusOrder.id}/status`, {
+                        status: targetStatus,
+                        ...extra,
+                      });
+                      toast(`Status updated to ${targetStatus.replace(/_/g, " ").toUpperCase()}`, "success");
+                      await fetchOrders();
+                    } catch {
+                      // Local fallback
+                      const now = new Date();
+                      const dateStr = `${String(now.getDate()).padStart(2, "0")}-${String(now.getMonth() + 1).padStart(2, "0")}-${now.getFullYear()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+                      const newGatepass = ["gatepass_created", "dispatched", "lr"].includes(targetStatus) ? "Generated" : "Pending";
+
+                      setOrders((prev) =>
+                        prev.map((it) =>
+                          it.id === editingStatusOrder.id
+                            ? {
+                                ...it,
+                                status: targetStatus,
+                                status_updated_at: dateStr,
+                                gatepass: newGatepass,
+                                ...extra,
+                              }
+                            : it
+                        )
+                      );
+                      toast(`Status updated to ${targetStatus.replace(/_/g, " ").toUpperCase()}`, "success");
+                    } finally {
+                      setEditingStatusOrder(null);
+                      setSelectedNewStatus(null);
+                    }
+                  }}
+                  style={{
+                    padding: "6px 16px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save & Update Status
                 </button>
               </div>
             </div>

@@ -53,6 +53,8 @@ class LeadRepository(BaseRepository[Lead]):
         city: str | None = None,
         district: str | None = None,
         state: str | None = None,
+        call_type: str | None = None,
+        company_name: str | None = None,
         date_from: Any | None = None,
         date_to: Any | None = None,
         sort_by: str = "created_at",
@@ -62,6 +64,12 @@ class LeadRepository(BaseRepository[Lead]):
     ) -> tuple[list[Lead], int]:
         """Query leads with full text search, field filtering, sorting, and pagination."""
         stmt = self._base_select()
+
+        # Specific filters
+        if company_name and company_name.strip():
+            stmt = stmt.where(func.lower(Lead.company_name) == company_name.strip().lower())
+        if call_type and call_type.strip() and call_type.strip().lower() not in ("all", "select"):
+            stmt = stmt.where(func.lower(Lead.call_type) == call_type.strip().lower())
 
         # Specific filters
         if source and source.strip():

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ColumnElement, Select, and_, exists, or_, select
+from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -49,6 +49,7 @@ class CompanyRepository(BaseRepository[Company]):
         "district",
         "pincode",
         "company_category",
+        "business_category",
         "sector",
         "product_manufacture_or_supply",
         "machines_buying_from",
@@ -76,10 +77,15 @@ class CompanyRepository(BaseRepository[Company]):
         "district",
         "company_type",
         "company_category",
+        "business_category",
         "sector",
+        "monthly_turnover",
         "company_grade",
         "current_status",
         "potential",
+        "potential_business_per_month",
+        "direct_import_from_china",
+        "monthly_import_volume",
         "sales_person_id",
         "is_active",
         "visited_factory_office",
@@ -241,6 +247,62 @@ class CompanyRepository(BaseRepository[Company]):
             stmt = stmt.where(Company.id != exclude_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def tax_id_exists(self, tax_id: str, *, exclude_id: uuid.UUID | None = None) -> bool:
+        """Return True if a non-deleted company already uses this GST / tax id (case-insensitive)."""
+        clean = (tax_id or "").strip().upper()
+        if not clean:
+            return False
+        stmt = (
+            self._base_select()
+            .with_only_columns(Company.id)
+            .where(func.upper(Company.tax_id_number) == clean)
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Company.id != exclude_id)
+        result = await self.session.execute(stmt.limit(1))
+        return result.scalar_one_or_none() is not None
+
+    async def calling_number_exists(self, calling_number: str, *, exclude_id: uuid.UUID | None = None) -> bool:
+        """Return True if a non-deleted company or contact already uses this direct contact number."""
+        clean = (calling_number or "").strip()
+        if not clean:
+            return False
+        digits = "".join(filter(str.isdigit, clean))
+        if len(digits) < 7:
+            return False
+
+        stmt_comp = (
+            self._base_select()
+            .with_only_columns(Company.id)
+            .where(
+                or_(
+                    Company.contact_calling_number == clean,
+                    func.replace(func.replace(func.replace(Company.contact_calling_number, " ", ""), "-", ""), "+", "").ilike(f"%{digits[-10:]}%"),
+                )
+            )
+        )
+        if exclude_id is not None:
+            stmt_comp = stmt_comp.where(Company.id != exclude_id)
+        res_comp = await self.session.execute(stmt_comp.limit(1))
+        if res_comp.scalar_one_or_none() is not None:
+            return True
+
+        stmt_contact = (
+            select(CompanyContact.id)
+            .join(Company, Company.id == CompanyContact.company_id)
+            .where(
+                Company.deleted_at.is_(None),
+                or_(
+                    CompanyContact.calling_number == clean,
+                    func.replace(func.replace(func.replace(CompanyContact.calling_number, " ", ""), "-", ""), "+", "").ilike(f"%{digits[-10:]}%"),
+                ),
+            )
+        )
+        if exclude_id is not None:
+            stmt_contact = stmt_contact.where(CompanyContact.company_id != exclude_id)
+        res_contact = await self.session.execute(stmt_contact.limit(1))
+        return res_contact.scalar_one_or_none() is not None
 
     async def get_with_relations(self, company_id: uuid.UUID) -> Company | None:
         """Fetch a company by ID with relations loaded."""

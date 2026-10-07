@@ -279,66 +279,50 @@
 }
 
 .stock-table th {
-  padding: 8px 10px;
-  font-size: 11.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #1e293b;
-  background-color: #f1f5f9;
+  padding: 9px 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #334155;
+  background-color: #f8fafc;
   border-bottom: 1px solid #cbd5e1;
-  border-right: 1px solid #cbd5e1;
+  border-right: 1px solid #e2e8f0;
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 .stock-table th.th-pink {
   background-color: #fde8e8;
-  color: #991b1b;
+  color: #1e293b;
   text-align: center;
+  font-weight: 600;
 }
 
-.stock-table th.th-sub {
-  background-color: #f8fafc;
-  color: #475569;
+.stock-table th.th-grey {
+  background-color: #f1f5f9;
+  color: #334155;
   text-align: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
-/* Grouped Column Headers (3,3,3 in 1) */
-.stock-table th.th-group {
+.stock-table td.td-pink {
+  background-color: #fde8e8;
   text-align: center;
-  font-weight: 700;
-  font-size: 12px;
-  padding: 7px 10px;
-  border-bottom: 1px solid #cbd5e1;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  color: #1e293b;
 }
 
-.stock-table th.th-group-mumbai {
-  background-color: #fde8e8;
-  color: #991b1b;
-  border-right: 2px solid #cbd5e1;
+.stock-table tr:hover td.td-pink {
+  background-color: #fcd7d7;
 }
 
-.stock-table th.th-group-ahmedabad {
-  background-color: #fde8e8;
-  color: #991b1b;
-  border-right: 2px solid #cbd5e1;
+.stock-table td.td-grey {
+  background-color: #f1f5f9;
+  text-align: center;
+  color: #334155;
 }
 
-.stock-table th.th-group-indore {
-  background-color: #fde8e8;
-  color: #991b1b;
-  border-right: 2px solid #cbd5e1;
-}
-
-.stock-table th.th-group-end {
-  border-right: 2px solid #cbd5e1 !important;
-}
-
-.stock-table td.td-group-end {
-  border-right: 2px solid #cbd5e1 !important;
+.stock-table tr:hover td.td-grey {
+  background-color: #e2e8f0;
 }
 
 .stock-table td {
@@ -566,3 +550,152 @@
   border-top: 1px solid #e2e8f0;
   background-color: #f8fafc;
 }
+
+/* Stock Breakup Info Modal (image1.png layout) */
+.stock-breakup-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  animation: stockFadeIn 0.15s ease-out;
+}
+
+@keyframes stockFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.stock-breakup-panel {
+  background: #ffffff;
+  width: 750px;
+  max-width: 95vw;
+  height: 100vh;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  animation: stockSlideInRight 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes stockSlideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.stock-breakup-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8fafc;
+}
+
+.stock-breakup-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stock-breakup-meta {
+  padding: 12px 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+  color: #475569;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stock-breakup-body {
+  padding: 20px 24px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.stock-breakup-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.stock-breakup-table th {
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 600;
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid #cbd5e1;
+  white-space: nowrap;
+}
+
+.stock-breakup-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.stock-breakup-table tr:hover td {
+  background-color: #f8fafc;
+}
+
+.stock-status-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.stock-status-pill.confirmed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.stock-status-pill.pending {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.stock-status-pill.transit {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.stock-status-pill.dispatched {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.stock-cell-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.stock-breakup-table th.col-qty,
+.stock-breakup-table td.col-qty {
+  min-width: 90px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.stock-breakup-table th.col-city-state,
+.stock-breakup-table td.col-city-state {
+  min-width: 140px;
+  white-space: normal;
+}
+

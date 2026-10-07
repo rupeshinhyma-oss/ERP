@@ -38,6 +38,7 @@ interface LeadFormData {
   company_name: string;
   business_type: string;
   source: string;
+  call_type: string;
   address: string;
   area: string;
   city: string;
@@ -59,6 +60,7 @@ const EMPTY_FORM: LeadFormData = {
   company_name: "",
   business_type: "",
   source: "",
+  call_type: "Telecall",
   address: "",
   area: "",
   city: "",
@@ -213,6 +215,7 @@ export function LeadsPage() {
     | "company_name"
     | "business_type"
     | "source"
+    | "call_type"
     | "contact_person"
     | "priority"
     | "area_city"
@@ -241,7 +244,7 @@ export function LeadsPage() {
   // Filter Panel Toggle (off by default matching Companies module)
   const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false);
 
-  // Exact 10 Filter States
+  // Filter States
   const [filterDateRange, setFilterDateRange] = useState<string>("");
   const [filterCreatedBy, setFilterCreatedBy] = useState<string>("");
   const [filterBusinessType, setFilterBusinessType] = useState<string>("");
@@ -249,9 +252,11 @@ export function LeadsPage() {
   const [filterDistrict, setFilterDistrict] = useState<string>("");
   const [filterCity, setFilterCity] = useState<string>("");
   const [filterSource, setFilterSource] = useState<string>("");
+  const [filterCallType, setFilterCallType] = useState<string>("");
   const [filterPriority, setFilterPriority] = useState<string>("");
   const [filterAllottedTo, setFilterAllottedTo] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
+  const [activeStatusTab, setActiveStatusTab] = useState<"all" | "ongoing" | "won" | "loss">("all");
 
   // Selection for bulk delete
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -410,6 +415,7 @@ export function LeadsPage() {
       if (filterDistrict.trim()) params.append("district", filterDistrict.trim());
       if (filterCity.trim()) params.append("city", filterCity.trim());
       if (filterSource.trim()) params.append("source", filterSource.trim());
+      if (filterCallType.trim()) params.append("call_type", filterCallType.trim());
       if (filterPriority.trim()) params.append("priority", filterPriority.trim());
       if (filterAllottedTo.trim()) params.append("allotted_to", filterAllottedTo.trim());
       if (filterStatus.trim()) params.append("lead_status", filterStatus.trim());
@@ -437,6 +443,7 @@ export function LeadsPage() {
     filterDistrict,
     filterCity,
     filterSource,
+    filterCallType,
     filterPriority,
     filterAllottedTo,
     filterStatus,
@@ -555,11 +562,48 @@ export function LeadsPage() {
     return Array.from(set).sort();
   }, [leads, STATUSES]);
 
+  // 9. Call Type: extracted from distinct call_type values in leads + standards
+  const extractedCallTypes = useMemo(() => {
+    const set = new Set<string>(["Telecall", "Physical Visit", "WhatsApp", "Email", "Incoming Inquiry"]);
+    leads.forEach((l) => {
+      if (l.call_type && l.call_type.trim()) set.add(l.call_type.trim());
+    });
+    return Array.from(set).sort();
+  }, [leads]);
+
+  // Status Tab Counts
+  const tabCounts = useMemo(() => {
+    let all = leads.length;
+    let ongoing = 0;
+    let won = 0;
+    let loss = 0;
+
+    leads.forEach((l) => {
+      const st = (l.lead_status || "").toLowerCase();
+      if (st === "won") won++;
+      else if (st === "loss" || st === "lost") loss++;
+      else ongoing++;
+    });
+
+    return { all, ongoing, won, loss };
+  }, [leads]);
+
   /* -------------------------------------------------------------------------- */
   /* Real-Time Filter Execution on Data                                         */
   /* -------------------------------------------------------------------------- */
   const filteredLeads = useMemo(() => {
     return leads.filter((lead) => {
+      // Status Tab Filter
+      if (activeStatusTab === "won") {
+        if ((lead.lead_status || "").toLowerCase() !== "won") return false;
+      } else if (activeStatusTab === "loss") {
+        const st = (lead.lead_status || "").toLowerCase();
+        if (st !== "loss" && st !== "lost") return false;
+      } else if (activeStatusTab === "ongoing") {
+        const st = (lead.lead_status || "").toLowerCase();
+        if (st === "won" || st === "loss" || st === "lost") return false;
+      }
+
       // Date Range Filter
       if (filterDateRange.trim()) {
         const leadDate = lead.added_on || lead.created_at;
@@ -610,6 +654,13 @@ export function LeadsPage() {
         }
       }
 
+      // Call Type Filter
+      if (filterCallType.trim()) {
+        if (!lead.call_type || lead.call_type.toLowerCase() !== filterCallType.toLowerCase()) {
+          return false;
+        }
+      }
+
       // Priority Filter
       if (filterPriority.trim()) {
         if (!lead.priority || lead.priority.toLowerCase() !== filterPriority.toLowerCase()) {
@@ -640,6 +691,7 @@ export function LeadsPage() {
         const city = (lead.city || "").toLowerCase();
         const state = (lead.state || "").toLowerCase();
         const src = (lead.source || "").toLowerCase();
+        const ct = (lead.call_type || "").toLowerCase();
         const req = (lead.requirements || "").toLowerCase();
         const allotted = (lead.allotted_to || "").toLowerCase();
         if (
@@ -649,6 +701,7 @@ export function LeadsPage() {
           !city.includes(q) &&
           !state.includes(q) &&
           !src.includes(q) &&
+          !ct.includes(q) &&
           !req.includes(q) &&
           !allotted.includes(q)
         ) {
@@ -660,6 +713,7 @@ export function LeadsPage() {
     });
   }, [
     leads,
+    activeStatusTab,
     filterDateRange,
     filterCreatedBy,
     filterBusinessType,
@@ -667,6 +721,7 @@ export function LeadsPage() {
     filterDistrict,
     filterCity,
     filterSource,
+    filterCallType,
     filterPriority,
     filterAllottedTo,
     filterStatus,
@@ -682,9 +737,11 @@ export function LeadsPage() {
     setFilterDistrict("");
     setFilterCity("");
     setFilterSource("");
+    setFilterCallType("");
     setFilterPriority("");
     setFilterAllottedTo("");
     setFilterStatus("");
+    setActiveStatusTab("all");
     setSearchQuery("");
     setSortField(null);
     setSortDirection("asc");
@@ -727,6 +784,9 @@ export function LeadsPage() {
           break;
         case "source":
           comparison = (a.source || "").localeCompare(b.source || "", undefined, { sensitivity: "base" });
+          break;
+        case "call_type":
+          comparison = (a.call_type || "").localeCompare(b.call_type || "", undefined, { sensitivity: "base" });
           break;
         case "contact_person":
           comparison = (a.contact_person || "").localeCompare(b.contact_person || "", undefined, { sensitivity: "base" });
@@ -817,6 +877,7 @@ export function LeadsPage() {
       company_name: lead.company_name || "",
       business_type: lead.business_type || "",
       source: lead.source || "IndiaMart",
+      call_type: lead.call_type || "Telecall",
       address: lead.address || "",
       area: lead.area || "",
       city: lead.city || "",
@@ -1635,6 +1696,38 @@ export function LeadsPage() {
                   ))}
                 </select>
               </div>
+
+              {/* Row 4, Col 2: Call Type */}
+              <div>
+                <label
+                  htmlFor="filter-call-type"
+                  style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}
+                >
+                  Call Type
+                </label>
+                <select
+                  id="filter-call-type"
+                  value={filterCallType}
+                  onChange={(e) => setFilterCallType(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                    color: "#334155",
+                    outline: "none",
+                  }}
+                >
+                  <option value="">All</option>
+                  {extractedCallTypes.map((ct) => (
+                    <option key={ct} value={ct}>
+                      {ct}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
         )}
@@ -1652,6 +1745,67 @@ export function LeadsPage() {
             overflow: "hidden",
           }}
         >
+          {/* Top Status Tabs */}
+          <div
+            data-testid="leads-status-tabs"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+              padding: "10px 16px 0 16px",
+              borderBottom: "1px solid #e2e8f0",
+              background: "#fafafa",
+            }}
+          >
+            {[
+              { id: "all", label: "All Leads", count: tabCounts.all, color: "#0061f2" },
+              { id: "ongoing", label: "Ongoing", count: tabCounts.ongoing, color: "#0284c7" },
+              { id: "won", label: "Won", count: tabCounts.won, color: "#16a34a" },
+              { id: "loss", label: "Loss", count: tabCounts.loss, color: "#dc2626" },
+            ].map((tab) => {
+              const isActive = activeStatusTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  data-testid={`lead-tab-${tab.id}`}
+                  onClick={() => {
+                    setActiveStatusTab(tab.id as any);
+                    setCurrentPage(1);
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    borderBottom: isActive ? `3px solid ${tab.color}` : "3px solid transparent",
+                    padding: "8px 16px",
+                    fontWeight: isActive ? 700 : 500,
+                    fontSize: "13.5px",
+                    color: isActive ? tab.color : "#64748b",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    marginBottom: "-1px",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    style={{
+                      background: isActive ? `${tab.color}15` : "#e2e8f0",
+                      color: isActive ? tab.color : "#475569",
+                      padding: "1px 7px",
+                      borderRadius: "10px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
           {/* Table Toolbar */}
           <div
@@ -1788,6 +1942,7 @@ export function LeadsPage() {
                   {renderSortableHeader("company_name", "Company Name")}
                   {renderSortableHeader("business_type", "Business Type")}
                   {renderSortableHeader("source", "Source")}
+                  {renderSortableHeader("call_type", "Call Type")}
                   {renderSortableHeader("contact_person", "Contact Person")}
                   {renderSortableHeader("priority", "Priority")}
                   {renderSortableHeader("area_city", "Area/City")}
@@ -1802,7 +1957,7 @@ export function LeadsPage() {
                 {loading ? (
                   <LeadsTableSkeletonRows count={8} />
                 ) : paginatedLeads.length === 0 ? (
-                  <TableMessageRow colSpan={13}>No Data Available In Table</TableMessageRow>
+                  <TableMessageRow colSpan={14}>No Data Available In Table</TableMessageRow>
                 ) : (
                   paginatedLeads.map((lead, idx) => {
                     const rowNum = (currentPage - 1) * itemsPerPage + idx + 1;
@@ -1862,6 +2017,37 @@ export function LeadsPage() {
                         {/* Source */}
                         <td style={{ padding: "10px 14px", borderBottom: "1px solid #f1f5f9", color: "#475569" }}>
                           {lead.source || "—"}
+                        </td>
+
+                        {/* Call Type */}
+                        <td style={{ padding: "10px 14px", borderBottom: "1px solid #f1f5f9" }}>
+                          {lead.call_type ? (
+                            <span
+                              style={{
+                                background:
+                                  lead.call_type === "Physical Visit"
+                                    ? "#fef3c7"
+                                    : lead.call_type === "Telecall"
+                                    ? "#e0e7ff"
+                                    : "#f1f5f9",
+                                color:
+                                  lead.call_type === "Physical Visit"
+                                    ? "#92400e"
+                                    : lead.call_type === "Telecall"
+                                    ? "#4338ca"
+                                    : "#475569",
+                                padding: "2px 8px",
+                                borderRadius: "10px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                display: "inline-block",
+                              }}
+                            >
+                              {lead.call_type}
+                            </span>
+                          ) : (
+                            <span style={{ color: "#94a3b8" }}>—</span>
+                          )}
                         </td>
 
                         {/* Contact Person */}
@@ -2074,6 +2260,7 @@ export function LeadsPage() {
                 { label: "Company Name", value: drawerLead.company_name, fullWidth: true },
                 { label: "Business Type", value: drawerLead.business_type || "—" },
                 { label: "Lead Source", value: drawerLead.source || "—" },
+                { label: "Call Type", value: drawerLead.call_type || "—" },
                 { label: "Priority", value: getPriorityBadge(drawerLead.priority) },
                 { label: "Lead Status", value: getStatusBadge(drawerLead.lead_status) },
                 { label: "Address", value: drawerLead.address || "—", fullWidth: true },
@@ -2182,19 +2369,31 @@ export function LeadsPage() {
                 gap: "16px",
               }}
             >
-              {/* Field 1: Lead Source * (Typable combobox with dropdown chevron) */}
-              <div>
-                <label style={fieldLabelStyle}>
-                  Lead Source <span style={{ color: "#ef4444" }}>*</span>
-                </label>
-                <Combobox
-                  id="lead-source-select"
-                  value={formData.source}
-                  onChange={(val) => setFormData((prev) => ({ ...prev, source: val }))}
-                  options={sourceOptions}
-                  placeholder="Select"
-                  required
-                />
+              {/* Field 1: Lead Source * and Call Type (2 columns) */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                <div>
+                  <label style={fieldLabelStyle}>
+                    Lead Source <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <Combobox
+                    id="lead-source-select"
+                    value={formData.source}
+                    onChange={(val) => setFormData((prev) => ({ ...prev, source: val }))}
+                    options={sourceOptions}
+                    placeholder="Select"
+                    required
+                  />
+                </div>
+                <div>
+                  <label style={fieldLabelStyle}>Call Type</label>
+                  <Combobox
+                    id="lead-call-type-select"
+                    value={formData.call_type}
+                    onChange={(val) => setFormData((prev) => ({ ...prev, call_type: val }))}
+                    options={["Telecall", "Physical Visit", "WhatsApp", "Email", "Incoming Inquiry"]}
+                    placeholder="Select Call Type"
+                  />
+                </div>
               </div>
 
               {/* Field 2: Company Name * with Add Company link */}
@@ -2443,6 +2642,18 @@ export function LeadsPage() {
                   placeholder=""
                   value={formData.requirements}
                   onChange={(e) => setFormData((prev) => ({ ...prev, requirements: e.target.value }))}
+                />
+              </div>
+
+              {/* Field 14: Lead Status */}
+              <div>
+                <label style={fieldLabelStyle}>Lead Status</label>
+                <Combobox
+                  id="lead-status-select"
+                  value={formData.lead_status || "New"}
+                  placeholder="Select Status"
+                  options={["New", "Contacted", "In Discussion", "Qualified", "Won", "Loss"]}
+                  onChange={(val) => setFormData((prev) => ({ ...prev, lead_status: val }))}
                 />
               </div>
 

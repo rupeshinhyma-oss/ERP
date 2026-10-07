@@ -301,3 +301,47 @@ def test_company_contact_accepts_birth_and_anniversary_dates():
     updated = CompanyContactUpdate(birth_date="01-01-1985")
     assert updated.birth_date == "01-01-1985"
     assert updated.anniversary_date is None
+
+
+def test_company_schemas_accept_business_category():
+    from app.companies.schemas import CompanyCreate, CompanyUpdate, CompanyListItemRead, CompanyRead
+
+    c = CompanyCreate(company_name="Manufacturer Co", business_category="Manufacturer")
+    assert c.business_category == "Manufacturer"
+
+    u = CompanyUpdate(business_category="Trader")
+    assert u.business_category == "Trader"
+
+
+@pytest.mark.asyncio
+async def test_company_service_duplicate_checks():
+    from unittest.mock import AsyncMock, MagicMock
+    from app.companies.service import CompanyService
+    from app.core.exceptions import ConflictException
+
+    repo = MagicMock()
+    repo.name_city_exists = AsyncMock(return_value=False)
+    repo.tax_id_exists = AsyncMock(return_value=True)
+    repo.calling_number_exists = AsyncMock(return_value=True)
+
+    service = CompanyService(
+        repository=repo,
+        contact_repository=MagicMock(),
+        country_repository=MagicMock(),
+        state_repository=MagicMock(),
+        city_repository=MagicMock(),
+        category_repository=MagicMock(),
+        sub_category_repository=MagicMock(),
+        cache_manager=MagicMock(),
+    )
+    service._validate_geography = AsyncMock()
+    service._validate_categories = AsyncMock()
+    service._validate_sub_categories = AsyncMock()
+    service._validate_products = AsyncMock()
+
+    with pytest.raises(ConflictException, match="already exists"):
+        await service.create(company_name="Test Company", tax_id_number="27AABCU9603R1ZM")
+
+    repo.tax_id_exists = AsyncMock(return_value=False)
+    with pytest.raises(ConflictException, match="already exists"):
+        await service.create(company_name="Test Company", contact_calling_number="9876543210")

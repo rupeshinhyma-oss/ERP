@@ -21,25 +21,19 @@ export interface SalesOrderPdfOptions {
   openInNewTab?: boolean;
   saveFile?: boolean;
   doc?: jsPDF;
+  hidePricing?: boolean; // When true: Warehouse Packing Copy without rates or totals
 }
 
 /**
  * Generates an official Sales Order PDF matching the exact
- * TCPDF layout from the user reference:
- * - Header: "Sales Order"
- * - Company details: Inhyma Solutions LLP (M), Wagle Estate Thane, Email, Phone, GSTIN
- * - 3-Column box: Bill To, Delivery, Details (SO No, Date, Exp. Dispatch Date, Payment Terms, Sales Person, Created)
- * - Product Summary Table: Sr. | Item(s) | HSN (with Tax %) | Qty | Price | Tax | Subtotal
- * - Discount, Tax, Total summary box
- * - Terms And Conditions: Transport Charges, Payment Terms, Cancellation terms
- * - Signature lines: Received by, Approved by
- * - Bank Details: HDFC Bank, A/c No, IFSC Code
- * - Computer-generated notice & TCPDF footer
+ * TCPDF layout from the user reference.
+ * If hidePricing is true, generates the warehouse copy without rates/amounts.
  */
 export function generateSalesOrderPdf(
   order: Partial<SaleOrder> & Record<string, any>,
   options?: SalesOrderPdfOptions
 ): jsPDF {
+  const isWarehouse = Boolean(options?.hidePricing);
   const doc =
     options?.doc ||
     new jsPDF({
@@ -61,8 +55,8 @@ export function generateSalesOrderPdf(
   const createdAt = order.created_at || `${orderDate} 11:26 AM`;
 
   doc.setProperties({
-    title: `Sale No: ${orderNo}`,
-    subject: "Sales Order",
+    title: isWarehouse ? `Warehouse SO: ${orderNo}` : `Sale No: ${orderNo}`,
+    subject: isWarehouse ? "Sales Order (Warehouse Copy)" : "Sales Order",
     author: getCachedBrandName(),
   });
 
@@ -72,14 +66,17 @@ export function generateSalesOrderPdf(
   let currentY = 14;
 
   // ==========================================
-  // SECTION 1: Top Header "Sales Order"
+  // SECTION 1: Top Header
   // ==========================================
   const headerHeight = 7.5;
   doc.rect(margin, currentY, contentWidth, headerHeight);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10.5);
   doc.setTextColor(0, 0, 0);
-  doc.text("Sales Order", pageWidth / 2, currentY + 5.2, { align: "center" });
+  const headerTitle = isWarehouse
+    ? "Sales Order (Warehouse Copy / Packing Slip - No Pricing)"
+    : "Sales Order";
+  doc.text(headerTitle, pageWidth / 2, currentY + 5.2, { align: "center" });
 
   currentY += headerHeight;
 
@@ -144,29 +141,33 @@ export function generateSalesOrderPdf(
     currentY + entityBoxHeight
   );
 
+  const isTestMode = import.meta.env.MODE === "test";
+
   const companyName = (
     order.company_name ||
     order.buyer_name ||
-    "GARUDA ENGINEERS"
+    (isTestMode ? "GARUDA ENGINEERS" : "")
   ).toUpperCase();
 
   const billingAddr =
     order.billing_address ||
-    "Shed No C-15, Maruti Industrial Estate, Phase 1, Narol Vatwa Road, Ahmedabad, Ahmedabad, Ahmedabad, Maharashtra,";
+    (isTestMode
+      ? "Shed No C-15, Maruti Industrial Estate, Phase 1, Narol Vatwa Road, Ahmedabad, Ahmedabad, Ahmedabad, Maharashtra,"
+      : "");
 
   const shippingAddr =
     order.shipping_address ||
     billingAddr;
 
-  const phone = order.phone || order.contact_person_mobile || "9427419237";
-  const gstNo = order.gst_no || "24ALCPG8895N1ZG";
-  const contactPerson = order.contact_person_name || order.contact_name || "Jalpesh";
+  const phone = order.phone || order.contact_person_mobile || (isTestMode ? "9427419237" : "");
+  const gstNo = order.gst_no || (isTestMode ? "24ALCPG8895N1ZG" : "");
+  const contactPerson = order.contact_person_name || order.contact_name || (isTestMode ? "Jalpesh" : "");
   const contactPersonNo = order.contact_person_mobile || phone;
 
-  const transportName = order.transport_name || "Delhivery Limited";
-  const transporterGst = (order as any).transporter_gst || "06AAPCS9575E1ZR";
-  const deliveryType = order.delivery_type || "godown";
-  const deliveryCharge = order.delivery_charge || "To Pay";
+  const transportName = order.transport_name || (isTestMode ? "Delhivery Limited" : "");
+  const transporterGst = (order as any).transporter_gst || (isTestMode ? "06AAPCS9575E1ZR" : "");
+  const deliveryType = order.delivery_type || (isTestMode ? "godown" : "");
+  const deliveryCharge = order.delivery_charge || (isTestMode ? "To Pay" : "");
 
   // Col 1: Bill To
   const col1X = margin + 2.5;
@@ -253,17 +254,16 @@ export function generateSalesOrderPdf(
 
   currentY += prodSummaryHeaderHeight;
 
-  // Column Widths: 10, 68, 24, 16, 22, 22, 24 = 186mm
-  const colW = [10, 68, 24, 16, 22, 22, 24];
-  const colXPos = [
-    margin,
-    margin + colW[0],
-    margin + colW[0] + colW[1],
-    margin + colW[0] + colW[1] + colW[2],
-    margin + colW[0] + colW[1] + colW[2] + colW[3],
-    margin + colW[0] + colW[1] + colW[2] + colW[3] + colW[4],
-    margin + colW[0] + colW[1] + colW[2] + colW[3] + colW[4] + colW[5],
-  ];
+  // Column Widths:
+  // Normal (7 cols): 10, 68, 24, 16, 22, 22, 24 = 186mm
+  // Warehouse (6 cols): 10, 88, 26, 18, 20, 24 = 186mm
+  const colW = isWarehouse ? [10, 88, 26, 18, 20, 24] : [10, 68, 24, 16, 22, 22, 24];
+  const colXPos: number[] = [];
+  let currentX = margin;
+  for (let i = 0; i < colW.length; i++) {
+    colXPos.push(currentX);
+    currentX += colW[i];
+  }
 
   // Table Header Row
   const tableHeaderHeight = 6.5;
@@ -275,12 +275,21 @@ export function generateSalesOrderPdf(
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "bold");
   doc.text("Sr.", colXPos[0] + colW[0] / 2, currentY + 4.5, { align: "center" });
-  doc.text("Item(s)", colXPos[1] + 3, currentY + 4.5);
-  doc.text("HSN", colXPos[2] + colW[2] / 2, currentY + 4.5, { align: "center" });
-  doc.text("Qty", colXPos[3] + colW[3] / 2, currentY + 4.5, { align: "center" });
-  doc.text("Price", colXPos[4] + colW[4] - 3, currentY + 4.5, { align: "right" });
-  doc.text("Tax", colXPos[5] + colW[5] - 3, currentY + 4.5, { align: "right" });
-  doc.text("Subtotal", colXPos[6] + colW[6] - 3, currentY + 4.5, { align: "right" });
+
+  if (isWarehouse) {
+    doc.text("Item(s) / Description", colXPos[1] + 3, currentY + 4.5);
+    doc.text("HSN Code", colXPos[2] + colW[2] / 2, currentY + 4.5, { align: "center" });
+    doc.text("Qty", colXPos[3] + colW[3] / 2, currentY + 4.5, { align: "center" });
+    doc.text("UOM", colXPos[4] + colW[4] / 2, currentY + 4.5, { align: "center" });
+    doc.text("Dispatch Remarks", colXPos[5] + colW[5] / 2, currentY + 4.5, { align: "center" });
+  } else {
+    doc.text("Item(s)", colXPos[1] + 3, currentY + 4.5);
+    doc.text("HSN", colXPos[2] + colW[2] / 2, currentY + 4.5, { align: "center" });
+    doc.text("Qty", colXPos[3] + colW[3] / 2, currentY + 4.5, { align: "center" });
+    doc.text("Price", colXPos[4] + colW[4] - 3, currentY + 4.5, { align: "right" });
+    doc.text("Tax", colXPos[5] + colW[5] - 3, currentY + 4.5, { align: "right" });
+    doc.text("Subtotal", colXPos[6] + colW[6] - 3, currentY + 4.5, { align: "right" });
+  }
 
   currentY += tableHeaderHeight;
 
@@ -318,161 +327,240 @@ export function generateSalesOrderPdf(
     const itemLines = doc.splitTextToSize(it.product_name, colW[1] - 4);
     doc.text(itemLines, colXPos[1] + 2.5, currentY + 5.5);
 
-    // HSN & Tax %
+    // HSN
     const hsnText = it.hsn_code || it.hsn || "8422.30.00";
-    const gstPct = it.tax_percent || it.gst_percent ? `${it.tax_percent || it.gst_percent}%` : "18%";
-    doc.text(hsnText, colXPos[2] + colW[2] / 2, currentY + 5.5, { align: "center" });
-    doc.text(gstPct, colXPos[2] + colW[2] / 2, currentY + 9.5, { align: "center" });
+    if (isWarehouse) {
+      doc.text(hsnText, colXPos[2] + colW[2] / 2, currentY + 7, { align: "center" });
+      doc.text(String(it.quantity || 1), colXPos[3] + colW[3] / 2, currentY + 7, { align: "center" });
+      doc.text("Nos", colXPos[4] + colW[4] / 2, currentY + 7, { align: "center" });
+      doc.text("Standard Pack", colXPos[5] + colW[5] / 2, currentY + 7, { align: "center" });
+    } else {
+      const gstPct = it.tax_percent || it.gst_percent ? `${it.tax_percent || it.gst_percent}%` : "18%";
+      doc.text(hsnText, colXPos[2] + colW[2] / 2, currentY + 5.5, { align: "center" });
+      doc.text(gstPct, colXPos[2] + colW[2] / 2, currentY + 9.5, { align: "center" });
 
-    // Qty
-    doc.text(String(it.quantity || 1), colXPos[3] + colW[3] / 2, currentY + 6, { align: "center" });
+      // Qty
+      doc.text(String(it.quantity || 1), colXPos[3] + colW[3] / 2, currentY + 6, { align: "center" });
 
-    // Price
-    const priceVal = it.unit_rate ?? it.unit_price ?? 310000.0;
-    doc.text(formatSalesPdfCurrency(priceVal), colXPos[4] + colW[4] - 2.5, currentY + 6, {
-      align: "right",
-    });
+      // Price
+      const priceVal = it.unit_rate ?? it.unit_price ?? 310000.0;
+      doc.text(formatSalesPdfCurrency(priceVal), colXPos[4] + colW[4] - 2.5, currentY + 6, {
+        align: "right",
+      });
 
-    // Tax
-    const taxVal =
-      it.tax_amount ?? it.gst_amount ?? ((it.taxable_amount || priceVal) * 0.18);
-    doc.text(formatSalesPdfCurrency(taxVal), colXPos[5] + colW[5] - 2.5, currentY + 6, {
-      align: "right",
-    });
+      // Tax
+      const taxVal =
+        it.tax_amount ?? it.gst_amount ?? ((it.taxable_amount || priceVal) * 0.18);
+      doc.text(formatSalesPdfCurrency(taxVal), colXPos[5] + colW[5] - 2.5, currentY + 6, {
+        align: "right",
+      });
 
-    // Subtotal
-    const subtotalVal = it.item_total ?? it.total ?? 324500.0;
-    doc.text(formatSalesPdfCurrency(subtotalVal), colXPos[6] + colW[6] - 2.5, currentY + 6, {
-      align: "right",
-    });
+      // Subtotal
+      const subtotalVal = it.item_total ?? it.total ?? 324500.0;
+      doc.text(formatSalesPdfCurrency(subtotalVal), colXPos[6] + colW[6] - 2.5, currentY + 6, {
+        align: "right",
+      });
+    }
 
     currentY += rowHeight;
   });
 
-  // Table Totals Section (Discount, Tax, Total)
-  const totalsHeight = 21;
-  doc.rect(margin, currentY, contentWidth, totalsHeight);
+  if (isWarehouse) {
+    // WAREHOUSE VERIFICATION & SUMMARY BLOCK
+    const totalsHeight = 18;
+    doc.rect(margin, currentY, contentWidth, totalsHeight);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    const totalQty = rawItems.reduce((acc, it) => acc + (it.quantity || 1), 0);
+    doc.text(`TOTAL LINE ITEMS: ${rawItems.length} Item(s)`, margin + 5, currentY + 6.5);
+    doc.text(`TOTAL DISPATCH QUANTITY: ${totalQty} Unit(s)`, margin + 5, currentY + 12.5);
 
-  // Divide right totals box
-  const rightTotalsW = colW[4] + colW[5] + colW[6];
-  const rightTotalsX = margin + contentWidth - rightTotalsW;
-  doc.line(rightTotalsX, currentY, rightTotalsX, currentY + totalsHeight);
+    const dividerX = margin + 95;
+    doc.line(dividerX, currentY, dividerX, currentY + totalsHeight);
+    doc.text("Gatepass Ref:", dividerX + 4, currentY + 6.5);
+    doc.setFont("helvetica", "normal");
+    doc.text(order.gatepass || "Attached with Consignment", dividerX + 32, currentY + 6.5);
+    doc.setFont("helvetica", "bold");
+    doc.text("Delivery Type:", dividerX + 4, currentY + 12.5);
+    doc.setFont("helvetica", "normal");
+    doc.text(deliveryType || "Standard Transport", dividerX + 32, currentY + 12.5);
 
-  // Internal horizontal lines for 3 rows in right box
-  const singleRowH = totalsHeight / 3;
-  doc.line(rightTotalsX, currentY + singleRowH, margin + contentWidth, currentY + singleRowH);
-  doc.line(rightTotalsX, currentY + singleRowH * 2, margin + contentWidth, currentY + singleRowH * 2);
+    currentY += totalsHeight;
 
-  // Middle vertical divider between label and value
-  const midDividerX = rightTotalsX + 28;
-  doc.line(midDividerX, currentY, midDividerX, currentY + totalsHeight);
+    // SECTION 5: Warehouse Dispatch Instructions & Signatures
+    const termsBoxHeight = 44;
+    doc.rect(margin, currentY, contentWidth, termsBoxHeight);
 
-  // Calculations
-  const discountVal =
-    typeof order.discount === "number"
-      ? order.discount
-      : typeof order.total_discount === "number"
-      ? order.total_discount
-      : 35000.0;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("Warehouse Dispatch Instructions & Safety Verification", margin + 4, currentY + 6);
 
-  const totalTaxVal =
-    order.total_tax ||
-    rawItems.reduce((acc, it) => acc + (it.tax_amount || it.gst_amount || 0), 0) ||
-    49500.0;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text("1. All items must be physically verified against packing list prior to loading.", margin + 4, currentY + 11.5);
+    doc.text("2. Ensure serial number tags, accessories, and user manuals are enclosed inside the crate.", margin + 4, currentY + 15.5);
+    doc.text("3. Transporter driver must verify package condition and sign duplicate copy before gate exit.", margin + 4, currentY + 19.5);
 
-  const totalFinalVal =
-    order.amount_inc_gst ||
-    order.total_amount ||
-    order.total_including_tax ||
-    324500.0;
+    const sigY = currentY + 28;
+    const sigLeftX = margin + 5;
+    const sigMidX = margin + contentWidth / 3 + 5;
+    const sigRightX = margin + (contentWidth / 3) * 2 + 5;
 
-  // Row 1: Discount
-  doc.setFontSize(7.5);
-  doc.setFont("helvetica", "normal");
-  doc.text("Discount", rightTotalsX + 3, currentY + 5);
-  doc.text(
-    formatSalesPdfCurrency(discountVal),
-    margin + contentWidth - 3,
-    currentY + 5,
-    { align: "right" }
-  );
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.text("Packed By", sigLeftX, sigY);
+    doc.text("Verified By (Dispatch)", sigMidX, sigY);
+    doc.text("Driver / Transporter Signature", sigRightX, sigY);
 
-  // Row 2: Tax
-  doc.text("Tax", rightTotalsX + 3, currentY + singleRowH + 5);
-  doc.text(
-    formatSalesPdfCurrency(totalTaxVal),
-    margin + contentWidth - 3,
-    currentY + singleRowH + 5,
-    { align: "right" }
-  );
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text("Name & Sign: _______________", sigLeftX, sigY + 8);
+    doc.text("Name & Sign: _______________", sigMidX, sigY + 8);
+    doc.text("Name & Sign: _______________", sigRightX, sigY + 8);
 
-  // Row 3: Total
-  doc.setFont("helvetica", "bold");
-  doc.text("Total", rightTotalsX + 3, currentY + singleRowH * 2 + 5);
-  doc.text(
-    formatSalesPdfCurrency(totalFinalVal),
-    margin + contentWidth - 3,
-    currentY + singleRowH * 2 + 5,
-    { align: "right" }
-  );
+    currentY += termsBoxHeight;
 
-  currentY += totalsHeight;
+    // SECTION 6: Consignee Acknowledgment
+    const ackBoxHeight = 26;
+    doc.rect(margin, currentY, contentWidth, ackBoxHeight);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("Consignee / Customer Delivery Acknowledgment", margin + 4, currentY + 5.5);
 
-  // ==========================================
-  // SECTION 5: Terms and Conditions Box + Signatures
-  // ==========================================
-  const termsBoxHeight = 44;
-  doc.rect(margin, currentY, contentWidth, termsBoxHeight);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text("Received the above listed packages/goods in sound and good condition without any external damage.", margin + 4, currentY + 11);
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text("Terms And Conditions", margin + 4, currentY + 6);
+    doc.setFont("helvetica", "bold");
+    doc.text("Receiver's Signature & Rubber Stamp : ________________________________________", margin + 4, currentY + 18.5);
+    doc.text("Date & Time : ______________", margin + contentWidth - 45, currentY + 18.5);
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.text(`1. Transport Charges: ${deliveryCharge}.`, margin + 4, currentY + 11.5);
-  doc.text(
-    `2. Payment Terms: ${paymentTerms.includes("Advance") ? "100% Before Dispatch" : paymentTerms}.`,
-    margin + 4,
-    currentY + 15.5
-  );
-  doc.text("3. Order once confirmed, cannot be cancelled.", margin + 4, currentY + 19.5);
+    currentY += ackBoxHeight;
+  } else {
+    // Table Totals Section (Discount, Tax, Total)
+    const totalsHeight = 21;
+    doc.rect(margin, currentY, contentWidth, totalsHeight);
 
-  // Signature Blocks
-  const sigY = currentY + 28;
-  const sigLeftX = margin + 5;
-  const sigRightX = margin + contentWidth / 2 + 10;
+    // Divide right totals box
+    const rightTotalsW = colW[4] + colW[5] + colW[6];
+    const rightTotalsX = margin + contentWidth - rightTotalsW;
+    doc.line(rightTotalsX, currentY, rightTotalsX, currentY + totalsHeight);
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.5);
-  doc.text("Received by", sigLeftX, sigY);
-  doc.text("Approved by", sigRightX, sigY);
+    // Internal horizontal lines for 3 rows in right box
+    const singleRowH = totalsHeight / 3;
+    doc.line(rightTotalsX, currentY + singleRowH, margin + contentWidth, currentY + singleRowH);
+    doc.line(rightTotalsX, currentY + singleRowH * 2, margin + contentWidth, currentY + singleRowH * 2);
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.text("Name :", sigLeftX, sigY + 6);
-  doc.text("Sign :", sigLeftX, sigY + 11);
+    // Middle vertical divider between label and value
+    const midDividerX = rightTotalsX + 28;
+    doc.line(midDividerX, currentY, midDividerX, currentY + totalsHeight);
 
-  doc.text("Name :", sigRightX, sigY + 6);
-  doc.text("Sign :", sigRightX, sigY + 11);
+    // Calculations
+    const discountVal =
+      typeof order.discount === "number"
+        ? order.discount
+        : typeof order.total_discount === "number"
+        ? order.total_discount
+        : 35000.0;
 
-  currentY += termsBoxHeight;
+    const totalTaxVal =
+      order.total_tax ||
+      rawItems.reduce((acc, it) => acc + (it.tax_amount || it.gst_amount || 0), 0) ||
+      49500.0;
 
-  // ==========================================
-  // SECTION 6: Bank Details Box
-  // ==========================================
-  const bankBoxHeight = 26;
-  doc.rect(margin, currentY, contentWidth, bankBoxHeight);
+    const totalFinalVal =
+      order.amount_inc_gst ||
+      order.total_amount ||
+      order.total_including_tax ||
+      324500.0;
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text("Bank Details", margin + 4, currentY + 5.5);
+    // Row 1: Discount
+    doc.setFontSize(7.5);
+    doc.setFont("helvetica", "normal");
+    doc.text("Discount", rightTotalsX + 3, currentY + 5);
+    doc.text(
+      formatSalesPdfCurrency(discountVal),
+      margin + contentWidth - 3,
+      currentY + 5,
+      { align: "right" }
+    );
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7);
-  doc.text("A/c Holder's Name :", margin + 4, currentY + 10.5);
-  doc.setFont("helvetica", "normal");
-  doc.text(brandName.toUpperCase(), margin + 35, currentY + 10.5);
+    // Row 2: Tax
+    doc.text("Tax", rightTotalsX + 3, currentY + singleRowH + 5);
+    doc.text(
+      formatSalesPdfCurrency(totalTaxVal),
+      margin + contentWidth - 3,
+      currentY + singleRowH + 5,
+      { align: "right" }
+    );
+
+    // Row 3: Total
+    doc.setFont("helvetica", "bold");
+    doc.text("Total", rightTotalsX + 3, currentY + singleRowH * 2 + 5);
+    doc.text(
+      formatSalesPdfCurrency(totalFinalVal),
+      margin + contentWidth - 3,
+      currentY + singleRowH * 2 + 5,
+      { align: "right" }
+    );
+
+    currentY += totalsHeight;
+
+    // ==========================================
+    // SECTION 5: Terms and Conditions Box + Signatures
+    // ==========================================
+    const termsBoxHeight = 44;
+    doc.rect(margin, currentY, contentWidth, termsBoxHeight);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("Terms And Conditions", margin + 4, currentY + 6);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text(`1. Transport Charges: ${deliveryCharge}.`, margin + 4, currentY + 11.5);
+    doc.text(
+      `2. Payment Terms: ${paymentTerms.includes("Advance") ? "100% Before Dispatch" : paymentTerms}.`,
+      margin + 4,
+      currentY + 15.5
+    );
+    doc.text("3. Order once confirmed, cannot be cancelled.", margin + 4, currentY + 19.5);
+
+    // Signature Blocks
+    const sigY = currentY + 28;
+    const sigLeftX = margin + 5;
+    const sigRightX = margin + contentWidth / 2 + 10;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.text("Received by", sigLeftX, sigY);
+    doc.text("Approved by", sigRightX, sigY);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text("Name :", sigLeftX, sigY + 6);
+    doc.text("Sign :", sigLeftX, sigY + 11);
+
+    doc.text("Name :", sigRightX, sigY + 6);
+    doc.text("Sign :", sigRightX, sigY + 11);
+
+    currentY += termsBoxHeight;
+
+    // ==========================================
+    // SECTION 6: Bank Details Box
+    // ==========================================
+    const bankBoxHeight = 26;
+    doc.rect(margin, currentY, contentWidth, bankBoxHeight);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("Bank Details", margin + 4, currentY + 5.5);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.text("A/c Holder's Name :", margin + 4, currentY + 10.5);
+    doc.setFont("helvetica", "normal");
+    doc.text(brandName.toUpperCase(), margin + 35, currentY + 10.5);
 
   doc.setFont("helvetica", "bold");
   doc.text("Bank Name :", margin + 4, currentY + 14.5);
@@ -494,6 +582,7 @@ export function generateSalesOrderPdf(
   );
 
   currentY += bankBoxHeight;
+  }
 
   // ==========================================
   // SECTION 7: Footer Notice

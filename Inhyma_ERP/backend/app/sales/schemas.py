@@ -184,10 +184,15 @@ class SaleOrderItemResponse(BaseModel):
     product_name: str
     product_code: str | None = None
     hsn_code: str | None = None
+    uom: str | None = "Nos"
     quantity: float
     unit_rate: float
+    unit_price: float | None = None
+    unit_discount: float | None = None
+    taxable_amount: float | None = None
     tax_percent: float
     tax_amount: float
+    gst_amount: float | None = None
     item_total: float
     planning_row_id: uuid.UUID | None = None
     remarks: str | None = None
@@ -198,12 +203,30 @@ class SaleOrderItemResponse(BaseModel):
 
 
 class SaleOrderCreate(BaseModel):
-    organization_id: uuid.UUID
+    organization_id: uuid.UUID | None = None
     organization_name: str = "Inhyma"
-    buyer_id: uuid.UUID
+    buyer_id: uuid.UUID | None = None
     buyer_name: str
     buyer_branch_id: str | None = None
     buyer_branch_name: str | None = None
+
+    company_name: str | None = None
+    warehouse: str | None = None
+    proforma_no: str | None = None
+    proforma_id: uuid.UUID | None = None
+    city: str | None = None
+    state: str | None = None
+    sales_person: str | None = None
+    billing_address: str | None = None
+    shipping_address: str | None = None
+    payment_terms: str | None = None
+    transport_destination: str | None = None
+    delivery_type: str | None = None
+    delivery_charge: str | None = None
+    third_party_delivery: str | None = None
+    third_party_invoice: str | None = None
+    amount_inc_gst: float | None = None
+    discount: float | None = None
 
     consignment_code: str | None = None
     planning_sheet_id: uuid.UUID | None = None
@@ -231,6 +254,32 @@ class SaleOrderUpdate(BaseModel):
     buyer_branch_id: str | None = None
     buyer_branch_name: str | None = None
 
+    company_name: str | None = None
+    warehouse: str | None = None
+    proforma_no: str | None = None
+    proforma_id: uuid.UUID | None = None
+    city: str | None = None
+    state: str | None = None
+    sales_person: str | None = None
+    billing_address: str | None = None
+    shipping_address: str | None = None
+    payment_terms: str | None = None
+    transport_destination: str | None = None
+    delivery_type: str | None = None
+    delivery_charge: str | None = None
+    third_party_delivery: str | None = None
+    third_party_invoice: str | None = None
+    amount_inc_gst: float | None = None
+    discount: float | None = None
+
+    # Invoicing & Gate Pass
+    invoice_no: str | None = None
+    invoice_date: str | None = None
+    gatepass: str | None = None
+    gatepass_no: str | None = None
+    gatepass_date: str | None = None
+    gatepass_handled_by: str | None = None
+
     consignment_code: str | None = None
     planning_sheet_id: uuid.UUID | None = None
     planning_column_id: uuid.UUID | None = None
@@ -254,17 +303,54 @@ class SaleOrderUpdate(BaseModel):
 class SaleOrderStatusUpdate(BaseModel):
     status: str = Field(..., min_length=1, max_length=30)
     remarks: str | None = None
+    invoice_no: str | None = None
+    invoice_date: str | None = None
+    third_party_invoice: str | None = None
+    gatepass: str | None = None
+    gatepass_no: str | None = None
+    gatepass_date: str | None = None
+    gatepass_handled_by: str | None = None
+    transporter_name: str | None = None
+    transport_destination: str | None = None
+    delivery_type: str | None = None
+    delivery_charge: str | None = None
+    lr_no: str | None = None
 
 
 class SaleOrderResponse(BaseModel):
     id: uuid.UUID
     order_no: str
-    organization_id: uuid.UUID
-    organization_name: str
-    buyer_id: uuid.UUID
+    organization_id: uuid.UUID | None = None
+    organization_name: str | None = "Inhyma"
+    buyer_id: uuid.UUID | None = None
     buyer_name: str
     buyer_branch_id: str | None = None
     buyer_branch_name: str | None = None
+
+    company_name: str | None = None
+    warehouse: str | None = None
+    proforma_no: str | None = None
+    proforma_id: uuid.UUID | None = None
+    city: str | None = None
+    state: str | None = None
+    sales_person: str | None = None
+    billing_address: str | None = None
+    shipping_address: str | None = None
+    payment_terms: str | None = None
+    transport_destination: str | None = None
+    delivery_type: str | None = None
+    delivery_charge: str | None = None
+    third_party_delivery: str | None = None
+    third_party_invoice: str | None = None
+    amount_inc_gst: float | None = None
+    discount: float | None = None
+
+    invoice_no: str | None = None
+    invoice_date: str | None = None
+    gatepass: str | None = None
+    gatepass_no: str | None = None
+    gatepass_date: str | None = None
+    gatepass_handled_by: str | None = None
 
     consignment_code: str | None = None
     planning_sheet_id: uuid.UUID | None = None
@@ -307,9 +393,13 @@ class MetricItem(BaseModel):
 
 class SaleSummaryMetrics(BaseModel):
     all: MetricItem = Field(default_factory=MetricItem)
+    admin_confirmed_to_lr: MetricItem = Field(default_factory=MetricItem)
     pending: MetricItem = Field(default_factory=MetricItem)
     sales_confirmed: MetricItem = Field(default_factory=MetricItem)
     admin_approved: MetricItem = Field(default_factory=MetricItem)
+    acc_confirmed: MetricItem = Field(default_factory=MetricItem)
+    gatepass_created: MetricItem = Field(default_factory=MetricItem)
+    gatepass_cancelled: MetricItem = Field(default_factory=MetricItem)
     dispatched: MetricItem = Field(default_factory=MetricItem)
     lr: MetricItem = Field(default_factory=MetricItem)
     cancelled: MetricItem = Field(default_factory=MetricItem)

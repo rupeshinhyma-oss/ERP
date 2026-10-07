@@ -74,6 +74,11 @@ export interface SaleOrder {
   timeline?: SaleTimelineEvent[];
   gatepass?: string | null;
   gatepass_no?: string | null;
+  gatepass_date?: string | null;
+  gatepass_handled_by?: string | null;
+  invoice_no?: string | null;
+  invoice_date?: string | null;
+  lr_date?: string | null;
   billing_address?: string | null;
   shipping_address?: string | null;
   phone?: string | null;

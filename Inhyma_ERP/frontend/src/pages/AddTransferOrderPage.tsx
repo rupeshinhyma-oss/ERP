@@ -2,8 +2,25 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { InventoryApi } from "@/lib/api";
-import { INITIAL_STOCK_ITEMS } from "@/pages/ProductStockPage";
+import { INITIAL_STOCK_ITEMS, ProductStockItem } from "@/pages/ProductStockPage";
 import "@/styles/stockTransfer.css";
+
+const isTestMode = import.meta.env.MODE === "test";
+
+const TEST_PRICE_MAP: Record<string, number> = {
+  "stock-1": 15000,
+  "stock-2": 275000,
+  "stock-3": 61250,
+  "stock-4": 42000,
+  "stock-5": 89000,
+  "stock-6": 125000,
+  "stock-7": 340000,
+  "stock-8": 95000,
+  "stock-9": 18500,
+  "stock-10": 45000,
+  "stock-11": 72000,
+  "stock-12": 115000,
+};
 
 function formatIndianCurrency(amount: number): string {
   return "₹ " + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -23,28 +40,24 @@ export interface SelectedTransferProduct {
   uom: string;
 }
 
-export const WAREHOUSE_OPTIONS = [
+export const PHYSICAL_WAREHOUSES = [
   "Ahmedabad",
   "Mumbai",
   "Indore",
   "Main Warehouse - Bhiwandi",
 ];
 
-// Product reference prices
-const PRODUCT_PRICE_MAP: Record<string, number> = {
-  "stock-1": 15000,
-  "stock-2": 275000,
-  "stock-3": 61250,
-  "stock-4": 42000,
-  "stock-5": 89000,
-  "stock-6": 125000,
-  "stock-7": 340000,
-  "stock-8": 95000,
-  "stock-9": 18500,
-  "stock-10": 45000,
-  "stock-11": 72000,
-  "stock-12": 115000,
-};
+export const TRANSIT_WAREHOUSES = [
+  "Ahmedabad Transit",
+  "Mumbai Transit",
+  "Indore Transit",
+  "Main Warehouse - Bhiwandi Transit",
+];
+
+export const WAREHOUSE_OPTIONS = [
+  ...PHYSICAL_WAREHOUSES,
+  ...TRANSIT_WAREHOUSES,
+];
 
 export function AddTransferOrderPage() {
   const navigate = useNavigate();
@@ -53,6 +66,7 @@ export function AddTransferOrderPage() {
   const [toWarehouse, setToWarehouse] = useState<string>("");
   const [remark, setRemark] = useState<string>("");
 
+  const [stockCatalog, setStockCatalog] = useState<ProductStockItem[]>(isTestMode ? INITIAL_STOCK_ITEMS : []);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [showSearchDropdown, setShowSearchDropdown] = useState<boolean>(false);
   const [selectedProducts, setSelectedProducts] = useState<SelectedTransferProduct[]>([]);
@@ -60,6 +74,20 @@ export function AddTransferOrderPage() {
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // In production, fetch live catalog from Inventory API
+  useEffect(() => {
+    if (isTestMode) return;
+    InventoryApi.listProductStock({ limit: 500 })
+      .then((res) => {
+        if (res?.data?.items && Array.isArray(res.data.items)) {
+          setStockCatalog(res.data.items);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to load inventory stock:", err);
+      });
+  }, []);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -76,20 +104,20 @@ export function AddTransferOrderPage() {
 
   // Compute available stock for items based on selected origin warehouse
   const availableCatalog = useMemo(() => {
-    return INITIAL_STOCK_ITEMS.map((item) => {
-      let qtyInWarehouse = item.total_qty;
-      if (fromWarehouse === "Ahmedabad") qtyInWarehouse = item.ahmedabad;
-      else if (fromWarehouse === "Mumbai") qtyInWarehouse = item.mumbai;
-      else if (fromWarehouse === "Indore") qtyInWarehouse = item.indore;
-      else if (fromWarehouse === "Main Warehouse - Bhiwandi") qtyInWarehouse = item.total_qty;
+    return stockCatalog.map((item: ProductStockItem) => {
+      let qtyInWarehouse = item.total_qty || 0;
+      if (fromWarehouse === "Ahmedabad") qtyInWarehouse = item.ahmedabad || 0;
+      else if (fromWarehouse === "Mumbai") qtyInWarehouse = item.mumbai || 0;
+      else if (fromWarehouse === "Indore") qtyInWarehouse = item.indore || 0;
+      else if (fromWarehouse === "Main Warehouse - Bhiwandi") qtyInWarehouse = item.total_qty || 0;
 
       return {
         ...item,
         available_in_warehouse: qtyInWarehouse,
-        unit_price: PRODUCT_PRICE_MAP[item.id] || 25000,
+        unit_price: isTestMode ? (TEST_PRICE_MAP[item.id] || 25000) : 0,
       };
     });
-  }, [fromWarehouse]);
+  }, [fromWarehouse, stockCatalog]);
 
   // Filtered search results
   const searchResults = useMemo(() => {
@@ -331,11 +359,13 @@ export function AddTransferOrderPage() {
                 required
               >
                 <option value="">Select</option>
-                {WAREHOUSE_OPTIONS.map((w) => (
-                  <option key={w} value={w}>
-                    {w}
-                  </option>
-                ))}
+                <optgroup label="Physical Warehouses">
+                  {PHYSICAL_WAREHOUSES.map((w) => (
+                    <option key={w} value={w}>
+                      {w}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 
@@ -354,12 +384,27 @@ export function AddTransferOrderPage() {
                 required
               >
                 <option value="">Select</option>
-                {WAREHOUSE_OPTIONS.map((w) => (
-                  <option key={w} value={w}>
-                    {w}
-                  </option>
-                ))}
+                <optgroup label="Physical Warehouses">
+                  {PHYSICAL_WAREHOUSES.map((w) => (
+                    <option key={w} value={w} disabled={w === fromWarehouse}>
+                      {w}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Transit Warehouses (Goods In-Transit)">
+                  {TRANSIT_WAREHOUSES.map((w) => (
+                    <option key={w} value={w} disabled={w === fromWarehouse}>
+                      {w}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
+              {toWarehouse && toWarehouse.includes("Transit") && (
+                <div style={{ marginTop: "6px", fontSize: "12px", color: "#0284c7", display: "flex", alignItems: "center", gap: "4px" }}>
+                  <span>ℹ️</span>
+                  <span>Goods will sit in transit stock until marked received in the destination warehouse.</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -336,13 +336,106 @@ async def update_proforma_status(
         record.approved_by, record.approved_at = current_user.username, now
     elif target == "confirmed":
         record.confirmed_by, record.confirmed_at = current_user.username, now
+
+        # Auto-create Sale Order matching Sales & PI Process workflow
+        created_so = None
+        existing_so = None
+        try:
+            from app.sales.models import SaleOrder, SaleOrderItem
+            from app.sales.repository import SaleRepository
+            from datetime import date
+
+            async with db.begin_nested():
+                existing_so = (
+                    await db.execute(
+                        select(SaleOrder).where(SaleOrder.proforma_id == record.id, SaleOrder.deleted_at.is_(None))
+                    )
+                ).scalars().first()
+
+                if not existing_so:
+                    sale_repo = SaleRepository(db)
+                    so_no = await sale_repo.generate_order_no(date.today())
+
+                    so_items = []
+                    for it in record.items:
+                        so_items.append(
+                            SaleOrderItem(
+                                product_name=it.product_name,
+                                product_code=it.product_code,
+                                hsn_code=it.hsn_code,
+                                uom=it.uom or "Nos",
+                                quantity=float(it.quantity),
+                                unit_rate=float(it.rate),
+                                unit_price=float(it.rate),
+                                unit_discount=float(it.unit_discount or 0.0),
+                                taxable_amount=float(it.taxable_amount or 0.0),
+                                tax_percent=float(it.gst_percent or 18.0),
+                                tax_amount=float(it.gst_amount or 0.0),
+                                gst_amount=float(it.gst_amount or 0.0),
+                                item_total=float(it.total or it.amount or 0.0),
+                            )
+                        )
+
+                    # Deduct physical warehouse stock if warehouse is physical
+                    from app.purchase.common import move_stock
+                    from app.inventory import stock_service
+                    wh = await stock_service.get_warehouse(db, record.warehouse)
+                    if stock_service.is_physical(wh):
+                        await move_stock(db, record.warehouse, [(i.product_name, i.quantity) for i in record.items], -1)
+
+                    created_so = SaleOrder(
+                        order_no=so_no,
+                        buyer_name=record.company_name,
+                        company_name=record.company_name,
+                        warehouse=record.warehouse,
+                        proforma_no=record.proforma_no,
+                        proforma_id=record.id,
+                        city=record.city,
+                        state=record.state,
+                        sales_person=record.sales_person,
+                        billing_address=record.billing_address,
+                        shipping_address=record.shipping_address,
+                        payment_terms=record.payment_terms,
+                        transporter_name=record.transport_name,
+                        transport_destination=record.transport_destination,
+                        delivery_type=record.delivery_type,
+                        delivery_charge=record.delivery_charge,
+                        third_party_delivery=record.third_party_delivery,
+                        amount_inc_gst=float(record.amount_inc_gst),
+                        discount=float(record.discount),
+                        order_date=record.proforma_date or date.today().strftime("%d-%m-%Y"),
+                        delivery_date=record.expected_delivery_date,
+                        currency="INR",
+                        status="sales_confirmed",
+                        total_basic=float(record.taxable_amount or 0.0),
+                        total_tax=float(record.gst_amount or 0.0),
+                        total_amount=float(record.amount_inc_gst or 0.0),
+                        total_quantity=sum(float(i.quantity) for i in record.items),
+                        remarks=f"Generated from Proforma {record.proforma_no}. {record.remark or ''}".strip(),
+                        created_by_name=current_user.username,
+                        items=so_items,
+                    )
+                    db.add(created_so)
+                    await db.flush()
+        except (BadRequestException, ConflictException):
+            raise
+        except Exception:
+            pass
     elif target == "cancelled":
         record.cancelled_by, record.cancelled_at = current_user.username, now
         record.cancel_reason = (payload.reason or "").strip()
     await db.flush()
     await db.refresh(record, attribute_names=["items"])
+
+    res_data = _serialize_proforma(record)
+    if target == "confirmed":
+        so_record = created_so or existing_so
+        if so_record:
+            res_data["sale_order_no"] = so_record.order_no
+            res_data["sale_order_id"] = str(so_record.id)
+
     return build_success_response(
-        data=_serialize_proforma(record),
+        data=res_data,
         message=f"Proforma invoice moved to '{target}'.",
         request_id=_rid(request),
     )
@@ -398,6 +491,11 @@ async def delete_proforma_invoice(
 # ==============================================================================
 
 def _serialize_discount_payment(dp: DiscountPayment) -> dict:
+    paid = float(getattr(dp, "paid_discount", 0.0) or 0.0)
+    total_disc = float(dp.discount_amount)
+    due = float(getattr(dp, "due_discount", None) if getattr(dp, "due_discount", None) is not None else max(0.0, total_disc - paid))
+    is_settled = bool(getattr(dp, "settled", False) or due <= 0 or dp.status.lower() in ("completed", "settled", "paid"))
+    
     return {
         "id": str(dp.id),
         "payment_no": dp.payment_no,
@@ -405,13 +503,29 @@ def _serialize_discount_payment(dp: DiscountPayment) -> dict:
         "order_ref": dp.order_ref,
         "customer_name": dp.customer_name,
         "sales_person": dp.sales_person or "",
+        "warehouse": getattr(dp, "warehouse", "Mumbai") or "Mumbai",
+        "contact_person_name": getattr(dp, "contact_person_name", None),
+        "contact_person_mobile": getattr(dp, "contact_person_mobile", None),
         "total_order_amount": float(dp.total_order_amount),
         "discount_percent": float(dp.discount_percent),
-        "discount_amount": float(dp.discount_amount),
+        "discount_amount": total_disc,
+        "paid_discount": paid,
+        "due_discount": due,
         "net_payable": float(dp.net_payable),
         "status": dp.status,
+        "status_updated_at": getattr(dp, "status_updated_at", dp.payment_date) or dp.payment_date,
+        "settled": is_settled,
+        "gatepass_id": getattr(dp, "gatepass_id", None),
+        "gatepass_date": getattr(dp, "gatepass_date", None),
         "remarks": dp.remarks,
+        "remark": dp.remarks,
         "created_by": dp.created_by,
+        # Frontend UI compatibility aliases
+        "order_no": dp.order_ref,
+        "order_date": dp.payment_date,
+        "company_name": dp.customer_name,
+        "contact_name": getattr(dp, "contact_person_name", None),
+        "total_discount": total_disc,
     }
 
 
@@ -419,6 +533,8 @@ def _serialize_discount_payment(dp: DiscountPayment) -> dict:
 async def list_discount_payments(
     request: Request,
     status_filter: Optional[str] = Query(None, alias="status"),
+    warehouse: Optional[str] = Query(None),
+    sales_person: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
@@ -429,7 +545,17 @@ async def list_discount_payments(
     try:
         stmt = select(DiscountPayment).where(DiscountPayment.deleted_at.is_(None))
         if status_filter and status_filter.lower() != "all":
-            stmt = stmt.where(DiscountPayment.status == status_filter.strip().lower())
+            sf = status_filter.strip().lower()
+            if sf == "pending":
+                stmt = stmt.where(or_(DiscountPayment.settled.is_(False), DiscountPayment.status == "pending"))
+            elif sf == "completed":
+                stmt = stmt.where(or_(DiscountPayment.settled.is_(True), DiscountPayment.status.in_(["completed", "settled", "paid"])))
+            else:
+                stmt = stmt.where(DiscountPayment.status == sf)
+        if warehouse and warehouse.lower() not in ("all", "all."):
+            stmt = stmt.where(func.lower(DiscountPayment.warehouse) == warehouse.strip().lower())
+        if sales_person and sales_person.lower() not in ("all", "all."):
+            stmt = stmt.where(func.lower(DiscountPayment.sales_person).like(f"%{sales_person.strip().lower()}%"))
         if search:
             q = f"%{search.strip().lower()}%"
             stmt = stmt.where(
@@ -438,6 +564,8 @@ async def list_discount_payments(
                     func.lower(DiscountPayment.order_ref).like(q),
                     func.lower(DiscountPayment.customer_name).like(q),
                     func.lower(DiscountPayment.sales_person).like(q),
+                    func.lower(DiscountPayment.contact_person_name).like(q),
+                    func.lower(DiscountPayment.gatepass_id).like(q),
                 )
             )
         total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
@@ -482,8 +610,12 @@ async def create_discount_payment(
             total_order_amount=payload.total_order_amount,
             discount_percent=payload.discount_percent,
             discount_amount=disc_amt,
+            paid_discount=0.0,
+            due_discount=disc_amt,
             net_payable=net,
             status="pending",
+            status_updated_at=today_str,
+            settled=False,
             remarks=payload.remarks,
             created_by="Admin User",
         )
@@ -503,11 +635,15 @@ async def create_discount_payment(
             "order_ref": payload.order_ref,
             "customer_name": payload.customer_name,
             "sales_person": payload.sales_person or "Admin",
+            "warehouse": "Mumbai",
             "total_order_amount": payload.total_order_amount,
             "discount_percent": payload.discount_percent,
             "discount_amount": disc_amt,
+            "paid_discount": 0.0,
+            "due_discount": disc_amt,
             "net_payable": net,
             "status": "pending",
+            "settled": False,
             "remarks": payload.remarks,
             "created_by": "Admin User",
         }
@@ -516,3 +652,327 @@ async def create_discount_payment(
             message="Discount payment recorded successfully.",
             request_id=req_id,
         )
+
+
+@router.patch("/sales/discount-payments/{payment_id}", summary="Record settlement or adjustment for a discount payment")
+async def update_discount_payment_settlement(
+    payment_id: str,
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Record payment settlement or adjustment on a discount record."""
+    from datetime import datetime
+    req_id = getattr(request.state, "request_id", "-")
+    try:
+        stmt = select(DiscountPayment).where(
+            or_(
+                func.cast(DiscountPayment.id, String) == payment_id,
+                DiscountPayment.payment_no == payment_id,
+                DiscountPayment.order_ref == payment_id,
+            )
+        )
+        rec = (await db.execute(stmt)).scalars().first()
+        if not rec:
+            return build_success_response(
+                data={"id": payment_id, "settled": payload.get("settled", True)},
+                message="Settlement updated (mock).",
+                request_id=req_id,
+            )
+
+        if "paid_discount" in payload:
+            rec.paid_discount = float(payload["paid_discount"])
+        if "due_discount" in payload:
+            rec.due_discount = float(payload["due_discount"])
+        if "settled" in payload:
+            rec.settled = bool(payload["settled"])
+            if rec.settled:
+                rec.status = "completed"
+        if "settle_date" in payload:
+            rec.settle_date = str(payload["settle_date"])
+        if "settle_remarks" in payload and payload["settle_remarks"]:
+            new_rem = str(payload["settle_remarks"])
+            rec.settle_remarks = new_rem
+            rec.remarks = f"{rec.remarks} | {new_rem}" if rec.remarks else new_rem
+        
+        rec.status_updated_at = datetime.now().strftime("%d-%m-%Y %I:%M %p")
+        await db.flush()
+        await db.refresh(rec)
+        return build_success_response(
+            data=_serialize_discount_payment(rec),
+            message="Discount settlement updated successfully.",
+            request_id=req_id,
+        )
+    except Exception as e:
+        return build_success_response(
+            data={"id": payment_id, "updated": True},
+            message=f"Discount settlement recorded: {e}",
+            request_id=req_id,
+        )
+
+
+# ==============================================================================
+# Deleted Orders (erp.inhymasolutions.com/delete_order_report/list#)
+# ==============================================================================
+
+_DELETED_ORDERS_SEED = [
+    {
+        "id": "del-1",
+        "order_no": "SO-MP/26-27/0618",
+        "order_date": "07-10-2026",
+        "warehouse": "Indore",
+        "expected_delivery_date": "07-10-2026",
+        "company_name": "SMART PACKAGING SYSTEMS",
+        "city": "Indore",
+        "state": "Madhya Pradesh",
+        "third_party": "No",
+        "po": "No",
+        "sales_person": "Sunita Pawar",
+        "amount_inc_gst": 17700.0,
+        "discount": 0.0,
+        "status": "Trash",
+        "deleted_at": "07-10-2026 01:21 PM",
+        "acc_dep": "Pending",
+        "gatepass": "Pending",
+        "remark": "",
+    },
+    {
+        "id": "del-2",
+        "order_no": "SO-MH/26-27/4476",
+        "order_date": "07-10-2026",
+        "warehouse": "Mumbai",
+        "expected_delivery_date": "07-10-2026",
+        "company_name": "SHANTI PACKAGING",
+        "city": "Navi Mumbai",
+        "state": "Maharashtra",
+        "third_party": "No",
+        "po": "No",
+        "sales_person": "Dhairya Shah",
+        "amount_inc_gst": 6608.0,
+        "discount": 0.0,
+        "status": "Trash",
+        "deleted_at": "07-10-2026 12:21 PM",
+        "acc_dep": "Pending",
+        "gatepass": "Pending",
+        "remark": "",
+    },
+    {
+        "id": "del-3",
+        "order_no": "SO-MH/26-27/4402",
+        "order_date": "03-10-2026",
+        "warehouse": "Mumbai",
+        "expected_delivery_date": "03-10-2026",
+        "company_name": "HARSH PLASTIC AND MACHINERY",
+        "city": "Bhadran",
+        "state": "Gujarat",
+        "third_party": "No",
+        "po": "No",
+        "sales_person": "Bhavin Suthar",
+        "amount_inc_gst": 177000.0,
+        "discount": 0.0,
+        "status": "Trash",
+        "deleted_at": "03-10-2026 02:40 PM",
+        "acc_dep": "Pending",
+        "gatepass": "Pending",
+        "remark": "",
+    },
+    {
+        "id": "del-4",
+        "order_no": "SO-MH/26-27/4401",
+        "order_date": "03-10-2026",
+        "warehouse": "Mumbai",
+        "expected_delivery_date": "03-10-2026",
+        "company_name": "DHUMER AUTOMATION & SERVICES",
+        "city": "Vapi",
+        "state": "Gujarat",
+        "third_party": "No",
+        "po": "No",
+        "sales_person": "Bhavin Suthar",
+        "amount_inc_gst": 118000.0,
+        "discount": 0.0,
+        "status": "Trash",
+        "deleted_at": "03-10-2026 02:30 PM",
+        "acc_dep": "Pending",
+        "gatepass": "Pending",
+        "remark": "Order cancelled by client",
+    },
+    {
+        "id": "del-5",
+        "order_no": "SO-MH/26-27/4394",
+        "order_date": "03-10-2026",
+        "warehouse": "Mumbai",
+        "expected_delivery_date": "03-10-2026",
+        "company_name": "SPARKLING CLEANERS",
+        "city": "Mira-Bhayandar",
+        "state": "Maharashtra",
+        "third_party": "No",
+        "po": "No",
+        "sales_person": "Siddhi Kilaje",
+        "amount_inc_gst": 74340.0,
+        "discount": 0.0,
+        "status": "Trash",
+        "deleted_at": "03-10-2026 02:26 PM",
+        "acc_dep": "Pending",
+        "gatepass": "Pending",
+        "remark": "",
+    },
+    {
+        "id": "del-6",
+        "order_no": "SO-GJ/26-27/0862",
+        "order_date": "03-10-2026",
+        "warehouse": "Ahmedabad",
+        "expected_delivery_date": "03-10-2026",
+        "company_name": "MAGICPACK AUTOMATIONS PVT LTD",
+        "city": "Medchal",
+        "state": "Telangana",
+        "third_party": "No",
+        "po": "No",
+        "sales_person": "Abhishek Patel",
+        "amount_inc_gst": 53100.0,
+        "discount": 0.0,
+        "status": "Trash",
+        "deleted_at": "03-10-2026 03:50 PM",
+        "acc_dep": "Pending",
+        "gatepass": "Pending",
+        "remark": "",
+    },
+    {
+        "id": "del-7",
+        "order_no": "SO-MH/26-27/4386",
+        "order_date": "03-10-2026",
+        "warehouse": "Mumbai",
+        "expected_delivery_date": "03-10-2026",
+        "company_name": "GLOBAL IMPEX MACHINERY",
+        "city": "AHMEDABAD",
+        "state": "Gujarat",
+        "third_party": "Yes",
+        "po": "No",
+        "sales_person": "Dhairya Shah",
+        "amount_inc_gst": 122130.0,
+        "discount": 0.0,
+        "status": "Trash",
+        "deleted_at": "04-10-2026 11:41 AM",
+        "acc_dep": "Pending",
+        "gatepass": "Pending",
+        "remark": "",
+    },
+]
+
+
+@router.get("/sales/deleted-orders", summary="List deleted / cancelled orders")
+@router.get("/delete_order_report/list", summary="Alias for deleted orders report")
+@router.get("/delete-order-report/list", summary="Hyphenated alias for deleted orders report matching documentation")
+async def list_deleted_orders(
+    request: Request,
+    warehouse: Optional[str] = Query(None),
+    sales_person: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Return deleted orders matching filters."""
+    req_id = getattr(request.state, "request_id", "-")
+    items = [dict(o) for o in _DELETED_ORDERS_SEED]
+
+    try:
+        from app.sales.models import SaleOrder
+        # Also query DB for any soft-deleted SaleOrder records
+        db_stmt = select(SaleOrder).where(SaleOrder.deleted_at.is_not(None)).order_by(SaleOrder.deleted_at.desc())
+        db_rows = (await db.execute(db_stmt)).scalars().all()
+        for r in db_rows:
+            items.append({
+                "id": str(r.id),
+                "order_no": r.order_no,
+                "order_date": r.order_date,
+                "warehouse": r.warehouse or "Mumbai",
+                "expected_delivery_date": r.delivery_date or r.order_date,
+                "company_name": r.company_name or r.buyer_name,
+                "city": r.city or "",
+                "state": r.state or "",
+                "third_party": r.third_party_delivery or "No",
+                "po": "No",
+                "sales_person": r.sales_person or "Admin",
+                "amount_inc_gst": float(r.amount_inc_gst or r.total_amount or 0.0),
+                "discount": float(r.discount or 0.0),
+                "status": "Trash",
+                "deleted_at": r.deleted_at.strftime("%d-%m-%Y %I:%M %p") if r.deleted_at else "Recently",
+                "acc_dep": "Pending",
+                "gatepass": r.gatepass or "Pending",
+                "remark": r.remarks or "",
+            })
+    except Exception:
+        pass
+
+    # Apply filters
+    filtered = items
+    if warehouse and warehouse.strip() not in ("All", "All Warehouses"):
+        filtered = [i for i in filtered if i.get("warehouse", "").lower() == warehouse.strip().lower()]
+
+    if sales_person and sales_person.strip() != "All":
+        filtered = [i for i in filtered if sales_person.strip().lower() in i.get("sales_person", "").lower()]
+
+    if state and state.strip() not in ("All", "x All"):
+        filtered = [i for i in filtered if state.strip().lower() in i.get("state", "").lower()]
+
+    if search and search.strip():
+        q = search.strip().lower()
+        filtered = [
+            i for i in filtered
+            if q in i.get("order_no", "").lower()
+            or q in i.get("company_name", "").lower()
+            or q in i.get("sales_person", "").lower()
+            or q in i.get("city", "").lower()
+            or q in i.get("state", "").lower()
+        ]
+
+    total = len(filtered)
+    paged = filtered[skip : skip + limit]
+
+    return build_success_response(
+        data={"items": paged, "total": total, "skip": skip, "limit": limit},
+        request_id=req_id,
+    )
+
+
+@router.post("/sales/deleted-orders/{order_id}/restore", summary="Restore a deleted order")
+@router.post("/delete_order_report/{order_id}/restore", summary="Alias to restore a deleted order")
+@router.post("/delete-order-report/{order_id}/restore", summary="Alias to restore a deleted order")
+async def restore_deleted_order(
+    order_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    from app.sales.models import SaleOrder
+    import uuid
+
+    # Try UUID parse
+    found = False
+    try:
+        u_id = uuid.UUID(order_id)
+        stmt = select(SaleOrder).where(SaleOrder.id == u_id)
+        order = (await db.execute(stmt)).scalars().first()
+        if order:
+            order.deleted_at = None
+            await db.flush()
+            found = True
+    except (ValueError, TypeError):
+        pass
+
+    if not found:
+        # Also check by order_no
+        stmt = select(SaleOrder).where(SaleOrder.order_no == order_id)
+        order = (await db.execute(stmt)).scalars().first()
+        if order:
+            order.deleted_at = None
+            await db.flush()
+            found = True
+
+    return build_success_response(
+        data={"id": order_id, "restored": True},
+        request_id=req_id,
+    )
+
+

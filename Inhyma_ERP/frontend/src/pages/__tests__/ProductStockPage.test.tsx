@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { ProductStockPage, INITIAL_STOCK_ITEMS } from "../ProductStockPage";
+import { InventoryApi } from "@/lib/api";
 
 // Mock AppShell so the test focuses purely on the page content and navigation key
 vi.mock("@/components/AppShell", () => ({
@@ -29,6 +30,46 @@ describe("ProductStockPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(InventoryApi, "listProductStock").mockResolvedValue({
+      data: { items: INITIAL_STOCK_ITEMS },
+    } as any);
+    vi.spyOn(InventoryApi, "getProductStockBreakup").mockImplementation((({ type }: { type: string }) => {
+      if (type === "physical") {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                sr_no: 1,
+                order_no: "SO-2026-001",
+                order_date: "2026-10-01",
+                company_name: "Acme Packaging",
+                city_state: "Mumbai, Maharashtra",
+                quantity: 1,
+                status: "Confirmed",
+                sales_person: "Rohit",
+                delivery_date: "2026-10-15",
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({
+        data: {
+          items: [
+            {
+              sr_no: 1,
+              consignment_no: "CON-2026-99",
+              invoice_no: "INV-99",
+              date: "2026-10-02",
+              supplier_name: "Yinglima Co.",
+              quantity: 2,
+              arrival_date: "2026-10-20",
+              status: "Ordered",
+            },
+          ],
+        },
+      });
+    }) as any);
   });
 
   it("renders page header and action buttons", () => {
@@ -38,7 +79,7 @@ describe("ProductStockPage", () => {
       </BrowserRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "Product Stock" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Product Stock/i })).toBeTruthy();
     expect(screen.getByTitle("Filter stock list")).toBeTruthy();
     expect(screen.getByTitle("Export to Excel")).toBeTruthy();
   });
@@ -55,7 +96,7 @@ describe("ProductStockPage", () => {
     ).toBeTruthy();
   });
 
-  it("renders 3,3,3 in 1 grouped table column headers", () => {
+  it("renders 15 table column headers", () => {
     render(
       <BrowserRouter>
         <ProductStockPage />
@@ -67,14 +108,15 @@ describe("ProductStockPage", () => {
     expect(screen.getByText("Product Code")).toBeTruthy();
     expect(screen.getByText("Brand")).toBeTruthy();
     expect(screen.getByText("Sub Category")).toBeTruthy();
-    // Group headers (3 in 1)
     expect(screen.getByText("Mumbai")).toBeTruthy();
+    expect(screen.getByText("Mumbai Transit")).toBeTruthy();
+    expect(screen.getByText("Mumbai Ordered")).toBeTruthy();
     expect(screen.getByText("Ahmedabad")).toBeTruthy();
+    expect(screen.getByText("Ahmedabad Transit")).toBeTruthy();
+    expect(screen.getByText("Ahmedabad Ordered")).toBeTruthy();
     expect(screen.getByText("Indore")).toBeTruthy();
-    // Subheaders under each of the 3 groups
-    expect(screen.getAllByText("Stock").length).toBe(3);
-    expect(screen.getAllByText("Transit").length).toBe(3);
-    expect(screen.getAllByText("Ordered").length).toBe(3);
+    expect(screen.getByText("Indore Transit")).toBeTruthy();
+    expect(screen.getByText("Indore Ordered")).toBeTruthy();
     expect(screen.getByText("Total Qty")).toBeTruthy();
   });
 
@@ -104,7 +146,7 @@ describe("ProductStockPage", () => {
     expect(screen.queryByText("XLSG36100 Capping Machine")).toBeNull();
   });
 
-  it("opens Detail drawer when clicking product name", async () => {
+  it("opens Product Master View Window drawer when clicking product name", async () => {
     render(
       <BrowserRouter>
         <ProductStockPage />
@@ -116,11 +158,11 @@ describe("ProductStockPage", () => {
 
     await waitFor(() => {
       expect(screen.getAllByText("Sensor (Banding)").length).toBeGreaterThan(1);
-      expect(screen.getByText("Category")).toBeTruthy();
-      expect(screen.getByText("HSN")).toBeTruthy();
-      expect(screen.getByText("GST")).toBeTruthy();
-      expect(screen.getByText("84229090")).toBeTruthy();
+      expect(screen.getByText("Identity & Classification")).toBeTruthy();
+      expect(screen.getByText("Packaging & Pricing")).toBeTruthy();
+      expect(screen.getByText("Dimensions For CBM")).toBeTruthy();
       expect(screen.getByText("Location Stock Breakdown")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Open in Product Master/i })).toBeTruthy();
     });
   });
 
@@ -159,7 +201,7 @@ describe("ProductStockPage", () => {
     expect(screen.getByLabelText("Category")).toBeTruthy();
     expect(screen.getByLabelText("Sub Category")).toBeTruthy();
     expect(screen.getByLabelText("Brand")).toBeTruthy();
-    expect(screen.getByLabelText("Is Negative Stock")).toBeTruthy();
+    expect(screen.getByLabelText("Negative Stock")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reset" })).toBeTruthy();
 
@@ -198,6 +240,71 @@ describe("ProductStockPage", () => {
     expect(screen.getByText("XLSG36100 Capping Machine")).toBeTruthy();
   });
 
+  it("filters correctly by Negative Stock (Select, Yes, No)", () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    // Open filter panel
+    fireEvent.click(screen.getByTitle("Filter stock list"));
+    const negSelect = screen.getByLabelText("Negative Stock");
+
+    // Select Yes (none in INITIAL_STOCK_ITEMS have negative stock)
+    fireEvent.change(negSelect, { target: { value: "Yes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    // Empty state should be visible
+    expect(screen.getByText("No products found matching your search or filters.")).toBeTruthy();
+
+    // Select No (all in INITIAL_STOCK_ITEMS have stock >= 0)
+    fireEvent.change(negSelect, { target: { value: "No" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(screen.getByText("Sensor (Banding)")).toBeTruthy();
+
+    // Reset back to Select
+    fireEvent.change(negSelect, { target: { value: "Select" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(screen.getByText("Sensor (Banding)")).toBeTruthy();
+  });
+
+  it("opens slide-over breakup modal when clicking (i) button on stock cells", async () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    // Find and click Mumbai physical stock (i) button on Sensor (Banding)
+    const mumbaiPhysicalBtn = screen.getAllByLabelText("View Mumbai Sale Order Information")[0];
+    expect(mumbaiPhysicalBtn).toBeTruthy();
+    fireEvent.click(mumbaiPhysicalBtn);
+
+    // Breakup modal should open
+    await waitFor(() => {
+      expect(screen.getByTestId("stock-breakup-modal")).toBeTruthy();
+      expect(screen.getByText(/Sale Order Information/i)).toBeTruthy();
+      expect(screen.getByRole("table", { name: "Sale Order Information Table" })).toBeTruthy();
+    });
+
+    // Close modal
+    const closeBtn = screen.getByLabelText("Close breakup modal");
+    fireEvent.click(closeBtn);
+    expect(screen.queryByTestId("stock-breakup-modal")).toBeNull();
+
+    // Now test Ordered stock (i) button
+    const mumbaiOrderedBtn = screen.getAllByLabelText("View Mumbai Ordered Consignment Breakup")[0];
+    fireEvent.click(mumbaiOrderedBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("stock-breakup-modal")).toBeTruthy();
+      expect(screen.getByText(/Consignment Breakup/i)).toBeTruthy();
+      expect(screen.getByRole("table", { name: "Consignment Breakup Table" })).toBeTruthy();
+    });
+  });
+
   it("renders shimmer skeleton rows when loading is true", () => {
     render(
       <BrowserRouter>
@@ -207,6 +314,36 @@ describe("ProductStockPage", () => {
 
     const skeletonRows = screen.getAllByTestId("stock-skeleton-row");
     expect(skeletonRows.length).toBe(8);
+  });
+
+  it("opens consignment PO details modal when clicking consignment number in ordered breakup", async () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    // Open ordered breakup modal
+    const orderedBtn = screen.getAllByLabelText("View Mumbai Ordered Consignment Breakup")[0];
+    fireEvent.click(orderedBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("CON-2026-99")).toBeTruthy();
+    });
+
+    // Click consignment number link
+    fireEvent.click(screen.getByText("CON-2026-99"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("consignment-detail-modal")).toBeTruthy();
+      expect(screen.getByText(/Consignment Details: CON-2026-99/i)).toBeTruthy();
+      expect(screen.getByText(/ETA Port Date:/i)).toBeTruthy();
+      expect(screen.getByText(/ETD Origin Date:/i)).toBeTruthy();
+    });
+
+    // Close consignment details
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("consignment-detail-modal")).toBeNull();
   });
 });
 

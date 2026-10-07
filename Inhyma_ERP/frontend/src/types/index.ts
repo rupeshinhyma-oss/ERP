@@ -795,6 +795,7 @@ export interface Company {
   primary_website?: string | null;
   secondary_website?: string | null;
   company_category?: string | null;
+  business_category?: string | null;
   sector?: string | null;
   monthly_turnover?: string | null;
   product_manufacture_or_supply?: string | null;
@@ -921,6 +922,7 @@ export interface Lead {
   allotted_to?: string | null;
   created_by?: string | null;
   lead_status?: string | null;
+  call_type?: string | null;
   notes?: string | null;
   added_on?: string | null;
   created_at?: string | null;

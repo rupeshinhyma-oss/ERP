@@ -5,14 +5,14 @@ Technical Task Repository.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
-from app.technical_tasks.models import TechnicalTask
+from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog
 
 
 class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
@@ -22,6 +22,8 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         "company_name",
         "city",
         "third_party",
+        "third_party_city",
+        "third_party_contact_name",
         "machine_model",
         "task_description",
         "contact_person_name",
@@ -29,6 +31,7 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         "task_allotted_to",
         "task_approved_by",
         "created_by_name",
+        "payment_terms",
     )
     sortable_fields = ("company_name", "city", "priority", "status", "created_at", "task_created_date")
     filterable_fields = ("task_type", "city", "priority", "service_type", "call_type", "task_allotted_to", "status")
@@ -52,11 +55,13 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         res = (await self.session.execute(status_stmt)).all()
         counts_map = {row[0]: row[1] for row in res}
         cancel_count = counts_map.get("cancel", 0) + counts_map.get("cancelled", 0)
+        payment_pending_count = counts_map.get("payment pending", 0) + counts_map.get("payment_pending", 0)
 
         return {
             "all": total,
             "pending": counts_map.get("pending", 0),
             "approved": counts_map.get("approved", 0),
+            "payment_pending": payment_pending_count,
             "completed": counts_map.get("completed", 0),
             "cancel": cancel_count,
         }
@@ -85,6 +90,8 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
             clean_tab = tab.strip().lower()
             if clean_tab in ("cancel", "cancelled"):
                 stmt = stmt.where(func.lower(TechnicalTask.status).in_(["cancel", "cancelled"]))
+            elif clean_tab in ("payment_pending", "payment pending"):
+                stmt = stmt.where(func.lower(TechnicalTask.status).in_(["payment pending", "payment_pending"]))
             else:
                 stmt = stmt.where(func.lower(TechnicalTask.status) == clean_tab)
 
@@ -149,3 +156,33 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
             t.deleted_at = now
         await self.session.flush()
         return len(tasks)
+
+    async def create_call_log(
+        self,
+        task_id: uuid.UUID,
+        call_date: date,
+        call_type: str,
+        remarks: str,
+        created_by: str,
+    ) -> TechnicalTaskCallLog:
+        """Create a new technical call log entry."""
+        log = TechnicalTaskCallLog(
+            id=uuid.uuid4(),
+            task_id=task_id,
+            call_date=call_date,
+            call_type=call_type,
+            remarks=remarks,
+            created_by=created_by,
+        )
+        self.session.add(log)
+        await self.session.flush()
+        return log
+
+    async def list_call_logs(self, task_id: uuid.UUID) -> list[TechnicalTaskCallLog]:
+        """Fetch all call logs for a task in reverse chronological order."""
+        stmt = (
+            select(TechnicalTaskCallLog)
+            .where(TechnicalTaskCallLog.task_id == task_id)
+            .order_by(TechnicalTaskCallLog.created_at.desc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())

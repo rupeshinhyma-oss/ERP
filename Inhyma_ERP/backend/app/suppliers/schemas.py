@@ -337,6 +337,20 @@ class SupplierRead(BaseModel):
     product_ids: list[uuid.UUID] = Field(default_factory=list)
     contacts: list[SupplierContactRead] = Field(default_factory=list)
 
+    @field_validator("supplier_grade", "current_status", "potential", mode="before")
+    @classmethod
+    def _normalize_enums(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --"):
+                return None
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+        return value
+
 
 class SupplierListItemRead(BaseModel):
     """A supplier, as returned in the list view (per the document's "Fields in List")."""
@@ -363,6 +377,21 @@ class SupplierListItemRead(BaseModel):
     secondary_products_description: str | None = None
     visit_media: list[str] | None = None
     media_urls: str | None = None
+
+    @field_validator("supplier_grade", "current_status", "potential", mode="before")
+    @classmethod
+    def _normalize_enums(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --"):
+                return None
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+        return value
+
 
 
 class ImportSummaryRead(BaseModel):

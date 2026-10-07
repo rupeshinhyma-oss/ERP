@@ -216,6 +216,7 @@ export function ProformaInvoicesPage({
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Filter state matching legacy ERP screenshot:
   // - Proforma Invoice Date Range
@@ -651,7 +652,14 @@ export function ProformaInvoicesPage({
   const applyTransition = async (p: ProformaInvoice, target: string, reason?: string) => {
     try {
       setErrorMessage(null);
-      await apiPatch(`/proforma-invoice/${p.id}/status`, { status: target, reason });
+      setSuccessMessage(null);
+      const res = await apiPatch<{ message: string; sale_order_no?: string; sale_order_id?: string }>(
+        `/proforma-invoice/${p.id}/status`,
+        { status: target, reason }
+      );
+      if (res?.data?.sale_order_no) {
+        setSuccessMessage(`Proforma ${p.proforma_no} confirmed! Sales Order ${res.data.sale_order_no} created successfully.`);
+      }
       await loadProformas();
     } catch (err) {
       setErrorMessage(apiErrorText(err));
@@ -1466,6 +1474,41 @@ export function ProformaInvoicesPage({
           </div>
         </div>
 
+        {successMessage && (
+          <div
+            style={{
+              padding: "12px 16px",
+              backgroundColor: "#dcfce7",
+              border: "1px solid #86efac",
+              borderRadius: "6px",
+              color: "#15803d",
+              fontSize: "13px",
+              marginBottom: "16px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>✅ {successMessage}</span>
+            <button
+              type="button"
+              onClick={() => navigate("/sales/process")}
+              style={{
+                background: "#15803d",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "4px",
+                padding: "5px 12px",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Go to Sale Process →
+            </button>
+          </div>
+        )}
+
         {errorMessage && (
           <div style={{ padding: "12px 16px", backgroundColor: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "16px" }}>
             ⚠️ {errorMessage}
@@ -2037,11 +2080,15 @@ export function ProformaInvoicesPage({
                             )}
                             {availableTransitions(p).map((target) => {
                               const tab = STATUS_TABS.find((t) => t.key === target);
+                              const label =
+                                target === "confirmed"
+                                  ? "✅ Confirm & Create SO"
+                                  : tab?.actionLabel || tab?.label || target;
                               return (
                                 <ActionMenuItem
                                   key={target}
-                                  label={tab?.actionLabel || tab?.label || target}
-                                  color={tab?.actionColor}
+                                  label={label}
+                                  color={target === "confirmed" ? "#16a34a" : tab?.actionColor}
                                   onClick={() => startTransition(p, target)}
                                 />
                               );

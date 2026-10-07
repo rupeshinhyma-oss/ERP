@@ -32,7 +32,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, Unique
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+from app.database.base import CaseResilientEnum, GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 def _utcnow() -> datetime:
@@ -135,14 +135,14 @@ class Supplier(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDele
     secondary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     supplier_grade: Mapped[SupplierGrade | None] = mapped_column(
-        SAEnum(SupplierGrade, name="supplier_grade", native_enum=False, length=5), nullable=True
+        CaseResilientEnum(SupplierGrade, length=5), nullable=True
     )
     current_status: Mapped[SupplierCurrentStatus | None] = mapped_column(
-        SAEnum(SupplierCurrentStatus, name="supplier_current_status", native_enum=False, length=20),
+        CaseResilientEnum(SupplierCurrentStatus, length=20),
         nullable=True,
     )  # "by default Select" -- modeled as nullable rather than a forced default
     potential: Mapped[SupplierPotential | None] = mapped_column(
-        SAEnum(SupplierPotential, name="supplier_potential", native_enum=False, length=10), nullable=True
+        CaseResilientEnum(SupplierPotential, length=10), nullable=True
     )  # "by default Select"
     potential_reason: Mapped[str | None] = mapped_column(
         Text, nullable=True

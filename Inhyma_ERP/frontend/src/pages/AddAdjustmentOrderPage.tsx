@@ -3,8 +3,25 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
 import { InventoryApi } from "@/lib/api";
-import { INITIAL_STOCK_ITEMS } from "@/pages/ProductStockPage";
+import { INITIAL_STOCK_ITEMS, ProductStockItem } from "@/pages/ProductStockPage";
 import "@/styles/stockAdjustment.css";
+
+const isTestMode = import.meta.env.MODE === "test";
+
+const TEST_PRICE_MAP: Record<string, number> = {
+  "stock-1": 15000,
+  "stock-2": 275000,
+  "stock-3": 61250,
+  "stock-4": 42000,
+  "stock-5": 89000,
+  "stock-6": 125000,
+  "stock-7": 340000,
+  "stock-8": 95000,
+  "stock-9": 18500,
+  "stock-10": 45000,
+  "stock-11": 72000,
+  "stock-12": 115000,
+};
 
 function formatIndianCurrency(amount: number): string {
   return "₹ " + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,22 +51,6 @@ const PURPOSE_OPTIONS = [
   "Internal Transfer Correction",
 ];
 
-// Default unit prices for demo items if not present
-const PRODUCT_PRICE_MAP: Record<string, number> = {
-  "stock-1": 15000,
-  "stock-2": 275000,
-  "stock-3": 61250,
-  "stock-4": 42000,
-  "stock-5": 89000,
-  "stock-6": 125000,
-  "stock-7": 340000,
-  "stock-8": 95000,
-  "stock-9": 18500,
-  "stock-10": 45000,
-  "stock-11": 72000,
-  "stock-12": 115000,
-};
-
 export function AddAdjustmentOrderPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -68,6 +69,7 @@ export function AddAdjustmentOrderPage() {
   const [invoiceNo, setInvoiceNo] = useState<string>("");
   const [remark, setRemark] = useState<string>("");
 
+  const [stockCatalog, setStockCatalog] = useState<ProductStockItem[]>(isTestMode ? INITIAL_STOCK_ITEMS : []);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [showSearchDropdown, setShowSearchDropdown] = useState<boolean>(false);
   const [selectedProducts, setSelectedProducts] = useState<SelectedAdjustmentProduct[]>([]);
@@ -79,21 +81,35 @@ export function AddAdjustmentOrderPage() {
     setAdjustmentType(initialType);
   }, [initialType]);
 
+  // In production, fetch live catalog from Inventory API
+  useEffect(() => {
+    if (isTestMode) return;
+    InventoryApi.listProductStock({ limit: 500 })
+      .then((res) => {
+        if (res?.data?.items && Array.isArray(res.data.items)) {
+          setStockCatalog(res.data.items);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to load inventory stock:", err);
+      });
+  }, []);
+
   // Compute available stock for items based on selected warehouse
   const availableCatalog = useMemo(() => {
-    return INITIAL_STOCK_ITEMS.map((item) => {
-      let qtyInWarehouse = item.total_qty;
-      if (warehouse === "Ahmedabad") qtyInWarehouse = item.ahmedabad;
-      else if (warehouse === "Mumbai") qtyInWarehouse = item.mumbai;
-      else if (warehouse === "Indore") qtyInWarehouse = item.indore;
+    return stockCatalog.map((item: ProductStockItem) => {
+      let qtyInWarehouse = item.total_qty || 0;
+      if (warehouse === "Ahmedabad") qtyInWarehouse = item.ahmedabad || 0;
+      else if (warehouse === "Mumbai") qtyInWarehouse = item.mumbai || 0;
+      else if (warehouse === "Indore") qtyInWarehouse = item.indore || 0;
 
       return {
         ...item,
         available_in_warehouse: qtyInWarehouse,
-        unit_price: PRODUCT_PRICE_MAP[item.id] || 25000,
+        unit_price: isTestMode ? (TEST_PRICE_MAP[item.id] || 25000) : 0,
       };
     });
-  }, [warehouse]);
+  }, [warehouse, stockCatalog]);
 
   // Filtered search results
   const searchResults = useMemo(() => {

@@ -58,6 +58,7 @@ import type {
   PaginationMeta,
   Company,
   CompanyContact,
+  Lead,
 } from "@/types";
 
 /** Document rule: show 5 chips inline, the rest behind a "+N more" expander. */
@@ -197,6 +198,7 @@ const EMPTY_SUPPLIER_FORM = {
   company_grade: "",
   potential: "",
   company_category: "",
+  business_category: "",
   product_manufacture_or_supply: "",
   machines_buying_from: "",
   spares_buying_from: "",
@@ -1226,15 +1228,19 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [gradeFilter, setGradeFilter] = useState("");
   const [potentialFilter, setPotentialFilter] = useState("");
-  const [businessCategoryFilter, setBusinessCategoryFilter] = useState("");
+  const [potentialBusinessFilter, setPotentialBusinessFilter] = useState("");
+  const [monthlyTurnoverFilter, setMonthlyTurnoverFilter] = useState("");
   const [sectorFilter, setSectorFilter] = useState("");
+  const [businessCategoryFilter, setBusinessCategoryFilter] = useState("");
+  const [directImportFilter, setDirectImportFilter] = useState("");
+  const [monthlyImportVolumeFilter, setMonthlyImportVolumeFilter] = useState("");
   const [salesPersonFilter, setSalesPersonFilter] = useState("");
 
   // Master option lists for filter dropdowns
   const [filterStates, setFilterStates] = useState<Array<{ id: string; name: string }>>([]);
   const [filterDistricts, setFilterDistricts] = useState<Array<{ id: string; name: string; state_id?: string }>>([]);
   const [filterCities, setFilterCities] = useState<Array<{ id: string; name: string; state_id?: string; district_id?: string }>>([]);
-  const [filterCategories, setFilterCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [companyCategories, setCompanyCategories] = useState<Array<{ id: string; name: string; business_type?: string }>>([]);
   const [filterSalesPersons, setFilterSalesPersons] = useState<Array<{ id: string; full_name: string; username: string }>>([]);
   const [salesPersons, setSalesPersons] = useState<Array<{ id: string; full_name: string; username: string }>>([]);
   const [filterBusinessTypes] = useState<Array<{ value: string; label: string }>>([
@@ -1260,14 +1266,13 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       })
       .catch(() => { });
 
-    void apiGet<Array<{ id: string; name: string }>>("/masters/product-categories?page_size=250&status=active")
+    void apiGet<Array<{ id: string; name: string; business_type?: string }>>("/masters/company-categories/lookup")
       .then((res) => {
         if (res?.data) {
-          setFilterCategories([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
+          setCompanyCategories(res.data);
         }
       })
       .catch(() => { });
-
 
     void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
       .then((res) => {
@@ -1321,6 +1326,25 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     return filtered.length > 0 ? filtered : filterCities;
   }, [filterCities, districtFilter, filterDistricts]);
 
+  // Available company categories adapted by Business Type (B2B -> Traditional, Non Traditional; B2C -> Corporate, SME)
+  const availableCompanyCategories = useMemo(() => {
+    const list = companyCategories.length > 0
+      ? companyCategories
+      : [
+          { id: "traditional", name: "Traditional", business_type: "B2B" },
+          { id: "non-traditional", name: "Non Traditional", business_type: "B2B" },
+          { id: "corporate", name: "Corporate", business_type: "B2C" },
+          { id: "sme", name: "SME", business_type: "B2C" },
+        ];
+    if (companyTypeFilter === "B2B") {
+      return list.filter((c) => c.business_type === "B2B");
+    }
+    if (companyTypeFilter === "B2C") {
+      return list.filter((c) => c.business_type === "B2C");
+    }
+    return list;
+  }, [companyCategories, companyTypeFilter]);
+
   const handleResetFilters = () => {
     setFilterDateRange("");
     setCompanyTypeFilter("");
@@ -1331,8 +1355,12 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     setCategoryFilter("");
     setGradeFilter("");
     setPotentialFilter("");
-    setBusinessCategoryFilter("");
+    setPotentialBusinessFilter("");
+    setMonthlyTurnoverFilter("");
     setSectorFilter("");
+    setBusinessCategoryFilter("");
+    setDirectImportFilter("");
+    setMonthlyImportVolumeFilter("");
     setSalesPersonFilter("");
     setCountryFilter(null);
     setSubCategoryFilter(null);
@@ -1627,14 +1655,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         })
         .catch(() => { });
 
-      void apiGet<Array<{ id: string; name: string }>>("/masters/product-categories?page_size=250&status=active")
-        .then((res) => {
-          if (res?.data) {
-            setProductCategories([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
-          }
-        })
-        .catch(() => { });
-
 
       void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
         .then((res) => {
@@ -1911,9 +1931,27 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     ...EMPTY_SUPPLIER_FORM,
     sales_person_id: getLoggedInSalesPersonId(),
   }));
+  const [initialCompanyStatus, setInitialCompanyStatus] = useState<string>("");
+
+  const availableFormCompanyCategories = useMemo(() => {
+    const list = companyCategories.length > 0
+      ? companyCategories
+      : [
+          { id: "traditional", name: "Traditional", business_type: "B2B" },
+          { id: "non-traditional", name: "Non Traditional", business_type: "B2B" },
+          { id: "corporate", name: "Corporate", business_type: "B2C" },
+          { id: "sme", name: "SME", business_type: "B2C" },
+        ];
+    if (form.company_type === "B2B") {
+      return list.filter((c) => c.business_type === "B2B");
+    }
+    if (form.company_type === "B2C") {
+      return list.filter((c) => c.business_type === "B2C");
+    }
+    return list;
+  }, [companyCategories, form.company_type]);
   const [formDistricts, setFormDistricts] = useState<Array<{ id: string; name: string }>>([]);
   const [formCities, setFormCities] = useState<Array<{ id: string; name: string }>>([]);
-  const [productCategories, setProductCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [gstFetching, setGstFetching] = useState(false);
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
 
@@ -2107,6 +2145,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         company_grade: form.company_grade || null,
         potential: form.potential || null,
         company_category: form.company_category || null,
+        business_category: form.business_category || null,
         product_manufacture_or_supply: form.product_manufacture_or_supply.trim() || null,
         machines_buying_from: form.machines_buying_from.trim() || null,
         spares_buying_from: form.spares_buying_from.trim() || null,
@@ -2173,7 +2212,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   }
 
   /* Tabs & Contacts State */
-  const [editTab, setEditTab] = useState<"profile" | "contacts">("profile");
+  const [editTab, setEditTab] = useState<"profile" | "contacts" | "leads" | "call_logs">("profile");
   const [contacts, setContacts] = useState<CompanyContact[]>([]);
   const [contactFormOpen, setContactFormOpen] = useState(false);
   const [contactForm, setContactForm] = useState(EMPTY_CONTACT_FORM);
@@ -2183,6 +2222,67 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [contactSameCallingWechat, setContactSameCallingWechat] = useState(false);
   const [drawerError, setDrawerError] = useState<unknown>(null);
   const [contactSubmitting, setContactSubmitting] = useState(false);
+
+  /* Inside-Company Leads & Call Logs State */
+  const [companyLeads, setCompanyLeads] = useState<Lead[]>([]);
+  const [companyLeadsLoading, setCompanyLeadsLoading] = useState<boolean>(false);
+  const [companyFollowUps, setCompanyFollowUps] = useState<any[]>([]);
+  const [companyFollowUpsLoading, setCompanyFollowUpsLoading] = useState<boolean>(false);
+
+  // Quick modals for adding Lead or Call Log inside Company view
+  const [addLeadModalOpen, setAddLeadModalOpen] = useState<boolean>(false);
+  const [addLeadForm, setAddLeadForm] = useState({
+    contact_person: "",
+    contact_phone: "",
+    contact_email: "",
+    call_type: "Telecall",
+    business_type: "",
+    priority: "B",
+    requirements: "",
+    allotted_to: "",
+    lead_status: "New",
+  });
+  const [savingLead, setSavingLead] = useState<boolean>(false);
+
+  const [addCallLogModalOpen, setAddCallLogModalOpen] = useState<boolean>(false);
+  const [addCallLogForm, setAddCallLogForm] = useState({
+    call_type: "Telecall",
+    marketing_person: "",
+    call_category: "Follow-up",
+    feedback: "",
+    followup_date: "",
+    current_status: "New",
+  });
+  const [savingCallLog, setSavingCallLog] = useState<boolean>(false);
+
+  const fetchCompanyLeadsAndCalls = useCallback(async (companyName: string) => {
+    if (!companyName) return;
+    setCompanyLeadsLoading(true);
+    setCompanyFollowUpsLoading(true);
+    try {
+      const leadsRes = await apiGet<{ items?: Lead[] } | Lead[]>(`/leads?company_name=${encodeURIComponent(companyName)}&limit=100`);
+      const items = Array.isArray(leadsRes.data)
+        ? leadsRes.data
+        : (leadsRes.data as any)?.items || [];
+      setCompanyLeads(items);
+    } catch {
+      setCompanyLeads([]);
+    } finally {
+      setCompanyLeadsLoading(false);
+    }
+
+    try {
+      const followUpsRes = await apiGet<{ items?: any[] } | any[]>(`/follow-ups?company_name=${encodeURIComponent(companyName)}&limit=100`);
+      const items = Array.isArray(followUpsRes.data)
+        ? followUpsRes.data
+        : (followUpsRes.data as any)?.items || [];
+      setCompanyFollowUps(items);
+    } catch {
+      setCompanyFollowUps([]);
+    } finally {
+      setCompanyFollowUpsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!contactCountryId) {
@@ -2535,11 +2635,16 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         company_grade: gradeFilter || "",
         current_status: statusFilter || "",
         potential: potentialFilter || "",
-        company_category: businessCategoryFilter || "",
+        company_category: categoryFilter || "",
+        business_category: businessCategoryFilter || "",
+        monthly_turnover: monthlyTurnoverFilter || "",
+        potential_business_per_month: potentialBusinessFilter || "",
+        direct_import_from_china: directImportFilter || "",
+        monthly_import_volume: monthlyImportVolumeFilter || "",
         sector: sectorFilter || "",
         sales_person_id: salesPersonFilter || "",
         visited_factory_office: visitedFilter || "",
-        category_id: categoryFilter || "",
+        category_id: "",
         sub_category_id: subCategoryFilter || "",
         product_id: productFilter || "",
         created_after: created_after || "",
@@ -2597,6 +2702,10 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     statusFilter,
     potentialFilter,
     businessCategoryFilter,
+    monthlyTurnoverFilter,
+    potentialBusinessFilter,
+    directImportFilter,
+    monthlyImportVolumeFilter,
     sectorFilter,
     salesPersonFilter,
     visitedFilter,
@@ -2734,6 +2843,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       return;
     }
     setCurrentCompanyId(supplier ? supplier.id : null);
+    setInitialCompanyStatus(supplier ? (supplier.current_status || "") : "");
     setModalMode(mode);
     setEditTab("profile");
     setError(null);
@@ -2768,6 +2878,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         company_grade: supplier.company_grade || "",
         potential: supplier.potential || "",
         company_category: supplier.company_category || "",
+        business_category: supplier.business_category || "",
         product_manufacture_or_supply: supplier.product_manufacture_or_supply || "",
         machines_buying_from: supplier.machines_buying_from || "",
         spares_buying_from: supplier.spares_buying_from || "",
@@ -2797,6 +2908,12 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       setFormStateId(supplier.state_id || null);
       setFormCategoryIds(supplier.category_ids || []);
       setContacts(supplier.contacts || []);
+      if (supplier.company_name) {
+        fetchCompanyLeadsAndCalls(supplier.company_name);
+      } else {
+        setCompanyLeads([]);
+        setCompanyFollowUps([]);
+      }
     } else {
       const defaultSpId = getLoggedInSalesPersonId();
       setForm({
@@ -2808,6 +2925,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       setFormCities([]);
       setFormCategoryIds([]);
       setContacts([]);
+      setCompanyLeads([]);
+      setCompanyFollowUps([]);
       setFormCountryId(defaultIndiaId || null);
       setFormAlert(null);
     }
@@ -2818,6 +2937,9 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   function closeModal() {
     setModalOpen(false);
     setCurrentCompanyId(null);
+    setInitialCompanyStatus("");
+    setCompanyLeads([]);
+    setCompanyFollowUps([]);
     setError(null);
     setAlertPopup(null);
     setValidationErrors({});
@@ -3408,39 +3530,107 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   <span style={{ fontSize: "16px" }}>👤</span> Profile
                 </button>
                 {currentCompanyId && (
-                  <button
-                    type="button"
-                    onClick={() => setEditTab("contacts")}
-                    style={{
-                      padding: "10px 18px",
-                      background: "none",
-                      border: "none",
-                      borderBottom: editTab === "contacts" ? "3px solid #0061f2" : "3px solid transparent",
-                      color: editTab === "contacts" ? "#0061f2" : "#64748b",
-                      fontWeight: editTab === "contacts" ? 700 : 600,
-                      fontSize: "14.5px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      marginBottom: "-2px",
-                      transition: "all 0.2s ease",
-                    }}
-                  >
-                    <span style={{ fontSize: "16px" }}>📇</span> Contacts
-                    {contacts.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setEditTab("contacts")}
+                      style={{
+                        padding: "10px 18px",
+                        background: "none",
+                        border: "none",
+                        borderBottom: editTab === "contacts" ? "3px solid #0061f2" : "3px solid transparent",
+                        color: editTab === "contacts" ? "#0061f2" : "#64748b",
+                        fontWeight: editTab === "contacts" ? 700 : 600,
+                        fontSize: "14.5px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        marginBottom: "-2px",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <span style={{ fontSize: "16px" }}>📇</span> Contacts
+                      {contacts.length > 0 && (
+                        <span style={{
+                          background: editTab === "contacts" ? "#e0e7ff" : "#f1f5f9",
+                          color: editTab === "contacts" ? "#4338ca" : "#64748b",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: "12px",
+                        }}>
+                          {contacts.length}
+                        </span>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="company-tab-leads"
+                      onClick={() => setEditTab("leads")}
+                      style={{
+                        padding: "10px 18px",
+                        background: "none",
+                        border: "none",
+                        borderBottom: editTab === "leads" ? "3px solid #0061f2" : "3px solid transparent",
+                        color: editTab === "leads" ? "#0061f2" : "#64748b",
+                        fontWeight: editTab === "leads" ? 700 : 600,
+                        fontSize: "14.5px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        marginBottom: "-2px",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <span style={{ fontSize: "16px" }}>🎯</span> Leads
                       <span style={{
-                        background: editTab === "contacts" ? "#e0e7ff" : "#f1f5f9",
-                        color: editTab === "contacts" ? "#4338ca" : "#64748b",
+                        background: editTab === "leads" ? "#e0e7ff" : "#f1f5f9",
+                        color: editTab === "leads" ? "#4338ca" : "#64748b",
                         fontSize: "12px",
                         fontWeight: 700,
                         padding: "2px 8px",
                         borderRadius: "12px",
                       }}>
-                        {contacts.length}
+                        {companyLeads.length}
                       </span>
-                    )}
-                  </button>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="company-tab-call-logs"
+                      onClick={() => setEditTab("call_logs")}
+                      style={{
+                        padding: "10px 18px",
+                        background: "none",
+                        border: "none",
+                        borderBottom: editTab === "call_logs" ? "3px solid #0061f2" : "3px solid transparent",
+                        color: editTab === "call_logs" ? "#0061f2" : "#64748b",
+                        fontWeight: editTab === "call_logs" ? 700 : 600,
+                        fontSize: "14.5px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        marginBottom: "-2px",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <span style={{ fontSize: "16px" }}>📞</span> Call Logs
+                      <span style={{
+                        background: editTab === "call_logs" ? "#e0e7ff" : "#f1f5f9",
+                        color: editTab === "call_logs" ? "#4338ca" : "#64748b",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: "12px",
+                      }}>
+                        {companyFollowUps.length}
+                      </span>
+                    </button>
+                  </>
                 )}
               </div>
             )}
@@ -3809,7 +3999,9 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       >
                         <option value="">Select</option>
                         <option value="Existing">Existing</option>
-                        <option value="New">New</option>
+                        {initialCompanyStatus.toLowerCase() !== "existing" && (
+                          <option value="New">New</option>
+                        )}
                         {form.current_status &&
                           !["existing", "new", ""].includes(form.current_status.toLowerCase()) && (
                             <option value={form.current_status}>{form.current_status}</option>
@@ -3840,17 +4032,21 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     <div>
                       <label style={fieldLabelStyle}>Category</label>
                       <select
-                        id="category_id"
+                        id="company_category"
                         style={selectStyle}
-                        value={form.category_id}
-                        onChange={(e) => setField("category_id", e.target.value)}
+                        value={form.company_category}
+                        onChange={(e) => setField("company_category", e.target.value)}
                       >
                         <option value="">Select Category</option>
-                        {productCategories.map((pc) => (
-                          <option key={pc.id} value={pc.id}>
-                            {pc.name}
+                        {availableFormCompanyCategories.map((c) => (
+                          <option key={c.name} value={c.name}>
+                            {c.name}
                           </option>
                         ))}
+                        {form.company_category &&
+                          !availableFormCompanyCategories.some((c) => c.name === form.company_category) && (
+                            <option value={form.company_category}>{form.company_category}</option>
+                          )}
                       </select>
                     </div>
 
@@ -3941,12 +4137,12 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     )}
 
                     <div>
-                      <label style={fieldLabelStyle}>Business Categories</label>
+                      <label style={fieldLabelStyle}>Business Category</label>
                       <select
-                        id="company_category"
+                        id="business_category"
                         style={selectStyle}
-                        value={form.company_category}
-                        onChange={(e) => setField("company_category", e.target.value)}
+                        value={form.business_category}
+                        onChange={(e) => setField("business_category", e.target.value)}
                       >
                         <option value="">Select</option>
                         {BUSINESS_CATEGORY_OPTIONS.map((v) => (
@@ -3954,8 +4150,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                             {v}
                           </option>
                         ))}
-                        {form.company_category && !BUSINESS_CATEGORY_OPTIONS.includes(form.company_category) && (
-                          <option value={form.company_category}>{form.company_category}</option>
+                        {form.business_category && !BUSINESS_CATEGORY_OPTIONS.includes(form.business_category) && (
+                          <option value={form.business_category}>{form.business_category}</option>
                         )}
                       </select>
                     </div>
@@ -4931,6 +5127,550 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 </div>
               </div>
             )}
+
+            {/* TAB 3: LEADS TAB VIEW */}
+            {modalMode === "full" && currentCompanyId && editTab === "leads" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+                  <div>
+                    <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                      Company Leads ({form.company_name})
+                    </h3>
+                    <div style={{ fontSize: "13px", color: "#64748b", marginTop: "3px" }}>
+                      Active and historical sales leads, requirements, and statuses for this company.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="company-add-lead-btn"
+                    className="btn btn-add-new"
+                    onClick={() => {
+                      setAddLeadForm({
+                        contact_person: form.contact_full_name || "",
+                        contact_phone: form.contact_calling_number || form.contact_whatsapp_number || "",
+                        contact_email: form.email || "",
+                        call_type: "Telecall",
+                        business_type: form.company_type || "",
+                        priority: "B",
+                        requirements: form.products_interested || "",
+                        allotted_to: form.sales_person_id || "",
+                        lead_status: "New",
+                      });
+                      setAddLeadModalOpen(true);
+                    }}
+                    style={{
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      padding: "9px 18px",
+                      borderRadius: "6px",
+                      fontWeight: 600,
+                      fontSize: "13.5px",
+                      border: "none",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    + Add Lead
+                  </button>
+                </div>
+
+                {/* LEADS LIST TABLE */}
+                <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#ffffff" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Sr.</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Added On</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Call Type</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Contact Person</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Requirements</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Priority</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Allotted To</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {companyLeadsLoading ? (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
+                            Loading company leads...
+                          </td>
+                        </tr>
+                      ) : companyLeads.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: "center", padding: "40px 20px", color: "#64748b" }}>
+                            <div style={{ fontSize: "28px", marginBottom: "8px" }}>🎯</div>
+                            <div style={{ fontWeight: 600, color: "#334155", marginBottom: "4px" }}>No leads recorded yet</div>
+                            <div style={{ fontSize: "12.5px", color: "#94a3b8", marginBottom: "16px" }}>
+                              Create the first lead for {form.company_name} to start tracking sales requirements.
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddLeadForm({
+                                  contact_person: form.contact_full_name || "",
+                                  contact_phone: form.contact_calling_number || form.contact_whatsapp_number || "",
+                                  contact_email: form.email || "",
+                                  call_type: "Telecall",
+                                  business_type: form.company_type || "",
+                                  priority: "B",
+                                  requirements: form.products_interested || "",
+                                  allotted_to: form.sales_person_id || "",
+                                  lead_status: "New",
+                                });
+                                setAddLeadModalOpen(true);
+                              }}
+                              style={{
+                                background: "#0061f2",
+                                color: "#ffffff",
+                                padding: "8px 16px",
+                                borderRadius: "6px",
+                                fontSize: "13px",
+                                fontWeight: 600,
+                                border: "none",
+                                cursor: "pointer",
+                              }}
+                            >
+                              + Create First Lead
+                            </button>
+                          </td>
+                        </tr>
+                      ) : (
+                        companyLeads.map((lead, idx) => (
+                          <tr
+                            key={lead.id}
+                            style={{ borderBottom: "1px solid #f1f5f9" }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
+                          >
+                            <td style={{ padding: "10px 14px", color: "#64748b" }}>{idx + 1}</td>
+                            <td style={{ padding: "10px 14px", color: "#334155" }}>{lead.added_on || lead.created_at?.slice(0, 10) || "—"}</td>
+                            <td style={{ padding: "10px 14px" }}>
+                              <span
+                                style={{
+                                  background: lead.call_type === "Physical Visit" ? "#fef3c7" : lead.call_type === "Telecall" ? "#e0e7ff" : "#f1f5f9",
+                                  color: lead.call_type === "Physical Visit" ? "#92400e" : lead.call_type === "Telecall" ? "#4338ca" : "#475569",
+                                  padding: "2px 8px",
+                                  borderRadius: "10px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {lead.call_type || "Standard"}
+                              </span>
+                            </td>
+                            <td style={{ padding: "10px 14px" }}>
+                              <div style={{ fontWeight: 600, color: "#1e293b" }}>{lead.contact_person || "—"}</div>
+                              {lead.contact_phone && <div style={{ fontSize: "11px", color: "#059669" }}>📞 {lead.contact_phone}</div>}
+                            </td>
+                            <td style={{ padding: "10px 14px", maxWidth: "240px", color: "#475569", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {lead.requirements || "—"}
+                            </td>
+                            <td style={{ padding: "10px 14px" }}>
+                              <span style={{ fontWeight: 700, color: lead.priority === "A" ? "#dc2626" : lead.priority === "B" ? "#d97706" : "#2563eb" }}>
+                                {lead.priority || "B"}
+                              </span>
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#475569" }}>{lead.allotted_to || "—"}</td>
+                            <td style={{ padding: "10px 14px" }}>
+                              <span
+                                style={{
+                                  background: (lead.lead_status || "").toLowerCase() === "won" ? "#dcfce7" : (lead.lead_status || "").toLowerCase().includes("loss") ? "#fee2e2" : "#eff6ff",
+                                  color: (lead.lead_status || "").toLowerCase() === "won" ? "#166534" : (lead.lead_status || "").toLowerCase().includes("loss") ? "#991b1b" : "#1e40af",
+                                  padding: "3px 8px",
+                                  borderRadius: "12px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {lead.lead_status || "New"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: CALL LOGS TAB VIEW */}
+            {modalMode === "full" && currentCompanyId && editTab === "call_logs" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+                  <div>
+                    <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                      Call Logs & Follow-ups ({form.company_name})
+                    </h3>
+                    <div style={{ fontSize: "13px", color: "#64748b", marginTop: "3px" }}>
+                      Chronological call logs, visits, discussion summaries, and next follow-up schedules.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="company-add-call-log-btn"
+                    className="btn btn-add-new"
+                    onClick={() => {
+                      setAddCallLogForm({
+                        call_type: "Telecall",
+                        marketing_person: form.sales_person_id || "",
+                        call_category: "Follow-up",
+                        feedback: "",
+                        followup_date: "",
+                        current_status: "New",
+                      });
+                      setAddCallLogModalOpen(true);
+                    }}
+                    style={{
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      padding: "9px 18px",
+                      borderRadius: "6px",
+                      fontWeight: 600,
+                      fontSize: "13.5px",
+                      border: "none",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    + Add Call Log
+                  </button>
+                </div>
+
+                {/* CALL LOGS LIST TABLE */}
+                <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#ffffff" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Date</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Call Type</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Marketing Person</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Category / Purpose</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Next Follow-up</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Remarks / Discussion</th>
+                        <th style={{ padding: "12px 14px", fontWeight: 700, color: "#475569" }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {companyFollowUpsLoading ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
+                            Loading company call logs...
+                          </td>
+                        </tr>
+                      ) : companyFollowUps.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: "center", padding: "40px 20px", color: "#64748b" }}>
+                            <div style={{ fontSize: "28px", marginBottom: "8px" }}>📞</div>
+                            <div style={{ fontWeight: 600, color: "#334155", marginBottom: "4px" }}>No call logs recorded yet</div>
+                            <div style={{ fontSize: "12.5px", color: "#94a3b8", marginBottom: "16px" }}>
+                              Log a phone call or site visit with {form.company_name}.
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddCallLogForm({
+                                  call_type: "Telecall",
+                                  marketing_person: form.sales_person_id || "",
+                                  call_category: "Follow-up",
+                                  feedback: "",
+                                  followup_date: "",
+                                  current_status: "New",
+                                });
+                                setAddCallLogModalOpen(true);
+                              }}
+                              style={{
+                                background: "#0061f2",
+                                color: "#ffffff",
+                                padding: "8px 16px",
+                                borderRadius: "6px",
+                                fontSize: "13px",
+                                fontWeight: 600,
+                                border: "none",
+                                cursor: "pointer",
+                              }}
+                            >
+                              + Record First Call Log
+                            </button>
+                          </td>
+                        </tr>
+                      ) : (
+                        companyFollowUps.map((log) => (
+                          <tr
+                            key={log.id}
+                            style={{ borderBottom: "1px solid #f1f5f9" }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
+                          >
+                            <td style={{ padding: "10px 14px", color: "#334155", fontWeight: 500 }}>
+                              {log.added_on || log.created_at?.slice(0, 10) || "—"}
+                            </td>
+                            <td style={{ padding: "10px 14px" }}>
+                              <span
+                                style={{
+                                  background: log.call_type === "Physical Visit" ? "#fef3c7" : "#e0e7ff",
+                                  color: log.call_type === "Physical Visit" ? "#92400e" : "#4338ca",
+                                  padding: "2px 8px",
+                                  borderRadius: "10px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {log.call_type || "Telecall"}
+                              </span>
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#1e293b", fontWeight: 500 }}>
+                              {log.marketing_person || "—"}
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#475569" }}>
+                              {log.call_category || log.category || "General"}
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#059669", fontWeight: 600 }}>
+                              {log.followup_date || "—"}
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#475569", maxWidth: "260px" }}>
+                              {log.feedback || log.notes || "—"}
+                            </td>
+                            <td style={{ padding: "10px 14px" }}>
+                              <span
+                                style={{
+                                  background: "#f1f5f9",
+                                  color: "#334155",
+                                  padding: "3px 8px",
+                                  borderRadius: "12px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {log.current_status || "New"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Quick Add Lead Modal inside Company View */}
+            {addLeadModalOpen && (
+              <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div onClick={() => setAddLeadModalOpen(false)} style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.5)" }} />
+                <div style={{ position: "relative", width: "500px", background: "#ffffff", borderRadius: "8px", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)", padding: "24px", zIndex: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>Add Lead for {form.company_name}</h3>
+                    <button type="button" onClick={() => setAddLeadModalOpen(false)} style={{ border: "none", background: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
+                  </div>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    setSavingLead(true);
+                    try {
+                      await apiPost("/leads/", {
+                        ...addLeadForm,
+                        company_name: form.company_name,
+                        address: form.address,
+                        area: form.area,
+                        state: form.state_id,
+                        district: form.district,
+                        city: form.city_id,
+                      });
+                      setAddLeadModalOpen(false);
+                      if (form.company_name) fetchCompanyLeadsAndCalls(form.company_name);
+                    } catch (err: any) {
+                      alert(err?.message || "Failed to create lead");
+                    } finally {
+                      setSavingLead(false);
+                    }
+                  }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <div>
+                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Contact Person</label>
+                        <input
+                          type="text"
+                          value={addLeadForm.contact_person}
+                          onChange={(e) => setAddLeadForm((p) => ({ ...p, contact_person: e.target.value }))}
+                          style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                        />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                        <div>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Phone</label>
+                          <input
+                            type="text"
+                            value={addLeadForm.contact_phone}
+                            onChange={(e) => setAddLeadForm((p) => ({ ...p, contact_phone: e.target.value }))}
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Call Type</label>
+                          <select
+                            value={addLeadForm.call_type}
+                            onChange={(e) => setAddLeadForm((p) => ({ ...p, call_type: e.target.value }))}
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#fff" }}
+                          >
+                            <option value="Telecall">Telecall</option>
+                            <option value="Physical Visit">Physical Visit</option>
+                            <option value="WhatsApp">WhatsApp</option>
+                            <option value="Email">Email</option>
+                            <option value="Incoming Inquiry">Incoming Inquiry</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Requirements</label>
+                        <textarea
+                          rows={3}
+                          value={addLeadForm.requirements}
+                          onChange={(e) => setAddLeadForm((p) => ({ ...p, requirements: e.target.value }))}
+                          style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                        />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                        <div>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Priority</label>
+                          <select
+                            value={addLeadForm.priority}
+                            onChange={(e) => setAddLeadForm((p) => ({ ...p, priority: e.target.value }))}
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#fff" }}
+                          >
+                            <option value="A">A (High)</option>
+                            <option value="B">B (Medium)</option>
+                            <option value="C">C (Low)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Status</label>
+                          <select
+                            value={addLeadForm.lead_status}
+                            onChange={(e) => setAddLeadForm((p) => ({ ...p, lead_status: e.target.value }))}
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#fff" }}
+                          >
+                            <option value="New">New</option>
+                            <option value="Contacted">Contacted</option>
+                            <option value="In Discussion">In Discussion</option>
+                            <option value="Qualified">Qualified</option>
+                            <option value="Won">Won</option>
+                            <option value="Loss">Loss</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px" }}>
+                        <button type="button" onClick={() => setAddLeadModalOpen(false)} style={{ padding: "8px 14px", borderRadius: "5px", border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer" }}>Cancel</button>
+                        <button type="submit" disabled={savingLead} style={{ padding: "8px 16px", borderRadius: "5px", border: "none", background: "#0061f2", color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+                          {savingLead ? "Saving..." : "Save Lead"}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Quick Add Call Log Modal inside Company View */}
+            {addCallLogModalOpen && (
+              <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div onClick={() => setAddCallLogModalOpen(false)} style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.5)" }} />
+                <div style={{ position: "relative", width: "500px", background: "#ffffff", borderRadius: "8px", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)", padding: "24px", zIndex: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>Record Call Log for {form.company_name}</h3>
+                    <button type="button" onClick={() => setAddCallLogModalOpen(false)} style={{ border: "none", background: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
+                  </div>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    setSavingCallLog(true);
+                    try {
+                      await apiPost("/follow-ups/", {
+                        ...addCallLogForm,
+                        company_name: form.company_name,
+                        contact_person: form.contact_full_name,
+                        contact_phone: form.contact_calling_number || form.contact_whatsapp_number,
+                        contact_email: form.email,
+                        followup_date: addCallLogForm.followup_date || null,
+                      });
+                      setAddCallLogModalOpen(false);
+                      if (form.company_name) fetchCompanyLeadsAndCalls(form.company_name);
+                    } catch (err: any) {
+                      alert(err?.message || "Failed to save call log");
+                    } finally {
+                      setSavingCallLog(false);
+                    }
+                  }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                        <div>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Call Type</label>
+                          <select
+                            value={addCallLogForm.call_type}
+                            onChange={(e) => setAddCallLogForm((p) => ({ ...p, call_type: e.target.value }))}
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#fff" }}
+                          >
+                            <option value="Telecall">Telecall</option>
+                            <option value="Physical Visit">Physical Visit</option>
+                            <option value="WhatsApp">WhatsApp</option>
+                            <option value="Email">Email</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Marketing Person</label>
+                          <input
+                            type="text"
+                            value={addCallLogForm.marketing_person}
+                            onChange={(e) => setAddCallLogForm((p) => ({ ...p, marketing_person: e.target.value }))}
+                            placeholder="Person Name"
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                        <div>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Category / Purpose</label>
+                          <input
+                            type="text"
+                            value={addCallLogForm.call_category}
+                            onChange={(e) => setAddCallLogForm((p) => ({ ...p, call_category: e.target.value }))}
+                            placeholder="Follow-up, Negotiation..."
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Next Follow-up Date</label>
+                          <input
+                            type="date"
+                            value={addCallLogForm.followup_date}
+                            onChange={(e) => setAddCallLogForm((p) => ({ ...p, followup_date: e.target.value }))}
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Discussion & Feedback</label>
+                        <textarea
+                          rows={3}
+                          value={addCallLogForm.feedback}
+                          onChange={(e) => setAddCallLogForm((p) => ({ ...p, feedback: e.target.value }))}
+                          placeholder="Summary of conversation, questions raised, quotation discussed..."
+                          style={{ width: "100%", padding: "7px 10px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                        />
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px" }}>
+                        <button type="button" onClick={() => setAddCallLogModalOpen(false)} style={{ padding: "8px 14px", borderRadius: "5px", border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer" }}>Cancel</button>
+                        <button type="submit" disabled={savingCallLog} style={{ padding: "8px 16px", borderRadius: "5px", border: "none", background: "#0061f2", color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+                          {savingCallLog ? "Saving..." : "Save Call Log"}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         </main>
       ) : (
@@ -5019,12 +5759,12 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  columnGap: "24px",
+                  gridTemplateColumns: "repeat(4, 1fr)",
+                  columnGap: "20px",
                   rowGap: "16px",
                 }}
               >
-                {/* Row 1 */}
+                {/* 1. Date / Date Range */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Date / Date Range
@@ -5036,6 +5776,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   />
                 </div>
 
+                {/* 2. Business Type */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Business Type
@@ -5062,6 +5803,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   </select>
                 </div>
 
+                {/* 3. Current Status */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Current Status
@@ -5087,7 +5829,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   </select>
                 </div>
 
-                {/* Row 2 */}
+                {/* 4. State */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     State
@@ -5117,31 +5859,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   </select>
                 </div>
 
-                <div>
-                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    City
-                  </label>
-                  <select
-                    value={cityFilter}
-                    onChange={(e) => setCityFilter(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "38px",
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      color: cityFilter ? "#0f172a" : "#64748b",
-                      background: "#ffffff",
-                    }}
-                  >
-                    <option value="">All</option>
-                    {availableCities.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-
+                {/* 5. District */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     District
@@ -5164,13 +5882,41 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     }}
                   >
                     <option value="">All</option>
+                    <option value="blank">Blank</option>
                     {filterDistricts.map((d) => (
                       <option key={d.id || d.name} value={d.name}>{d.name}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Row 3 */}
+                {/* 6. City */}
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    City
+                  </label>
+                  <select
+                    value={cityFilter}
+                    onChange={(e) => setCityFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: cityFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    <option value="blank">Blank</option>
+                    {availableCities.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 7. Category (Adapted by Business Type: B2B -> Traditional, Non Traditional; B2C -> Corporate, SME) */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Category
@@ -5191,12 +5937,13 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   >
                     <option value="">All</option>
                     <option value="blank">Blank</option>
-                    {filterCategories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    {availableCompanyCategories.map((cat) => (
+                      <option key={cat.id || cat.name} value={cat.name}>{cat.name}</option>
                     ))}
                   </select>
                 </div>
 
+                {/* 8. Client Grade */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Client Grade
@@ -5223,6 +5970,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   </select>
                 </div>
 
+                {/* 9. Potential */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Potential
@@ -5244,17 +5992,18 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     <option value="">All</option>
                     <option value="yes">Yes</option>
                     <option value="no">No</option>
+                    <option value="blank">Blank</option>
                   </select>
                 </div>
 
-                {/* Row 4 */}
+                {/* 10. Potential for Business per month */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Business Category
+                    Potential for Business per month
                   </label>
                   <select
-                    value={businessCategoryFilter}
-                    onChange={(e) => setBusinessCategoryFilter(e.target.value)}
+                    value={potentialBusinessFilter}
+                    onChange={(e) => setPotentialBusinessFilter(e.target.value)}
                     style={{
                       width: "100%",
                       height: "38px",
@@ -5262,17 +6011,46 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       borderRadius: "6px",
                       border: "1px solid #cbd5e1",
                       fontSize: "13px",
-                      color: businessCategoryFilter ? "#0f172a" : "#64748b",
+                      color: potentialBusinessFilter ? "#0f172a" : "#64748b",
                       background: "#ffffff",
                     }}
                   >
                     <option value="">All</option>
-                    <option value="Manufacturer">Manufacturer</option>
-                    <option value="Trader">Trader</option>
                     <option value="blank">Blank</option>
+                    {POTENTIAL_BUSINESS_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
                   </select>
                 </div>
 
+                {/* 11. Monthly Turnover */}
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Monthly Turnover
+                  </label>
+                  <select
+                    value={monthlyTurnoverFilter}
+                    onChange={(e) => setMonthlyTurnoverFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: monthlyTurnoverFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    <option value="blank">Blank</option>
+                    {MONTHLY_TURNOVER_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 12. Sector */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Sector
@@ -5301,6 +6079,86 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   </select>
                 </div>
 
+                {/* 13. Business Category */}
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Business Category
+                  </label>
+                  <select
+                    value={businessCategoryFilter}
+                    onChange={(e) => setBusinessCategoryFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: businessCategoryFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    <option value="Manufacturer">Manufacturer</option>
+                    <option value="Trader">Trader</option>
+                    <option value="blank">Blank</option>
+                  </select>
+                </div>
+
+                {/* 14. Direct Import from China? */}
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Direct Import from China?
+                  </label>
+                  <select
+                    value={directImportFilter}
+                    onChange={(e) => setDirectImportFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: directImportFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                    <option value="blank">Blank</option>
+                  </select>
+                </div>
+
+                {/* 15. Monthly Import Volume */}
+                <div>
+                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                    Monthly Import Volume
+                  </label>
+                  <select
+                    value={monthlyImportVolumeFilter}
+                    onChange={(e) => setMonthlyImportVolumeFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "38px",
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      color: monthlyImportVolumeFilter ? "#0f172a" : "#64748b",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <option value="">All</option>
+                    <option value="blank">Blank</option>
+                    {IMPORT_VOLUME_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 16. Sales Person */}
                 <div>
                   <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Sales Person
@@ -5320,6 +6178,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     }}
                   >
                     <option value="">All</option>
+                    <option value="blank">Blank</option>
                     {filterSalesPersons.map((sp) => (
                       <option key={sp.id} value={sp.id}>{sp.full_name || sp.username}</option>
                     ))}
@@ -6106,6 +6965,9 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
 
             <DetailFieldGrid
               fields={[
+                { label: "Category", value: drawerCompany.company_category || "—" },
+                { label: "Business Category", value: drawerCompany.business_category || "—" },
+                { label: "Sector", value: drawerCompany.sector || "—" },
                 { label: "Company Grade", value: drawerCompany.company_grade || "—" },
                 { label: "Current Status", value: <StatusPill value={drawerCompany.current_status} /> },
                 { label: "Potential", value: drawerCompany.potential || "—" },

@@ -44,13 +44,14 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
       { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
-      { key: "marketing-tasks", label: "Marketing Tasks", path: "/marketing-task/list", icon: "messageSquare" },
     ],
   },
   {
     label: "CONTACT",
     items: [
       { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "company.view" },
+      { key: "agents", label: "Agents", path: "/agents", icon: "user", permission: "agent.view" },
+      { key: "industrial-zones", label: "Industrial Zones", path: "/industrial/zones/list", icon: "pin", permission: "zone.view" },
     ],
   },
   {
@@ -166,6 +167,8 @@ export const NAV_SECTIONS: NavSection[] = [
 ];
 
 export const PAGE_TITLES: Record<string, string> = {
+  agents: "Agents",
+  "industrial-zones": "Industrial Zones",
   leads: "Leads",
   "lead-list": "Leads",
   trash: "Trash Management",
@@ -222,7 +225,6 @@ export const PAGE_TITLES: Record<string, string> = {
   "my-tasks": "My Tasks",
   tasks: "Task Management",
   "technical-tasks": "Technical Task List",
-  "marketing-tasks": "Marketing Tasks",
   "tasks-kanban": "Tasks Kanban Board",
   "tasks-calendar": "Tasks Calendar",
 
@@ -328,6 +330,12 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/product-stock": "/product-stock/list",
   "/product-stock.html": "/product-stock/list",
   "/product_stock/list": "/product-stock/list",
+  "/transaction_report/list": "/reports/stock-transactions",
+  "/transaction-report/list": "/reports/stock-transactions",
+  "/delete_order_report/list": "/reports/deleted-orders",
+  "/delete-order-report/list": "/reports/deleted-orders",
+  "/product-reorder/list": "/reports/re-order",
+  "/product_reorder/list": "/reports/re-order",
   "/stock-transfer.html": "/stock-transfer",
   "/transfer.html": "/transfer/list",
   "/additionalcharges/list": "/masters/additional-charges",
@@ -356,8 +364,6 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/tasks.html": "/tasks",
   "/technical-tasks": "/technical-task/list",
   "/technical-tasks.html": "/technical-task/list",
-  "/marketing-tasks": "/marketing-task/list",
-  "/marketing-tasks.html": "/marketing-task/list",
   // Both of these were already redirect-only stubs in the original.
   "/employee-detail.html": "/users",
   "/employee-form.html": "/users",

@@ -320,17 +320,36 @@ export function SaleProcessFormPage() {
   }, [id, isEdit]);
 
   // Product Search handler
-  const handleProductSearchChange = (query: string) => {
+  const handleProductSearchChange = async (query: string) => {
     setProductSearch(query);
     if (!query.trim()) {
       setProductMatches([]);
       return;
     }
     const q = query.toLowerCase();
-    const matches = SAMPLE_PRODUCTS.filter(
-      (p) => p.product_name.toLowerCase().includes(q) || p.hsn.includes(q)
-    );
-    setProductMatches(matches);
+    if (import.meta.env.MODE === "test") {
+      const matches = SAMPLE_PRODUCTS.filter(
+        (p) => p.product_name.toLowerCase().includes(q) || p.hsn.includes(q)
+      );
+      setProductMatches(matches);
+      return;
+    }
+
+    try {
+      const res = await apiGet<any[] | { items: any[] }>(
+        `/masters/products?page=1&page_size=20&status=active&search=${encodeURIComponent(query.trim())}`
+      );
+      const items = Array.isArray(res?.data) ? res.data : (res?.data?.items || []);
+      const mapped = items.map((p: any) => ({
+        product_name: p.product_name || p.name || "",
+        hsn: p.hsn_code || p.hsn || "",
+        rate: Number(p.sales_price || p.unit_price || p.price || 0),
+        gst_percent: Number(p.gst_rate || p.tax_percent || 18),
+      }));
+      setProductMatches(mapped);
+    } catch {
+      setProductMatches([]);
+    }
   };
 
   const handleSelectProductMatch = (prod: (typeof SAMPLE_PRODUCTS)[0]) => {
@@ -572,15 +591,28 @@ export function SaleProcessFormPage() {
         toast("Sales Order created successfully", "success");
       }
       navigate("/sales/process");
-    } catch {
-      // Offline fallback: simulate successful save
-      toast(
-        isEdit
-          ? `Sales Order ${orderNo || id} updated successfully`
-          : "Sales Order created successfully",
-        "success"
-      );
-      navigate("/sales/process");
+    } catch (err: any) {
+      const errorMsg =
+        err?.response?.data?.detail?.message ||
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message;
+      if (errorMsg && (err?.response?.status === 409 || err?.response?.status === 400 || err?.response?.status === 422)) {
+        toast(String(errorMsg), "error");
+        return;
+      }
+      // Offline fallback: simulate successful save only in test/offline environment without server response
+      if (!err?.response && import.meta.env.MODE === "test") {
+        toast(
+          isEdit
+            ? `Sales Order ${orderNo || id} updated successfully`
+            : "Sales Order created successfully",
+          "success"
+        );
+        navigate("/sales/process");
+      } else {
+        toast(errorMsg ? String(errorMsg) : "Failed to save sales order", "error");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -991,7 +1023,7 @@ export function SaleProcessFormPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!companyName) setCompanyName("V S Machines");
+                    if (!companyName && import.meta.env.MODE === "test") setCompanyName("V S Machines");
                   }}
                   style={{
                     height: "34px",

@@ -29,6 +29,7 @@ class LeadBase(BaseModel):
     allotted_to: str | None = None
     created_by: str | None = None
     lead_status: str = Field(default="New", max_length=50)
+    call_type: str | None = None
     notes: str | None = None
     added_on: date | None = None
 
@@ -55,6 +56,7 @@ class LeadUpdate(BaseModel):
     allotted_to: str | None = None
     created_by: str | None = None
     lead_status: str | None = None
+    call_type: str | None = None
     notes: str | None = None
     added_on: date | None = None
 

@@ -21,7 +21,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundException, ValidationException
+from app.core.exceptions import BadRequestException, NotFoundException, ValidationException
 from app.masters.taxes.models import Tax
 from app.masters.products.models import Product
 from app.planning.models import PlanningCell, PlanningColumn, PlanningRow, PlanningSheet
@@ -389,12 +389,29 @@ class SaleService:
             buyer_name=payload.buyer_name,
             buyer_branch_id=payload.buyer_branch_id,
             buyer_branch_name=payload.buyer_branch_name,
+            company_name=payload.company_name or payload.buyer_name,
+            warehouse=payload.warehouse,
+            proforma_no=payload.proforma_no,
+            proforma_id=payload.proforma_id,
+            city=payload.city,
+            state=payload.state,
+            sales_person=payload.sales_person,
+            billing_address=payload.billing_address,
+            shipping_address=payload.shipping_address,
+            payment_terms=payload.payment_terms,
+            transport_destination=payload.transport_destination,
+            delivery_type=payload.delivery_type,
+            delivery_charge=payload.delivery_charge,
+            third_party_delivery=payload.third_party_delivery,
+            third_party_invoice=payload.third_party_invoice,
+            amount_inc_gst=payload.amount_inc_gst or round(total_amount, 2),
+            discount=payload.discount or 0.0,
             consignment_code=payload.consignment_code,
             planning_sheet_id=payload.planning_sheet_id,
             planning_column_id=payload.planning_column_id,
             order_date=payload.order_date,
             delivery_date=payload.delivery_date,
-            currency=payload.currency or "RMB",
+            currency=payload.currency or "INR",
             status=payload.status or "pending",
             total_basic=round(total_basic, 2),
             total_tax=round(total_tax, 2),
@@ -412,6 +429,17 @@ class SaleService:
             items=item_entities,
         )
 
+        # Deduct physical warehouse stock if warehouse is physical
+        if payload.warehouse:
+            from app.purchase.common import move_stock
+            from app.inventory import stock_service
+            try:
+                wh = await stock_service.get_warehouse(self.session, payload.warehouse)
+                if stock_service.is_physical(wh):
+                    await move_stock(self.session, payload.warehouse, [(it.product_name, it.quantity) for it in payload.items], -1)
+            except BadRequestException:
+                pass
+
         return await self.repo.create(order)
 
     async def update_order(
@@ -423,6 +451,22 @@ class SaleService:
         if not order:
             raise NotFoundException(f"Sale order {order_id} not found.")
 
+        # Check warehouse change to physical warehouse
+        if payload.warehouse is not None and payload.warehouse != order.warehouse:
+            from app.purchase.common import move_stock
+            from app.inventory import stock_service
+            try:
+                old_wh = await stock_service.get_warehouse(self.session, order.warehouse) if order.warehouse else None
+                new_wh = await stock_service.get_warehouse(self.session, payload.warehouse)
+                if stock_service.is_physical(new_wh):
+                    items_to_move = [(it.product_name, it.quantity) for it in (order.items or [])]
+                    if items_to_move:
+                        await move_stock(self.session, payload.warehouse, items_to_move, -1)
+                        if old_wh and stock_service.is_physical(old_wh):
+                            await move_stock(self.session, old_wh.name, items_to_move, 1)
+            except BadRequestException:
+                pass
+
         if payload.buyer_id is not None:
             order.buyer_id = payload.buyer_id
         if payload.buyer_name is not None:
@@ -431,6 +475,54 @@ class SaleService:
             order.buyer_branch_id = payload.buyer_branch_id
         if payload.buyer_branch_name is not None:
             order.buyer_branch_name = payload.buyer_branch_name
+        if payload.company_name is not None:
+            order.company_name = payload.company_name
+        if payload.warehouse is not None:
+            order.warehouse = payload.warehouse
+        if payload.proforma_no is not None:
+            order.proforma_no = payload.proforma_no
+        if payload.proforma_id is not None:
+            order.proforma_id = payload.proforma_id
+        if payload.city is not None:
+            order.city = payload.city
+        if payload.state is not None:
+            order.state = payload.state
+        if payload.sales_person is not None:
+            order.sales_person = payload.sales_person
+        if payload.billing_address is not None:
+            order.billing_address = payload.billing_address
+        if payload.shipping_address is not None:
+            order.shipping_address = payload.shipping_address
+        if payload.payment_terms is not None:
+            order.payment_terms = payload.payment_terms
+        if payload.transport_destination is not None:
+            order.transport_destination = payload.transport_destination
+        if payload.delivery_type is not None:
+            order.delivery_type = payload.delivery_type
+        if payload.delivery_charge is not None:
+            order.delivery_charge = payload.delivery_charge
+        if payload.third_party_delivery is not None:
+            order.third_party_delivery = payload.third_party_delivery
+        if payload.third_party_invoice is not None:
+            order.third_party_invoice = payload.third_party_invoice
+        if payload.amount_inc_gst is not None:
+            order.amount_inc_gst = payload.amount_inc_gst
+        if payload.discount is not None:
+            order.discount = payload.discount
+
+        if payload.invoice_no is not None:
+            order.invoice_no = payload.invoice_no
+        if payload.invoice_date is not None:
+            order.invoice_date = payload.invoice_date
+        if payload.gatepass is not None:
+            order.gatepass = payload.gatepass
+        if payload.gatepass_no is not None:
+            order.gatepass_no = payload.gatepass_no
+        if payload.gatepass_date is not None:
+            order.gatepass_date = payload.gatepass_date
+        if payload.gatepass_handled_by is not None:
+            order.gatepass_handled_by = payload.gatepass_handled_by
+
         if payload.consignment_code is not None:
             order.consignment_code = payload.consignment_code
         if payload.planning_sheet_id is not None:
@@ -509,16 +601,49 @@ class SaleService:
     async def update_status(
         self,
         order_id: uuid.UUID,
-        status: str,
+        payload_or_status: Any,
         remarks: str | None = None,
     ) -> SaleOrder:
         order = await self.repo.get_by_id(order_id)
         if not order:
             raise NotFoundException(f"Sale order {order_id} not found.")
 
-        order.status = status.strip().lower()
-        if remarks:
-            order.remarks = f"{order.remarks or ''}\n[{date.today()}] Status updated to {status}: {remarks}".strip()
+        if hasattr(payload_or_status, "status"):
+            st = payload_or_status.status.strip().lower()
+            rmk = payload_or_status.remarks or remarks
+            if payload_or_status.invoice_no:
+                order.invoice_no = payload_or_status.invoice_no
+            if payload_or_status.invoice_date:
+                order.invoice_date = payload_or_status.invoice_date
+            if payload_or_status.third_party_invoice:
+                order.third_party_invoice = payload_or_status.third_party_invoice
+            if payload_or_status.gatepass:
+                order.gatepass = payload_or_status.gatepass
+                order.gatepass_no = payload_or_status.gatepass
+            if payload_or_status.gatepass_no:
+                order.gatepass = payload_or_status.gatepass_no
+                order.gatepass_no = payload_or_status.gatepass_no
+            if payload_or_status.gatepass_date:
+                order.gatepass_date = payload_or_status.gatepass_date
+            if payload_or_status.gatepass_handled_by:
+                order.gatepass_handled_by = payload_or_status.gatepass_handled_by
+            if payload_or_status.transporter_name:
+                order.transporter_name = payload_or_status.transporter_name
+            if payload_or_status.transport_destination:
+                order.transport_destination = payload_or_status.transport_destination
+            if payload_or_status.delivery_type:
+                order.delivery_type = payload_or_status.delivery_type
+            if payload_or_status.delivery_charge:
+                order.delivery_charge = payload_or_status.delivery_charge
+            if payload_or_status.lr_no:
+                order.lr_no = payload_or_status.lr_no
+        else:
+            st = str(payload_or_status).strip().lower()
+            rmk = remarks
+
+        order.status = st
+        if rmk:
+            order.remarks = f"{order.remarks or ''}\n[{date.today()}] Status updated to {st}: {rmk}".strip()
 
         return await self.repo.update(order)
 

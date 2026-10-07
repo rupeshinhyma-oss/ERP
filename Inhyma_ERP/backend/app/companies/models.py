@@ -105,6 +105,7 @@ class Company(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     secondary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     company_category: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    business_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     sector: Mapped[str | None] = mapped_column(String(150), nullable=True)
     monthly_turnover: Mapped[str | None] = mapped_column(String(50), nullable=True)
     product_manufacture_or_supply: Mapped[str | None] = mapped_column(Text, nullable=True)

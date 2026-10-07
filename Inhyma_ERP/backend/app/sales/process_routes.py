@@ -155,42 +155,7 @@ async def list_sale_orders(
         offset=offset,
     )
 
-    items = []
-    for r in records:
-        items.append(
-            SaleOrderResponse(
-                id=r.id,
-                order_no=r.order_no,
-                organization_id=r.organization_id,
-                organization_name=r.organization_name,
-                buyer_id=r.buyer_id,
-                buyer_name=r.buyer_name,
-                buyer_branch_id=r.buyer_branch_id,
-                buyer_branch_name=r.buyer_branch_name,
-                consignment_code=r.consignment_code,
-                planning_sheet_id=r.planning_sheet_id,
-                planning_column_id=r.planning_column_id,
-                order_date=r.order_date,
-                delivery_date=r.delivery_date,
-                currency=r.currency,
-                status=r.status,
-                total_basic=float(r.total_basic),
-                total_tax=float(r.total_tax),
-                total_amount=float(r.total_amount),
-                total_quantity=float(r.total_quantity),
-                item_count=len(r.items),
-                container_no=r.container_no,
-                bl_no=r.bl_no,
-                lr_no=r.lr_no,
-                transporter_name=r.transporter_name,
-                port_of_loading=r.port_of_loading,
-                port_of_discharge=r.port_of_discharge,
-                remarks=r.remarks,
-                created_by_name=r.created_by_name,
-                created_at=r.created_at,
-                updated_at=r.updated_at,
-            ).model_dump()
-        )
+    items = [SaleOrderResponse.model_validate(r).model_dump() for r in records]
 
     return build_success_response(
         data={
@@ -268,7 +233,7 @@ async def update_order_status(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    order = await service.update_status(id, payload.status, payload.remarks)
+    order = await service.update_status(id, payload)
     loaded = await service.repo.get_by_id(order.id)
     if not loaded:
         raise NotFoundException("Order could not be reloaded.")
@@ -292,6 +257,24 @@ async def delete_sale_order(
         raise NotFoundException(f"Sale order {id} not found.")
     return build_success_response(
         data={"id": str(id), "deleted": True},
+        request_id=req_id,
+    )
+
+
+@router.post("/orders/{id}/restore", summary="Restore a soft-deleted sale order")
+async def restore_sale_order(
+    id: uuid.UUID,
+    request: Request,
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    restored_by = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
+    ok = await service.repo.restore(id, restored_by=restored_by)
+    if not ok:
+        raise NotFoundException(f"Sale order {id} not found.")
+    return build_success_response(
+        data={"id": str(id), "restored": True},
         request_id=req_id,
     )
 

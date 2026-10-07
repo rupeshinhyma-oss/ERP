@@ -102,6 +102,10 @@ class SaleRepository:
                 or_(
                     SaleOrder.order_no.ilike(clean_search),
                     SaleOrder.buyer_name.ilike(clean_search),
+                    SaleOrder.company_name.ilike(clean_search),
+                    SaleOrder.warehouse.ilike(clean_search),
+                    SaleOrder.sales_person.ilike(clean_search),
+                    SaleOrder.proforma_no.ilike(clean_search),
                     SaleOrder.consignment_code.ilike(clean_search),
                     SaleOrder.container_no.ilike(clean_search),
                     SaleOrder.bl_no.ilike(clean_search),
@@ -162,6 +166,8 @@ class SaleRepository:
         metrics = SaleSummaryMetrics()
         all_count = 0
         all_amount = 0.0
+        admin_to_lr_count = 0
+        admin_to_lr_amount = 0.0
 
         for r in rows:
             st = str(r[0]).lower().strip()
@@ -171,12 +177,22 @@ class SaleRepository:
             all_count += cnt
             all_amount += amt
 
+            if st in ("admin_approved", "acc_confirmed", "gatepass_created", "dispatched", "lr"):
+                admin_to_lr_count += cnt
+                admin_to_lr_amount += amt
+
             if st == "pending":
                 metrics.pending = MetricItem(count=cnt, amount=amt)
             elif st == "sales_confirmed":
                 metrics.sales_confirmed = MetricItem(count=cnt, amount=amt)
             elif st == "admin_approved":
                 metrics.admin_approved = MetricItem(count=cnt, amount=amt)
+            elif st == "acc_confirmed":
+                metrics.acc_confirmed = MetricItem(count=cnt, amount=amt)
+            elif st == "gatepass_created":
+                metrics.gatepass_created = MetricItem(count=cnt, amount=amt)
+            elif st == "gatepass_cancelled":
+                metrics.gatepass_cancelled = MetricItem(count=cnt, amount=amt)
             elif st == "dispatched":
                 metrics.dispatched = MetricItem(count=cnt, amount=amt)
             elif st == "lr":
@@ -185,6 +201,7 @@ class SaleRepository:
                 metrics.cancelled = MetricItem(count=cnt, amount=amt)
 
         metrics.all = MetricItem(count=all_count, amount=round(all_amount, 2))
+        metrics.admin_confirmed_to_lr = MetricItem(count=admin_to_lr_count, amount=round(admin_to_lr_amount, 2))
         return metrics
 
     async def create(self, order: SaleOrder) -> SaleOrder:
@@ -212,3 +229,19 @@ class SaleRepository:
             order.remarks = f"{order.remarks or ''}\n[{date.today()}] Deleted by {deleted_by}".strip()
         await self.session.flush()
         return True
+
+    async def restore(self, order_or_id: SaleOrder | uuid.UUID, restored_by: str | None = None) -> bool:
+        if isinstance(order_or_id, uuid.UUID):
+            stmt = select(SaleOrder).where(SaleOrder.id == order_or_id)
+            order = (await self.session.execute(stmt)).scalars().first()
+            if not order:
+                return False
+        else:
+            order = order_or_id
+
+        order.deleted_at = None
+        if restored_by:
+            order.remarks = f"{order.remarks or ''}\n[{date.today()}] Restored by {restored_by}".strip()
+        await self.session.flush()
+        return True
+

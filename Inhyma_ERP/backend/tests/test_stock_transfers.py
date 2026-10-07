@@ -99,3 +99,44 @@ async def test_live_stock_transfers_db_and_counts():
         assert top_row.added_by == "Akshata Wadekar"
         assert top_row.status == "Received"
         assert top_row.total_amount == pytest.approx(629534.06, 0.01)
+
+
+def test_parse_wh_column_physical_and_transit():
+    from app.inventory.routes import _parse_wh_column
+
+    col, city, is_tr = _parse_wh_column("Ahmedabad")
+    assert col == "ahmedabad" and city == "ahmedabad" and not is_tr
+
+    col, city, is_tr = _parse_wh_column("Mumbai Transit")
+    assert col == "mumbai_transit" and city == "mumbai" and is_tr
+
+    col, city, is_tr = _parse_wh_column("Main Warehouse - Bhiwandi")
+    assert col == "mumbai" and city == "mumbai" and not is_tr
+
+    col, city, is_tr = _parse_wh_column("Indore Transit")
+    assert col == "indore_transit" and city == "indore" and is_tr
+
+    col, city, is_tr = _parse_wh_column("Indore", prefer_transit=True)
+    assert col == "indore_transit" and city == "indore" and is_tr
+
+
+def test_recompute_total_stock():
+    from app.inventory.routes import _recompute_total_stock
+    from app.inventory.models import ProductStock
+
+    prod = ProductStock(
+        product_name_tally="Demo Item",
+        ahmedabad=10.0,
+        ahmedabad_transit=5.0,
+        ahmedabad_ordered=2.0,
+        mumbai=20.0,
+        mumbai_transit=3.0,
+        mumbai_ordered=0.0,
+        indore=4.0,
+        indore_transit=1.0,
+        indore_ordered=0.0,
+        total_qty=0.0,
+    )
+    _recompute_total_stock(prod)
+    assert prod.total_qty == 45.0
+

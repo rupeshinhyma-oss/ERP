@@ -6,8 +6,10 @@ Provides REST API endpoints for:
 - Detail retrieval
 - Creation
 - Updates
-- Status transitions (approve, complete, cancel)
+- Status transitions (approve, complete, cancel, reopen/reassign)
 - Single and bulk deletion
+- Call Logs management (create, list)
+- Payment Screenshot upload
 """
 
 from __future__ import annotations
@@ -15,17 +17,20 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
-from app.technical_tasks.models import TechnicalTask
+from app.common.storage import save_uploaded_file
+from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog
 from app.technical_tasks.repository import TechnicalTaskRepository
 from app.technical_tasks.schemas import (
     TechnicalTaskBulkDeleteRequest,
+    TechnicalTaskCallLogCreate,
+    TechnicalTaskCallLogRead,
     TechnicalTaskCountsResponse,
     TechnicalTaskCreate,
     TechnicalTaskRead,
@@ -43,6 +48,10 @@ def get_service(db: AsyncSession = Depends(get_db_session)) -> TechnicalTaskServ
 
 def _to_dict(task: TechnicalTask) -> dict[str, Any]:
     return TechnicalTaskRead.model_validate(task).model_dump(mode="json")
+
+
+def _log_to_dict(log: TechnicalTaskCallLog) -> dict[str, Any]:
+    return TechnicalTaskCallLogRead.model_validate(log).model_dump(mode="json")
 
 
 @router.get("", summary="List technical tasks with filtering and pagination")
@@ -117,6 +126,30 @@ async def get_task_counts(
     return {"success": True, "data": counts}
 
 
+@router.post("/upload-screenshot", summary="Upload payment screenshot")
+async def upload_payment_screenshot(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: CurrentUser | None = Depends(get_current_user),
+) -> dict:
+    content = await file.read()
+    public_url, stored_name = await save_uploaded_file(
+        content=content,
+        original_filename=file.filename or "screenshot.png",
+        bucket="technical-task-screenshots",
+        local_subfolder="technical_tasks",
+        content_type=file.content_type,
+    )
+    return {
+        "success": True,
+        "data": {
+            "file_url": public_url,
+            "file_name": file.filename or stored_name,
+        },
+        "message": "Payment screenshot uploaded successfully.",
+    }
+
+
 @router.get("/{task_id}", summary="Get technical task details")
 async def get_technical_task(
     task_id: uuid.UUID,
@@ -179,3 +212,24 @@ async def bulk_delete_technical_tasks(
         "message": f"Successfully deleted {deleted_count} technical task(s).",
         "deleted_count": deleted_count,
     }
+
+
+@router.get("/{task_id}/call-logs", summary="Get call logs for a task")
+async def get_task_call_logs(
+    task_id: uuid.UUID,
+    service: TechnicalTaskService = Depends(get_service),
+) -> dict:
+    logs = await service.list_call_logs(task_id)
+    return {"success": True, "data": [_log_to_dict(l) for l in logs]}
+
+
+@router.post("/{task_id}/call-logs", status_code=status.HTTP_201_CREATED, summary="Add a call log for a task")
+async def create_task_call_log(
+    task_id: uuid.UUID,
+    payload: TechnicalTaskCallLogCreate,
+    service: TechnicalTaskService = Depends(get_service),
+    current_user: CurrentUser | None = Depends(get_current_user),
+) -> dict:
+    creator = current_user.username if current_user else "Technician"
+    log = await service.add_call_log(task_id, payload, creator_name=creator)
+    return {"success": True, "data": _log_to_dict(log), "message": "Call log recorded successfully."}

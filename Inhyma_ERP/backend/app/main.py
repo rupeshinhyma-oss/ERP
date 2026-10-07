@@ -128,6 +128,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursement_notes TEXT;"))
             await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS receipt_filename VARCHAR(255);"))
             from app.users.models import User
+            from app.sales.models import DiscountPayment
+            from app.suppliers.models import Supplier, SupplierContact
+            from app.purchase.models import LocalPurchase, LocalPurchaseItem, ImportPurchase, ImportPurchaseItem
             await conn.run_sync(
                 Base.metadata.create_all,
                 tables=[
@@ -148,6 +151,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     HrmsSiteVisit.__table__,
                     HrmsLiveTrackingSession.__table__,
                     HrmsTrackingPoint.__table__,
+                    DiscountPayment.__table__,
+                    Supplier.__table__,
+                    SupplierContact.__table__,
+                    LocalPurchase.__table__,
+                    LocalPurchaseItem.__table__,
+                    ImportPurchase.__table__,
+                    ImportPurchaseItem.__table__,
                 ],
             )
 

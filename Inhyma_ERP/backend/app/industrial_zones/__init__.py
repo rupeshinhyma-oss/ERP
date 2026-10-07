@@ -1,0 +1,1 @@
+"""Industrial Zones module package."""

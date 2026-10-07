@@ -38,6 +38,7 @@ class Lead(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     allotted_to: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
     created_by: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
     lead_status: Mapped[str] = mapped_column(String(50), nullable=False, default="New", index=True)
+    call_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     added_on: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
 

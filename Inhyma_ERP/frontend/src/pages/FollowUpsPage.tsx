@@ -88,109 +88,6 @@ const INITIAL_FILTERS: FilterState = {
   business_category: "",
 };
 
-const INITIAL_MOCK_FOLLOW_UPS: FollowUpItem[] = [
-  {
-    id: "fup-001",
-    company_name: "DURAPAK (VAPI)",
-    contact_person: "Ramesh Shah",
-    contact_phone: "9824056789",
-    contact_email: "ramesh@durapak.com",
-    designation: "Plant Head",
-    business_type: "Manufacturer",
-    client_grade: "Grade A",
-    potential_type: "High",
-    business_category: "Packaging Machinery",
-    category: "Industrial Equipment",
-    call_type: "Outgoing Call",
-    call_category: "Follow Up",
-    marketing_person: "Pooja Vani",
-    current_status: "Existing",
-    feedback: "Discussed heavy duty carton sealing machines; quotation revised and client will confirm PO by Friday.",
-    address: "Plot 42, GIDC Industrial Estate",
-    area: "GIDC",
-    city: "Vapi",
-    district: "Valsad",
-    state: "Gujarat",
-    followup_date: "2026-10-05",
-    added_on: "2026-09-29",
-  },
-  {
-    id: "fup-002",
-    company_name: "Apex Valves & Automation India Pvt Ltd",
-    contact_person: "Rajesh Sharma",
-    contact_phone: "9876543210",
-    contact_email: "rajesh@apexvalves.com",
-    designation: "Director",
-    business_type: "Trader",
-    client_grade: "Grade B",
-    potential_type: "Medium",
-    business_category: "Flow Control",
-    category: "Pneumatics",
-    call_type: "Incoming Call",
-    call_category: "Quotation Discussion",
-    marketing_person: "Admin",
-    current_status: "Hot Lead",
-    feedback: "Client called regarding technical specs for pneumatic control valves. Sample requested for testing.",
-    address: "Phase II, Vatva GIDC",
-    area: "Vatva",
-    city: "Ahmedabad",
-    district: "Ahmedabad",
-    state: "Gujarat",
-    followup_date: "2026-10-02",
-    added_on: "2026-09-28",
-  },
-  {
-    id: "fup-003",
-    company_name: "Shree Krishna Polymers",
-    contact_person: "Mukesh Patel",
-    contact_phone: "9426012345",
-    contact_email: "mukesh@skpolymers.com",
-    designation: "Purchase Manager",
-    business_type: "OEM",
-    client_grade: "Grade A",
-    potential_type: "High",
-    business_category: "Plastic Extrusion",
-    category: "Raw Materials",
-    call_type: "Site Visit",
-    call_category: "Demo",
-    marketing_person: "Vikram Rathod",
-    current_status: "New",
-    feedback: "Visited Surat manufacturing facility; demonstrated high speed stretch film rewinder. Excellent interest.",
-    address: "Survey No. 128, Sachin GIDC",
-    area: "Sachin",
-    city: "Surat",
-    district: "Surat",
-    state: "Gujarat",
-    followup_date: "2026-10-08",
-    added_on: "2026-09-27",
-  },
-  {
-    id: "fup-004",
-    company_name: "Techno Mech Engineering",
-    contact_person: "Amit Joshi",
-    contact_phone: "9909098765",
-    contact_email: "amit@technomech.in",
-    designation: "Operations Lead",
-    business_type: "Manufacturer",
-    client_grade: "Grade C",
-    potential_type: "Low",
-    business_category: "Fabrication",
-    category: "Machining",
-    call_type: "Outgoing Call",
-    call_category: "Payment Follow-up",
-    marketing_person: "Pooja Vani",
-    current_status: "Cold",
-    feedback: "Followed up on pending invoice payment. Account department promised RTGS clearance by Tuesday.",
-    address: "Makarpura Industrial Estate",
-    area: "Makarpura",
-    city: "Vadodara",
-    district: "Vadodara",
-    state: "Gujarat",
-    followup_date: "2026-09-30",
-    added_on: "2026-09-25",
-  },
-];
-
 const DEFAULT_INDIAN_STATES = [
   "Andhra Pradesh",
   "Arunachal Pradesh",
@@ -335,7 +232,7 @@ function FollowUpsTableSkeletonRows({ count = 8 }: { count?: number }) {
 
 export default function FollowUpsPage() {
   // State variables
-  const [followUps, setFollowUps] = useState<FollowUpItem[]>(INITIAL_MOCK_FOLLOW_UPS);
+  const [followUps, setFollowUps] = useState<FollowUpItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -374,14 +271,13 @@ export default function FollowUpsPage() {
     setLoading(true);
     try {
       const res = await apiGet<FollowUpItem[]>("/follow-ups");
-      if (res && res.data && Array.isArray(res.data) && res.data.length > 0) {
+      if (res && res.data && Array.isArray(res.data)) {
         setFollowUps(res.data);
       } else {
-        setFollowUps(INITIAL_MOCK_FOLLOW_UPS);
+        setFollowUps([]);
       }
     } catch {
-      // Fallback gracefully to mock data
-      setFollowUps(INITIAL_MOCK_FOLLOW_UPS);
+      setFollowUps([]);
     } finally {
       setLoading(false);
     }

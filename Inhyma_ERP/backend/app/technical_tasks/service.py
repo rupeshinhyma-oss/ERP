@@ -7,10 +7,15 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 
-from app.core.exceptions import NotFoundException
-from app.technical_tasks.models import TechnicalTask
+from app.core.exceptions import BadRequestException, NotFoundException
+from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog
 from app.technical_tasks.repository import TechnicalTaskRepository
-from app.technical_tasks.schemas import TechnicalTaskCreate, TechnicalTaskStatusUpdate, TechnicalTaskUpdate
+from app.technical_tasks.schemas import (
+    TechnicalTaskCallLogCreate,
+    TechnicalTaskCreate,
+    TechnicalTaskStatusUpdate,
+    TechnicalTaskUpdate,
+)
 
 
 class TechnicalTaskService:
@@ -77,19 +82,44 @@ class TechnicalTaskService:
         self, task_id: uuid.UUID, payload: TechnicalTaskStatusUpdate, user_name: str | None = None
     ) -> TechnicalTask:
         task = await self.get_by_id(task_id)
-        new_status = payload.status.capitalize()
+        raw_status = payload.status.strip()
+        if raw_status.lower().replace("_", " ") == "payment pending":
+            new_status = "Payment Pending"
+        elif raw_status.lower() in ("cancel", "cancelled"):
+            new_status = "Cancel"
+        else:
+            new_status = raw_status.capitalize()
 
         updates: dict = {"status": new_status}
         if payload.task_allotted_to:
             updates["task_allotted_to"] = payload.task_allotted_to
+        if payload.payment_status:
+            updates["payment_status"] = payload.payment_status
 
         if new_status == "Approved":
             updates["task_approved_by"] = payload.task_approved_by or user_name or "Manager"
             updates["task_approved_date"] = payload.task_approved_date or date.today()
+            if payload.scheduled_visit_date:
+                updates["scheduled_visit_date"] = payload.scheduled_visit_date
+            if payload.remarks:
+                updates["approver_remarks"] = payload.remarks
         elif new_status == "Completed":
             updates["completed_date"] = payload.completed_date or date.today()
+            if payload.payment_mode:
+                updates["payment_mode"] = payload.payment_mode
+            if payload.payment_screenshot:
+                updates["payment_screenshot"] = payload.payment_screenshot
+            if payload.remarks:
+                updates["approver_remarks"] = payload.remarks
         elif new_status == "Cancel":
-            pass
+            cancel_rem = payload.cancel_remarks or payload.remarks
+            if not cancel_rem or not cancel_rem.strip():
+                raise BadRequestException("Remarks are mandatory when cancelling a technical task.")
+            updates["cancel_remarks"] = cancel_rem.strip()
+        elif new_status == "Pending":
+            # Reopen to Pending
+            if payload.remarks:
+                updates["approver_remarks"] = payload.remarks
 
         return await self.repository.update(task, **updates)
 
@@ -99,3 +129,20 @@ class TechnicalTaskService:
 
     async def bulk_delete(self, ids: list[uuid.UUID]) -> int:
         return await self.repository.bulk_soft_delete(ids)
+
+    async def add_call_log(
+        self, task_id: uuid.UUID, payload: TechnicalTaskCallLogCreate, creator_name: str
+    ) -> TechnicalTaskCallLog:
+        """Log a call or physical visit for a task."""
+        task = await self.get_by_id(task_id)
+        return await self.repository.create_call_log(
+            task_id=task.id,
+            call_date=payload.call_date or date.today(),
+            call_type=payload.call_type or "Telecall",
+            remarks=payload.remarks,
+            created_by=creator_name,
+        )
+
+    async def list_call_logs(self, task_id: uuid.UUID) -> list[TechnicalTaskCallLog]:
+        await self.get_by_id(task_id)
+        return await self.repository.list_call_logs(task_id)

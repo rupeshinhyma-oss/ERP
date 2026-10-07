@@ -159,17 +159,45 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
     order_no: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("master_companies.id"), nullable=False, index=True
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("master_companies.id"), nullable=True, index=True
     )
     organization_name: Mapped[str] = mapped_column(String(150), default="Inhyma", nullable=False)
 
-    buyer_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("buyers.id"), nullable=False, index=True
+    buyer_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("buyers.id"), nullable=True, index=True
     )
     buyer_name: Mapped[str] = mapped_column(String(200), nullable=False)
     buyer_branch_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     buyer_branch_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+
+    company_name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    warehouse: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    proforma_no: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    proforma_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    sales_person: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
+    billing_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shipping_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payment_terms: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    transport_destination: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    delivery_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    delivery_charge: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    third_party_delivery: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    third_party_invoice: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    amount_inc_gst: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    discount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+
+    # Invoicing & Accounting
+    invoice_no: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    invoice_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # Gate Pass tracking
+    gatepass: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gatepass_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gatepass_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    gatepass_handled_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     consignment_code: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     planning_sheet_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -229,11 +257,16 @@ class SaleOrderItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
     product_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     hsn_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    uom: Mapped[str | None] = mapped_column(String(50), default="Nos", nullable=True)
 
     quantity: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     unit_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    unit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit_discount: Mapped[float | None] = mapped_column(Float, default=0.0, nullable=True)
+    taxable_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     tax_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     tax_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    gst_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     item_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     planning_row_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -257,11 +290,22 @@ class DiscountPayment(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin
     order_ref: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     customer_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     sales_person: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    warehouse: Mapped[str | None] = mapped_column(String(100), default="Mumbai", nullable=True)
+    contact_person_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    contact_person_mobile: Mapped[str | None] = mapped_column(String(50), nullable=True)
     total_order_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     discount_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     discount_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    paid_discount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    due_discount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     net_payable: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False, index=True)
+    status_updated_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    settled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    gatepass_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    gatepass_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    settle_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    settle_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(100), default="Admin User", nullable=False)
 

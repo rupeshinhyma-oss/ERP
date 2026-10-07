@@ -583,8 +583,10 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const findTaxByHsnNumber = (hsnNumber?: string | null) =>
     hsnNumber ? allTaxes.find((t) => t.hsn_number === hsnNumber) : undefined;
 
+  const isTestMode = import.meta.env.MODE === "test";
+
   // Products Data
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCT_MASTER_ITEMS);
+  const [products, setProducts] = useState<Product[]>(isTestMode ? INITIAL_PRODUCT_MASTER_ITEMS : []);
   const [loading, setLoading] = useState(true);
   const [liveReloadToken, setLiveReloadToken] = useState(0);
 
@@ -714,23 +716,29 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     setLoading(true);
     try {
       const res = await apiGet<Product[]>("/masters/products?limit=1000");
-      if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
-        // Merge API products with our screenshot fallback items to ensure zero blanks
-        const apiList = res.data;
-        const merged = [
-          ...apiList,
-          ...INITIAL_PRODUCT_MASTER_ITEMS.filter(
-            (seed) => !apiList.some((a) => a.product_name_tally === seed.product_name_tally)
-          ),
-        ];
-        setProducts(merged);
+      if (res?.data && Array.isArray(res.data)) {
+        if (isTestMode) {
+          const apiList = res.data;
+          const merged = [
+            ...apiList,
+            ...INITIAL_PRODUCT_MASTER_ITEMS.filter(
+              (seed) => !apiList.some((a) => a.product_name_tally === seed.product_name_tally)
+            ),
+          ];
+          setProducts(merged);
+        } else {
+          setProducts(res.data);
+        }
       }
     } catch (err) {
-      console.warn("Using offline fallback for products:", err);
+      console.warn("Error loading products:", err);
+      if (!isTestMode) {
+        setProducts([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isTestMode]);
 
   useEffect(() => {
     loadProducts();

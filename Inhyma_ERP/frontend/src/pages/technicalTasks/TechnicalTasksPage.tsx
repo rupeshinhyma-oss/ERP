@@ -10,13 +10,18 @@ import {
   updateTechnicalTaskStatus,
   deleteTechnicalTask,
   bulkDeleteTechnicalTasks,
+  fetchTaskCallLogs,
+  createTaskCallLog,
+  uploadPaymentScreenshot,
   type TechnicalTaskListParams,
 } from "@/lib/technicalTasksApi";
 import type {
   TechnicalTask,
+  TechnicalTaskCallLog,
   TechnicalTaskCounts,
   TechnicalTaskCreatePayload,
 } from "@/types/technicalTasks";
+import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
 import { apiGet, errorMessage } from "@/lib/api";
 import { useOptions, optionValues } from "@/lib/options";
 import { Banner, Modal } from "@/components/ui";
@@ -551,7 +556,19 @@ function TechnicalTasksPageContent() {
   const CALL_TYPE_OPTIONS = callTypeOptions;
   const PRIORITY_OPTIONS = optionValues(optionGroups, "technical_task.priority");
   const SERVICE_TYPE_OPTIONS = optionValues(optionGroups, "technical_task.service_type");
-  const STATUS_OPTIONS = optionValues(optionGroups, "technical_task.status");
+  const baseStatusOptions = optionValues(optionGroups, "technical_task.status");
+  const STATUS_OPTIONS = useMemo(() => {
+    const list = baseStatusOptions.length > 0 ? [...baseStatusOptions] : ["Pending", "Approved", "Completed", "Cancel"];
+    if (!list.some((s) => s.toLowerCase() === "payment pending")) {
+      const compIdx = list.findIndex((s) => s.toLowerCase() === "completed");
+      if (compIdx !== -1) {
+        list.splice(compIdx, 0, "Payment Pending");
+      } else {
+        list.push("Payment Pending");
+      }
+    }
+    return list;
+  }, [baseStatusOptions]);
 
   // Feedback and Error Handling States
   const [apiError, setApiError] = useState<unknown>(null);
@@ -590,13 +607,40 @@ function TechnicalTasksPageContent() {
   // Action Menu Dropdown inside table cell
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
 
-  // Modals
+  // Modals & Stage Management
   const [detailTask, setDetailTask] = useState<TechnicalTask | null>(null);
   const [addEditModalOpen, setAddEditModalOpen] = useState<boolean>(false);
   const [editingTask, setEditingTask] = useState<TechnicalTask | null>(null);
   const [statusModalTask, setStatusModalTask] = useState<TechnicalTask | null>(null);
   const [newStatusValue, setNewStatusValue] = useState<string>("Approved");
   const [statusRemarks, setStatusRemarks] = useState<string>("");
+  const [statusAllottedTo, setStatusAllottedTo] = useState<string>("");
+  const [statusVisitDate, setStatusVisitDate] = useState<string>("");
+  const [statusPaymentCollected, setStatusPaymentCollected] = useState<boolean>(true);
+  const [statusPaymentMode, setStatusPaymentMode] = useState<string>("Company Acc");
+  const [statusScreenshotFile, setStatusScreenshotFile] = useState<File | null>(null);
+  const [statusScreenshotUrl, setStatusScreenshotUrl] = useState<string>("");
+  const [uploadingScreenshot, setUploadingScreenshot] = useState<boolean>(false);
+
+  // Cancellation Modal State (Mandatory Remarks)
+  const [cancelModalTask, setCancelModalTask] = useState<TechnicalTask | null>(null);
+  const [cancelRemarks, setCancelRemarks] = useState<string>("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [submittingCancel, setSubmittingCancel] = useState<boolean>(false);
+
+  // Call Logs Modal State
+  const [callLogModalTask, setCallLogModalTask] = useState<TechnicalTask | null>(null);
+  const [callLogsList, setCallLogsList] = useState<TechnicalTaskCallLog[]>([]);
+  const [loadingCallLogs, setLoadingCallLogs] = useState<boolean>(false);
+  const [newCallLogType, setNewCallLogType] = useState<string>("Telecall");
+  const [newCallLogRemarks, setNewCallLogRemarks] = useState<string>("");
+  const [callLogError, setCallLogError] = useState<string | null>(null);
+  const [submittingCallLog, setSubmittingCallLog] = useState<boolean>(false);
+
+  // Product Autocomplete State for Machine & Model
+  const [productSuggestions, setProductSuggestions] = useState<Array<{ id: string; product_name: string; product_code?: string }>>([]);
+  const [showProductDropdown, setShowProductDropdown] = useState<boolean>(false);
+  const productSearchRef = useRef<HTMLDivElement>(null);
 
   // Form State for Add / Edit
   const [formData, setFormData] = useState<TechnicalTaskCreatePayload>({
@@ -604,6 +648,9 @@ function TechnicalTasksPageContent() {
     task_type: "",
     city: "",
     third_party: "",
+    third_party_city: "",
+    third_party_contact_name: "",
+    third_party_contact_phone: "",
     priority: "A",
     machine_model: "",
     task_description: "",
@@ -612,7 +659,9 @@ function TechnicalTasksPageContent() {
     contact_phone: "",
     service_type: "",
     service_charge: 0,
+    payment_terms: "",
     call_type: "",
+    creator_remarks: "",
     task_allotted_to: "",
     payment_status: "Pending",
     status: "Pending",
@@ -631,6 +680,9 @@ function TechnicalTasksPageContent() {
       }
       if (bulkActionsRef.current && !bulkActionsRef.current.contains(e.target as Node)) {
         setBulkActionsOpen(false);
+      }
+      if (productSearchRef.current && !productSearchRef.current.contains(e.target as Node)) {
+        setShowProductDropdown(false);
       }
       setOpenActionMenuId(null);
     }
@@ -908,6 +960,126 @@ function TechnicalTasksPageContent() {
     URL.revokeObjectURL(url);
   };
 
+  // Product Search handler for Machine & Model
+  const handleProductSearch = async (val: string) => {
+    if (!val.trim()) {
+      setProductSuggestions([]);
+      setShowProductDropdown(false);
+      return;
+    }
+    try {
+      const res = await apiGet<any[] | { items: any[] }>(
+        `/masters/products?is_active=true&search=${encodeURIComponent(val.trim())}&limit=20`
+      );
+      const prods = Array.isArray(res?.data) ? res.data : (res?.data?.items || []);
+      const mapped = prods.map((p: any) => ({
+        id: String(p.id),
+        product_name: String(p.product_name || p.name || ""),
+        product_code: String(p.product_code || ""),
+      }));
+      setProductSuggestions(mapped);
+      setShowProductDropdown(mapped.length > 0);
+    } catch {
+      setProductSuggestions([]);
+      setShowProductDropdown(false);
+    }
+  };
+
+  // Open Call Logs modal
+  const handleOpenCallLogs = async (task: TechnicalTask) => {
+    setCallLogModalTask(task);
+    setNewCallLogRemarks("");
+    setNewCallLogType("Telecall");
+    setCallLogError(null);
+    setLoadingCallLogs(true);
+    try {
+      const logs = await fetchTaskCallLogs(task.id);
+      setCallLogsList(logs);
+    } catch (err: any) {
+      setCallLogError(errorMessage(err));
+    } finally {
+      setLoadingCallLogs(false);
+    }
+  };
+
+  // Submit New Call Log
+  const handleCreateCallLogSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!callLogModalTask) return;
+    if (!newCallLogRemarks.trim()) {
+      setCallLogError("Remarks / Feedback by technician is required.");
+      return;
+    }
+    setSubmittingCallLog(true);
+    setCallLogError(null);
+    try {
+      await createTaskCallLog(callLogModalTask.id, {
+        call_type: newCallLogType,
+        remarks: newCallLogRemarks.trim(),
+      });
+      showSuccess("Call log recorded successfully.");
+      setNewCallLogRemarks("");
+      const refreshed = await fetchTaskCallLogs(callLogModalTask.id);
+      setCallLogsList(refreshed);
+    } catch (err: any) {
+      setCallLogError(errorMessage(err));
+    } finally {
+      setSubmittingCallLog(false);
+    }
+  };
+
+  // Cancel Task Submit with Mandatory Remarks
+  const handleCancelTaskSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancelModalTask) return;
+    if (!cancelRemarks.trim()) {
+      setCancelError("Remarks are mandatory when cancelling a technical task.");
+      return;
+    }
+    setSubmittingCancel(true);
+    setCancelError(null);
+    try {
+      await updateTechnicalTaskStatus(cancelModalTask.id, "Cancel", cancelRemarks.trim(), {
+        cancel_remarks: cancelRemarks.trim(),
+      });
+      showSuccess(`Task cancelled for ${cancelModalTask.company_name}.`);
+      setCancelModalTask(null);
+      setCancelRemarks("");
+      await Promise.all([loadTasks(), loadCounts()]);
+    } catch (err: any) {
+      setCancelError(errorMessage(err));
+    } finally {
+      setSubmittingCancel(false);
+    }
+  };
+
+  // Stage Modal Openers
+  const openApproveModal = (task: TechnicalTask) => {
+    setStatusModalTask(task);
+    setNewStatusValue("Approved");
+    setStatusAllottedTo(task.task_allotted_to || "");
+    setStatusVisitDate(task.scheduled_visit_date || task.task_approved_date || "");
+    setStatusRemarks(task.approver_remarks || "");
+  };
+
+  const openCompleteModal = (task: TechnicalTask) => {
+    setStatusModalTask(task);
+    setNewStatusValue("Completed");
+    setStatusPaymentCollected(task.payment_status?.toLowerCase() === "paid");
+    setStatusPaymentMode(task.payment_mode || "Company Acc");
+    setStatusScreenshotUrl(task.payment_screenshot || "");
+    setStatusScreenshotFile(null);
+    setStatusRemarks(task.approver_remarks || "");
+  };
+
+  const openReopenModal = (task: TechnicalTask) => {
+    setStatusModalTask(task);
+    setNewStatusValue("Approved");
+    setStatusAllottedTo(task.task_allotted_to || "");
+    setStatusVisitDate("");
+    setStatusRemarks("");
+  };
+
   // Open Add New Task
   const handleOpenAdd = () => {
     setEditingTask(null);
@@ -916,6 +1088,9 @@ function TechnicalTasksPageContent() {
       task_type: "",
       city: "",
       third_party: "",
+      third_party_city: "",
+      third_party_contact_name: "",
+      third_party_contact_phone: "",
       priority: "A",
       machine_model: "",
       task_description: "",
@@ -924,12 +1099,15 @@ function TechnicalTasksPageContent() {
       contact_phone: "",
       service_type: "",
       service_charge: 0,
+      payment_terms: "",
       call_type: "",
+      creator_remarks: "",
       task_allotted_to: "",
       payment_status: "Pending",
       status: "Pending",
     });
     setFormError(null);
+    setShowProductDropdown(false);
     setAddEditModalOpen(true);
   };
 
@@ -941,6 +1119,9 @@ function TechnicalTasksPageContent() {
       task_type: task.task_type,
       city: task.city,
       third_party: task.third_party || "",
+      third_party_city: task.third_party_city || "",
+      third_party_contact_name: task.third_party_contact_name || "",
+      third_party_contact_phone: task.third_party_contact_phone || "",
       priority: task.priority || "A",
       machine_model: task.machine_model,
       task_description: task.task_description || "",
@@ -949,16 +1130,19 @@ function TechnicalTasksPageContent() {
       contact_phone: task.contact_phone || "",
       service_type: task.service_type,
       service_charge: task.service_charge || 0,
+      payment_terms: task.payment_terms || "",
       call_type: task.call_type,
+      creator_remarks: task.creator_remarks || "",
       task_allotted_to: task.task_allotted_to || "",
       payment_status: task.payment_status || "Pending",
       status: task.status,
     });
     setFormError(null);
+    setShowProductDropdown(false);
     setAddEditModalOpen(true);
   };
 
-  // Submit Form (Add or Edit) with Screenshot Fields Validation
+  // Submit Form (Add or Edit)
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.company_name.trim()) {
@@ -973,6 +1157,14 @@ function TechnicalTasksPageContent() {
       setFormError("Task Type is required.");
       return;
     }
+    if (
+      formData.task_type === "Onsite Visit - Third-Party Location" &&
+      !formData.third_party_city?.trim() &&
+      !formData.third_party?.trim()
+    ) {
+      setFormError("Third-Party City is required for third-party onsite visits.");
+      return;
+    }
     if (!formData.machine_model.trim()) {
       setFormError("Machine & Model is required.");
       return;
@@ -983,6 +1175,10 @@ function TechnicalTasksPageContent() {
     }
     if (!formData.service_type || formData.service_type === "Select") {
       setFormError("Service Type is required.");
+      return;
+    }
+    if (formData.service_type === "Chargeable" && !formData.payment_terms?.trim()) {
+      setFormError("Payment Terms are required for chargeable tasks.");
       return;
     }
     if (!formData.call_type || formData.call_type === "Select") {
@@ -1016,10 +1212,49 @@ function TechnicalTasksPageContent() {
 
     try {
       setActionError(null);
-      await updateTechnicalTaskStatus(statusModalTask.id, newStatusValue, statusRemarks);
-      showSuccess(`Status updated to ${newStatusValue} for ${statusModalTask.company_name}.`);
+      let targetStatus = newStatusValue;
+      let targetPaymentStatus: string | undefined = undefined;
+      let uploadedScreenshotUrl = statusScreenshotUrl;
+
+      if (
+        newStatusValue === "Completed" &&
+        (statusModalTask.service_type === "Chargeable" || (statusModalTask.service_charge ?? 0) > 0)
+      ) {
+        if (!statusPaymentCollected) {
+          targetStatus = "Payment Pending";
+          targetPaymentStatus = "Pending";
+        } else {
+          targetPaymentStatus = "Paid";
+          if (statusScreenshotFile) {
+            setUploadingScreenshot(true);
+            try {
+              const uploadRes = await uploadPaymentScreenshot(statusScreenshotFile);
+              uploadedScreenshotUrl = uploadRes.file_url;
+            } catch (upErr) {
+              console.warn("Screenshot upload warning:", upErr);
+            } finally {
+              setUploadingScreenshot(false);
+            }
+          }
+        }
+      }
+
+      await updateTechnicalTaskStatus(statusModalTask.id, targetStatus, statusRemarks, {
+        task_allotted_to: targetStatus === "Approved" ? (statusAllottedTo || undefined) : undefined,
+        task_approved_date: targetStatus === "Approved" ? (statusVisitDate || undefined) : undefined,
+        scheduled_visit_date: targetStatus === "Approved" ? (statusVisitDate || undefined) : undefined,
+        payment_status: targetPaymentStatus,
+        payment_mode: targetPaymentStatus === "Paid" ? statusPaymentMode : undefined,
+        payment_screenshot: targetPaymentStatus === "Paid" ? (uploadedScreenshotUrl || undefined) : undefined,
+      });
+
+      showSuccess(`Status updated to ${targetStatus} for ${statusModalTask.company_name}.`);
       setStatusModalTask(null);
       setStatusRemarks("");
+      setStatusAllottedTo("");
+      setStatusVisitDate("");
+      setStatusScreenshotFile(null);
+      setStatusScreenshotUrl("");
       await Promise.all([loadTasks(), loadCounts()]);
     } catch (err) {
       setActionError(err);
@@ -1196,6 +1431,7 @@ function TechnicalTasksPageContent() {
     let badgeClass = "badge-tech";
     if (s === "pending") badgeClass += " badge-status-pending";
     else if (s === "approved") badgeClass += " badge-status-approved";
+    else if (s === "payment_pending" || s === "payment pending") badgeClass += " badge-status-payment-pending";
     else if (s === "completed") badgeClass += " badge-status-completed";
     else if (s === "cancel") badgeClass += " badge-status-cancel";
 
@@ -1722,6 +1958,7 @@ function TechnicalTasksPageContent() {
               { key: "all", label: `All (${counts.all})` },
               { key: "pending", label: `Pending (${counts.pending})` },
               { key: "approved", label: `Approved (${counts.approved})` },
+              { key: "payment_pending", label: `Payment Pending (${counts.payment_pending ?? 0})` },
               { key: "completed", label: `Completed (${counts.completed})` },
               { key: "cancel", label: `Cancel (${counts.cancel})` },
             ].map((tab) => {
@@ -2532,6 +2769,7 @@ function TechnicalTasksPageContent() {
                                             display: "flex",
                                             alignItems: "center",
                                             gap: "6px",
+                                            color: "#334155",
                                           }}
                                         >
                                           <span>👁</span>
@@ -2540,7 +2778,7 @@ function TechnicalTasksPageContent() {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            handleOpenEdit(task);
+                                            handleOpenCallLogs(task);
                                             setOpenActionMenuId(null);
                                           }}
                                           style={{
@@ -2553,33 +2791,170 @@ function TechnicalTasksPageContent() {
                                             display: "flex",
                                             alignItems: "center",
                                             gap: "6px",
+                                            color: "#0284c7",
                                           }}
                                         >
-                                          <span>✏️</span>
-                                          <span>Edit</span>
+                                          <span>📞</span>
+                                          <span>Call Logs</span>
                                         </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setStatusModalTask(task);
-                                            setNewStatusValue(task.status);
-                                            setOpenActionMenuId(null);
-                                          }}
-                                          style={{
-                                            padding: "8px 12px",
-                                            background: "none",
-                                            border: "none",
-                                            textAlign: "left",
-                                            fontSize: "13px",
-                                            cursor: "pointer",
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: "6px",
-                                          }}
-                                        >
-                                          <span>🔄</span>
-                                          <span>Change Status</span>
-                                        </button>
+
+                                        {/* Stage 1: Pending -> Approve, Edit, Delete */}
+                                        {task.status.toLowerCase() === "pending" && (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                openApproveModal(task);
+                                                setOpenActionMenuId(null);
+                                              }}
+                                              style={{
+                                                padding: "8px 12px",
+                                                background: "none",
+                                                border: "none",
+                                                textAlign: "left",
+                                                fontSize: "13px",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "6px",
+                                                color: "#16a34a",
+                                                fontWeight: 600,
+                                              }}
+                                            >
+                                              <span>✅</span>
+                                              <span>Approve</span>
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                handleOpenEdit(task);
+                                                setOpenActionMenuId(null);
+                                              }}
+                                              style={{
+                                                padding: "8px 12px",
+                                                background: "none",
+                                                border: "none",
+                                                textAlign: "left",
+                                                fontSize: "13px",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "6px",
+                                                color: "#334155",
+                                              }}
+                                            >
+                                              <span>✏️</span>
+                                              <span>Edit</span>
+                                            </button>
+                                          </>
+                                        )}
+
+                                        {/* Stage 2: Approved -> Complete Task, Cancel Task, Edit, Delete */}
+                                        {task.status.toLowerCase() === "approved" && (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                openCompleteModal(task);
+                                                setOpenActionMenuId(null);
+                                              }}
+                                              style={{
+                                                padding: "8px 12px",
+                                                background: "none",
+                                                border: "none",
+                                                textAlign: "left",
+                                                fontSize: "13px",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "6px",
+                                                color: "#16a34a",
+                                                fontWeight: 600,
+                                              }}
+                                            >
+                                              <span>✔️</span>
+                                              <span>Complete Task</span>
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setCancelModalTask(task);
+                                                setCancelRemarks("");
+                                                setCancelError(null);
+                                                setOpenActionMenuId(null);
+                                              }}
+                                              style={{
+                                                padding: "8px 12px",
+                                                background: "none",
+                                                border: "none",
+                                                textAlign: "left",
+                                                fontSize: "13px",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "6px",
+                                                color: "#ea580c",
+                                                fontWeight: 500,
+                                              }}
+                                            >
+                                              <span>❌</span>
+                                              <span>Cancel Task</span>
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                handleOpenEdit(task);
+                                                setOpenActionMenuId(null);
+                                              }}
+                                              style={{
+                                                padding: "8px 12px",
+                                                background: "none",
+                                                border: "none",
+                                                textAlign: "left",
+                                                fontSize: "13px",
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "6px",
+                                                color: "#334155",
+                                              }}
+                                            >
+                                              <span>✏️</span>
+                                              <span>Edit</span>
+                                            </button>
+                                          </>
+                                        )}
+
+                                        {/* Stage 3: Cancel / Payment Pending -> Reopen / Reassign Task, Delete */}
+                                        {(task.status.toLowerCase() === "cancel" ||
+                                          task.status.toLowerCase() === "cancelled" ||
+                                          task.status.toLowerCase() === "payment pending") && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              openReopenModal(task);
+                                              setOpenActionMenuId(null);
+                                            }}
+                                            style={{
+                                              padding: "8px 12px",
+                                              background: "none",
+                                              border: "none",
+                                              textAlign: "left",
+                                              fontSize: "13px",
+                                              cursor: "pointer",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: "6px",
+                                              color: "#4f46e5",
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            <span>🔄</span>
+                                            <span>Reopen / Reassign</span>
+                                          </button>
+                                        )}
+
+                                        {/* Universal Delete */}
                                         <div style={{ borderTop: "1px solid #f1f5f9" }} />
                                         <button
                                           type="button"
@@ -2940,6 +3315,243 @@ function TechnicalTasksPageContent() {
                   {detailTask.task_description || "—"}
                 </div>
               </div>
+
+              {/* Conditional Third-Party Site Details */}
+              {(detailTask.third_party ||
+                detailTask.third_party_city ||
+                detailTask.third_party_contact_name ||
+                detailTask.task_type === "Onsite Visit - Third-Party Location") && (
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: "#475569",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    🏢 Third-Party Location Details
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#64748b" }}>Location / Name:</span>
+                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                        {detailTask.third_party || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#64748b" }}>City:</span>
+                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                        {detailTask.third_party_city || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#64748b" }}>Contact Person:</span>
+                      <div style={{ fontSize: "12.5px", color: "#334155" }}>
+                        {detailTask.third_party_contact_name || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#64748b" }}>Contact Mobile:</span>
+                      <div style={{ fontSize: "12.5px", color: "#334155" }}>
+                        {detailTask.third_party_contact_phone || "—"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Approval & Scheduled Visit Date */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "20px",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: "#64748b",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Task Allotted To
+                  </div>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                    {detailTask.task_allotted_to || "—"}
+                  </div>
+                  {detailTask.task_approved_by && (
+                    <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px" }}>
+                      Approved by: {detailTask.task_approved_by}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: "#64748b",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Scheduled Visit Date
+                  </div>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                    {detailTask.scheduled_visit_date || detailTask.task_approved_date || "—"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Details (Charge, Terms, Mode, Screenshot) */}
+              {(detailTask.service_type === "Chargeable" || (detailTask.service_charge ?? 0) > 0) && (
+                <div
+                  style={{
+                    background: "#fefce8",
+                    border: "1px solid #fef08a",
+                    borderRadius: "6px",
+                    padding: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: "#854d0e",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    💰 Chargeable Payment Details
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#713f12" }}>Service Charge:</span>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#854d0e" }}>
+                        ₹{detailTask.service_charge || 0}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#713f12" }}>Payment Status:</span>
+                      <div>{renderPaymentBadge(detailTask.payment_status)}</div>
+                    </div>
+                  </div>
+                  {detailTask.payment_terms && (
+                    <div>
+                      <span style={{ fontSize: "11px", color: "#713f12" }}>Payment Terms:</span>
+                      <div style={{ fontSize: "12.5px", color: "#451a03", marginTop: "2px" }}>
+                        {detailTask.payment_terms}
+                      </div>
+                    </div>
+                  )}
+                  {detailTask.payment_mode && (
+                    <div style={{ display: "flex", gap: "14px", alignItems: "center", marginTop: "4px" }}>
+                      <span style={{ fontSize: "11.5px", color: "#713f12" }}>
+                        Mode: <strong>{detailTask.payment_mode}</strong>
+                      </span>
+                      {detailTask.payment_screenshot && (
+                        <a
+                          href={detailTask.payment_screenshot}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#0061f2",
+                            textDecoration: "underline",
+                          }}
+                        >
+                          View Receipt / Screenshot ↗
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Combined Remarks Box */}
+              <div
+                style={{
+                  background: "#f1f5f9",
+                  borderRadius: "6px",
+                  padding: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                }}
+              >
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>
+                  Combined Activity Remarks
+                </div>
+                {detailTask.creator_remarks && (
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b" }}>Creator: </span>
+                    <span style={{ fontSize: "12.5px", color: "#1e293b" }}>{detailTask.creator_remarks}</span>
+                  </div>
+                )}
+                {detailTask.approver_remarks && (
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b" }}>Approver: </span>
+                    <span style={{ fontSize: "12.5px", color: "#1e293b" }}>{detailTask.approver_remarks}</span>
+                  </div>
+                )}
+                {detailTask.cancel_remarks && (
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: "#dc2626" }}>Cancellation: </span>
+                    <span style={{ fontSize: "12.5px", color: "#991b1b" }}>{detailTask.cancel_remarks}</span>
+                  </div>
+                )}
+                {!detailTask.creator_remarks && !detailTask.approver_remarks && !detailTask.cancel_remarks && (
+                  <span style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+                    No additional remarks recorded.
+                  </span>
+                )}
+              </div>
+
+              {/* Quick Call Logs button */}
+              <div style={{ marginTop: "4px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOpenCallLogs(detailTask);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "8px",
+                    background: "#f0fdf4",
+                    color: "#166534",
+                    border: "1px solid #bbf7d0",
+                    borderRadius: "6px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <span>📞</span>
+                  <span>View / Log Call Logs</span>
+                </button>
+              </div>
             </div>
           )}
         </Modal>
@@ -2985,24 +3597,30 @@ function TechnicalTasksPageContent() {
                 </div>
               )}
 
-              {/* Company Name * */}
+              {/* Company Name * with Keyword Autocomplete */}
               <div>
                 <label style={fieldLabelStyle}>
                   Company Name <span style={{ color: "#ef4444" }}>*</span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Search for Company Name"
+                <ClientNameAutocomplete
                   value={formData.company_name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, company_name: e.target.value })
-                  }
-                  style={inputStyle}
+                  onChange={(val) => setFormData({ ...formData, company_name: val })}
+                  onSelectCompany={(item) => {
+                    setFormData((prev) => ({
+                      ...prev,
+                      company_name: item.company_name,
+                      city: item.city_name || prev.city,
+                      contact_person_name: item.contact_full_name || prev.contact_person_name,
+                      contact_designation: item.contact_designation || prev.contact_designation,
+                      contact_phone: item.contact_calling_number || item.contact_whatsapp_number || prev.contact_phone,
+                    }));
+                  }}
+                  placeholder="Search for Company Name"
+                  inputStyle={inputStyle}
                 />
               </div>
 
-              {/* Contact Person & Contact Number * */}
+              {/* Contact Person & Contact Designation */}
               <div
                 style={{
                   display: "grid",
@@ -3026,18 +3644,15 @@ function TechnicalTasksPageContent() {
                   />
                 </div>
                 <div>
-                  <label style={fieldLabelStyle}>
-                    Contact Number <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
+                  <label style={fieldLabelStyle}>Designation</label>
                   <input
                     type="text"
-                    required
-                    placeholder=""
-                    value={formData.contact_phone || ""}
+                    placeholder="Designation e.g. Manager"
+                    value={formData.contact_designation || ""}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        contact_phone: e.target.value,
+                        contact_designation: e.target.value,
                       })
                     }
                     style={inputStyle}
@@ -3045,14 +3660,31 @@ function TechnicalTasksPageContent() {
                 </div>
               </div>
 
-              {/* Task Type * & City (and Third-Party if selected) */}
+              {/* Contact Number * */}
+              <div>
+                <label style={fieldLabelStyle}>
+                  Contact Number <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Mobile / Calling Number"
+                  value={formData.contact_phone || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      contact_phone: e.target.value,
+                    })
+                  }
+                  style={inputStyle}
+                />
+              </div>
+
+              {/* Task Type * & City */}
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns:
-                    formData.task_type === "Onsite Visit - Third-Party Location"
-                      ? "1fr 1fr 1fr"
-                      : "1fr 1fr",
+                  gridTemplateColumns: "1fr 1fr",
                   gap: "14px",
                 }}
               >
@@ -3070,6 +3702,18 @@ function TechnicalTasksPageContent() {
                         third_party:
                           e.target.value === "Onsite Visit - Third-Party Location"
                             ? formData.third_party
+                            : "",
+                        third_party_city:
+                          e.target.value === "Onsite Visit - Third-Party Location"
+                            ? formData.third_party_city
+                            : "",
+                        third_party_contact_name:
+                          e.target.value === "Onsite Visit - Third-Party Location"
+                            ? formData.third_party_contact_name
+                            : "",
+                        third_party_contact_phone:
+                          e.target.value === "Onsite Visit - Third-Party Location"
+                            ? formData.third_party_contact_phone
                             : "",
                       })
                     }
@@ -3094,27 +3738,99 @@ function TechnicalTasksPageContent() {
                     placeholder="Select or type city..."
                   />
                 </div>
-                {formData.task_type === "Onsite Visit - Third-Party Location" && (
-                  <div>
-                    <label style={fieldLabelStyle}>
-                      Third-Party <span style={{ color: "#ef4444" }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Enter Third-Party Location"
-                      value={formData.third_party || ""}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          third_party: e.target.value,
-                        })
-                      }
-                      style={inputStyle}
-                    />
-                  </div>
-                )}
               </div>
+
+              {/* Conditional Third-Party Site Details */}
+              {formData.task_type === "Onsite Visit - Third-Party Location" && (
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    padding: "14px",
+                    borderRadius: "6px",
+                    border: "1px solid #e2e8f0",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      color: "#1e293b",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    Third-Party Site Details
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                    <div>
+                      <label style={fieldLabelStyle}>
+                        Third-Party Location / Name <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Third-Party Location"
+                        value={formData.third_party || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            third_party: e.target.value,
+                          })
+                        }
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={fieldLabelStyle}>
+                        Third-Party City <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <TypableCombobox
+                        value={formData.third_party_city || ""}
+                        onChange={(third_party_city) =>
+                          setFormData({ ...formData, third_party_city })
+                        }
+                        options={cityOptions}
+                        placeholder="Select or type city..."
+                      />
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                    <div>
+                      <label style={fieldLabelStyle}>Third-Party Contact Person</label>
+                      <input
+                        type="text"
+                        placeholder="Contact Person"
+                        value={formData.third_party_contact_name || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            third_party_contact_name: e.target.value,
+                          })
+                        }
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={fieldLabelStyle}>Third-Party Contact Mobile</label>
+                      <input
+                        type="text"
+                        placeholder="Mobile Number"
+                        value={formData.third_party_contact_phone || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            third_party_contact_phone: e.target.value,
+                          })
+                        }
+                        style={inputStyle}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Priority */}
               <div>
@@ -3184,8 +3900,8 @@ function TechnicalTasksPageContent() {
                 </div>
               </div>
 
-              {/* Machine & Model * */}
-              <div>
+              {/* Machine & Model * with Product Master Keyword Autocomplete */}
+              <div ref={productSearchRef} style={{ position: "relative" }}>
                 <label style={fieldLabelStyle}>
                   Machine & Model <span style={{ color: "#ef4444" }}>*</span>
                 </label>
@@ -3194,11 +3910,60 @@ function TechnicalTasksPageContent() {
                   required
                   placeholder="Search Product..."
                   value={formData.machine_model}
-                  onChange={(e) =>
-                    setFormData({ ...formData, machine_model: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData({ ...formData, machine_model: val });
+                    handleProductSearch(val);
+                  }}
+                  onFocus={() => {
+                    if (formData.machine_model) {
+                      handleProductSearch(formData.machine_model);
+                    }
+                  }}
                   style={inputStyle}
                 />
+                {showProductDropdown && productSuggestions.length > 0 && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      left: 0,
+                      right: 0,
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "6px",
+                      boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+                      zIndex: 1100,
+                      maxHeight: "180px",
+                      overflowY: "auto",
+                      marginTop: "4px",
+                    }}
+                  >
+                    {productSuggestions.map((prod) => (
+                      <div
+                        key={prod.id}
+                        onClick={() => {
+                          setFormData({ ...formData, machine_model: prod.product_name });
+                          setShowProductDropdown(false);
+                        }}
+                        style={{
+                          padding: "8px 12px",
+                          fontSize: "13px",
+                          cursor: "pointer",
+                          borderBottom: "1px solid #f1f5f9",
+                          color: "#1e293b",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#eff6ff")}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                      >
+                        <div style={{ fontWeight: 600 }}>{prod.product_name}</div>
+                        {prod.product_code && (
+                          <div style={{ fontSize: "11px", color: "#64748b" }}>Code: {prod.product_code}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Description (Nature Of Complain) * */}
@@ -3284,28 +4049,97 @@ function TechnicalTasksPageContent() {
                 </div>
               </div>
 
-              {/* Conditional Service Charge (₹) if Chargeable */}
+              {/* Conditional Service Charge (₹) & Mandatory Payment Terms if Chargeable */}
               {formData.service_type === "Chargeable" && (
-                <div>
-                  <label style={fieldLabelStyle}>
-                    Service Charge (₹) <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    placeholder="Enter charge e.g. 2000"
-                    value={formData.service_charge || ""}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        service_charge: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                    style={inputStyle}
-                  />
+                <div
+                  style={{
+                    background: "#fefce8",
+                    padding: "14px",
+                    borderRadius: "6px",
+                    border: "1px solid #fef08a",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  <div>
+                    <label style={fieldLabelStyle}>
+                      Service Charge (₹) <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="Enter charge e.g. 2000"
+                      value={formData.service_charge || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          service_charge: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={fieldLabelStyle}>
+                      Payment Terms <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <textarea
+                      required
+                      rows={2}
+                      placeholder="Enter payment terms description (e.g. 100% advance or collect on-site)"
+                      value={formData.payment_terms || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          payment_terms: e.target.value,
+                        })
+                      }
+                      style={{
+                        width: "100%",
+                        borderRadius: "5px",
+                        border: "1px solid #cbd5e1",
+                        padding: "8px 12px",
+                        fontSize: "13px",
+                        color: "#334155",
+                        boxSizing: "border-box",
+                        outline: "none",
+                        resize: "vertical",
+                        fontFamily: "inherit",
+                      }}
+                    />
+                  </div>
                 </div>
               )}
+
+              {/* Creator Remarks */}
+              <div>
+                <label style={fieldLabelStyle}>Creator Remarks / Task Notes</label>
+                <textarea
+                  rows={2}
+                  placeholder="Remarks or special instructions by task creator"
+                  value={formData.creator_remarks || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      creator_remarks: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: "100%",
+                    borderRadius: "5px",
+                    border: "1px solid #cbd5e1",
+                    padding: "8px 12px",
+                    fontSize: "13px",
+                    color: "#334155",
+                    boxSizing: "border-box",
+                    outline: "none",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                  }}
+                />
+              </div>
             </div>
 
             {/* Bottom Sticky Submit Button matching screenshot */}
@@ -3352,7 +4186,14 @@ function TechnicalTasksPageContent() {
             >
               <form onSubmit={handleStatusSubmit}>
                 <div className="tech-modal-header">
-                  <h2>Change Status — {statusModalTask.company_name}</h2>
+                  <h2>
+                    {newStatusValue === "Approved"
+                      ? "Approve & Allot Task"
+                      : newStatusValue === "Completed"
+                        ? "Complete Technical Task"
+                        : "Change Status"}{" "}
+                    — {statusModalTask.company_name}
+                  </h2>
                   <button
                     type="button"
                     className="btn-close-modal"
@@ -3363,7 +4204,7 @@ function TechnicalTasksPageContent() {
                 </div>
                 <div className="tech-modal-body">
                   <div className="field">
-                    <label>Select New Status</label>
+                    <label>Select Status</label>
                     <select
                       value={newStatusValue}
                       onChange={(e) => setNewStatusValue(e.target.value)}
@@ -3375,11 +4216,177 @@ function TechnicalTasksPageContent() {
                       ))}
                     </select>
                   </div>
-                  <div className="field">
-                    <label>Remarks / Notes (Optional)</label>
+
+                  {newStatusValue === "Approved" && (
+                    <>
+                      <div className="field" style={{ marginTop: "12px" }}>
+                        <label>Allot Technician</label>
+                        <select
+                          value={statusAllottedTo}
+                          onChange={(e) => setStatusAllottedTo(e.target.value)}
+                        >
+                          <option value="">-- Select Technician --</option>
+                          {technicianOptions.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {/* Conditionally visible based on task type: only for Onsite / Client / Third-Party visits */}
+                      {(statusModalTask.task_type?.toLowerCase().includes("onsite") ||
+                        statusModalTask.task_type?.toLowerCase().includes("client location") ||
+                        statusModalTask.task_type?.toLowerCase().includes("third-party") ||
+                        statusModalTask.task_type?.toLowerCase().includes("visit")) && (
+                        <div className="field" style={{ marginTop: "12px" }}>
+                          <label>Scheduled / Visit Date</label>
+                          <input
+                            type="date"
+                            value={statusVisitDate}
+                            onChange={(e) => setStatusVisitDate(e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {newStatusValue === "Completed" &&
+                    (statusModalTask.service_type === "Chargeable" || (statusModalTask.service_charge ?? 0) > 0) && (
+                      <div
+                        style={{
+                          marginTop: "14px",
+                          padding: "12px",
+                          background: "#fef3c7",
+                          border: "1px solid #fde68a",
+                          borderRadius: "6px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "10px",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: "13px", color: "#92400e" }}>
+                          💰 Chargeable Task Payment Collection:
+                        </div>
+                        <div style={{ fontSize: "12.5px", color: "#78350f" }}>
+                          Did you collect payment of ₹{statusModalTask.service_charge || 0} from the client?
+                        </div>
+                        <div style={{ display: "flex", gap: "16px" }}>
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              cursor: "pointer",
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              color: "#166534",
+                            }}
+                          >
+                            <input
+                              type="radio"
+                              name="paymentCollected"
+                              checked={statusPaymentCollected === true}
+                              onChange={() => setStatusPaymentCollected(true)}
+                            />
+                            Yes (Payment Collected)
+                          </label>
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              cursor: "pointer",
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              color: "#b45309",
+                            }}
+                          >
+                            <input
+                              type="radio"
+                              name="paymentCollected"
+                              checked={statusPaymentCollected === false}
+                              onChange={() => setStatusPaymentCollected(false)}
+                            />
+                            No (Move to Payment Pending)
+                          </label>
+                        </div>
+
+                        {statusPaymentCollected && (
+                          <div
+                            style={{
+                              marginTop: "6px",
+                              paddingTop: "8px",
+                              borderTop: "1px dashed #fde68a",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "10px",
+                            }}
+                          >
+                            <div>
+                              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#78350f", marginBottom: "4px" }}>
+                                Payment Collection Mode
+                              </label>
+                              <div style={{ display: "flex", gap: "20px" }}>
+                                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", cursor: "pointer" }}>
+                                  <input
+                                    type="radio"
+                                    name="paymentMode"
+                                    value="Company Acc"
+                                    checked={statusPaymentMode === "Company Acc"}
+                                    onChange={(e) => setStatusPaymentMode(e.target.value)}
+                                  />
+                                  Company Acc (Bank / Online)
+                                </label>
+                                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", cursor: "pointer" }}>
+                                  <input
+                                    type="radio"
+                                    name="paymentMode"
+                                    value="Self collect"
+                                    checked={statusPaymentMode === "Self collect"}
+                                    onChange={(e) => setStatusPaymentMode(e.target.value)}
+                                  />
+                                  Self collect (Technician)
+                                </label>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#78350f", marginBottom: "4px" }}>
+                                Payment Screenshot / Receipt (Optional)
+                              </label>
+                              <input
+                                type="file"
+                                accept="image/*,.pdf"
+                                onChange={(e) => setStatusScreenshotFile(e.target.files?.[0] || null)}
+                                style={{ fontSize: "12px" }}
+                              />
+                              {statusScreenshotFile && (
+                                <div style={{ fontSize: "11.5px", color: "#166534", marginTop: "2px" }}>
+                                  Selected: {statusScreenshotFile.name}
+                                </div>
+                              )}
+                              {uploadingScreenshot && (
+                                <div style={{ fontSize: "11.5px", color: "#0284c7", marginTop: "2px" }}>
+                                  Uploading screenshot...
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                  <div className="field" style={{ marginTop: "12px" }}>
+                    <label>
+                      {newStatusValue === "Approved" ? "Approver Remarks" : "Remarks / Notes (Optional)"}
+                    </label>
                     <textarea
                       rows={3}
-                      placeholder="Add completion notes or update remarks"
+                      placeholder={
+                        newStatusValue === "Approved"
+                          ? "Add instructions for allotted technician"
+                          : "Add completion notes or update remarks"
+                      }
                       value={statusRemarks}
                       onChange={(e) => setStatusRemarks(e.target.value)}
                     />
@@ -3398,6 +4405,313 @@ function TechnicalTasksPageContent() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* CANCEL TASK MODAL (Mandatory Remarks) */}
+        {cancelModalTask && (
+          <div className="tech-modal-overlay" onClick={() => setCancelModalTask(null)}>
+            <div
+              className="tech-modal-card"
+              style={{ maxWidth: "480px" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <form onSubmit={handleCancelTaskSubmit}>
+                <div className="tech-modal-header" style={{ borderBottom: "1px solid #fee2e2", background: "#fef2f2" }}>
+                  <h2 style={{ color: "#991b1b" }}>Cancel Technical Task</h2>
+                  <button
+                    type="button"
+                    className="btn-close-modal"
+                    onClick={() => setCancelModalTask(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="tech-modal-body" style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "20px" }}>
+                  {cancelError && (
+                    <div style={{ background: "#fee2e2", color: "#991b1b", padding: "8px 12px", borderRadius: "6px", fontSize: "13px" }}>
+                      {cancelError}
+                    </div>
+                  )}
+                  <div style={{ fontSize: "13.5px", color: "#334155", lineHeight: 1.5 }}>
+                    Are you sure you want to cancel the technical task for <strong>{cancelModalTask.company_name}</strong>?
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                      Reason / Cancellation Remarks <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <textarea
+                      required
+                      rows={4}
+                      placeholder="Provide a mandatory reason for cancelling this task..."
+                      value={cancelRemarks}
+                      onChange={(e) => setCancelRemarks(e.target.value)}
+                      style={{
+                        width: "100%",
+                        borderRadius: "5px",
+                        border: "1px solid #cbd5e1",
+                        padding: "10px 12px",
+                        fontSize: "13px",
+                        color: "#1e293b",
+                        boxSizing: "border-box",
+                        outline: "none",
+                        fontFamily: "inherit",
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="tech-modal-footer">
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setCancelModalTask(null)}
+                    disabled={submittingCancel}
+                  >
+                    Keep Task
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn"
+                    style={{ background: "#dc2626", color: "#ffffff", border: "none" }}
+                    disabled={submittingCancel}
+                  >
+                    {submittingCancel ? "Cancelling..." : "Confirm Cancellation"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* CALL LOGS MODAL (Combined Remarks Summary, Add Call Log, Call History Table) */}
+        {callLogModalTask && (
+          <div className="tech-modal-overlay" onClick={() => setCallLogModalTask(null)}>
+            <div
+              className="tech-modal-card"
+              style={{ maxWidth: "760px", width: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="tech-modal-header">
+                <div>
+                  <h2>Technical Call Logs</h2>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                    {callLogModalTask.company_name} — #{callLogModalTask.id.slice(0, 8)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-close-modal"
+                  onClick={() => setCallLogModalTask(null)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
+                {/* Top Summary: 3 Combined Remarks */}
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                    padding: "14px 16px",
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr",
+                    gap: "14px",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#64748b", marginBottom: "4px" }}>
+                      1. Creator Remarks
+                    </div>
+                    <div style={{ fontSize: "12.5px", color: "#1e293b", whiteSpace: "pre-wrap" }}>
+                      {callLogModalTask.creator_remarks || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#64748b", marginBottom: "4px" }}>
+                      2. Approver Remarks
+                    </div>
+                    <div style={{ fontSize: "12.5px", color: "#1e293b", whiteSpace: "pre-wrap" }}>
+                      {callLogModalTask.approver_remarks || "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#64748b", marginBottom: "4px" }}>
+                      3. Completion / Cancel Remarks
+                    </div>
+                    <div style={{ fontSize: "12.5px", color: "#1e293b", whiteSpace: "pre-wrap" }}>
+                      {callLogModalTask.cancel_remarks || (callLogsList.length > 0 ? callLogsList[0].remarks : "—")}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Add New Call Log Form */}
+                <form
+                  onSubmit={handleCreateCallLogSubmit}
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "8px",
+                    padding: "16px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: "13.5px", color: "#0f172a" }}>
+                    Add Call Log / Visit Update
+                  </div>
+                  {callLogError && (
+                    <div style={{ background: "#fee2e2", color: "#991b1b", padding: "8px 12px", borderRadius: "6px", fontSize: "12.5px" }}>
+                      {callLogError}
+                    </div>
+                  )}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", alignItems: "center" }}>
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                        Call / Visit Type
+                      </label>
+                      <div style={{ display: "flex", gap: "20px" }}>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                          <input
+                            type="radio"
+                            name="callLogType"
+                            value="Telecall"
+                            checked={newCallLogType === "Telecall"}
+                            onChange={(e) => setNewCallLogType(e.target.value)}
+                          />
+                          📞 Telecall
+                        </label>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                          <input
+                            type="radio"
+                            name="callLogType"
+                            value="Physical Visit"
+                            checked={newCallLogType === "Physical Visit"}
+                            onChange={(e) => setNewCallLogType(e.target.value)}
+                          />
+                          🏢 Physical Visit
+                        </label>
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                        Date
+                      </label>
+                      <div style={{ fontSize: "13px", color: "#334155", fontWeight: 500 }}>
+                        {new Date().toLocaleDateString("en-GB")} (System Date)
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                      Feedback / Remarks by Technician <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <textarea
+                      required
+                      rows={3}
+                      placeholder="Enter discussion summary, technical findings, or next steps..."
+                      value={newCallLogRemarks}
+                      onChange={(e) => setNewCallLogRemarks(e.target.value)}
+                      style={{
+                        width: "100%",
+                        borderRadius: "5px",
+                        border: "1px solid #cbd5e1",
+                        padding: "8px 12px",
+                        fontSize: "13px",
+                        color: "#1e293b",
+                        boxSizing: "border-box",
+                        outline: "none",
+                        fontFamily: "inherit",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={submittingCallLog}
+                      style={{ padding: "8px 18px", fontSize: "13px" }}
+                    >
+                      {submittingCallLog ? "Saving Log..." : "+ Add Call Log"}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Call Logs History List */}
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: "13.5px", color: "#0f172a", marginBottom: "10px" }}>
+                    Call Logs History ({callLogsList.length})
+                  </div>
+
+                  {loadingCallLogs ? (
+                    <div style={{ textAlign: "center", padding: "20px", color: "#64748b", fontSize: "13px" }}>
+                      Loading call logs...
+                    </div>
+                  ) : callLogsList.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "24px", color: "#94a3b8", background: "#f8fafc", borderRadius: "6px", fontSize: "13px" }}>
+                      No call logs recorded yet.
+                    </div>
+                  ) : (
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflow: "hidden" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+                        <thead>
+                          <tr style={{ background: "#f1f5f9", textAlign: "left", color: "#475569" }}>
+                            <th style={{ padding: "8px 12px", width: "40px" }}>#</th>
+                            <th style={{ padding: "8px 12px", width: "110px" }}>Type</th>
+                            <th style={{ padding: "8px 12px", width: "130px" }}>Date & Time</th>
+                            <th style={{ padding: "8px 12px", width: "130px" }}>Logged By</th>
+                            <th style={{ padding: "8px 12px" }}>Remarks / Feedback</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {callLogsList.map((log, idx) => (
+                            <tr key={log.id} style={{ borderTop: "1px solid #e2e8f0" }}>
+                              <td style={{ padding: "10px 12px", color: "#64748b" }}>{idx + 1}</td>
+                              <td style={{ padding: "10px 12px", fontWeight: 600 }}>
+                                <span
+                                  style={{
+                                    padding: "2px 8px",
+                                    borderRadius: "12px",
+                                    fontSize: "11px",
+                                    background: log.call_type === "Physical Visit" ? "#e0f2fe" : "#f1f5f9",
+                                    color: log.call_type === "Physical Visit" ? "#0369a1" : "#475569",
+                                  }}
+                                >
+                                  {log.call_type}
+                                </span>
+                              </td>
+                              <td style={{ padding: "10px 12px", color: "#334155" }}>
+                                {log.call_date || (log.created_at ? new Date(log.created_at).toLocaleString("en-GB") : "—")}
+                              </td>
+                              <td style={{ padding: "10px 12px", color: "#334155", fontWeight: 500 }}>
+                                {log.created_by || "System"}
+                              </td>
+                              <td style={{ padding: "10px 12px", color: "#1e293b", whiteSpace: "pre-wrap" }}>
+                                {log.remarks}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="tech-modal-footer">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setCallLogModalTask(null)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         )}

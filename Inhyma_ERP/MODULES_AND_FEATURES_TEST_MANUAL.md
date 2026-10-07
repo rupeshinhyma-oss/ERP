@@ -97,7 +97,6 @@
 | **PURCHASE** | Purchase Suppliers | `/purchase/suppliers` | `purchase-suppliers` | `factory` | `supplier.view` |
 | **TASK** | Tasks | `/tasks` | `tasks` | `checkSquare` | `task.view` |
 | **TASK** | Technical Tasks | `/technical-task/list` | `technical-tasks` | `wrench` | `technicaltask.view` |
-| **TASK** | Marketing Tasks | `/marketing-task/list` | `marketing-tasks` | `messageSquare` | `task.view` |
 | **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
 | **USER MANAGEMENT** | Positions | `/positions` | `positions` | `briefcase` | `position.view` |
 | **USER MANAGEMENT** | Organization Chart | `/org-chart` | `org-chart` | `orgChart` | `reporting.view` |

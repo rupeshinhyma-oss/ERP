@@ -770,7 +770,7 @@ describe("Proforma list: workflow actions follow the database rules and the user
   it("an approved invoice offers Confirm and Cancel, but no Edit or Delete to a normal user", async () => {
     await renderList();
     openRowMenu(0); // PI-00002 is admin_approved
-    expect(screen.getByRole("button", { name: /^Confirm$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Confirm & Create SO/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Cancel$/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /✏️ Edit/ })).toBeNull(); // edit is admin-only after approval
     expect(screen.queryByRole("button", { name: /🗑️ Delete/ })).toBeNull();

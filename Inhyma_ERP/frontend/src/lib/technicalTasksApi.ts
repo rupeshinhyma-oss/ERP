@@ -2,9 +2,10 @@
  * API client helpers for Technical Tasks Module.
  */
 
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type {
   TechnicalTask,
+  TechnicalTaskCallLog,
   TechnicalTaskCounts,
   TechnicalTaskCreatePayload,
 } from "@/types/technicalTasks";
@@ -78,7 +79,7 @@ export async function updateTechnicalTask(
   id: string,
   payload: Partial<TechnicalTaskCreatePayload>
 ): Promise<TechnicalTask> {
-  const res = await apiPut<TechnicalTask>(
+  const res = await apiPatch<TechnicalTask>(
     `/technical-tasks/${encodeURIComponent(id)}`,
     payload
   );
@@ -88,11 +89,20 @@ export async function updateTechnicalTask(
 export async function updateTechnicalTaskStatus(
   id: string,
   status: string,
-  remarks?: string
+  remarks?: string,
+  extra?: {
+    task_allotted_to?: string;
+    task_approved_date?: string;
+    scheduled_visit_date?: string;
+    payment_status?: string;
+    payment_mode?: string;
+    payment_screenshot?: string;
+    cancel_remarks?: string;
+  }
 ): Promise<TechnicalTask> {
   const res = await apiPatch<TechnicalTask>(
     `/technical-tasks/${encodeURIComponent(id)}/status`,
-    { status, remarks }
+    { status, remarks, ...extra }
   );
   return res.data;
 }
@@ -106,5 +116,44 @@ export async function bulkDeleteTechnicalTasks(ids: string[]): Promise<number> {
     "/technical-tasks/bulk-delete",
     { ids }
   );
-  return res.data?.deleted_count ?? 0;
+  return res.data.deleted_count;
+}
+
+export async function fetchTaskCallLogs(taskId: string): Promise<TechnicalTaskCallLog[]> {
+  const res = await apiGet<TechnicalTaskCallLog[]>(
+    `/technical-tasks/${encodeURIComponent(taskId)}/call-logs`
+  );
+  return res.data || [];
+}
+
+export async function createTaskCallLog(
+  taskId: string,
+  payload: { call_date?: string; call_type: string; remarks: string }
+): Promise<TechnicalTaskCallLog> {
+  const res = await apiPost<TechnicalTaskCallLog>(
+    `/technical-tasks/${encodeURIComponent(taskId)}/call-logs`,
+    payload
+  );
+  return res.data;
+}
+
+export async function uploadPaymentScreenshot(
+  file: File
+): Promise<{ file_url: string; file_name: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch("/api/v1/technical-tasks/upload-screenshot", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
+    },
+    body: formData,
+  });
+
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.message || "Failed to upload payment screenshot");
+  }
+  return json.data;
 }
