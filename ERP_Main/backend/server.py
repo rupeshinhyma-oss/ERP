@@ -133,7 +133,7 @@ def main() -> None:
 
     _check_env_file()
 
-    python = str(Path(sys.executable).resolve())
+    python = sys.executable
 
     if not args.skip_migrate:
         _run_step(

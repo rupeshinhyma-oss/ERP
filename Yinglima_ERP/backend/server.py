@@ -116,7 +116,7 @@ def main() -> None:
 
     _check_env_file()
 
-    python = str(Path(sys.executable).resolve())  # the interpreter currently running this script (i.e. the active venv's python)
+    python = sys.executable  # the interpreter currently running this script (i.e. the active venv's python)
 
     if not args.skip_migrate:
         _run_step(
