@@ -127,6 +127,24 @@ async def seed_bootstrap_accounts() -> None:
         now = datetime.now(timezone.utc)
 
         for instance in instances:
+            # The database enforces ONE membership per (global_user, erp_instance).
+            # Look that pair up first: an existing link may carry a different
+            # local_user_id (e.g. after real provisioning/SSO), and inserting a
+            # second row for the same pair violates uq_erp_memberships_user_erp.
+            membership_by_pair = await db.scalar(
+                select(ErpMembership).where(
+                    ErpMembership.global_user_id == existing_user.id,
+                    ErpMembership.erp_instance_id == instance.id,
+                )
+            )
+            if membership_by_pair is not None:
+                if membership_by_pair.status != ErpMembershipStatus.ACTIVE:
+                    membership_by_pair.status = ErpMembershipStatus.ACTIVE
+                    print(f"Updated membership: re-activated {instance.key} for {BOOTSTRAP_EMAIL}")
+                else:
+                    print(f"Membership for {instance.key} already exists (skipped).")
+                continue
+
             membership_by_local = await db.scalar(
                 select(ErpMembership).where(
                     ErpMembership.erp_instance_id == instance.id,
