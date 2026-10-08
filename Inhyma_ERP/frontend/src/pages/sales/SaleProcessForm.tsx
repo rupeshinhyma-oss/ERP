@@ -108,6 +108,7 @@ export interface FormLineItem {
   gst_percent: number;
   gst_amount: number;
   total: number;
+  serial_numbers?: string[];
 }
 
 export function formatIndianCurrency(amount: number | null | undefined): string {
@@ -225,6 +226,8 @@ export function SaleProcessFormPage() {
 
   // Line Items & Additional Charges
   const [additionalChargesEnabled, setAdditionalChargesEnabled] = useState(true);
+  const [serialModalItemIndex, setSerialModalItemIndex] = useState<number | null>(null);
+  const [serialInputText, setSerialInputText] = useState("");
   const [lineItems, setLineItems] = useState<FormLineItem[]>([
     {
       id: "charge-1",
@@ -337,6 +340,7 @@ export function SaleProcessFormPage() {
                 gst_percent: gst,
                 gst_amount: gstAmt,
                 total: tot,
+                serial_numbers: (it as any).serial_numbers || [],
               };
             });
             setLineItems(mapped);
@@ -572,6 +576,7 @@ export function SaleProcessFormPage() {
     const payload = {
       warehouse,
       consignment_code: containerAllocation || undefined,
+      allocated_consignment: containerAllocation || undefined,
       container_no: containerAllocation || undefined,
       expected_delivery_date: expectedDeliveryDate,
       payment_terms: paymentTerms,
@@ -614,6 +619,7 @@ export function SaleProcessFormPage() {
         item_total: it.total,
         is_additional_charge: it.is_additional_charge,
         charge_type: it.charge_type,
+        serial_numbers: it.serial_numbers && it.serial_numbers.length > 0 ? it.serial_numbers : undefined,
       })),
     };
 
@@ -1614,6 +1620,35 @@ export function SaleProcessFormPage() {
                             }}
                           />
                         )}
+                        {!row.is_additional_charge && (
+                          <div style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSerialModalItemIndex(idx);
+                                setSerialInputText((row.serial_numbers || []).join(", "));
+                              }}
+                              style={{
+                                background: row.serial_numbers && row.serial_numbers.length > 0 ? "#eff6ff" : "#f8fafc",
+                                border: `1px solid ${row.serial_numbers && row.serial_numbers.length > 0 ? "#93c5fd" : "#cbd5e1"}`,
+                                borderRadius: "3px",
+                                padding: "2px 6px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: row.serial_numbers && row.serial_numbers.length > 0 ? "#1d4ed8" : "#64748b",
+                                cursor: "pointer",
+                              }}
+                              title="Enter / View Product Serial Numbers"
+                            >
+                              🔢 S/N {row.serial_numbers && row.serial_numbers.length > 0 ? `(${row.serial_numbers.length})` : "+ Add S/N"}
+                            </button>
+                            {row.serial_numbers && row.serial_numbers.length > 0 && (
+                              <span style={{ fontSize: "11px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
+                                {row.serial_numbers.join(", ")}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <input
@@ -2113,6 +2148,160 @@ export function SaleProcessFormPage() {
             </button>
           </div>
         </form>
+
+        {/* Product Serial Numbers Modal */}
+        {serialModalItemIndex !== null && activeItems[serialModalItemIndex] && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.6)",
+              backdropFilter: "blur(2px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 9999,
+              padding: "16px",
+            }}
+            onClick={() => setSerialModalItemIndex(null)}
+          >
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "8px",
+                width: "100%",
+                maxWidth: "480px",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15)",
+                overflow: "hidden",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  padding: "14px 18px",
+                  borderBottom: "1px solid #e2e8f0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "#f8fafc",
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>
+                  Product Serial Numbers
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSerialModalItemIndex(null)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "18px",
+                    cursor: "pointer",
+                    color: "#64748b",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ padding: "16px 18px" }}>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b", marginBottom: "4px" }}>
+                  {activeItems[serialModalItemIndex].product_name || "Product"}
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
+                  Quantity: <strong style={{ color: "#0061f2" }}>{activeItems[serialModalItemIndex].quantity} unit(s)</strong>
+                </div>
+
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                  Enter Serial Numbers (comma or newline separated):
+                </label>
+                <textarea
+                  rows={4}
+                  value={serialInputText}
+                  onChange={(e) => setSerialInputText(e.target.value)}
+                  placeholder="e.g. SN-2026-001, SN-2026-002"
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "12.5px",
+                    fontFamily: "monospace",
+                    boxSizing: "border-box",
+                  }}
+                />
+
+                <div style={{ marginTop: "6px", fontSize: "11.5px", color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                  <span>
+                    Identified:{" "}
+                    <strong>
+                      {serialInputText.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean).length}
+                    </strong>{" "}
+                    of {activeItems[serialModalItemIndex].quantity}
+                  </span>
+                  <span>Separate each serial with a comma or new line</span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: "12px 18px",
+                  borderTop: "1px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "10px",
+                  background: "#f8fafc",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSerialModalItemIndex(null)}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "4px",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    fontSize: "12.5px",
+                    fontWeight: 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parsed = serialInputText
+                      .split(/[,\n]+/)
+                      .map((s) => s.trim())
+                      .filter(Boolean);
+                    setLineItems((prev) => {
+                      const updated = [...prev];
+                      const idx = serialModalItemIndex;
+                      if (idx !== null && updated[idx]) {
+                        updated[idx] = { ...updated[idx], serial_numbers: parsed };
+                      }
+                      return updated;
+                    });
+                    setSerialModalItemIndex(null);
+                  }}
+                  style={{
+                    padding: "6px 16px",
+                    borderRadius: "4px",
+                    border: "none",
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    fontSize: "12.5px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save Serial Numbers
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );

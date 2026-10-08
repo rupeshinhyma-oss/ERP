@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { LeadsPage } from "../LeadsPage";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 
 // Mock AppShell
 vi.mock("@/components/AppShell", () => ({
@@ -89,6 +89,16 @@ describe("LeadsPage", () => {
         });
       }
       return Promise.resolve({ data: [] });
+    });
+
+    (apiPost as any).mockImplementation((_url: string, data: any) => {
+      return Promise.resolve({ success: true, data: { id: "test-created-1", ...data } });
+    });
+    (apiPut as any).mockImplementation((_url: string, data: any) => {
+      return Promise.resolve({ success: true, data: { id: "test-updated-1", ...data } });
+    });
+    (apiDelete as any).mockImplementation(() => {
+      return Promise.resolve({ success: true });
     });
   });
 
@@ -237,10 +247,11 @@ describe("LeadsPage", () => {
     expect(screen.getByText(/Lead Source/i)).toBeTruthy();
     expect(document.getElementById("lead-source-select")).toBeTruthy();
 
-    // 3. Company Name * and Add Company link
+    // 3. Company Name * and + Add New Company button
     expect(screen.getAllByText(/Company Name/i).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("Add Company")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /\+ Add New Company/i })).toBeTruthy();
     expect(screen.getByPlaceholderText("Search Company Name")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /\+ Add New Contact Person/i })).toBeTruthy();
 
     // 4. Address
     expect(screen.getByText("Address")).toBeTruthy();
@@ -576,6 +587,222 @@ describe("LeadsPage", () => {
     expect(districtInput.value).toBe("");
     expect(cityInput.value).toBe("");
     expect(cityInput.disabled).toBe(true);
+  });
+
+  it("opens Form 1 modal on clicking '+ Add New Company' and auto-populates lead form on save", async () => {
+    render(
+      <BrowserRouter>
+        <LeadsPage />
+      </BrowserRouter>
+    );
+
+    // Open Add Lead drawer
+    fireEvent.click(screen.getByRole("button", { name: /\+ ADD NEW/i }));
+
+    // Click + Add New Company button
+    const quickAddCompBtn = screen.getByRole("button", { name: /\+ Add New Company/i });
+    expect(quickAddCompBtn).toBeTruthy();
+    fireEvent.click(quickAddCompBtn);
+
+    // Wait for statesList to load in Form 1 modal
+    await waitFor(() => {
+      expect(screen.getByText("Gujarat")).toBeTruthy();
+    });
+
+    // Fill form 1 company name and GST, click Fetch Data
+    const compNameInput = document.getElementById("form1_company_name") as HTMLInputElement;
+    const gstInput = document.getElementById("form1_tax_id_number") as HTMLInputElement;
+    fireEvent.change(compNameInput, { target: { value: "Omega Automation Technologies" } });
+    fireEvent.change(gstInput, { target: { value: "24AAAC0000A1Z5" } });
+
+    // Click Fetch Data to auto-detect State from GST
+    const fetchGstBtn = document.getElementById("btn-form1-fetch-gst")!;
+    fireEvent.click(fetchGstBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/State auto-detected from GST/i)).toBeTruthy();
+    });
+
+    // Save company Form 1
+    const form1 = document.getElementById("company-form1")!;
+    fireEvent.submit(form1);
+
+    // Verify company name is populated into Add Lead form
+    await waitFor(() => {
+      const leadCompInput = screen.getByPlaceholderText("Search Company Name") as HTMLInputElement;
+      expect(leadCompInput.value).toBe("Omega Automation Technologies");
+    });
+  });
+
+  it("opens Quick Add Contact Person modal on clicking '+ Add New Contact Person' and auto-populates contact details", async () => {
+    render(
+      <BrowserRouter>
+        <LeadsPage />
+      </BrowserRouter>
+    );
+
+    // Open Add Lead drawer
+    fireEvent.click(screen.getByRole("button", { name: /\+ ADD NEW/i }));
+
+    // Click + Add New Contact Person button
+    const quickAddContactBtn = screen.getByRole("button", { name: /\+ Add New Contact Person/i });
+    expect(quickAddContactBtn).toBeTruthy();
+    fireEvent.click(quickAddContactBtn);
+
+    // Verify Contact modal is open
+    expect(document.getElementById("quick-add-contact-modal")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /\+ Add New Contact Person/i })).toBeTruthy();
+
+    // Fill contact details
+    const nameInput = document.getElementById("quick-contact-name") as HTMLInputElement;
+    const desigInput = document.getElementById("quick-contact-designation") as HTMLInputElement;
+    const phoneInput = document.getElementById("quick-contact-phone") as HTMLInputElement;
+    const emailInput = document.getElementById("quick-contact-email") as HTMLInputElement;
+
+    fireEvent.change(nameInput, { target: { value: "Suresh Sharma" } });
+    fireEvent.change(desigInput, { target: { value: "General Manager" } });
+    fireEvent.change(phoneInput, { target: { value: "9876500000" } });
+    fireEvent.change(emailInput, { target: { value: "suresh@omega.com" } });
+
+    // Save contact
+    const saveBtn = document.getElementById("btn-quick-contact-save")!;
+    fireEvent.click(saveBtn);
+
+    // Verify fields populated into Add Lead form
+    await waitFor(() => {
+      const contactPersonInput = document.getElementById("lead-contact-person-input") as HTMLInputElement;
+      const desigFormInput = document.getElementById("lead-designation-input") as HTMLInputElement;
+      const phoneFormInput = document.getElementById("lead-contact-phone-input") as HTMLInputElement;
+      const emailFormInput = document.getElementById("lead-contact-email-input") as HTMLInputElement;
+
+      expect(contactPersonInput.value).toBe("Suresh Sharma");
+      expect(desigFormInput.value).toBe("General Manager");
+      expect(phoneFormInput.value).toBe("9876500000");
+      expect(emailFormInput.value).toBe("suresh@omega.com");
+    });
+  });
+
+  it("displays Reason for Won / Loss conditional textarea when selecting Won or Loss status", async () => {
+    render(
+      <BrowserRouter>
+        <LeadsPage />
+      </BrowserRouter>
+    );
+
+    // Open Add Lead drawer
+    fireEvent.click(screen.getByRole("button", { name: /\+ ADD NEW/i }));
+
+    const statusInput = document.getElementById("lead-status-select") as HTMLInputElement;
+    expect(statusInput).toBeTruthy();
+    // Default is Ongoing
+    expect(statusInput.value).toBe("Ongoing");
+
+    // By default Ongoing does not display reason for won/loss
+    expect(document.getElementById("lead-reason-won-loss")).toBeNull();
+
+    // Change status to Won
+    fireEvent.change(statusInput, { target: { value: "Won" } });
+
+    // Now Reason for Won is visible
+    await waitFor(() => {
+      expect(document.getElementById("lead-reason-won-loss")).toBeTruthy();
+      expect(screen.getByText(/Reason for Won/i)).toBeTruthy();
+    });
+
+    // Change status to Loss
+    fireEvent.change(statusInput, { target: { value: "Loss" } });
+    await waitFor(() => {
+      expect(document.getElementById("lead-reason-won-loss")).toBeTruthy();
+      expect(screen.getByText(/Reason for Loss/i)).toBeTruthy();
+    });
+
+    // Change status back to Ongoing -> Reason hides
+    fireEvent.change(statusInput, { target: { value: "Ongoing" } });
+    await waitFor(() => {
+      expect(document.getElementById("lead-reason-won-loss")).toBeNull();
+    });
+  });
+
+  it("includes Lead Allot action button in table rows and opens allotment modal to allot lead", async () => {
+    const mockLead = {
+      id: "lead-allot-test-1",
+      company_name: "Paramount Industries",
+      business_type: "B2B",
+      source: "IndiaMart",
+      contact_person: "Karan Patel",
+      contact_phone: "9876512345",
+      priority: "High",
+      city: "Surat",
+      state: "Gujarat",
+      allotted_to: "",
+      lead_status: "Ongoing",
+    };
+
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/leads")) {
+        return Promise.resolve({
+          data: {
+            items: [mockLead],
+            total: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <LeadsPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Paramount Industries")).toBeTruthy();
+    });
+
+    // Lead Allot button is visible in action column
+    const allotBtn = screen.getByTestId("btn-lead-allot");
+    expect(allotBtn).toBeTruthy();
+    expect(allotBtn.textContent).toContain("Allot");
+
+    // Click Lead Allot
+    fireEvent.click(allotBtn);
+
+    // Verify Allot Lead modal opened
+    expect(document.getElementById("allot-lead-modal")).toBeTruthy();
+    expect(screen.getByText("👤 Lead Allotment")).toBeTruthy();
+    expect(screen.getAllByText("Paramount Industries").length).toBeGreaterThanOrEqual(2);
+
+    // Select salesperson
+    const selectSalesperson = document.getElementById("allot-lead-select") as HTMLSelectElement;
+    fireEvent.change(selectSalesperson, { target: { value: "Rupesh Malla" } });
+
+    // Confirm Allotment
+    const confirmBtn = screen.getByTestId("btn-allot-lead-confirm");
+    fireEvent.click(confirmBtn);
+
+    // Modal closes
+    await waitFor(() => {
+      expect(document.getElementById("allot-lead-modal")).toBeNull();
+    });
+  });
+
+  it("confirms Email column is not in table list headers and Business Type column is visible", async () => {
+    render(
+      <BrowserRouter>
+        <LeadsPage />
+      </BrowserRouter>
+    );
+
+    const headers = Array.from(document.querySelectorAll("#leads-table thead th")).map(
+      (th) => th.textContent?.trim() || ""
+    );
+
+    // Business Type is present
+    expect(headers.some((h) => h.includes("Business Type"))).toBe(true);
+
+    // Email column is NOT present in headers
+    expect(headers.some((h) => h.includes("Email"))).toBe(false);
   });
 });
 

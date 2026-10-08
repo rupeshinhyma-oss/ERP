@@ -232,6 +232,20 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   // Card 1: General Details
   const [formWarehouse, setFormWarehouse] = useState("Select");
   const [formSupplier, setFormSupplier] = useState("Select");
+
+  // Default supplier to Yinglima while keeping it fully editable
+  useEffect(() => {
+    if (editingOrderId) return;
+    if (formSupplier === "Select" || !formSupplier) {
+      const defaultSupplier = "Yinglima";
+      const matched = supplierNames.find(
+        (n) => n.toLowerCase() === defaultSupplier.toLowerCase() ||
+               n.toLowerCase().startsWith(defaultSupplier.toLowerCase()) ||
+               n.toLowerCase().includes(defaultSupplier.toLowerCase())
+      ) || defaultSupplier;
+      setFormSupplier(matched);
+    }
+  }, [supplierNames, editingOrderId]);
   const [formInvoiceNo, setFormInvoiceNo] = useState("");
   const [formInvoiceDate, setFormInvoiceDate] = useState(todayDDMMYYYY());
   const [formBasicValue, setFormBasicValue] = useState("");
@@ -461,8 +475,14 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   };
 
   const resetFormFields = () => {
+    const defaultSupplier = "Yinglima";
+    const matched = supplierNames.find(
+      (n) => n.toLowerCase() === defaultSupplier.toLowerCase() ||
+             n.toLowerCase().startsWith(defaultSupplier.toLowerCase()) ||
+             n.toLowerCase().includes(defaultSupplier.toLowerCase())
+    ) || defaultSupplier;
     setFormWarehouse("Select");
-    setFormSupplier("Select");
+    setFormSupplier(matched);
     setFormInvoiceNo("");
     setFormInvoiceDate(todayDDMMYYYY());
     setFormBasicValue("");
@@ -648,8 +668,15 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
 
     if (formWarehouse === "Select") errs.warehouse = "Warehouse is required.";
     if (formSupplier === "Select" || !formSupplier.trim()) errs.supplier = "Supplier is required.";
-    else if (supplierNames.length > 0 && !supplierNames.some((n) => n.toLowerCase() === formSupplier.trim().toLowerCase())) {
-      errs.supplier = "Select a supplier from the list.";
+    else if (supplierNames.length > 0) {
+      const trimmed = formSupplier.trim().toLowerCase();
+      const matched = supplierNames.some((n) => {
+        const ln = n.toLowerCase();
+        return ln === trimmed || ln.startsWith(trimmed) || ln.includes(trimmed);
+      });
+      if (!matched) {
+        errs.supplier = "Select a supplier from the list.";
+      }
     }
     if (!formInvoiceNo.trim()) errs.invoice_no = "Invoice No. is required.";
     if (!formInvoiceDate.trim()) errs.invoice_date = "Invoice Date is required.";
@@ -671,8 +698,13 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     setSaving(true);
 
     try {
+      const trimmedSup = formSupplier.trim().toLowerCase();
+      const canonicalSupplier =
+        supplierNames.find((n) => n.toLowerCase() === trimmedSup) ||
+        supplierNames.find((n) => n.toLowerCase().startsWith(trimmedSup)) ||
+        supplierNames.find((n) => n.toLowerCase().includes(trimmedSup));
       const body = buildLocalPayload({
-        supplier_name: supplierNames.find((n) => n.toLowerCase() === formSupplier.trim().toLowerCase()) || formSupplier.trim(),
+        supplier_name: canonicalSupplier || formSupplier.trim(),
         warehouse: formWarehouse,
         invoice_no: formInvoiceNo,
         invoice_date: formInvoiceDate,

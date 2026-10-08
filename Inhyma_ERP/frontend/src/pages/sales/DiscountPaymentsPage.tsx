@@ -1509,6 +1509,67 @@ export function DiscountPaymentsPage({
                         ) : (
                           <div style={{ color: "#16a34a", fontWeight: 600 }}>Settled</div>
                         )}
+                        {/* Visual indicator badge for partial vs fully settled payments (Discount.docx) */}
+                        <div>
+                          {o.settled || o.due_discount <= 0 ? (
+                            <span
+                              data-testid={`badge-settled-${o.id}`}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 8px",
+                                borderRadius: "10px",
+                                fontSize: "10.5px",
+                                fontWeight: 700,
+                                background: "#dcfce7",
+                                color: "#15803d",
+                                border: "1px solid #86efac",
+                                marginTop: "4px",
+                              }}
+                            >
+                              ✓ Fully Settled
+                            </span>
+                          ) : o.paid_discount > 0 ? (
+                            <span
+                              data-testid={`badge-partial-${o.id}`}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 8px",
+                                borderRadius: "10px",
+                                fontSize: "10.5px",
+                                fontWeight: 700,
+                                background: "#fef3c7",
+                                color: "#b45309",
+                                border: "1px solid #fcd34d",
+                                marginTop: "4px",
+                              }}
+                            >
+                              ⏳ Partial Payment
+                            </span>
+                          ) : (
+                            <span
+                              data-testid={`badge-unpaid-${o.id}`}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 8px",
+                                borderRadius: "10px",
+                                fontSize: "10.5px",
+                                fontWeight: 700,
+                                background: "#fee2e2",
+                                color: "#b91c1c",
+                                border: "1px solid #fca5a5",
+                                marginTop: "4px",
+                              }}
+                            >
+                              ⚠️ Unpaid
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Status (Badge + Date + Remark) */}

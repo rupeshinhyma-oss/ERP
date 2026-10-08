@@ -23,7 +23,7 @@ from typing import Any, List, Optional
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, false
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import (
@@ -200,6 +200,7 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     gatepass_handled_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     consignment_code: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    allocated_consignment: Mapped[str | None] = mapped_column(String(100), nullable=True)
     planning_sheet_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("planning_sheets.id"), nullable=True
     )
@@ -280,6 +281,7 @@ class SaleOrderItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         GUID(), ForeignKey("planning_rows.id"), nullable=True
     )
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    serial_numbers: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     order: Mapped[SaleOrder] = relationship("SaleOrder", back_populates="items")
 
@@ -318,3 +320,33 @@ class DiscountPayment(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin
 
     def __repr__(self) -> str:
         return f"<DiscountPayment {self.payment_no!r} - {self.customer_name!r}>"
+
+
+class GatePass(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """Gate Pass record for dispatch and transport tracking (Completed/Gate Pass.docx)."""
+
+    __tablename__ = "gate_passes"
+
+    gatepass_no: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    gatepass_date: Mapped[Any] = mapped_column(Date, nullable=False)
+    so_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("sales_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    so_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    so_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    invoice_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    invoice_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sales_person: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    party_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    billing_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shipping_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transport_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    destination: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    delivery_type: Mapped[str | None] = mapped_column(String(50), default="Door", nullable=True)
+    delivery_charges: Mapped[str | None] = mapped_column(String(50), default="To Pay", nullable=True)
+    handled_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    items: Mapped[list | None] = mapped_column(JSON, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="ACTIVE", nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(150), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<GatePass {self.gatepass_no!r} - {self.party_name!r}>"

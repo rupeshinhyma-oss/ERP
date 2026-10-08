@@ -370,16 +370,28 @@ export function SaleProcessDetailModal({
             background: "#ffffff",
           }}
         >
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "15px",
-              fontWeight: 700,
-              color: "#1e293b",
-            }}
-          >
-            Sales Details
-          </h2>
+          <div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "15px",
+                fontWeight: 700,
+                color: "#1e293b",
+              }}
+            >
+              Sales Order: {order?.order_no || "Details"}
+            </h2>
+            {order && (
+              <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 500, marginTop: "2px" }}>
+                <span style={{ fontWeight: 600, color: "#1e293b" }}>{order.company_name || order.buyer_name || "—"}</span>
+                {(order.allocated_consignment || order.consignment_code) && (
+                  <span style={{ marginLeft: "8px", color: "#d97706", fontWeight: 600 }}>
+                    • 📦 Allocated: {order.allocated_consignment || order.consignment_code}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <button
@@ -783,6 +795,12 @@ export function SaleProcessDetailModal({
                           <div style={{ fontWeight: 600, color: "#1e293b" }}>
                             {item.product_name}
                           </div>
+                          {item.serial_numbers && item.serial_numbers.length > 0 && (
+                            <div style={{ marginTop: "4px", fontSize: "11px", color: "#0369a1" }}>
+                              <span style={{ fontWeight: 600 }}>S/N: </span>
+                              {item.serial_numbers.join(", ")}
+                            </div>
+                          )}
                         </td>
                         <td
                           style={{

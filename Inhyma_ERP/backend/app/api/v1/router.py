@@ -209,8 +209,10 @@ api_router.include_router(sales_router)
 api_router.include_router(purchase_router)
 
 from app.durable_events.routes import router as durable_events_router  # noqa: E402
+from app.core.backup_routes import router as backup_router  # noqa: E402
 
 api_router.include_router(durable_events_router)
+api_router.include_router(backup_router)
 
 
 @api_router.get("/organizations/public", summary="Get public organization info for login page")

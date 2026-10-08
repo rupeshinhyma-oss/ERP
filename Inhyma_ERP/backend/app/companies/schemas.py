@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator, model_validator
 
 from app.core.exceptions import BadRequestException
 from app.companies.models import CompanyCurrentStatus, CompanyGrade, CompanyPotential, CompanyType
@@ -107,6 +107,35 @@ class CompanyContactRead(BaseModel):
     is_primary: bool
     created_at: datetime
     updated_at: datetime
+
+    @computed_field
+    def age(self) -> int | None:
+        """Compute age in whole years from birth_date (DD-MM-YYYY or YYYY-MM-DD)."""
+        if not self.birth_date:
+            return None
+        import re
+        from datetime import date
+        clean = self.birth_date.strip()
+        dmy = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$", clean)
+        ymd = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", clean)
+        dob = None
+        if dmy:
+            day, month, year = int(dmy.group(1)), int(dmy.group(2)), int(dmy.group(3))
+            try:
+                dob = date(year, month, day)
+            except ValueError:
+                pass
+        elif ymd:
+            year, month, day = int(ymd.group(1)), int(ymd.group(2)), int(ymd.group(3))
+            try:
+                dob = date(year, month, day)
+            except ValueError:
+                pass
+        if dob is None:
+            return None
+        today = date.today()
+        calculated_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        return calculated_age if calculated_age >= 0 else None
 
 
 # ---------------------------------------------------------------------------

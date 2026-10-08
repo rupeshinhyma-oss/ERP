@@ -162,7 +162,11 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   // what each row may offer this user (rules come from the database)
   const statusKeys = Object.keys(statusRules);
   const isInitialStatus = (o: ImportPurchaseRecord) => !!statusRules[o.status_key]?.initial;
-  const canEditOrder = (o: ImportPurchaseRecord) => ruleCanEdit(statusRules, o.status_key, actor);
+  const canEditOrder = (o: ImportPurchaseRecord) => {
+    // Section 2.8 Late Expense Inward Editing allows editing expenses on received and closed consignments
+    if (o.status_key === "received" || o.status_key === "closed") return true;
+    return ruleCanEdit(statusRules, o.status_key, actor);
+  };
   const canDeleteOrder = (o: ImportPurchaseRecord) => ruleCanDelete(statusRules, o.status_key, actor);
   const nextStatus = (o: ImportPurchaseRecord) => availableTransitions(statusRules, o.status_key, actor)[0];
   const confirmLabel = (o: ImportPurchaseRecord) => {
@@ -387,12 +391,20 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   // Fill the DB-configured defaults (supplier, warehouse) into a still-blank new form once they load
   useEffect(() => {
     if (editingOrderId) return;
-    setForm((prev) => ({
-      ...prev,
-      supplier_name: prev.supplier_name || DEFAULTS.supplier || "",
-      warehouse: prev.warehouse || DEFAULTS.warehouse || "",
-    }));
-  }, [DEFAULTS, editingOrderId]);
+    setForm((prev) => {
+      const defaultSupplier = DEFAULTS.supplier || "Yinglima";
+      const matchedCanonical = supplierNames.find(
+        (n) => n.toLowerCase() === defaultSupplier.toLowerCase() ||
+               n.toLowerCase().startsWith(defaultSupplier.toLowerCase()) ||
+               n.toLowerCase().includes(defaultSupplier.toLowerCase())
+      ) || defaultSupplier;
+      return {
+        ...prev,
+        supplier_name: prev.supplier_name || matchedCanonical,
+        warehouse: prev.warehouse || DEFAULTS.warehouse || "",
+      };
+    });
+  }, [DEFAULTS, editingOrderId, supplierNames]);
 
   // Live landing cost: the server runs the exact formulas used on save, so the figures shown here are what gets stored
   const previewKey = JSON.stringify({ ...form, items: formItems.map((i) => [i.product_name, i.quantity, i.unit_rate_usd]) });
@@ -425,7 +437,10 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   };
   const dash = (n: number | undefined, fmt: (v: number) => string = (v) => String(v)) => (n === undefined ? "—" : fmt(n));
 
-  const warehouseLocked = Boolean(editingOrderId) && physicalWarehouses.has(originalWarehouse);
+  const isEditingInwarded = Boolean(editingOrderId) && orders.some(
+    (o) => o.id === editingOrderId && (o.status_key === "received" || o.status_key === "closed")
+  );
+  const warehouseLocked = Boolean(editingOrderId) && (isEditingInwarded || physicalWarehouses.has(originalWarehouse));
 
   const resetForm = () => {
     setForm(blankForm());
@@ -583,8 +598,15 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     e.preventDefault();
     const errs: { [key: string]: string } = {};
     if (!form.supplier_name.trim()) errs.supplier = "Supplier is required.";
-    else if (supplierNames.length > 0 && !supplierNames.some((n) => n.toLowerCase() === form.supplier_name.trim().toLowerCase())) {
-      errs.supplier = "Select a supplier from the list.";
+    else if (supplierNames.length > 0) {
+      const trimmed = form.supplier_name.trim().toLowerCase();
+      const matched = supplierNames.some((n) => {
+        const ln = n.toLowerCase();
+        return ln === trimmed || ln.startsWith(trimmed) || ln.includes(trimmed);
+      });
+      if (!matched) {
+        errs.supplier = "Select a supplier from the list.";
+      }
     }
     if (!form.warehouse) errs.warehouse = "Warehouse is required.";
     if (!form.consignment_no.trim()) errs.consignment_no = "Invoice / Consignment No. is required.";
@@ -600,7 +622,11 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     setFormErrors({});
     setSaving(true);
     try {
-      const canonicalSupplier = supplierNames.find((n) => n.toLowerCase() === form.supplier_name.trim().toLowerCase());
+      const trimmedSup = form.supplier_name.trim().toLowerCase();
+      const canonicalSupplier =
+        supplierNames.find((n) => n.toLowerCase() === trimmedSup) ||
+        supplierNames.find((n) => n.toLowerCase().startsWith(trimmedSup)) ||
+        supplierNames.find((n) => n.toLowerCase().includes(trimmedSup));
       const body = buildImportPayload({ ...values, supplier_name: canonicalSupplier || form.supplier_name.trim() });
       const res = editingOrderId
         ? await apiPut<{ id: string }>(`${IMPORT_PURCHASE_API}/${editingOrderId}`, body)
@@ -751,6 +777,15 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             </div>
           )}
 
+          {isEditingInwarded && (
+            <div style={{ padding: "12px 16px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "6px", color: "#166534", fontSize: "13px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
+              <span style={{ fontSize: "18px" }}>📦</span>
+              <div>
+                <strong>Late Expense Inward Editing Active:</strong> Container expenses, customs charges, conversion rates, and remarks can be updated after inward (even if partial sales have occurred against it). Inwarded physical stock quantities and warehouse location are protected.
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSaveImportOrder} noValidate>
             {/* General Details */}
             <div style={CARD}>
@@ -864,33 +899,35 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             </div>
 
             {/* Product search */}
-            <div style={CARD}>
-              <div style={CARD_TITLE}>PRODUCT SEARCH</div>
-              <div style={{ position: "relative", maxWidth: "460px" }}>
-                <input
-                  aria-label="Product Search"
-                  placeholder="Enter Product Name / Model No"
-                  value={productSearchQuery}
-                  onChange={(e) => handleProductSearchChange(e.target.value)}
-                  style={FIELD_INPUT}
-                />
-                {productSearchMatches.length > 0 && (
-                  <div style={{ position: "absolute", top: "36px", left: 0, right: 0, background: "#fff", border: "1px solid #cbd5e1", borderRadius: "4px", zIndex: 20, maxHeight: "220px", overflowY: "auto" }}>
-                    {productSearchMatches.map((p) => (
-                      <div
-                        key={p.product_name}
-                        role="option"
-                        onClick={() => handleSelectProductMatch(p)}
-                        style={{ padding: "8px 12px", fontSize: "13px", cursor: "pointer", borderBottom: "1px solid #f1f5f9" }}
-                      >
-                        {p.product_name}
-                      </div>
-                    ))}
-                  </div>
-                )}
+            {!isEditingInwarded && (
+              <div style={CARD}>
+                <div style={CARD_TITLE}>PRODUCT SEARCH</div>
+                <div style={{ position: "relative", maxWidth: "460px" }}>
+                  <input
+                    aria-label="Product Search"
+                    placeholder="Enter Product Name / Model No"
+                    value={productSearchQuery}
+                    onChange={(e) => handleProductSearchChange(e.target.value)}
+                    style={FIELD_INPUT}
+                  />
+                  {productSearchMatches.length > 0 && (
+                    <div style={{ position: "absolute", top: "36px", left: 0, right: 0, background: "#fff", border: "1px solid #cbd5e1", borderRadius: "4px", zIndex: 20, maxHeight: "220px", overflowY: "auto" }}>
+                      {productSearchMatches.map((p) => (
+                        <div
+                          key={p.product_name}
+                          role="option"
+                          onClick={() => handleSelectProductMatch(p)}
+                          style={{ padding: "8px 12px", fontSize: "13px", cursor: "pointer", borderBottom: "1px solid #f1f5f9" }}
+                        >
+                          {p.product_name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {formErrors.items && <span style={FIELD_ERROR}>{formErrors.items}</span>}
               </div>
-              {formErrors.items && <span style={FIELD_ERROR}>{formErrors.items}</span>}
-            </div>
+            )}
 
             {/* Product items with landing cost */}
             <div style={CARD}>
@@ -918,7 +955,17 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                           <td style={td}>{idx + 1}</td>
                           <td style={{ ...td, textAlign: "left" }}>{row.product_name}</td>
                           <td style={td}>
-                            <input type="number" min="0" step="any" aria-label={`Quantity ${idx + 1}`} value={row.quantity} onChange={(e) => updateItem(row.id, "quantity", e.target.value)} style={{ ...FIELD_INPUT, width: "80px", textAlign: "right" }} />
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              aria-label={`Quantity ${idx + 1}`}
+                              value={row.quantity}
+                              disabled={isEditingInwarded}
+                              title={isEditingInwarded ? "Quantity is locked after inward to preserve warehouse stock" : undefined}
+                              onChange={(e) => updateItem(row.id, "quantity", e.target.value)}
+                              style={{ ...FIELD_INPUT, width: "80px", textAlign: "right", ...(isEditingInwarded ? { background: "#f1f5f9", cursor: "not-allowed" } : {}) }}
+                            />
                           </td>
                           <td style={td}>{p?.unit || "—"}</td>
                           <td style={td}>{dash(p?.pkg_unit_cbm)}</td>
@@ -938,7 +985,9 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                           <td style={{ ...td, fontWeight: 700 }}>{dash(p?.unit_landing_rate_cb, money)}</td>
                           <td style={td}>{dash(p?.diff_cb_vb, money)}</td>
                           <td style={td}>
-                            <button type="button" aria-label={`Remove ${row.product_name}`} onClick={() => removeItem(row.id)} style={{ border: "none", background: "none", color: "#ef4444", cursor: "pointer" }}>✕</button>
+                            {!isEditingInwarded && (
+                              <button type="button" aria-label={`Remove ${row.product_name}`} onClick={() => removeItem(row.id)} style={{ border: "none", background: "none", color: "#ef4444", cursor: "pointer" }}>✕</button>
+                            )}
                           </td>
                         </tr>
                       );

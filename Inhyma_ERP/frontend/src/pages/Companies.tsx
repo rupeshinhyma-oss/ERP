@@ -2108,6 +2108,14 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       return;
     }
 
+    if (initialCompanyStatus.toLowerCase() === "existing" && form.current_status?.toLowerCase() === "new") {
+      const msg = "Once a company status is set to 'Existing', it cannot be changed back to 'New'.";
+      setError(msg);
+      setFormAlert({ type: "error", message: msg });
+      setSaving(false);
+      return;
+    }
+
     try {
       const emailList = form.email.trim()
         ? [form.email.trim()]
@@ -3040,28 +3048,73 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   }
 
   async function handleRowDelete(id: string) {
-    if (!confirm("Delete this supplier?")) return;
+    const targetCompany = rows.find((r) => r.id === id);
+    if (targetCompany?.current_status?.toLowerCase() === "existing") {
+      alert("Companies with status 'Existing' cannot be deleted. You can set them to Inactive instead.");
+      return;
+    }
+    if (targetCompany?.potential?.toLowerCase() === "yes") {
+      alert("Companies marked as 'Potential' cannot be deleted.");
+      return;
+    }
+    if (!confirm("Delete this company?")) return;
     await guardRowAction(`delete:${id}`, async () => {
       try {
         await apiDelete(`/companies/${id}`);
         setRows((prev) => prev.filter((r) => r.id !== id));
         setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
-      } catch (err) {
-        setError(err);
+      } catch (err: any) {
+        const msg = err?.detail || err?.message || "Failed to delete company.";
+        setError(msg);
+        alert(msg);
+      }
+    });
+  }
+
+  async function handleToggleActive(company: Company) {
+    const nextActive = !company.is_active;
+    const actionText = nextActive ? "activate" : "deactivate";
+    if (!confirm(`Are you sure you want to ${actionText} "${company.company_name}"?`)) return;
+    await guardRowAction(`toggle-active:${company.id}`, async () => {
+      try {
+        if (nextActive) {
+          await apiPost(`/companies/${company.id}/activate`, {});
+        } else {
+          await apiPost(`/companies/${company.id}/deactivate`, {});
+        }
+        setRows((prev) =>
+          prev.map((r) => (r.id === company.id ? { ...r, is_active: nextActive } : r))
+        );
+      } catch (err: any) {
+        const msg = err?.detail || err?.message || `Failed to ${actionText} company.`;
+        setError(msg);
+        alert(msg);
       }
     });
   }
 
   async function handleBulkDelete() {
     if (!selectedIds.length) return;
-    if (!confirm(`Delete ${selectedIds.length} selected supplier(s)? This cannot be undone.`)) return;
+    const existingBlocked = rows.filter((r) => selectedIds.includes(r.id) && r.current_status?.toLowerCase() === "existing");
+    if (existingBlocked.length > 0) {
+      alert(`Cannot delete: ${existingBlocked.length} selected company/companies have status 'Existing'. Existing companies cannot be deleted, but can be deactivated.`);
+      return;
+    }
+    const potentialBlocked = rows.filter((r) => selectedIds.includes(r.id) && r.potential?.toLowerCase() === "yes");
+    if (potentialBlocked.length > 0) {
+      alert(`Cannot delete: ${potentialBlocked.length} selected company/companies are marked as 'Potential'. Potential companies cannot be deleted.`);
+      return;
+    }
+    if (!confirm(`Delete ${selectedIds.length} selected company/companies? This cannot be undone.`)) return;
     await guardRowAction("bulk-delete", async () => {
       try {
         await Promise.all(selectedIds.map((id) => apiDelete(`/companies/${id}`)));
         setRows((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
         setSelectedIds([]);
-      } catch (err) {
-        setError(err);
+      } catch (err: any) {
+        const msg = err?.detail || err?.message || "Failed to delete selected companies.";
+        setError(msg);
+        alert(msg);
       }
     });
   }
@@ -4851,6 +4904,11 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                               color: "#0f172a",
                             }}
                           />
+                          {computeAge(contactForm.birth_date) !== null && (
+                            <div style={{ fontSize: "12px", color: "#166534", marginTop: "4px", fontWeight: 600 }}>
+                              Calculated Age: {computeAge(contactForm.birth_date)} years old
+                            </div>
+                          )}
                         </div>
 
                         {/* Anniversary Date */}
@@ -4997,6 +5055,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                         <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>NAME / DESIGNATION</th>
                         <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>CALLING / WHATSAPP</th>
                         <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>WECHAT / EMAIL</th>
+                        <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>BIRTH DATE / AGE</th>
                         <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>HANDLING TERRITORY</th>
                         <th style={{ padding: "12px 14px", textAlign: "center", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase", width: "140px" }}>ACTION</th>
                       </tr>
@@ -5004,7 +5063,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     <tbody>
                       {contacts.length === 0 ? (
                         <tr>
-                          <td colSpan={5} style={{ padding: "24px", textAlign: "center", color: "#94a3b8", fontSize: "13.5px" }}>
+                          <td colSpan={6} style={{ padding: "24px", textAlign: "center", color: "#94a3b8", fontSize: "13.5px" }}>
                             No contact persons added yet. Click "+ Add New" above to add contacts.
                           </td>
                         </tr>
@@ -5025,11 +5084,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                                 <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "2px" }}>{c.designation}</div>
                               ) : (
                                 <div style={{ fontSize: "12px", color: "#cbd5e1" }}>—</div>
-                              )}
-                              {computeAge(c.birth_date) !== null && (
-                                <div style={{ fontSize: "11.5px", color: "#94a3b8", marginTop: "2px" }}>
-                                  Age: {computeAge(c.birth_date)}
-                                </div>
                               )}
                             </td>
 
@@ -5063,6 +5117,24 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                                   </a>
                                 ) : null}
                               </div>
+                            </td>
+
+                            {/* BIRTH DATE / AGE */}
+                            <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                              {c.birth_date ? (
+                                <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                                  <span style={{ fontSize: "12.5px", color: "#334155", fontWeight: 500 }}>
+                                    🎂 {c.birth_date}
+                                  </span>
+                                  {computeAge(c.birth_date) !== null && (
+                                    <span style={{ display: "inline-flex", alignItems: "center", width: "fit-content", background: "#f0fdf4", color: "#166534", fontSize: "11px", fontWeight: 700, padding: "1px 6px", borderRadius: "4px", border: "1px solid #bbf7d0" }}>
+                                      Age: {computeAge(c.birth_date)} yrs
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span style={{ color: "#cbd5e1" }}>—</span>
+                              )}
                             </td>
 
                             {/* HANDLING TERRITORY */}
@@ -6806,42 +6878,72 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                                         </svg>
                                       </button>
                                     )}
-                                    {canDelete && (() => {
-                                      const isEligibleForDelete =
-                                        (!s.current_status || s.current_status.toLowerCase() === "new") &&
-                                        (!s.potential || s.potential.toLowerCase() === "no");
-                                      if (!isEligibleForDelete) return null;
-                                      return (
-                                        <button
-                                          type="button"
-                                          className="btn"
-                                          disabled={isRowActionPending(`delete:${s.id}`)}
-                                          style={{
-                                            background: "#ef4444",
-                                            color: "#ffffff",
-                                            padding: "6px 8px",
-                                            borderRadius: "4px",
-                                            border: "none",
-                                            cursor: isRowActionPending(`delete:${s.id}`) ? "default" : "pointer",
-                                            opacity: isRowActionPending(`delete:${s.id}`) ? 0.6 : 1,
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                          }}
-                                          onClick={() => {
-                                            void handleRowDelete(s.id);
-                                          }}
-                                          title="Delete Company"
-                                        >
-                                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <polyline points="3 6 5 6 21 6" />
-                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                            <line x1="10" y1="11" x2="10" y2="17" />
-                                            <line x1="14" y1="11" x2="14" y2="17" />
-                                          </svg>
-                                        </button>
-                                      );
-                                    })()}
+                                    {s.current_status?.toLowerCase() === "existing" ? (
+                                      <button
+                                        type="button"
+                                        className="btn"
+                                        data-testid="btn-toggle-inactive"
+                                        disabled={isRowActionPending(`toggle-active:${s.id}`)}
+                                        style={{
+                                          background: s.is_active ? "#f59e0b" : "#10b981",
+                                          color: "#ffffff",
+                                          padding: "5px 9px",
+                                          borderRadius: "4px",
+                                          border: "none",
+                                          cursor: isRowActionPending(`toggle-active:${s.id}`) ? "default" : "pointer",
+                                          opacity: isRowActionPending(`toggle-active:${s.id}`) ? 0.6 : 1,
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          fontSize: "11px",
+                                          fontWeight: 600,
+                                        }}
+                                        onClick={() => {
+                                          void handleToggleActive(s);
+                                        }}
+                                        title={s.is_active ? "Toggle Inactive (Existing companies cannot be deleted)" : "Activate Company"}
+                                      >
+                                        {s.is_active ? "Deactivate" : "Activate"}
+                                      </button>
+                                    ) : (
+                                      canDelete && (() => {
+                                        const isEligibleForDelete =
+                                          (!s.current_status || s.current_status.toLowerCase() === "new") &&
+                                          (!s.potential || s.potential.toLowerCase() === "no");
+                                        if (!isEligibleForDelete) return null;
+                                        return (
+                                          <button
+                                            type="button"
+                                            className="btn"
+                                            data-testid="btn-delete-company"
+                                            disabled={isRowActionPending(`delete:${s.id}`)}
+                                            style={{
+                                              background: "#ef4444",
+                                              color: "#ffffff",
+                                              padding: "6px 8px",
+                                              borderRadius: "4px",
+                                              border: "none",
+                                              cursor: isRowActionPending(`delete:${s.id}`) ? "default" : "pointer",
+                                              opacity: isRowActionPending(`delete:${s.id}`) ? 0.6 : 1,
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                            }}
+                                            onClick={() => {
+                                              void handleRowDelete(s.id);
+                                            }}
+                                            title="Delete Company"
+                                          >
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                              <polyline points="3 6 5 6 21 6" />
+                                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                              <line x1="10" y1="11" x2="10" y2="17" />
+                                              <line x1="14" y1="11" x2="14" y2="17" />
+                                            </svg>
+                                          </button>
+                                        );
+                                      })()
+                                    )}
                                   </div>
                                 </td>
                               );

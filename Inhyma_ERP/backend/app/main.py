@@ -218,9 +218,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.inquiries.email_inbound_worker import email_inbound_worker
     await email_inbound_worker.start()
 
+    # Start the automated 8:00 PM daily database backup service (General New points inhyma.docx)
+    from app.core.backup_service import backup_service
+    await backup_service.start()
+
     yield
 
     logger.info("Application shutting down.")
+
+    # Stop the daily backup worker
+    await backup_service.stop()
 
     # Gracefully drain the queue worker before closing the DB pool.
     await worker.stop()

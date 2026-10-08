@@ -964,6 +964,7 @@ export interface Lead {
   allotted_to?: string | null;
   created_by?: string | null;
   lead_status?: string | null;
+  reason_for_won_loss?: string | null;
   call_type?: string | null;
   notes?: string | null;
   added_on?: string | null;

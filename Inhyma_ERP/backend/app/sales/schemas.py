@@ -205,6 +205,7 @@ class SaleOrderItemCreate(BaseModel):
     gst_percent: float | None = Field(default=None, ge=0)
     is_additional_charge: bool = False
     charge_type: str | None = None
+    serial_numbers: list[str] | None = None
 
     def as_priced_input(self) -> "ProformaLineItemSchema":
         """The shared pricing function (spec formula) works on Proforma lines; a sale-order line maps onto one 1:1."""
@@ -238,6 +239,7 @@ class SaleOrderItemResponse(BaseModel):
     remarks: str | None = None
     is_additional_charge: bool = False
     charge_type: str | None = None
+    serial_numbers: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -298,6 +300,7 @@ class SaleOrderCreate(BaseModel):
     discount: float | None = None
 
     consignment_code: str | None = None
+    allocated_consignment: str | None = None
     planning_sheet_id: uuid.UUID | None = None
     planning_column_id: uuid.UUID | None = None
 
@@ -357,6 +360,7 @@ class SaleOrderUpdate(BaseModel):
     gatepass_handled_by: str | None = None
 
     consignment_code: str | None = None
+    allocated_consignment: str | None = None
     planning_sheet_id: uuid.UUID | None = None
     planning_column_id: uuid.UUID | None = None
 
@@ -434,6 +438,7 @@ class SaleOrderResponse(BaseModel):
     gatepass_handled_by: str | None = None
 
     consignment_code: str | None = None
+    allocated_consignment: str | None = None
     planning_sheet_id: uuid.UUID | None = None
     planning_column_id: uuid.UUID | None = None
 

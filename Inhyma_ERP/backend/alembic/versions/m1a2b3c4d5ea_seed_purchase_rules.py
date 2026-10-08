@@ -49,7 +49,7 @@ SEED = {
             "edit": "any", "delete": "none", "action_label": "Receive", "action_color": "#2563eb"}),
         ("closed", "Closed", {
             "card_label": "CLOSED", "badge": DONE, "next": [], "admin_only_to": [], "reason_required_to": [],
-            "edit": "none", "delete": "none", "action_label": "Close", "action_color": "#475569"}),
+            "edit": "any", "delete": "none", "action_label": "Close", "action_color": "#475569"}),
     ],
     "purchase.import.defaults": [
         ("supplier", "Yinglima", None),

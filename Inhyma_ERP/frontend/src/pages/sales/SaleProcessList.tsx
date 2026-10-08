@@ -1444,6 +1444,11 @@ export function SaleProcessListPage() {
                           {o.order_no}
                         </button>
                         <div style={{ fontSize: "11px", color: "#64748b" }}>{o.order_date}</div>
+                        {(o.allocated_consignment || o.consignment_code) && (
+                          <div style={{ fontSize: "11px", color: "#d97706", fontWeight: 600, marginTop: "2px" }} title="Allocated Transit Consignment">
+                            📦 {o.allocated_consignment || o.consignment_code}
+                          </div>
+                        )}
                       </td>
 
                       {/* Warehouse */}

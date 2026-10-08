@@ -417,6 +417,10 @@ async def update_proforma_status(
                     )
                     db.add(created_so)
                     await db.flush()
+
+                    from app.companies.repository import CompanyRepository
+                    company_repo = CompanyRepository(db)
+                    await company_repo.transition_to_existing_by_name(record.company_name)
         except (BadRequestException, ConflictException):
             raise
         except Exception:

@@ -25,13 +25,48 @@ async def resolve_supplier(db: AsyncSession, name: str, supplier_id):
 
     Only the id and name are needed, so just those columns are read (a full Supplier entity would also
     load its emails, contacts and category links).
+    Supports exact match, prefix match (e.g. 'Yinglima' -> 'Yinglima Packaging Machinery Co., Ltd.'),
+    and substring match for convenience.
     """
-    stmt = select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None))
-    stmt = stmt.where(Supplier.id == supplier_id) if supplier_id else stmt.where(func.lower(Supplier.company_name) == name.strip().lower())
+    clean_name = (name or "").strip()
+    if supplier_id:
+        stmt = select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None), Supplier.id == supplier_id)
+        supplier = (await db.execute(stmt)).first()
+        if supplier:
+            return supplier
+
+    if not clean_name:
+        raise BadRequestException("Supplier name is required.")
+
+    # 1. Exact match (case-insensitive)
+    stmt = select(Supplier.id, Supplier.company_name).where(
+        Supplier.deleted_at.is_(None),
+        func.lower(Supplier.company_name) == clean_name.lower(),
+    )
     supplier = (await db.execute(stmt)).first()
-    if supplier is None:
-        raise BadRequestException(f"Supplier '{name}' is not in the Supplier master.")
-    return supplier
+    if supplier:
+        return supplier
+
+    # 2. Prefix match (e.g. 'Yinglima' -> 'Yinglima Packaging Machinery Co., Ltd.')
+    stmt = select(Supplier.id, Supplier.company_name).where(
+        Supplier.deleted_at.is_(None),
+        Supplier.company_name.ilike(f"{clean_name}%"),
+    )
+    supplier = (await db.execute(stmt)).first()
+    if supplier:
+        return supplier
+
+    # 3. Substring match
+    stmt = select(Supplier.id, Supplier.company_name).where(
+        Supplier.deleted_at.is_(None),
+        Supplier.company_name.ilike(f"%{clean_name}%"),
+    )
+    supplier = (await db.execute(stmt)).first()
+    if supplier:
+        return supplier
+
+    raise BadRequestException(f"Supplier '{name}' is not in the Supplier master.")
+
 
 
 async def require_physical_warehouse(db: AsyncSession, name: str):

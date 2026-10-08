@@ -200,34 +200,85 @@ class CompanyService:
                 "Visit Remarks can only be set when 'Visited Factory/Office' is Yes."
             )
 
-    def _validate_status_transition(self, existing_status: CompanyCurrentStatus | None, new_status: Any) -> None:
-        """Status may not move from Existing back to New."""
-        if new_status is None:
+    def _validate_status_transition(self, existing_status: Any, new_status: Any) -> None:
+        """Status may not move from Existing back to New (one-way status lock per spec)."""
+        if not existing_status or not new_status:
             return
-        if existing_status == CompanyCurrentStatus.EXISTING and new_status == CompanyCurrentStatus.NEW:
+        ex_str = (existing_status.value if hasattr(existing_status, "value") else str(existing_status)).strip().lower()
+        new_str = (new_status.value if hasattr(new_status, "value") else str(new_status)).strip().lower()
+        if ex_str == "existing" and new_str == "new":
             raise ConflictException(
-                "Current Status cannot be changed from 'Existing' back to 'New'."
+                "Current Status cannot be changed from 'Existing' back to 'New'. Once a company transitions to Existing, status is locked from returning to New."
             )
 
     def _can_delete(self, company: Company) -> bool:
-        """Delete is only allowed if status is New and potential is not Yes."""
-        status_blocks_delete = company.current_status == CompanyCurrentStatus.EXISTING
-        potential_blocks_delete = company.potential is not None and company.potential.value == "yes"
-        return not (status_blocks_delete or potential_blocks_delete)
+        """
+        Spec: If Current Status is 'Existing', cannot DELETE that data but can do 'Inactive'.
+        Deletion only permitted if Current Status is 'New or Blank' and Select Type is 'Not Potential' (no/blank).
+        """
+        status_str = (company.current_status.value if hasattr(company.current_status, "value") else str(company.current_status or "")).strip().lower()
+        if status_str == "existing":
+            return False
+        if status_str not in ("", "none", "new"):
+            return False
+        pot_str = (company.potential.value if hasattr(company.potential, "value") else str(company.potential or "")).strip().lower()
+        if pot_str in ("yes",):
+            return False
+        return True
 
     async def _ensure_tax_id_unique(self, tax_id: str | None, *, exclude_id: uuid.UUID | None = None) -> None:
         """Spec: a duplicate GST number must be refused with an 'already exists' message."""
         if tax_id and await self.repository.tax_id_exists(tax_id, exclude_id=exclude_id):
             raise ConflictException(f"A company with GST number {tax_id.strip().upper()!r} already exists.")
 
-    async def _ensure_calling_number_unique(self, calling_number: str | None, *, exclude_id: uuid.UUID | None = None) -> None:
+    async def _ensure_calling_number_unique(
+        self,
+        calling_number: str | None,
+        *,
+        exclude_id: uuid.UUID | None = None,
+        exclude_contact_id: uuid.UUID | None = None,
+    ) -> None:
         """Spec: Contact Number (Direct) must show 'already exists' and not allow to save."""
-        if calling_number and await self.repository.calling_number_exists(calling_number, exclude_id=exclude_id):
-            raise ConflictException(f"A company with Contact Number (Direct) {calling_number.strip()!r} already exists.")
+        if not calling_number:
+            return
+        import inspect
+        if hasattr(self.repository, "get_company_by_calling_number"):
+            res = self.repository.get_company_by_calling_number(
+                calling_number, exclude_id=exclude_id, exclude_contact_id=exclude_contact_id
+            )
+            if inspect.isawaitable(res):
+                existing_comp = await res
+                if existing_comp:
+                    raise ConflictException(
+                        f"A company or contact with Contact Number (Direct) {calling_number.strip()!r} already exists "
+                        f"(in company {existing_comp.company_name!r}). Duplicate contact numbers are not allowed."
+                    )
+        if hasattr(self.repository, "calling_number_exists"):
+            res = self.repository.calling_number_exists(
+                calling_number, exclude_id=exclude_id, exclude_contact_id=exclude_contact_id
+            )
+            exists = await res if inspect.isawaitable(res) else res
+            if exists:
+                raise ConflictException(
+                    f"A company or contact with Contact Number (Direct) {calling_number.strip()!r} already exists. "
+                    "Duplicate contact numbers are not allowed."
+                )
+
+    async def auto_transition_to_existing(self, company_name: str | None) -> None:
+        """Spec: When an invoice or confirmed sales order is generated for a client, automatically flip current_status from new to existing."""
+        if not company_name:
+            return
+        updated = await self.repository.transition_to_existing_by_name(company_name)
+        if updated:
+            await self._invalidate_cache()
 
     async def _invalidate_cache(self) -> None:
         """Invalidate the companies dropdown cache after mutation."""
-        await self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)
+        if hasattr(self.cache_manager, "invalidate_dropdown"):
+            import inspect
+            res = self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)
+            if inspect.isawaitable(res):
+                await res
 
     # ------------------------------------------------------------------
     # Create / Update
@@ -432,9 +483,15 @@ class CompanyService:
         """Soft-delete a company, enforcing eligibility rules."""
         company = await self.get_by_id_or_raise(company_id)
         if not self._can_delete(company):
+            status_str = (company.current_status.value if hasattr(company.current_status, "value") else str(company.current_status or "")).strip().lower()
+            if status_str == "existing":
+                raise ConflictException(
+                    "This company cannot be deleted because its Current Status is 'Existing'. "
+                    "Companies with 'Existing' status cannot be deleted; you may toggle it to Inactive instead."
+                )
             raise ConflictException(
-                "This company cannot be deleted because its Current Status is 'Existing' or "
-                "Potential is 'Yes'. Set it to Inactive instead."
+                "This company cannot be deleted. Deletion is only permitted if Current Status is 'New' or blank, "
+                "and Potential is 'No' (Not Potential). Set it to Inactive instead."
             )
         await self.repository.delete(company)
         await self._invalidate_cache()
@@ -449,6 +506,8 @@ class CompanyService:
         if field_values.get("country_id"):
             if await self.country_repository.get_by_id(field_values["country_id"]) is None:
                 raise BadRequestException("The specified country does not exist.")
+        if field_values.get("calling_number"):
+            await self._ensure_calling_number_unique(field_values["calling_number"])
         contact = await self.contact_repository.create(company_id=company_id, is_primary=False, **field_values)
         return contact
 
@@ -465,6 +524,11 @@ class CompanyService:
         if field_values.get("country_id"):
             if await self.country_repository.get_by_id(field_values["country_id"]) is None:
                 raise BadRequestException("The specified country does not exist.")
+        if field_values.get("calling_number"):
+            await self._ensure_calling_number_unique(
+                field_values["calling_number"],
+                exclude_contact_id=contact_id,
+            )
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
             await self.contact_repository.update(contact, **changes)

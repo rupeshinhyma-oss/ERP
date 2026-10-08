@@ -282,7 +282,9 @@ async def update_import_purchase(
 ) -> dict:
     record = await _get(db, purchase_id)
     rules = await wf.load_status_rules(db, GROUP)
-    wf.check_editable(rules, record.status, user)
+    # Late Expense Inward Editing allows editing expenses on received and closed consignments
+    if record.status not in ("received", "closed"):
+        wf.check_editable(rules, record.status, user)
     supplier, warehouse, result = await _prepare(db, payload, record)
 
     old_warehouse = await stock_service.get_warehouse(db, record.warehouse)
@@ -290,14 +292,21 @@ async def update_import_purchase(
         raise ConflictException("The warehouse cannot be changed once stock has been received into a physical warehouse.")
 
     if record.stock_applied:
+        # Key deltas by normalized (warehouse, product) to guarantee unchanged items produce exact 0 delta
         deltas: dict[tuple[str, str], float] = defaultdict(float)
+        canonical_targets: dict[tuple[str, str], tuple[str, str]] = {}
         for name, qty in by_product((i.product_name, i.quantity) for i in record.items).items():
-            deltas[(old_warehouse.name, name)] -= qty
+            wh_key = (old_warehouse.name.strip().lower(), name.strip().lower())
+            deltas[wh_key] -= qty
+            canonical_targets[wh_key] = (old_warehouse.name, name)
         for name, qty in by_product((ln.product_name, ln.quantity) for ln in result.items).items():
-            deltas[(warehouse.name, name)] += qty
-        for (wh, name), delta in sorted(deltas.items(), key=lambda kv: -kv[1]):       # additions before removals
+            wh_key = (warehouse.name.strip().lower(), name.strip().lower())
+            deltas[wh_key] += qty
+            canonical_targets[wh_key] = (warehouse.name, name)
+        for wh_key, delta in sorted(deltas.items(), key=lambda kv: -kv[1]):       # additions before removals
             if abs(delta) > 1e-9:
-                await stock_service.apply_stock_delta(db, product_name=name, warehouse_name=wh, delta=delta)
+                target_wh, target_prod = canonical_targets[wh_key]
+                await stock_service.apply_stock_delta(db, product_name=target_prod, warehouse_name=target_wh, delta=delta)
 
     _apply(record, payload, supplier, warehouse, result)
     await db.flush()

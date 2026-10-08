@@ -83,6 +83,10 @@ class LeadService:
             lead = await self.repository.update(lead, **updates)
         return lead
 
+    async def allot_lead(self, lead_id: uuid.UUID, allotted_to: str) -> Lead:
+        lead = await self.get_by_id(lead_id)
+        return await self.repository.allot_lead(lead, allotted_to)
+
     async def delete(self, lead_id: uuid.UUID) -> None:
         lead = await self.get_by_id(lead_id)
         await self.repository.soft_delete(lead)

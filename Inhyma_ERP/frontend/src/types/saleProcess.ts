@@ -37,6 +37,7 @@ export interface SaleOrderItem {
   remarks?: string | null;
   is_additional_charge?: boolean;
   charge_type?: string;
+  serial_numbers?: string[] | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -111,6 +112,7 @@ export interface SaleOrder {
   files?: Array<{ name: string; size?: string; type?: string; url?: string }>;
 
   consignment_code?: string | null;
+  allocated_consignment?: string | null;
   planning_sheet_id?: string | null;
   planning_column_id?: string | null;
 

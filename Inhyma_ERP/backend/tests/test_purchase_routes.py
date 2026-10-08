@@ -114,7 +114,7 @@ async def factory():
             Product(product_name="Teflon Belt", product_name_tally="Teflon Belt", category_id=cat, uom_id=uom.id,
                     packaging_unit_cbm=0.0, packaging_quantity=1),
         ])
-        for name in ("Yinglima", "Local Traders"):
+        for name in ("Yinglima Packaging Machinery Co., Ltd.", "Local Traders"):
             sup = Supplier(company_name=name, country_id=country, state_id=state.id, city_id=city.id, tax_id_number=name[:3].upper(),
                            address="6/7 Ripal Complex", town="Bodakdev", contact_calling_number="8799513908")
             s.add(sup)
@@ -383,7 +383,7 @@ async def test_import_status_flow_and_who_may_do_what(factory):
         assert (await user.patch(f"{url}/status", json={"status": "closed"})).status_code == 403          # close is admin only
         closed = (await admin.patch(f"{url}/status", json={"status": "closed"})).json()["data"]
         assert closed["closed_at"] and closed["status"] == "closed"
-        assert (await admin.put(url, json=_import())).status_code == 409         # closed is final
+        assert (await admin.put(url, json=_import())).status_code == 200         # late expense inward editing is allowed on closed
         assert (await admin.delete(url)).status_code == 409
 
 
@@ -445,3 +445,95 @@ async def test_import_preview_saves_nothing_needs_login_and_ignores_blank_rows(f
         assert (await _stock(factory)) == {}
     async with _client(factory, None) as anon:
         assert (await anon.post("/purchase/import-orders/preview", json={})).status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_supplier_flexible_matching_for_yinglima(factory):
+    async with _client(factory, NORMAL) as c:
+        # 1. Prefix match 'Yinglima' -> 'Yinglima Packaging Machinery Co., Ltd.'
+        imp1 = await _new_import(c, consignment_no="EXP-Y1", supplier_name="Yinglima")
+        assert imp1["supplier_name"] == "Yinglima Packaging Machinery Co., Ltd."
+
+        # 2. Exact match 'Yinglima Packaging Machinery Co., Ltd.'
+        imp2 = await _new_import(c, consignment_no="EXP-Y2", supplier_name="Yinglima Packaging Machinery Co., Ltd.")
+        assert imp2["supplier_name"] == "Yinglima Packaging Machinery Co., Ltd."
+
+        # 3. Case-insensitive substring match 'packaging machinery'
+        imp3 = await _new_import(c, consignment_no="EXP-Y3", supplier_name="packaging machinery")
+        assert imp3["supplier_name"] == "Yinglima Packaging Machinery Co., Ltd."
+
+        # 4. Unknown supplier raises 400
+        res = await c.post("/purchase/import-orders", json=_import(consignment_no="EXP-Y4", supplier_name="NonExistent Corp"))
+        assert res.status_code == 400 and "not in the Supplier master" in res.text
+
+
+@pytest.mark.asyncio
+async def test_late_expense_editing_after_inward_and_partial_sales(factory):
+    async with _client(factory, NORMAL) as user, _client(factory, ADMIN) as admin:
+        # Create an import purchase with 10 units of Band Sealer into physical warehouse "Mumbai"
+        order = await _new_import(
+            user,
+            consignment_no="EXP-LATE-1",
+            warehouse="Mumbai",
+            items=[{"product_name": "Band Sealer", "quantity": 10, "unit_rate_usd": 60}],
+            freight=4000,
+            insurance=400,
+            clearing_transport=2000,
+        )
+        url = f"/purchase/import-orders/{order['id']}"
+
+        # Transition: pending -> confirmed -> received
+        await user.patch(f"{url}/status", json={"status": "confirmed"})
+        r = (await user.patch(f"{url}/status", json={"status": "received"})).json()["data"]
+        assert r["status"] == "received"
+        assert (await _stock(factory))["mumbai"] == 10.0
+
+        # Simulate partial sales against this consignment: 6 units sold, only 4 units remain in warehouse
+        await _set_stock(factory, "Band Sealer", mumbai=4.0, total_qty=4.0)
+        assert (await _stock(factory))["mumbai"] == 4.0
+
+        # Now edit container expenses on the received consignment (Late Expense Inward Editing)
+        edit_payload = _import(
+            consignment_no="EXP-LATE-1",
+            warehouse="Mumbai",
+            items=[{"product_name": "Band Sealer", "quantity": 10, "unit_rate_usd": 60}],
+            freight=8000,
+            insurance=800,
+            clearing_transport=5000,
+        )
+        res = await admin.put(url, json=edit_payload)
+        assert res.status_code == 200, res.text
+        updated = res.json()["data"]
+
+        # Physical stock in warehouse must be preserved exactly at 4.0 (no negative stock error or delta collision)
+        assert (await _stock(factory))["mumbai"] == 4.0
+
+        # Verify container expenses and landing rates recalculated properly
+        assert updated["freight"] == 8000.0
+        assert updated["insurance"] == 800.0
+        assert updated["clearing_transport"] == 5000.0
+        assert updated["total_expenses"] > order["total_expenses"]
+        assert updated["gross_total_landing"] > order["gross_total_landing"]
+
+        # Move to closed status
+        closed = (await admin.patch(f"{url}/status", json={"status": "closed"})).json()["data"]
+        assert closed["status"] == "closed"
+
+        # Late expense edit on closed consignment also succeeds
+        close_edit = _import(
+            consignment_no="EXP-LATE-1",
+            warehouse="Mumbai",
+            items=[{"product_name": "Band Sealer", "quantity": 10, "unit_rate_usd": 60}],
+            freight=8000,
+            insurance=800,
+            clearing_transport=5000,
+            misc_charges=1200,
+            misc_remarks="Late port clearance fee",
+        )
+        res_closed = await admin.put(url, json=close_edit)
+        assert res_closed.status_code == 200, res_closed.text
+        final = res_closed.json()["data"]
+        assert final["misc_charges"] == 1200.0
+        assert final["misc_remarks"] == "Late port clearance fee"
+        assert (await _stock(factory))["mumbai"] == 4.0
+

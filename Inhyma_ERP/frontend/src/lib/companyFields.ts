@@ -65,14 +65,29 @@ export function clearInapplicableCompanyFields<T extends CompanyFieldsInput>(
   };
 }
 
-/** Whole years from a YYYY-MM-DD (or DD-MM-YYYY) birth date, for display only -- never stored. */
+/** Whole years from a DD-MM-YYYY or YYYY-MM-DD birth date, for display only -- never stored. */
 export function computeAge(birthDate?: string | null): number | null {
   if (!birthDate) return null;
-  const dob = new Date(birthDate);
-  if (Number.isNaN(dob.getTime())) return null;
+  const clean = birthDate.trim();
+  if (!clean) return null;
+
+  let dob: Date | null = null;
+  // Match DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = clean.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10) - 1;
+    const year = parseInt(dmyMatch[3], 10);
+    dob = new Date(year, month, day);
+  } else {
+    dob = new Date(clean);
+  }
+
+  if (!dob || Number.isNaN(dob.getTime())) return null;
   const today = new Date();
   let age = today.getFullYear() - dob.getFullYear();
   const monthDiff = today.getMonth() - dob.getMonth();
   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) age -= 1;
   return age >= 0 ? age : null;
 }
+

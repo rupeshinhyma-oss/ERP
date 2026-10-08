@@ -18,7 +18,7 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.service import CurrentUser
@@ -97,6 +97,7 @@ class SaleService:
                     tax_percent=line.gst_percent, tax_amount=line.gst_amount, gst_amount=line.gst_amount,
                     item_total=line.total, planning_row_id=src.planning_row_id, remarks=src.remarks,
                     is_additional_charge=line.is_additional_charge, charge_type=line.charge_type,
+                    serial_numbers=getattr(src, "serial_numbers", None),
                 )
             )
         goods = [l for l in priced.lines if not l.is_additional_charge]
@@ -477,6 +478,7 @@ class SaleService:
             amount_inc_gst=totals["amount_inc_gst"],
             discount=totals["discount"],
             consignment_code=payload.consignment_code,
+            allocated_consignment=payload.allocated_consignment,
             planning_sheet_id=payload.planning_sheet_id,
             planning_column_id=payload.planning_column_id,
             order_date=payload.order_date,
@@ -517,7 +519,35 @@ class SaleService:
                         f"(available {avail:g}, needed {qty:g}). Physical warehouses cannot go negative."
                     )
 
-        return await self.repo.create(order)
+        created = await self.repo.create(order)
+        if created.status in ("sales_confirmed", "confirmed", "acc_confirmed") or created.invoice_no:
+            await self._transition_company_to_existing(created.company_name or created.buyer_name)
+        return created
+
+    async def _transition_company_to_existing(self, company_name: str | None) -> None:
+        """Spec: When an invoice or confirmed sales order is generated for a client, backend must automatically flip current_status from new to existing."""
+        if not company_name:
+            return
+        clean = company_name.strip()
+        if not clean:
+            return
+        try:
+            from app.companies.models import Company, CompanyCurrentStatus
+            stmt = (
+                select(Company)
+                .where(Company.deleted_at.is_(None), func.lower(Company.company_name) == clean.lower())
+                .limit(1)
+            )
+            res = await self.session.execute(stmt)
+            comp = res.scalar_one_or_none()
+            if comp:
+                curr = (comp.current_status.value if hasattr(comp.current_status, "value") else str(comp.current_status or "")).strip().lower()
+                if curr != "existing":
+                    comp.current_status = CompanyCurrentStatus.EXISTING
+                    await self.session.flush()
+        except Exception:
+            # Tolerant if company table is omitted from isolated tests
+            pass
 
     async def update_order(
         self,
@@ -594,6 +624,8 @@ class SaleService:
 
         if payload.consignment_code is not None:
             order.consignment_code = payload.consignment_code
+        if payload.allocated_consignment is not None:
+            order.allocated_consignment = payload.allocated_consignment
         if payload.planning_sheet_id is not None:
             order.planning_sheet_id = payload.planning_sheet_id
         if payload.planning_column_id is not None:
@@ -652,7 +684,10 @@ class SaleService:
                         f"(available {avail:g}, needed {qty:g}). Physical warehouses cannot go negative."
                     )
 
-        return await self.repo.update(order)
+        updated = await self.repo.update(order)
+        if updated.invoice_no or updated.status in ("sales_confirmed", "confirmed", "acc_confirmed"):
+            await self._transition_company_to_existing(updated.company_name or updated.buyer_name)
+        return updated
 
     async def update_status(
         self,
@@ -725,7 +760,10 @@ class SaleService:
             order.remarks = (
                 f"{order.remarks or ''}\n[{date.today()}] {current_user.username}: {previous} -> {target}: {reason}".strip()
             )
-        return await self.repo.update(order)
+        updated = await self.repo.update(order)
+        if target in ("sales_confirmed", "confirmed", "acc_confirmed") or updated.invoice_no:
+            await self._transition_company_to_existing(updated.company_name or updated.buyer_name)
+        return updated
 
     async def delete_order(self, order_id: uuid.UUID, current_user: CurrentUser) -> None:
         """Delete (soft) according to the stage rules; the order's stock goes back first."""

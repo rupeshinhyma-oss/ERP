@@ -39,6 +39,11 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         "district",
         "state",
         "notes",
+        "direct_import_from_china",
+        "monthly_import_volume",
+        "lead_status",
+        "reason_for_won_loss",
+        "entry_source",
     )
     sortable_fields = (
         "company_name",
@@ -57,6 +62,9 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         "followup_date",
         "added_on",
         "created_at",
+        "direct_import_from_china",
+        "monthly_import_volume",
+        "lead_status",
     )
     filterable_fields = (
         "call_type",
@@ -70,6 +78,11 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         "client_grade",
         "potential_type",
         "business_category",
+        "call_category",
+        "direct_import_from_china",
+        "monthly_import_volume",
+        "lead_status",
+        "entry_source",
     )
 
     def __init__(self, session: AsyncSession) -> None:
@@ -92,6 +105,10 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         business_category: str | None = None,
         company_name: str | None = None,
         call_category: str | None = None,
+        direct_import_from_china: str | None = None,
+        monthly_import_volume: str | None = None,
+        lead_status: str | None = None,
+        entry_source: str | None = None,
         added_date: Any | None = None,
         date_from: Any | None = None,
         date_to: Any | None = None,
@@ -130,6 +147,14 @@ class FollowUpRepository(BaseRepository[FollowUp]):
             stmt = stmt.where(func.lower(FollowUp.potential_type) == potential_type.strip().lower())
         if business_category and business_category.strip() and business_category.strip().lower() not in ("all", "select"):
             stmt = stmt.where(func.lower(FollowUp.business_category) == business_category.strip().lower())
+        if direct_import_from_china and direct_import_from_china.strip() and direct_import_from_china.strip().lower() not in ("all", "select"):
+            stmt = stmt.where(func.lower(FollowUp.direct_import_from_china) == direct_import_from_china.strip().lower())
+        if monthly_import_volume and monthly_import_volume.strip() and monthly_import_volume.strip().lower() not in ("all", "select"):
+            stmt = stmt.where(func.lower(FollowUp.monthly_import_volume).ilike(f"%{monthly_import_volume.strip().lower()}%"))
+        if lead_status and lead_status.strip() and lead_status.strip().lower() not in ("all", "select"):
+            stmt = stmt.where(func.lower(FollowUp.lead_status) == lead_status.strip().lower())
+        if entry_source and entry_source.strip() and entry_source.strip().lower() not in ("all", "select"):
+            stmt = stmt.where(func.lower(FollowUp.entry_source) == entry_source.strip().lower())
 
         # Date filters
         if added_date:
@@ -155,6 +180,9 @@ class FollowUpRepository(BaseRepository[FollowUp]):
                 func.lower(FollowUp.current_status).ilike(term),
                 func.lower(FollowUp.feedback).ilike(term),
                 func.lower(FollowUp.business_type).ilike(term),
+                func.lower(FollowUp.lead_status).ilike(term),
+                func.lower(FollowUp.reason_for_won_loss).ilike(term),
+                func.lower(FollowUp.monthly_import_volume).ilike(term),
             ]
             stmt = stmt.where(or_(*or_clauses))
 

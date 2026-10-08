@@ -263,18 +263,23 @@ class CompanyRepository(BaseRepository[Company]):
         result = await self.session.execute(stmt.limit(1))
         return result.scalar_one_or_none() is not None
 
-    async def calling_number_exists(self, calling_number: str, *, exclude_id: uuid.UUID | None = None) -> bool:
-        """Return True if a non-deleted company or contact already uses this direct contact number."""
+    async def get_company_by_calling_number(
+        self,
+        calling_number: str,
+        *,
+        exclude_id: uuid.UUID | None = None,
+        exclude_contact_id: uuid.UUID | None = None,
+    ) -> Company | None:
+        """Find non-deleted Company using this direct contact number (either in company profile or its contacts)."""
         clean = (calling_number or "").strip()
         if not clean:
-            return False
+            return None
         digits = "".join(filter(str.isdigit, clean))
         if len(digits) < 7:
-            return False
+            return None
 
         stmt_comp = (
             self._base_select()
-            .with_only_columns(Company.id)
             .where(
                 or_(
                     Company.contact_calling_number == clean,
@@ -285,14 +290,16 @@ class CompanyRepository(BaseRepository[Company]):
         if exclude_id is not None:
             stmt_comp = stmt_comp.where(Company.id != exclude_id)
         res_comp = await self.session.execute(stmt_comp.limit(1))
-        if res_comp.scalar_one_or_none() is not None:
-            return True
+        comp = res_comp.scalar_one_or_none()
+        if comp is not None:
+            return comp
 
         stmt_contact = (
-            select(CompanyContact.id)
-            .join(Company, Company.id == CompanyContact.company_id)
+            select(Company)
+            .join(CompanyContact, Company.id == CompanyContact.company_id)
             .where(
                 Company.deleted_at.is_(None),
+                CompanyContact.deleted_at.is_(None),
                 or_(
                     CompanyContact.calling_number == clean,
                     func.replace(func.replace(func.replace(CompanyContact.calling_number, " ", ""), "-", ""), "+", "").ilike(f"%{digits[-10:]}%"),
@@ -301,8 +308,47 @@ class CompanyRepository(BaseRepository[Company]):
         )
         if exclude_id is not None:
             stmt_contact = stmt_contact.where(CompanyContact.company_id != exclude_id)
+        if exclude_contact_id is not None:
+            stmt_contact = stmt_contact.where(CompanyContact.id != exclude_contact_id)
         res_contact = await self.session.execute(stmt_contact.limit(1))
-        return res_contact.scalar_one_or_none() is not None
+        return res_contact.scalar_one_or_none()
+
+    async def calling_number_exists(
+        self,
+        calling_number: str,
+        *,
+        exclude_id: uuid.UUID | None = None,
+        exclude_contact_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Return True if a non-deleted company or contact already uses this direct contact number."""
+        return (
+            await self.get_company_by_calling_number(
+                calling_number, exclude_id=exclude_id, exclude_contact_id=exclude_contact_id
+            )
+            is not None
+        )
+
+    async def transition_to_existing_by_name(self, company_name: str | None) -> Company | None:
+        """Find non-deleted company matching name (case-insensitive). If found and status != 'existing', flip to 'existing'."""
+        if not company_name:
+            return None
+        clean = company_name.strip()
+        if not clean:
+            return None
+        stmt = (
+            self._base_select()
+            .where(func.lower(Company.company_name) == clean.lower())
+            .limit(1)
+        )
+        res = await self.session.execute(stmt)
+        company = res.scalar_one_or_none()
+        if company:
+            from app.companies.models import CompanyCurrentStatus
+            curr = (company.current_status.value if hasattr(company.current_status, "value") else str(company.current_status or "")).strip().lower()
+            if curr != "existing":
+                company.current_status = CompanyCurrentStatus.EXISTING
+                await self.session.flush()
+        return company
 
     async def get_with_relations(self, company_id: uuid.UUID) -> Company | None:
         """Fetch a company by ID with relations loaded."""
