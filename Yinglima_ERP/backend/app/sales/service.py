@@ -562,7 +562,7 @@ class SaleService:
             "cbm_per_unit": cbm_unit,
             "total_cbm": total_cbm,
             "total_supplier_amount_rmb": total_supplier_amount_rmb,
-            "is_from_local_purchase": bool(lp_row is not None and unit_price_rmb_with_vat > 0),
+            "is_from_local_purchase": lp_row is not None and unit_price_rmb_with_vat > 0,
         }
 
     # -----------------------------------------------------------------------
