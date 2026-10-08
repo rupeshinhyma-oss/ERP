@@ -28,7 +28,8 @@ class LeadBase(BaseModel):
     requirements: str | None = None
     allotted_to: str | None = None
     created_by: str | None = None
-    lead_status: str = Field(default="New", max_length=50)
+    lead_status: str = Field(default="Ongoing", max_length=50)
+    reason_for_won_loss: str | None = None
     call_type: str | None = None
     notes: str | None = None
     added_on: date | None = None
@@ -56,9 +57,14 @@ class LeadUpdate(BaseModel):
     allotted_to: str | None = None
     created_by: str | None = None
     lead_status: str | None = None
+    reason_for_won_loss: str | None = None
     call_type: str | None = None
     notes: str | None = None
     added_on: date | None = None
+
+
+class LeadAllotRequest(BaseModel):
+    allotted_to: str = Field(..., min_length=1, max_length=150)
 
 
 class LeadRead(LeadBase):

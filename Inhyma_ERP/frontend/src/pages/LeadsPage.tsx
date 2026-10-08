@@ -30,6 +30,9 @@ import {
   type CompanyAutocompleteItem,
 } from "@/components/ClientNameAutocomplete";
 import { Combobox } from "@/components/Combobox";
+import { CompanyForm1Modal } from "@/components/CompanyForm1Modal";
+import { QuickAddContactModal } from "@/components/QuickAddContactModal";
+import { AllotLeadModal } from "@/components/AllotLeadModal";
 import type { Lead } from "@/types";
 
 const LEAD_OPTION_GROUPS = ["lead.business_type", "lead.priority", "lead.status"] as const;
@@ -53,12 +56,13 @@ interface LeadFormData {
   allotted_to: string;
   created_by: string;
   lead_status: string;
+  reason_for_won_loss: string;
   notes: string;
 }
 
 const EMPTY_FORM: LeadFormData = {
   company_name: "",
-  business_type: "",
+  business_type: "B2B",
   source: "",
   call_type: "Telecall",
   address: "",
@@ -74,7 +78,8 @@ const EMPTY_FORM: LeadFormData = {
   requirements: "",
   allotted_to: "",
   created_by: "",
-  lead_status: "New",
+  lead_status: "Ongoing",
+  reason_for_won_loss: "",
   notes: "",
 };
 
@@ -276,6 +281,26 @@ export function LeadsPage() {
   const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
   const [isBulkDeleteModal, setIsBulkDeleteModal] = useState<boolean>(false);
   const [deleteLoading, setDeleteLoading] = useState<boolean>(false);
+
+  // Quick Add Company Form 1 & Contact Person Modals
+  const [isCompanyForm1Open, setIsCompanyForm1Open] = useState<boolean>(false);
+  const [isQuickContactOpen, setIsQuickContactOpen] = useState<boolean>(false);
+
+  // Allot Lead Modal
+  const [allotModalOpen, setAllotModalOpen] = useState<boolean>(false);
+  const [leadToAllot, setLeadToAllot] = useState<Lead | null>(null);
+
+  const handleOpenAllotModal = (lead: Lead) => {
+    setLeadToAllot(lead);
+    setAllotModalOpen(true);
+  };
+
+  const handleAllotSuccess = (leadId: string, allottedTo: string) => {
+    setLeads((prev) =>
+      prev.map((l) => (l.id === leadId ? { ...l, allotted_to: allottedTo } : l))
+    );
+    showToast(`Lead allotted to ${allottedTo} successfully.`, "success");
+  };
 
   // Master Lead Sources
   const [sourceOptions, setSourceOptions] = useState<string[]>([]);
@@ -554,7 +579,7 @@ export function LeadsPage() {
 
   // 8. Lead Status: extracted from distinct lead_status values in leads
   const extractedStatuses = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(["Ongoing", "Won", "Loss"]);
     STATUSES.forEach((s) => set.add(s));
     leads.forEach((l) => {
       if (l.lead_status && l.lead_status.trim()) set.add(l.lead_status.trim());
@@ -891,7 +916,8 @@ export function LeadsPage() {
       requirements: lead.requirements || "",
       allotted_to: lead.allotted_to || "",
       created_by: lead.created_by || "",
-      lead_status: lead.lead_status || "New",
+      lead_status: lead.lead_status || "Ongoing",
+      reason_for_won_loss: lead.reason_for_won_loss || "",
       notes: lead.notes || "",
     });
     setDrawerOpen(true);
@@ -1062,7 +1088,7 @@ export function LeadsPage() {
 
   // Status Badge Helper
   const getStatusBadge = (status?: string | null) => {
-    const s = (status || "New").toLowerCase();
+    const s = (status || "Ongoing").toLowerCase();
     if (s === "won" || s === "qualified") {
       return (
         <span
@@ -1081,7 +1107,7 @@ export function LeadsPage() {
         </span>
       );
     }
-    if (s === "lost") {
+    if (s === "loss" || s === "lost") {
       return (
         <span
           style={{
@@ -1090,12 +1116,12 @@ export function LeadsPage() {
             fontSize: "11.5px",
             fontWeight: 700,
             borderRadius: "4px",
-            background: "#f1f5f9",
-            color: "#64748b",
-            border: "1px solid #cbd5e1",
+            background: "#fef2f2",
+            color: "#dc2626",
+            border: "1px solid #fecaca",
           }}
         >
-          {status || "Lost"}
+          {status || "Loss"}
         </span>
       );
     }
@@ -1108,11 +1134,11 @@ export function LeadsPage() {
           fontWeight: 700,
           borderRadius: "4px",
           background: "#eff6ff",
-          color: "#1d4ed8",
-          border: "1px solid #bfdbfe",
+          color: "#0284c7",
+          border: "1px solid #bae6fd",
         }}
       >
-        {status || "New"}
+        {status || "Ongoing"}
       </span>
     );
   };
@@ -2007,10 +2033,21 @@ export function LeadsPage() {
                           </a>
                         </td>
 
-                        {/* Business Type */}
+                        {/* Business Type (B2B / B2C) */}
                         <td style={{ padding: "10px 14px", borderBottom: "1px solid #f1f5f9" }}>
-                          <span className="chip" style={{ background: "#f1f5f9", padding: "3px 8px", borderRadius: "12px", fontSize: "12px", color: "#334155" }}>
-                            {lead.business_type || "—"}
+                          <span
+                            className="chip"
+                            style={{
+                              background: (lead.business_type || "").toUpperCase() === "B2B" ? "#eff6ff" : (lead.business_type || "").toUpperCase() === "B2C" ? "#fdf4ff" : "#f1f5f9",
+                              color: (lead.business_type || "").toUpperCase() === "B2B" ? "#1d4ed8" : (lead.business_type || "").toUpperCase() === "B2C" ? "#86198f" : "#334155",
+                              border: (lead.business_type || "").toUpperCase() === "B2B" ? "1px solid #bfdbfe" : (lead.business_type || "").toUpperCase() === "B2C" ? "1px solid #f5d0fe" : "1px solid #e2e8f0",
+                              padding: "3px 8px",
+                              borderRadius: "12px",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {lead.business_type || "B2B"}
                           </span>
                         </td>
 
@@ -2103,9 +2140,32 @@ export function LeadsPage() {
                           {formatDate(lead.added_on || lead.created_at)}
                         </td>
 
-                        {/* Action buttons matching Companies module */}
+                        {/* Action buttons matching Leads module spec */}
                         <td style={{ textAlign: "center", padding: "10px 14px", borderBottom: "1px solid #f1f5f9" }}>
                           <div style={{ display: "inline-flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
+                            <button
+                              type="button"
+                              id={`btn-allot-lead-${lead.id}`}
+                              data-testid="btn-lead-allot"
+                              className="btn btn-small"
+                              style={{
+                                background: "#f0fdf4",
+                                color: "#16a34a",
+                                border: "1px solid #bbf7d0",
+                                borderRadius: "4px",
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                              onClick={() => handleOpenAllotModal(lead)}
+                              title="Lead Allot"
+                            >
+                              👤 Allot
+                            </button>
                             <button
                               type="button"
                               className="btn btn-small"
@@ -2263,6 +2323,9 @@ export function LeadsPage() {
                 { label: "Call Type", value: drawerLead.call_type || "—" },
                 { label: "Priority", value: getPriorityBadge(drawerLead.priority) },
                 { label: "Lead Status", value: getStatusBadge(drawerLead.lead_status) },
+                ...(drawerLead.reason_for_won_loss
+                  ? [{ label: "Reason for Won / Loss", value: drawerLead.reason_for_won_loss, fullWidth: true }]
+                  : []),
                 { label: "Address", value: drawerLead.address || "—", fullWidth: true },
                 { label: "Area", value: drawerLead.area || "—" },
                 { label: "District", value: drawerLead.district || "—" },
@@ -2369,8 +2432,8 @@ export function LeadsPage() {
                 gap: "16px",
               }}
             >
-              {/* Field 1: Lead Source * and Call Type (2 columns) */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              {/* Field 1: Lead Source *, Business Type (B2B / B2C), and Call Type (3 columns) */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }}>
                 <div>
                   <label style={fieldLabelStyle}>
                     Lead Source <span style={{ color: "#ef4444" }}>*</span>
@@ -2385,6 +2448,16 @@ export function LeadsPage() {
                   />
                 </div>
                 <div>
+                  <label style={fieldLabelStyle}>Business Type (B2B / B2C)</label>
+                  <Combobox
+                    id="lead-business-type-select"
+                    value={formData.business_type || "B2B"}
+                    onChange={(val) => setFormData((prev) => ({ ...prev, business_type: val }))}
+                    options={["B2B", "B2C", "Manufacturer", "Trader", "OEM", "Distributor"]}
+                    placeholder="Select"
+                  />
+                </div>
+                <div>
                   <label style={fieldLabelStyle}>Call Type</label>
                   <Combobox
                     id="lead-call-type-select"
@@ -2396,30 +2469,34 @@ export function LeadsPage() {
                 </div>
               </div>
 
-              {/* Field 2: Company Name * with Add Company link */}
+              {/* Field 2: Company Name * with + Add New Company button */}
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px", height: "18px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                   <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>
                     Company Name <span style={{ color: "#ef4444" }}>*</span>
                   </label>
-                  <a
-                    href="/companies?add=true"
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    id="btn-lead-quick-add-company"
+                    data-testid="btn-lead-quick-add-company"
                     style={{
+                      background: "#eff6ff",
                       color: "#0061f2",
-                      fontSize: "13px",
+                      border: "1px solid #bfdbfe",
+                      borderRadius: "4px",
+                      padding: "2px 8px",
+                      fontSize: "12px",
                       fontWeight: 600,
-                      textDecoration: "none",
-                      lineHeight: "18px",
+                      cursor: "pointer",
                       display: "inline-flex",
                       alignItems: "center",
+                      gap: "4px",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-                    onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                    onClick={() => setIsCompanyForm1Open(true)}
+                    title="Add New Company (Form 1)"
                   >
-                    Add Company
-                  </a>
+                    + Add New Company
+                  </button>
                 </div>
                 <ClientNameAutocomplete
                   value={formData.company_name}
@@ -2516,9 +2593,33 @@ export function LeadsPage() {
               </div>
 
               {/* Field 8, 9, 10: Contact Person, Designation, Priority (3 columns) */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", alignItems: "flex-start" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: "16px", alignItems: "flex-start" }}>
                 <div>
-                  <label style={fieldLabelStyle}>Contact Person</label>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                    <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>Contact Person</label>
+                    <button
+                      type="button"
+                      id="btn-lead-quick-add-contact"
+                      data-testid="btn-lead-quick-add-contact"
+                      style={{
+                        background: "#eff6ff",
+                        color: "#0061f2",
+                        border: "1px solid #bfdbfe",
+                        borderRadius: "4px",
+                        padding: "1px 6px",
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "2px",
+                      }}
+                      onClick={() => setIsQuickContactOpen(true)}
+                      title="Quick add new contact person"
+                    >
+                      + Add New Contact Person
+                    </button>
+                  </div>
                   <input
                     type="text"
                     id="lead-contact-person-input"
@@ -2650,12 +2751,43 @@ export function LeadsPage() {
                 <label style={fieldLabelStyle}>Lead Status</label>
                 <Combobox
                   id="lead-status-select"
-                  value={formData.lead_status || "New"}
+                  value={formData.lead_status || "Ongoing"}
                   placeholder="Select Status"
-                  options={["New", "Contacted", "In Discussion", "Qualified", "Won", "Loss"]}
+                  options={["Ongoing", "Won", "Loss"]}
                   onChange={(val) => setFormData((prev) => ({ ...prev, lead_status: val }))}
                 />
               </div>
+
+              {/* Conditional Field: Reason for Won / Loss */}
+              {(formData.lead_status?.toLowerCase() === "won" || formData.lead_status?.toLowerCase() === "loss") && (
+                <div>
+                  <label style={fieldLabelStyle}>
+                    Reason for {formData.lead_status?.toLowerCase() === "won" ? "Won" : "Loss"} <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <textarea
+                    id="lead-reason-won-loss"
+                    data-testid="lead-reason-won-loss"
+                    rows={3}
+                    style={{
+                      width: "100%",
+                      minHeight: "64px",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13.5px",
+                      fontFamily: "inherit",
+                      background: "#ffffff",
+                      color: "#1e293b",
+                      outline: "none",
+                      boxSizing: "border-box",
+                      resize: "vertical",
+                    }}
+                    placeholder={`Enter detailed reason for ${formData.lead_status}...`}
+                    value={formData.reason_for_won_loss}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, reason_for_won_loss: e.target.value }))}
+                  />
+                </div>
+              )}
 
               {/* Submit Button (Full Width bright blue button matching screenshot) */}
               <div style={{ marginTop: "8px" }}>
@@ -2792,6 +2924,62 @@ export function LeadsPage() {
           </div>
         </div>
       )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Quick Add Company Form 1 Modal                                     */}
+      {/* ------------------------------------------------------------------ */}
+      <CompanyForm1Modal
+        isOpen={isCompanyForm1Open}
+        onClose={() => setIsCompanyForm1Open(false)}
+        onSuccess={(newCompany) => {
+          setFormData((prev) => ({
+            ...prev,
+            company_name: newCompany.company_name,
+            business_type: newCompany.company_type || prev.business_type || "B2B",
+            contact_person: newCompany.contact_person || prev.contact_person,
+            contact_phone: newCompany.contact_phone || prev.contact_phone,
+            designation: newCompany.designation || prev.designation,
+            city: newCompany.city || prev.city,
+            state: newCompany.state || prev.state,
+            area: newCompany.area || prev.area,
+            district: newCompany.district || prev.district,
+          }));
+          showToast(`Company "${newCompany.company_name}" created & selected.`, "success");
+        }}
+      />
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Quick Add Contact Person Modal                                     */}
+      {/* ------------------------------------------------------------------ */}
+      <QuickAddContactModal
+        isOpen={isQuickContactOpen}
+        onClose={() => setIsQuickContactOpen(false)}
+        companyName={formData.company_name}
+        onSuccess={(newContact) => {
+          setFormData((prev) => ({
+            ...prev,
+            contact_person: newContact.person_name,
+            designation: newContact.designation || prev.designation,
+            contact_phone: newContact.phone || prev.contact_phone,
+            contact_email: newContact.email || prev.contact_email,
+          }));
+          showToast(`Contact person "${newContact.person_name}" added & selected.`, "success");
+        }}
+      />
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Allot Lead Modal                                                   */}
+      {/* ------------------------------------------------------------------ */}
+      <AllotLeadModal
+        isOpen={allotModalOpen}
+        onClose={() => {
+          setAllotModalOpen(false);
+          setLeadToAllot(null);
+        }}
+        lead={leadToAllot}
+        onSuccess={handleAllotSuccess}
+        availableAssignees={extractedAllottedTo.filter(Boolean)}
+      />
     </AppShell>
   );
 }

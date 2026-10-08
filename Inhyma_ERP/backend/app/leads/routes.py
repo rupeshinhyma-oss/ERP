@@ -15,7 +15,7 @@ from app.database.session import get_db_session
 from app.core.responses import build_success_response
 from app.leads.models import Lead
 from app.leads.repository import LeadRepository
-from app.leads.schemas import LeadBulkDeleteRequest, LeadCreate, LeadRead, LeadUpdate
+from app.leads.schemas import LeadAllotRequest, LeadBulkDeleteRequest, LeadCreate, LeadRead, LeadUpdate
 from app.leads.service import LeadService
 
 router = APIRouter(prefix="", tags=["Leads"])
@@ -133,6 +133,16 @@ async def update_lead(
 ) -> dict:
     lead = await service.update(lead_id, payload)
     return build_success_response(data=_to_dict(lead), message="Lead updated successfully.")
+
+
+@router.post("/{lead_id}/allot", summary="Allot lead to salesperson/team member")
+async def allot_lead(
+    lead_id: uuid.UUID,
+    payload: LeadAllotRequest,
+    service: LeadService = Depends(get_service),
+) -> dict:
+    lead = await service.allot_lead(lead_id, payload.allotted_to)
+    return build_success_response(data=_to_dict(lead), message="Lead allotted successfully.")
 
 
 @router.delete("/{lead_id}", summary="Delete a lead")
