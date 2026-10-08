@@ -1882,7 +1882,7 @@ export function SaleProcessDetailModal({
                                   <td style={{ ...cell, textAlign: "left", padding: "5px 8px" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                                       <span style={{ fontWeight: 600, color: "#0f172a" }}>{item.supplier_name || "—"}</span>
-                                      {item.supplier_name && item.supplier_name !== "—" && (
+                                      {item.supplier_name && item.supplier_name !== "—" && rmbInclVat > 0 && (
                                         <span style={{ fontSize: "9px", background: "#ecfdf5", color: "#059669", padding: "1px 4px", borderRadius: "3px", fontWeight: 700 }}>
                                           ✓ Local Purchase
                                         </span>

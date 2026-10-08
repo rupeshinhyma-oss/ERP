@@ -265,6 +265,7 @@ class ExtractedConsignmentItem(BaseModel):
     supplier_name: str | None = None
     unit_price_rmb_with_vat: float = 0.0
     unit_price_rmb_ex_vat: float = 0.0
+    is_from_local_purchase: bool = False
     profit_percent: float = 3.0
     fob_price_usd: float = 0.0
     freight_unit_usd: float = 0.0

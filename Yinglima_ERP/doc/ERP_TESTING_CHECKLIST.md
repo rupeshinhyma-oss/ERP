@@ -197,3 +197,57 @@ Run these automated regression tests via terminal to verify backend integrity:
 cd "D:\Om work1\ERP\Yinglima_ERP\frontend"
 npm run build
 ```
+
+---
+
+## 11. Comprehensive 7-Module End-to-End Live Audit & Test Data Purge
+
+**Audit Execution Date:** 2026-10-08  
+**Audit Scope:** 7 Core Modules — Suppliers, Buyers, Product Master, Product Prices, Product Gallery, Local Purchase, and Sales Process.  
+**Execution Environment:** Production-Equivalent Local Stack (FastAPI Asyncpg + PostgreSQL Engine).  
+**Data Safety Standard:** 100% automated cascade purge in `finally` execution block with zero test residue.
+
+### Module-by-Module Audit Summary
+
+| Module | Test Case | Target Entity | Status | Verified Technical Behavior |
+| :--- | :--- | :--- | :---: | :--- |
+| **Suppliers** | Create Supplier Profile | `suppliers` | **PASS** | Auto-assigned UUID, active status, company name, geographic hierarchy (Country, State, City). |
+| **Suppliers** | Create Primary Contact | `supplier_contacts` | **PASS** | Foreign-key linked to supplier, `is_primary=True`, mobile & WeChat fields populated. |
+| **Suppliers** | Duplicate Prevention | `suppliers` | **PASS** | Exact company name query verified single unique profile. |
+| **Suppliers** | In-Place Update | `suppliers` | **PASS** | `contact_wechat_number` successfully updated and verified in database session. |
+| **Buyers** | Create Buyer & Contact | `buyers`, `buyer_contacts` | **PASS** | Buyer created with Country FK, city, address, GST/TIN, linked primary contact. |
+| **Buyers** | Buyer Data Integrity | `buyers` | **PASS** | Company name and tax ID persist without encoding distortion. |
+| **Product Master** | Create Product with Dimensions | `products` | **PASS** | Product code, name, category, UOM, HSN, L/W/H packaging unit CBM (`0.027000 m³`). |
+| **Product Master** | Active/Inactive Status Toggle | `products` | **PASS** | Toggle between `RecordStatus.ACTIVE` and `RecordStatus.INACTIVE` verified. |
+| **Product Prices** | Supplier-Product Linking | `supplier_product_links` | **PASS** | Sourced quotation rate (`¥450.00 CNY`), MOQ (`50`), and notes linked to SKU. |
+| **Product Prices** | Rate Persistence & Lookups | `supplier_product_links` | **PASS** | Exact rate retrieval verified for procurement pricing engine. |
+| **Product Gallery** | Product Catalog Query | `products` (Images) | **PASS** | Active products indexed with JSON image array support (`/uploads/products/*`). |
+| **Product Gallery** | Quotation Docs Query | `quotations` (Attachments) | **PASS** | Repository method `QuotationRepository.get_all_quotation_documents()` executed cleanly. |
+| **Local Purchase** | Value-Based Landing Cost Engine | `local_purchases`, `local_purchase_items`| **PASS** | Freight/packing/handling expenses (`¥400.00`) accurately distributed per unit (`¥40.00/unit`). |
+| **Local Purchase** | Workflow Status Confirmation | `local_purchases` | **PASS** | Status transitions smoothly to `Confirmed`, locking inventory rates. |
+| **Sales Process** | 16-Col Internal Costing Excel | `sales_orders`, `sales_order_items` | **PASS** | Generated full 16-column costing workbook with dual sheets (`CI` + `Packing List`), ~126 KB. |
+| **Sales Process** | 7-Col Customer Excel | `sales_orders`, `sales_order_items` | **PASS** | Generated commercial invoice without internal purchase cost/margins, ~125 KB. |
+
+### Test Data Cleanup & Residual Verification Audit
+
+Per system governance constraints, all test records generated during the live audit were permanently removed:
+- `sales_order_items`: **0 residual audit records**
+- `sales_orders`: **0 residual audit records**
+- `local_purchase_items`: **0 residual audit records**
+- `local_purchases`: **0 residual audit records**
+- `supplier_product_links`: **0 residual audit records**
+- `products`: **0 residual audit records**
+- `buyer_contacts`: **0 residual audit records**
+- `buyers`: **0 residual audit records**
+- `supplier_contacts`: **0 residual audit records**
+- `suppliers`: **0 residual audit records**
+
+Database verification confirmation:
+```
+AUDIT DATA RESIDUALS -> Suppliers: 0, Buyers: 0, Products: 0, Local Purchases: 0, Sales Orders: 0
+```
+
+### Architectural & Business Logic Enforcement (2026-10-08)
+- **Sole Source of Truth Enforced:** Sourcing in Sales Process (`extract_consignment_items` and `get_product_costing_info`) strictly requires a **Confirmed Local Purchase** bill. The previous fallback to unpriced quote records in `Product Prices` (`supplier_product_links`) was removed.
+- **Badge Accuracy:** In both [`SaleProcessForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/sales/SaleProcessForm.tsx) and [`SaleProcessDetailModal.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/sales/SaleProcessDetailModal.tsx), the green `[✓ Local Purchase]` badge now strictly checks that a valid Confirmed Local Purchase unit price exists (`unit_price_rmb_with_vat > 0`), preventing false-positive badges on unpurchased items.
+

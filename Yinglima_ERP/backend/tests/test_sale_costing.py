@@ -1,7 +1,7 @@
 import pytest
 import uuid
 from datetime import date
-from sqlalchemy import select
+from sqlalchemy import select, text
 from app.database.engine import get_sessionmaker
 from app.masters.company_list.models import MasterCompany
 from app.masters.hsn.models import HsnCode
@@ -209,12 +209,17 @@ async def test_get_product_costing_info_from_supplier_quote_fallback():
         session.add(link)
         await session.commit()
 
-        # Test costing info falls back gracefully to supplier quote without deleted_at error
+        # Test costing info strictly enforces Confirmed Local Purchase as SOLE source of truth
         service = SaleService(session)
         cost_info = await service.get_product_costing_info(prod_no_lp.id, quantity=10.0)
 
-        assert cost_info["supplier_id"] == str(sup.id)
-        assert cost_info["supplier_name"] == sup.company_name
-        assert cost_info["unit_price_rmb_with_vat"] == 450.0
-        assert cost_info["unit_price_rmb_ex_vat"] == round(450.0 / 1.13, 2)
-        assert cost_info["total_supplier_amount_rmb"] == 4500.0
+        # Products without Confirmed Local Purchase must NOT pull quote rates into Sales Process
+        assert cost_info["supplier_id"] is None
+        assert cost_info["supplier_name"] is None
+        assert cost_info["unit_price_rmb_with_vat"] == 0.0
+        assert cost_info["is_from_local_purchase"] is False
+
+        # Cleanup test records
+        await session.execute(text("DELETE FROM supplier_product_links WHERE product_id = :pid"), {"pid": prod_no_lp.id})
+        await session.execute(text("DELETE FROM products WHERE id = :pid"), {"pid": prod_no_lp.id})
+        await session.commit()

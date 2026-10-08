@@ -29,6 +29,7 @@ export interface SaleOrderItem {
   // CI Costing & CFR engine fields (Excel replica)
   supplier_id?: string | null;
   supplier_name?: string | null;
+  is_from_local_purchase?: boolean;
   unit_price_rmb_with_vat?: number;
   unit_price_rmb_ex_vat?: number;
   profit_percent?: number;
@@ -134,6 +135,7 @@ export interface ExtractedConsignmentItem {
   // CI Costing extracted from Local Purchase
   supplier_id?: string | null;
   supplier_name?: string | null;
+  is_from_local_purchase?: boolean;
   unit_price_rmb_with_vat?: number;
   unit_price_rmb_ex_vat?: number;
   cbm_per_unit?: number;
@@ -164,6 +166,7 @@ export interface ProductCostingInfo {
   refund_vat_percent: number;
   supplier_id?: string | null;
   supplier_name?: string | null;
+  is_from_local_purchase?: boolean;
   source?: string; // 'local_purchase' | 'supplier_quote' | 'standard_cost' | 'none'
   unit_price_rmb_with_vat: number;
   unit_price_rmb_ex_vat: number;

@@ -371,6 +371,7 @@ export function SaleProcessFormPage() {
             // CI Costing extracted from Confirmed Local Purchase
             supplier_id: it.supplier_id || null,
             supplier_name: it.supplier_name || null,
+            is_from_local_purchase: Boolean(it.is_from_local_purchase ?? (rmbWithVat > 0 && it.supplier_name)),
             unit_price_rmb_with_vat: rmbWithVat,
             unit_price_rmb_ex_vat: rmbExVat,
             profit_percent: profitPercent,
@@ -462,6 +463,7 @@ export function SaleProcessFormPage() {
     let fobPriceUsd = 0;
     let cfrPriceUsd = 0;
     let totalSupplierRmb = 0;
+    let isFromLp = false;
     let taxPct = Number(p.refund_vat_percent) || 13.0;
 
     try {
@@ -472,6 +474,7 @@ export function SaleProcessFormPage() {
         const cd = costRes.data;
         supplierId = cd.supplier_id || null;
         supplierName = cd.supplier_name || null;
+        isFromLp = Boolean(cd.is_from_local_purchase ?? (cd.unit_price_rmb_with_vat && cd.unit_price_rmb_with_vat > 0));
         priceRmbWithVat = typeof cd.unit_price_rmb_with_vat === "number" ? cd.unit_price_rmb_with_vat : 0;
         priceRmbExVat = typeof cd.unit_price_rmb_ex_vat === "number" ? cd.unit_price_rmb_ex_vat : 0;
         cbmPerUnit = cd.cbm_per_unit || 0;
@@ -513,6 +516,7 @@ export function SaleProcessFormPage() {
       // CI Costing (from Local Purchase)
       supplier_id: supplierId,
       supplier_name: supplierName,
+      is_from_local_purchase: isFromLp,
       unit_price_rmb_with_vat: priceRmbWithVat,
       unit_price_rmb_ex_vat: priceRmbExVat,
       profit_percent: profitPercent,
@@ -2279,11 +2283,11 @@ export function SaleProcessFormPage() {
                                     boxSizing: "border-box",
                                   }}
                                 />
-                                {item.supplier_name && (
+                                {item.supplier_name && item.unit_price_rmb_with_vat && item.unit_price_rmb_with_vat > 0 ? (
                                   <span style={{ fontSize: "10px", color: "#059669", fontWeight: 700 }}>
                                     ✓ Local Purchase
                                   </span>
-                                )}
+                                ) : null}
                               </div>
                             </td>
                             {/* 15. Total CBM (editable) */}

@@ -371,27 +371,6 @@ class SaleService:
                     lp_supplier_map[pid] = (s_id, s_name, rate_with_vat)
                     lp_vat_map[pid] = vat_pct
 
-            # Fallback to Product Prices (supplier_product_links) for any products not in local purchase
-            missing_spl_ids = [pid for pid in prod_ids if pid not in lp_supplier_map]
-            if missing_spl_ids:
-                q_spl = await self.session.execute(
-                    select(
-                        SupplierProductLink.product_id,
-                        SupplierProductLink.supplier_id,
-                        Supplier.company_name,
-                        SupplierProductLink.unit_price,
-                    )
-                    .join(Supplier, SupplierProductLink.supplier_id == Supplier.id)
-                    .where(
-                        SupplierProductLink.product_id.in_(missing_spl_ids),
-                        Supplier.deleted_at.is_(None),
-                    )
-                    .order_by(SupplierProductLink.unit_price.asc())
-                )
-                for pid, s_id, s_name, u_rate in q_spl.all():
-                    if pid not in lp_supplier_map:
-                        lp_supplier_map[pid] = (s_id, s_name, float(u_rate or 0.0))
-
         # 6. Build extracted items payload
         extracted_items: list[ExtractedConsignmentItem] = []
         total_quantity = 0.0
@@ -406,15 +385,12 @@ class SaleService:
             hsn = hsn_map.get(prod.hsn_id) if (prod and prod.hsn_id) else None
             uom_name = uom_map.get(prod.uom_id, "NOS") if (prod and prod.uom_id) else "NOS"
 
-            # Supplier & RMB Unit Price with VAT from Local Purchase
+            # Supplier & RMB Unit Price with VAT STRICTLY from Confirmed Local Purchase ONLY (No Product Prices fallback)
             sup_info = lp_supplier_map.get(prod.id) if prod else None
             sup_id = sup_info[0] if sup_info else None
             sup_name = sup_info[1] if sup_info else None
-            unit_price_rmb_with_vat = (
-                sup_info[2]
-                if sup_info
-                else (float(prod.standard_cost) if prod and prod.standard_cost else 0.0)
-            )
+            unit_price_rmb_with_vat = sup_info[2] if sup_info else 0.0
+            is_from_lp = bool(sup_info and unit_price_rmb_with_vat > 0)
 
             # Refund VAT rate (use the Local Purchase VAT % when the price came from LP,
             # so "Excluding VAT" equals the LP basic Unit Rate exactly)
@@ -457,6 +433,7 @@ class SaleService:
                     supplier_name=sup_name,
                     unit_price_rmb_with_vat=unit_price_rmb_with_vat,
                     unit_price_rmb_ex_vat=unit_price_rmb_ex_vat,
+                    is_from_local_purchase=is_from_lp,
                     profit_percent=profit_pct,
                     fob_price_usd=fob_price_usd,
                     freight_unit_usd=0.0,
@@ -585,6 +562,7 @@ class SaleService:
             "cbm_per_unit": cbm_unit,
             "total_cbm": total_cbm,
             "total_supplier_amount_rmb": total_supplier_amount_rmb,
+            "is_from_local_purchase": bool(lp_row is not None and unit_price_rmb_with_vat > 0),
         }
 
     # -----------------------------------------------------------------------
