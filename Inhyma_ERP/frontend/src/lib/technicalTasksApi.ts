@@ -8,6 +8,7 @@ import type {
   TechnicalTaskCallLog,
   TechnicalTaskCounts,
   TechnicalTaskCreatePayload,
+  SerialLookupResult,
 } from "@/types/technicalTasks";
 import type { ApiResult } from "@/types";
 
@@ -20,6 +21,7 @@ export interface TechnicalTaskListParams {
   call_type?: string;
   city?: string;
   task_allotted_to?: string;
+  serial_number?: string;
   search?: string;
   sort_by?: string;
   sort_desc?: boolean;
@@ -45,6 +47,7 @@ export async function fetchTechnicalTasks(
     query.set("task_allotted_to", params.task_allotted_to);
     query.set("technician", params.task_allotted_to);
   }
+  if (params.serial_number) query.set("serial_number", params.serial_number);
   if (params.search) query.set("search", params.search);
   if (params.sort_by) query.set("sort_by", params.sort_by);
   if (params.sort_desc !== undefined) query.set("sort_desc", String(params.sort_desc));
@@ -56,6 +59,31 @@ export async function fetchTechnicalTasks(
 
   const qs = query.toString();
   return apiGet<TechnicalTask[]>(`/technical-tasks${qs ? `?${qs}` : ""}`);
+}
+
+export async function lookupTaskSerialNumber(
+  serialNumber: string
+): Promise<SerialLookupResult> {
+  const res = await apiGet<SerialLookupResult>(
+    `/technical-tasks/serial-lookup/${encodeURIComponent(serialNumber.trim())}`
+  );
+  return res.data;
+}
+
+export async function reopenTechnicalTask(
+  id: string,
+  payload: {
+    status?: string;
+    task_allotted_to?: string;
+    scheduled_visit_date?: string;
+    remarks?: string;
+  }
+): Promise<TechnicalTask> {
+  const res = await apiPost<TechnicalTask>(
+    `/technical-tasks/${encodeURIComponent(id)}/reopen`,
+    payload
+  );
+  return res.data;
 }
 
 export async function fetchTechnicalTaskCounts(): Promise<TechnicalTaskCounts> {

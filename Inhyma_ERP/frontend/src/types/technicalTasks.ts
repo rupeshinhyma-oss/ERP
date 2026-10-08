@@ -9,6 +9,7 @@ export interface TechnicalTask {
   third_party_contact_phone?: string | null;
   priority: string;
   machine_model: string;
+  serial_number?: string | null;
   task_description: string;
   contact_person_name?: string | null;
   contact_designation?: string | null;
@@ -65,6 +66,7 @@ export interface TechnicalTaskCreatePayload {
   third_party_contact_phone?: string | null;
   priority?: string;
   machine_model: string;
+  serial_number?: string | null;
   task_description?: string;
   contact_person_name?: string | null;
   contact_designation?: string | null;
@@ -77,4 +79,29 @@ export interface TechnicalTaskCreatePayload {
   task_allotted_to?: string | null;
   payment_status?: string | null;
   status?: string;
+}
+
+export interface SerialLookupResult {
+  serial_number: string;
+  machine_model?: string | null;
+  company_name?: string | null;
+  city?: string | null;
+  contact_person?: string | null;
+  contact_phone?: string | null;
+  warranty_status?: string | null;
+  warranty_end_date?: string | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  past_tasks_count: number;
+  past_tasks?: Array<{
+    id: string;
+    company_name: string;
+    task_created_date?: string | null;
+    task_type: string;
+    call_type: string;
+    status: string;
+    machine_model: string;
+    technician?: string | null;
+    task_description?: string;
+  }>;
 }

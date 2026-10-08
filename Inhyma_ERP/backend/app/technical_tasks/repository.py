@@ -25,6 +25,7 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         "third_party_city",
         "third_party_contact_name",
         "machine_model",
+        "serial_number",
         "task_description",
         "contact_person_name",
         "contact_phone",
@@ -34,7 +35,7 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         "payment_terms",
     )
     sortable_fields = ("company_name", "city", "priority", "status", "created_at", "task_created_date")
-    filterable_fields = ("task_type", "city", "priority", "service_type", "call_type", "task_allotted_to", "status")
+    filterable_fields = ("task_type", "city", "priority", "service_type", "call_type", "task_allotted_to", "status", "serial_number")
 
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, TechnicalTask)
@@ -71,6 +72,7 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         *,
         tab: str | None = None,
         search: str | None = None,
+        serial_number: str | None = None,
         city: str | None = None,
         task_type: str | None = None,
         call_type: str | None = None,
@@ -96,6 +98,8 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
                 stmt = stmt.where(func.lower(TechnicalTask.status) == clean_tab)
 
         # Filters
+        if serial_number and serial_number.strip():
+            stmt = stmt.where(TechnicalTask.serial_number.ilike(f"%{serial_number.strip()}%"))
         if city:
             stmt = stmt.where(TechnicalTask.city.ilike(f"%{city.strip()}%"))
         if task_type:
@@ -116,6 +120,7 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
                 TechnicalTask.company_name.ilike(clean_s),
                 TechnicalTask.city.ilike(clean_s),
                 TechnicalTask.machine_model.ilike(clean_s),
+                TechnicalTask.serial_number.ilike(clean_s),
                 TechnicalTask.contact_person_name.ilike(clean_s),
                 TechnicalTask.contact_phone.ilike(clean_s),
                 TechnicalTask.task_description.ilike(clean_s),
@@ -141,6 +146,15 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         items = list((await self.session.execute(stmt)).scalars().all())
 
         return items, total
+
+    async def find_by_serial(self, serial_number: str) -> list[TechnicalTask]:
+        """Return all tasks matching a machine serial number."""
+        stmt = (
+            self._base_select()
+            .where(func.lower(TechnicalTask.serial_number) == serial_number.strip().lower())
+            .order_by(TechnicalTask.created_at.desc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def bulk_soft_delete(self, ids: list[uuid.UUID]) -> int:
         """Soft-delete all tasks in ids list."""

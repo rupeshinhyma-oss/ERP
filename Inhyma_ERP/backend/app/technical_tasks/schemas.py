@@ -9,7 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TechnicalTaskCallLogBase(BaseModel):
@@ -42,6 +42,7 @@ class TechnicalTaskBase(BaseModel):
 
     priority: str = Field(default="A", max_length=10)
     machine_model: str = Field(..., min_length=1, max_length=255)
+    serial_number: str | None = Field(default=None, max_length=100)
     task_description: str = Field(default="")
 
     contact_person_name: str | None = Field(default=None, max_length=150)
@@ -84,6 +85,7 @@ class TechnicalTaskUpdate(BaseModel):
 
     priority: str | None = None
     machine_model: str | None = None
+    serial_number: str | None = None
     task_description: str | None = None
 
     contact_person_name: str | None = None
@@ -122,6 +124,29 @@ class TechnicalTaskStatusUpdate(BaseModel):
     completed_date: date | None = None
     remarks: str | None = None
     cancel_remarks: str | None = None
+
+    @model_validator(mode="after")
+    def validate_cancellation_remarks(self) -> TechnicalTaskStatusUpdate:
+        if self.status and self.status.strip().lower() in ("cancel", "cancelled"):
+            remarks = (self.cancel_remarks or self.remarks or "").strip()
+            if not remarks:
+                raise ValueError("Cancellation remarks are strictly mandatory when cancelling a technical task.")
+        return self
+
+
+class SerialLookupResponse(BaseModel):
+    serial_number: str
+    machine_model: str | None = None
+    company_name: str | None = None
+    city: str | None = None
+    contact_person: str | None = None
+    contact_phone: str | None = None
+    warranty_status: str | None = None
+    warranty_end_date: date | None = None
+    invoice_number: str | None = None
+    invoice_date: date | None = None
+    past_tasks_count: int = 0
+    past_tasks: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TechnicalTaskRead(TechnicalTaskBase):

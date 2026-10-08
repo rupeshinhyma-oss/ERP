@@ -13,6 +13,8 @@ import {
   fetchTaskCallLogs,
   createTaskCallLog,
   uploadPaymentScreenshot,
+  reopenTechnicalTask,
+  lookupTaskSerialNumber,
   type TechnicalTaskListParams,
 } from "@/lib/technicalTasksApi";
 import type {
@@ -642,6 +644,11 @@ function TechnicalTasksPageContent() {
   const [showProductDropdown, setShowProductDropdown] = useState<boolean>(false);
   const productSearchRef = useRef<HTMLDivElement>(null);
 
+  // Serial Number Filter & Lookup States
+  const [filterSerialNumber, setFilterSerialNumber] = useState<string>("");
+  const [serialLookupLoading, setSerialLookupLoading] = useState<boolean>(false);
+  const [serialLookupInfo, setSerialLookupInfo] = useState<string | null>(null);
+
   // Form State for Add / Edit
   const [formData, setFormData] = useState<TechnicalTaskCreatePayload>({
     company_name: "",
@@ -653,6 +660,7 @@ function TechnicalTasksPageContent() {
     third_party_contact_phone: "",
     priority: "A",
     machine_model: "",
+    serial_number: "",
     task_description: "",
     contact_person_name: "",
     contact_designation: "",
@@ -668,6 +676,42 @@ function TechnicalTasksPageContent() {
   });
   const [formSubmitting, setFormSubmitting] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Quick machine serial number lookup & autofill
+  const handleSerialLookup = async (snToLookup?: string) => {
+    const sn = (snToLookup !== undefined ? snToLookup : formData.serial_number || "").trim();
+    if (!sn) {
+      setSerialLookupInfo("Please enter a serial number to lookup.");
+      return;
+    }
+    setSerialLookupLoading(true);
+    setSerialLookupInfo(null);
+    try {
+      const data = await lookupTaskSerialNumber(sn);
+      if (data) {
+        setFormData((prev) => ({
+          ...prev,
+          serial_number: data.serial_number || sn,
+          machine_model: data.machine_model || prev.machine_model,
+          company_name: data.company_name || prev.company_name,
+          city: data.city || prev.city,
+          contact_person_name: data.contact_person || prev.contact_person_name,
+          contact_phone: data.contact_phone || prev.contact_phone,
+          service_type: data.warranty_status === "UNDER_WARRANTY" ? "Free" : prev.service_type,
+        }));
+        const infoParts: string[] = [];
+        if (data.company_name) infoParts.push(`Customer: ${data.company_name}`);
+        if (data.machine_model) infoParts.push(`Model: ${data.machine_model}`);
+        if (data.warranty_status) infoParts.push(`Warranty: ${data.warranty_status}`);
+        if (data.past_tasks_count > 0) infoParts.push(`${data.past_tasks_count} past task(s) found`);
+        setSerialLookupInfo(infoParts.length > 0 ? infoParts.join(" • ") : "Serial number verified.");
+      }
+    } catch {
+      setSerialLookupInfo("No previous records found for this serial number.");
+    } finally {
+      setSerialLookupLoading(false);
+    }
+  };
 
   // Close menus on document click
   useEffect(() => {
@@ -774,6 +818,9 @@ function TechnicalTasksPageContent() {
       if (filterPriority) {
         params.priority = filterPriority;
       }
+      if (filterSerialNumber.trim()) {
+        params.serial_number = filterSerialNumber.trim();
+      }
 
       const res = await fetchTechnicalTasks(params);
       setTasks(res.data || []);
@@ -796,6 +843,7 @@ function TechnicalTasksPageContent() {
     sortDesc,
     activeTab,
     debouncedSearch,
+    filterSerialNumber,
     filterCity,
     filterTaskType,
     filterCallType,
@@ -1093,6 +1141,7 @@ function TechnicalTasksPageContent() {
       third_party_contact_phone: "",
       priority: "A",
       machine_model: "",
+      serial_number: "",
       task_description: "",
       contact_person_name: "",
       contact_designation: "",
@@ -1107,6 +1156,7 @@ function TechnicalTasksPageContent() {
       status: "Pending",
     });
     setFormError(null);
+    setSerialLookupInfo(null);
     setShowProductDropdown(false);
     setAddEditModalOpen(true);
   };
@@ -1124,6 +1174,7 @@ function TechnicalTasksPageContent() {
       third_party_contact_phone: task.third_party_contact_phone || "",
       priority: task.priority || "A",
       machine_model: task.machine_model,
+      serial_number: task.serial_number || "",
       task_description: task.task_description || "",
       contact_person_name: task.contact_person_name || "",
       contact_designation: task.contact_designation || "",
@@ -1138,6 +1189,7 @@ function TechnicalTasksPageContent() {
       status: task.status,
     });
     setFormError(null);
+    setSerialLookupInfo(null);
     setShowProductDropdown(false);
     setAddEditModalOpen(true);
   };
@@ -1216,6 +1268,31 @@ function TechnicalTasksPageContent() {
       let targetPaymentStatus: string | undefined = undefined;
       let uploadedScreenshotUrl = statusScreenshotUrl;
 
+      // Mandatory cancellation remarks check
+      if (targetStatus.toLowerCase() === "cancel" || targetStatus.toLowerCase() === "cancelled") {
+        if (!statusRemarks.trim()) {
+          setActionError("Cancellation remarks are strictly mandatory when cancelling a technical task.");
+          return;
+        }
+      }
+
+      // Reopen workflow if currently in Cancel / Cancelled stage
+      if (statusModalTask.status.toLowerCase() === "cancel" || statusModalTask.status.toLowerCase() === "cancelled") {
+        await reopenTechnicalTask(statusModalTask.id, {
+          status: targetStatus,
+          task_allotted_to: targetStatus === "Approved" ? (statusAllottedTo || undefined) : undefined,
+          scheduled_visit_date: targetStatus === "Approved" ? (statusVisitDate || undefined) : undefined,
+          remarks: statusRemarks.trim() || undefined,
+        });
+        showSuccess(`Task for ${statusModalTask.company_name} reopened and updated to ${targetStatus}.`);
+        setStatusModalTask(null);
+        setStatusRemarks("");
+        setStatusAllottedTo("");
+        setStatusVisitDate("");
+        await Promise.all([loadTasks(), loadCounts()]);
+        return;
+      }
+
       if (
         newStatusValue === "Completed" &&
         (statusModalTask.service_type === "Chargeable" || (statusModalTask.service_charge ?? 0) > 0)
@@ -1246,6 +1323,10 @@ function TechnicalTasksPageContent() {
         payment_status: targetPaymentStatus,
         payment_mode: targetPaymentStatus === "Paid" ? statusPaymentMode : undefined,
         payment_screenshot: targetPaymentStatus === "Paid" ? (uploadedScreenshotUrl || undefined) : undefined,
+        cancel_remarks:
+          targetStatus.toLowerCase() === "cancel" || targetStatus.toLowerCase() === "cancelled"
+            ? statusRemarks.trim()
+            : undefined,
       });
 
       showSuccess(`Status updated to ${targetStatus} for ${statusModalTask.company_name}.`);
@@ -1384,6 +1465,7 @@ function TechnicalTasksPageContent() {
     setFilterServiceType("");
     setFilterTechnician("");
     setFilterPriority("");
+    setFilterSerialNumber("");
     setCurrentPage(1);
   };
 
@@ -2096,6 +2178,41 @@ function TechnicalTasksPageContent() {
               </div>
             </div>
 
+            {/* Serial Number Search Filter */}
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder="Search Serial No..."
+                aria-label="Search by serial number"
+                data-testid="filter-serial-number"
+                value={filterSerialNumber}
+                onChange={(e) => setFilterSerialNumber(e.target.value)}
+                style={{ width: "190px", padding: "8px 30px 8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+              />
+              {filterSerialNumber && (
+                <button
+                  type="button"
+                  onClick={() => setFilterSerialNumber("")}
+                  title="Clear serial search"
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                    lineHeight: 1,
+                    padding: "0 2px",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
             {/* Search Input */}
             <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
               <input
@@ -2103,7 +2220,7 @@ function TechnicalTasksPageContent() {
                 placeholder="Search..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                style={{ width: "260px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
               />
               {searchQuery && (
                 <button
@@ -2568,7 +2685,36 @@ function TechnicalTasksPageContent() {
                             case 7:
                               return (
                                 <td key="cell-7" style={{ ...getFreezeStyle(7, false) }}>
-                                  {task.machine_model || "—"}
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <span style={{ fontWeight: 600, color: "#1e293b" }}>
+                                      {task.machine_model || "—"}
+                                    </span>
+                                    {task.serial_number && (
+                                      <button
+                                        type="button"
+                                        data-testid="task-row-serial-number"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setFilterSerialNumber(task.serial_number || "");
+                                        }}
+                                        title="Click to search past tasks with this serial number"
+                                        style={{
+                                          background: "#eff6ff",
+                                          border: "1px solid #bfdbfe",
+                                          color: "#1d4ed8",
+                                          fontSize: "11px",
+                                          fontWeight: 600,
+                                          borderRadius: "4px",
+                                          padding: "1px 6px",
+                                          cursor: "pointer",
+                                          textAlign: "left",
+                                          width: "fit-content",
+                                        }}
+                                      >
+                                        SN: {task.serial_number}
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               );
                             case 8:
@@ -3286,8 +3432,36 @@ function TechnicalTasksPageContent() {
                   >
                     Machine & Model
                   </div>
-                  <div style={{ fontSize: "13.5px", color: "#334155" }}>
+                  <div style={{ fontSize: "13.5px", color: "#334155", fontWeight: 600 }}>
                     {detailTask.machine_model || "—"}
+                  </div>
+                  <div style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style={{ fontSize: "11.5px", color: "#64748b" }}>Serial No:</span>
+                    {detailTask.serial_number ? (
+                      <button
+                        type="button"
+                        data-testid="detail-drawer-serial-number"
+                        onClick={() => {
+                          setFilterSerialNumber(detailTask.serial_number || "");
+                          setDetailTask(null);
+                        }}
+                        title="Filter tasks by this serial number"
+                        style={{
+                          background: "#eff6ff",
+                          border: "1px solid #bfdbfe",
+                          color: "#1d4ed8",
+                          fontSize: "11.5px",
+                          fontWeight: 600,
+                          borderRadius: "4px",
+                          padding: "2px 8px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {detailTask.serial_number} 🔍
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: "12px", color: "#94a3b8" }}>Not specified</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -3552,6 +3726,40 @@ function TechnicalTasksPageContent() {
                   <span>View / Log Call Logs</span>
                 </button>
               </div>
+
+              {/* Action to Reopen / Reassign if Cancelled */}
+              {(detailTask.status.toLowerCase() === "cancel" ||
+                detailTask.status.toLowerCase() === "cancelled") && (
+                <div style={{ marginTop: "8px" }}>
+                  <button
+                    type="button"
+                    data-testid="drawer-btn-reopen-task"
+                    onClick={() => {
+                      const t = detailTask;
+                      setDetailTask(null);
+                      openReopenModal(t);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "9px",
+                      background: "#e0e7ff",
+                      color: "#3730a3",
+                      border: "1px solid #c7d2fe",
+                      borderRadius: "6px",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span>🔄</span>
+                    <span>Reopen / Reassign Cancelled Task</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </Modal>
@@ -3900,6 +4108,70 @@ function TechnicalTasksPageContent() {
                 </div>
               </div>
 
+              {/* Machine Serial Number with Quick Lookup */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>
+                    Machine Serial Number
+                  </label>
+                  <button
+                    type="button"
+                    data-testid="btn-lookup-serial"
+                    disabled={serialLookupLoading || !formData.serial_number?.trim()}
+                    onClick={() => handleSerialLookup()}
+                    style={{
+                      background: "#eff6ff",
+                      border: "1px solid #bfdbfe",
+                      color: "#1d4ed8",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      cursor: serialLookupLoading || !formData.serial_number?.trim() ? "not-allowed" : "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    {serialLookupLoading ? "Looking up..." : "🔍 Lookup Serial"}
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  data-testid="field-serial-number"
+                  placeholder="e.g. INH-2026-MC001"
+                  value={formData.serial_number || ""}
+                  onChange={(e) => {
+                    setFormData({ ...formData, serial_number: e.target.value });
+                    if (serialLookupInfo) setSerialLookupInfo(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleSerialLookup();
+                    }
+                  }}
+                  style={inputStyle}
+                />
+                {serialLookupInfo && (
+                  <div
+                    data-testid="serial-lookup-info"
+                    style={{
+                      marginTop: "6px",
+                      padding: "6px 10px",
+                      background: serialLookupInfo.includes("No previous") ? "#fef2f2" : "#f0fdf4",
+                      border: `1px solid ${serialLookupInfo.includes("No previous") ? "#fecaca" : "#bbf7d0"}`,
+                      borderRadius: "4px",
+                      fontSize: "12px",
+                      color: serialLookupInfo.includes("No previous") ? "#991b1b" : "#166534",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {serialLookupInfo}
+                  </div>
+                )}
+              </div>
+
               {/* Machine & Model * with Product Master Keyword Autocomplete */}
               <div ref={productSearchRef} style={{ position: "relative" }}>
                 <label style={fieldLabelStyle}>
@@ -4187,11 +4459,14 @@ function TechnicalTasksPageContent() {
               <form onSubmit={handleStatusSubmit}>
                 <div className="tech-modal-header">
                   <h2>
-                    {newStatusValue === "Approved"
-                      ? "Approve & Allot Task"
-                      : newStatusValue === "Completed"
-                        ? "Complete Technical Task"
-                        : "Change Status"}{" "}
+                    {statusModalTask.status.toLowerCase() === "cancel" ||
+                    statusModalTask.status.toLowerCase() === "cancelled"
+                      ? "🔄 Reopen / Reassign Cancelled Task"
+                      : newStatusValue === "Approved"
+                        ? "Approve & Allot Task"
+                        : newStatusValue === "Completed"
+                          ? "Complete Technical Task"
+                          : "Change Status"}{" "}
                     — {statusModalTask.company_name}
                   </h2>
                   <button
@@ -4378,14 +4653,22 @@ function TechnicalTasksPageContent() {
 
                   <div className="field" style={{ marginTop: "12px" }}>
                     <label>
-                      {newStatusValue === "Approved" ? "Approver Remarks" : "Remarks / Notes (Optional)"}
+                      {statusModalTask.status.toLowerCase() === "cancel" ||
+                      statusModalTask.status.toLowerCase() === "cancelled"
+                        ? "Reopen Remarks / Notes"
+                        : newStatusValue === "Approved"
+                          ? "Approver Remarks"
+                          : "Remarks / Notes (Optional)"}
                     </label>
                     <textarea
                       rows={3}
                       placeholder={
-                        newStatusValue === "Approved"
-                          ? "Add instructions for allotted technician"
-                          : "Add completion notes or update remarks"
+                        statusModalTask.status.toLowerCase() === "cancel" ||
+                        statusModalTask.status.toLowerCase() === "cancelled"
+                          ? "Enter reason or instructions for reopening / reassigning"
+                          : newStatusValue === "Approved"
+                            ? "Add instructions for allotted technician"
+                            : "Add completion notes or update remarks"
                       }
                       value={statusRemarks}
                       onChange={(e) => setStatusRemarks(e.target.value)}
@@ -4400,8 +4683,11 @@ function TechnicalTasksPageContent() {
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    Save Status
+                  <button type="submit" className="btn btn-primary" data-testid="btn-save-status">
+                    {statusModalTask.status.toLowerCase() === "cancel" ||
+                    statusModalTask.status.toLowerCase() === "cancelled"
+                      ? "Confirm Reopen & Reassign"
+                      : "Save Status"}
                   </button>
                 </div>
               </form>
@@ -4473,8 +4759,14 @@ function TechnicalTasksPageContent() {
                   <button
                     type="submit"
                     className="btn"
-                    style={{ background: "#dc2626", color: "#ffffff", border: "none" }}
-                    disabled={submittingCancel}
+                    data-testid="btn-confirm-cancel"
+                    style={{
+                      background: !cancelRemarks.trim() || submittingCancel ? "#fca5a5" : "#dc2626",
+                      color: "#ffffff",
+                      border: "none",
+                      cursor: !cancelRemarks.trim() || submittingCancel ? "not-allowed" : "pointer",
+                    }}
+                    disabled={submittingCancel || !cancelRemarks.trim()}
                   >
                     {submittingCancel ? "Cancelling..." : "Confirm Cancellation"}
                   </button>

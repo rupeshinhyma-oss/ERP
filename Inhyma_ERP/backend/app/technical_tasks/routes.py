@@ -60,6 +60,7 @@ async def list_technical_tasks(
     tab: str | None = Query(default=None),
     status: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    serial_number: str | None = Query(default=None),
     city: str | None = Query(default=None),
     task_type: str | None = Query(default=None),
     call_type: str | None = Query(default=None),
@@ -86,6 +87,7 @@ async def list_technical_tasks(
     items, total = await service.list_tasks(
         tab=effective_tab,
         search=search,
+        serial_number=serial_number,
         city=city,
         task_type=task_type,
         call_type=call_type,
@@ -150,6 +152,15 @@ async def upload_payment_screenshot(
     }
 
 
+@router.get("/serial-lookup/{serial_number}", summary="Look up machine info and past tasks by serial number")
+async def lookup_by_serial_number(
+    serial_number: str,
+    service: TechnicalTaskService = Depends(get_service),
+) -> dict:
+    data = await service.lookup_serial(serial_number)
+    return {"success": True, "data": data}
+
+
 @router.get("/{task_id}", summary="Get technical task details")
 async def get_technical_task(
     task_id: uuid.UUID,
@@ -190,6 +201,24 @@ async def update_technical_task_status(
     user_name = current_user.username if current_user else None
     task = await service.update_status(task_id, payload, user_name=user_name)
     return {"success": True, "data": _to_dict(task), "message": f"Task status updated to {task.status}."}
+
+
+@router.post("/{task_id}/reopen", summary="Reopen and optionally reassign a cancelled technical task")
+async def reopen_technical_task(
+    task_id: uuid.UUID,
+    payload: TechnicalTaskStatusUpdate,
+    service: TechnicalTaskService = Depends(get_service),
+    current_user: CurrentUser | None = Depends(get_current_user),
+) -> dict:
+    user_name = current_user.username if current_user else "Admin"
+    if payload.status.lower() not in ("approved", "pending"):
+        payload.status = "Approved" if payload.task_allotted_to else "Pending"
+    task = await service.update_status(task_id, payload, user_name=user_name)
+    return {
+        "success": True,
+        "data": _to_dict(task),
+        "message": f"Technical task reopened successfully (Status: {task.status}).",
+    }
 
 
 @router.delete("/{task_id}", summary="Delete a technical task")

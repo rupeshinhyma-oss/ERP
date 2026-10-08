@@ -32,6 +32,7 @@ class TechnicalTask(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Sof
 
     priority: Mapped[str] = mapped_column(String(10), nullable=False, default="A", index=True)
     machine_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     task_description: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     # Contact info
