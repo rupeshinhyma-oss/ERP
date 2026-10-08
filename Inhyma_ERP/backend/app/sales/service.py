@@ -97,6 +97,7 @@ class SaleService:
                     tax_percent=line.gst_percent, tax_amount=line.gst_amount, gst_amount=line.gst_amount,
                     item_total=line.total, planning_row_id=src.planning_row_id, remarks=src.remarks,
                     is_additional_charge=line.is_additional_charge, charge_type=line.charge_type,
+                    serial_numbers=getattr(src, "serial_numbers", None),
                 )
             )
         goods = [l for l in priced.lines if not l.is_additional_charge]
@@ -477,6 +478,7 @@ class SaleService:
             amount_inc_gst=totals["amount_inc_gst"],
             discount=totals["discount"],
             consignment_code=payload.consignment_code,
+            allocated_consignment=payload.allocated_consignment,
             planning_sheet_id=payload.planning_sheet_id,
             planning_column_id=payload.planning_column_id,
             order_date=payload.order_date,
@@ -622,6 +624,8 @@ class SaleService:
 
         if payload.consignment_code is not None:
             order.consignment_code = payload.consignment_code
+        if payload.allocated_consignment is not None:
+            order.allocated_consignment = payload.allocated_consignment
         if payload.planning_sheet_id is not None:
             order.planning_sheet_id = payload.planning_sheet_id
         if payload.planning_column_id is not None:
