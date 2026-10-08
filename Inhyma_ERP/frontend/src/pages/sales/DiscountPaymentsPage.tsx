@@ -363,7 +363,7 @@ export function DiscountPaymentsPage({
   const isTestMode = import.meta.env.MODE === "test";
   const [orders, setOrders] = useState<DiscountOrderRecord[]>(isTestMode ? INITIAL_DISCOUNT_ORDERS : []);
   const [_loading, setLoading] = useState<boolean>(!isTestMode);
-  const [activeTab, setActiveTab] = useState<"all" | "pending" | "completed">("pending");
+  const [activeTab, setActiveTab] = useState<"all" | "pending" | "completed" | "client_summary">("pending");
   const [search, setSearch] = useState("");
   const [perPage, setPerPage] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -586,6 +586,60 @@ export function DiscountPaymentsPage({
     () => (isTestMode ? 21 : orders.filter((o) => o.settled).length),
     [orders, isTestMode]
   );
+
+  // Client Monitoring Report aggregation (Cash discount / under-invoice per client)
+  const clientSummaries = useMemo(() => {
+    const map = new Map<string, {
+      company_name: string;
+      gst_no?: string;
+      city?: string;
+      state?: string;
+      orders_count: number;
+      total_discount: number;
+      paid_discount: number;
+      due_discount: number;
+      all_settled: boolean;
+      sample_order: DiscountOrderRecord;
+    }>();
+
+    orders.forEach((o) => {
+      const key = (o.company_name || "Unknown").trim();
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          company_name: key,
+          gst_no: o.gst_no,
+          city: o.city,
+          state: o.state,
+          orders_count: 1,
+          total_discount: o.total_discount || 0,
+          paid_discount: o.paid_discount || 0,
+          due_discount: o.due_discount || 0,
+          all_settled: !!o.settled,
+          sample_order: o,
+        });
+      } else {
+        existing.orders_count += 1;
+        existing.total_discount += o.total_discount || 0;
+        existing.paid_discount += o.paid_discount || 0;
+        existing.due_discount += o.due_discount || 0;
+        if (!o.settled) existing.all_settled = false;
+        if (!existing.gst_no && o.gst_no) existing.gst_no = o.gst_no;
+        if (!existing.city && o.city) existing.city = o.city;
+        if (!existing.state && o.state) existing.state = o.state;
+      }
+    });
+
+    const list = Array.from(map.values()).sort((a, b) => b.total_discount - a.total_discount);
+    if (!search.trim()) return list;
+    const q = search.toLowerCase();
+    return list.filter(
+      (c) =>
+        c.company_name.toLowerCase().includes(q) ||
+        (c.gst_no && c.gst_no.toLowerCase().includes(q)) ||
+        (c.city && c.city.toLowerCase().includes(q))
+    );
+  }, [orders, search]);
 
   // Handle Record Settlement
   const handleConfirmSettle = async () => {
@@ -1069,6 +1123,28 @@ export function DiscountPaymentsPage({
           >
             Completed ({completedCount})
           </button>
+
+          <button
+            type="button"
+            data-testid="tab-client-summary"
+            onClick={() => {
+              setActiveTab("client_summary");
+              setCurrentPage(1);
+            }}
+            style={{
+              background: "none",
+              border: "none",
+              borderBottom: activeTab === "client_summary" ? "2px solid #0061f2" : "2px solid transparent",
+              color: activeTab === "client_summary" ? "#0061f2" : "#64748b",
+              fontWeight: activeTab === "client_summary" ? 700 : 500,
+              fontSize: "13px",
+              padding: "8px 16px",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            📊 Client Monitoring Report ({clientSummaries.length})
+          </button>
         </div>
 
         {/* Controls Toolbar matching Screenshot */}
@@ -1124,16 +1200,127 @@ export function DiscountPaymentsPage({
         </div>
 
         {/* Table matching Screenshot */}
-        <div
-          style={{
-            backgroundColor: "#ffffff",
-            borderRadius: "6px",
-            border: "1px solid #e2e8f0",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-            overflowX: "auto",
-            marginBottom: "16px",
-          }}
-        >
+        {activeTab === "client_summary" ? (
+          /* Client-wise Monitoring Report Table */
+          <div
+            data-testid="client-monitoring-report-table"
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "6px",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+              overflowX: "auto",
+              marginBottom: "16px",
+            }}
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "12.5px" }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "5%" }}>#</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "25%" }}>Client / Company Name</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "15%" }}>City / State</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "center", width: "8%" }}>Orders</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "right", width: "15%" }}>Total Cash Discount</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "right", width: "12%" }}>Paid / Settled</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "right", width: "12%" }}>Balance Due</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "center", width: "10%" }}>Status</th>
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "center", width: "8%" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {clientSummaries.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
+                      No client discount records found.
+                    </td>
+                  </tr>
+                ) : (
+                  clientSummaries.map((c, idx) => (
+                    <tr
+                      key={c.company_name}
+                      style={{
+                        borderBottom: "1px solid #f1f5f9",
+                        backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fafbfc",
+                      }}
+                    >
+                      <td style={{ padding: "10px 12px", color: "#64748b" }}>{idx + 1}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <div style={{ fontWeight: 700, color: "#1e293b" }}>{c.company_name}</div>
+                        {c.gst_no && (
+                          <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace" }}>
+                            GST: {c.gst_no}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: "10px 12px", color: "#475569" }}>
+                        {[c.city, c.state].filter(Boolean).join(", ") || "—"}
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "center", fontWeight: 600 }}>
+                        {c.orders_count}
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, color: "#0061f2" }}>
+                        {formatIndianCurrency(c.total_discount)}
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, color: "#16a34a" }}>
+                        {formatIndianCurrency(c.paid_discount)}
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, color: c.due_discount > 0 ? "#dc2626" : "#64748b" }}>
+                        {formatIndianCurrency(c.due_discount)}
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "3px 8px",
+                            borderRadius: "12px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            backgroundColor: c.due_discount === 0 ? "#dcfce7" : "#fee2e2",
+                            color: c.due_discount === 0 ? "#15803d" : "#b91c1c",
+                          }}
+                        >
+                          {c.due_discount === 0 ? "Fully Settled" : "Pending Due"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearch(c.company_name);
+                            setActiveTab("all");
+                          }}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "11.5px",
+                            background: "#eff6ff",
+                            color: "#0061f2",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: "4px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}
+                          title="View all orders for this client"
+                        >
+                          View Orders
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "6px",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+              overflowX: "auto",
+              marginBottom: "16px",
+            }}
+          >
           <table
             style={{
               width: "100%",
@@ -1253,6 +1440,11 @@ export function DiscountPaymentsPage({
                         >
                           {o.company_name}
                         </button>
+                        {o.gst_no && (
+                          <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace", marginTop: "1px" }}>
+                            GST: {o.gst_no}
+                          </div>
+                        )}
                         {o.contact_name && (
                           <button
                             type="button"
@@ -1573,6 +1765,7 @@ export function DiscountPaymentsPage({
             </tbody>
           </table>
         </div>
+        )}
 
         {/* Bottom Pagination Info matching Screenshot */}
         <div

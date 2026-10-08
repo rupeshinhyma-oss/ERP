@@ -158,6 +158,36 @@ export function SaleProcessFormPage() {
 
   // General Details State
   const [warehouse, setWarehouse] = useState("");
+  const [containerAllocation, setContainerAllocation] = useState("");
+  const [containerOptions, setContainerOptions] = useState<string[]>([
+    "Mum 1",
+    "Mum 2",
+    "Exp 26",
+    "Exp 86",
+    "Sea 1",
+    "Sea 2",
+    "Sea 3",
+    "Air Cargo 1",
+  ]);
+
+  const isTransitOrOrderedWarehouse = useMemo(() => {
+    const w = (warehouse || "").toLowerCase();
+    return w.includes("transit") || w.includes("ordered");
+  }, [warehouse]);
+
+  useEffect(() => {
+    apiGet<any>("/sales/planning-consignments")
+      .then((res) => {
+        if (res?.data && Array.isArray(res.data)) {
+          const names = res.data.map((c: any) => c.title || c.code || c.consignment_code).filter(Boolean);
+          if (names.length > 0) {
+            setContainerOptions((prev) => Array.from(new Set([...names, ...prev])));
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(getTodayFormatted());
   const [paymentTerms, setPaymentTerms] = useState("");
   const [salesPerson, setSalesPerson] = useState(loggedInUserName);
@@ -259,6 +289,9 @@ export function SaleProcessFormPage() {
           const o = res.data;
           setOrderNo(o.order_no || "");
           setWarehouse(o.warehouse || "");
+          if (o.consignment_code || o.container_no) {
+            setContainerAllocation(o.consignment_code || o.container_no || "");
+          }
           if (o.expected_delivery_date) setExpectedDeliveryDate(o.expected_delivery_date);
           setPaymentTerms(o.payment_terms || "");
           setSalesPerson(o.sales_person || "Rupesh Malia");
@@ -538,6 +571,8 @@ export function SaleProcessFormPage() {
 
     const payload = {
       warehouse,
+      consignment_code: containerAllocation || undefined,
+      container_no: containerAllocation || undefined,
       expected_delivery_date: expectedDeliveryDate,
       payment_terms: paymentTerms,
       sales_person: salesPerson,
@@ -710,6 +745,25 @@ export function SaleProcessFormPage() {
                   <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" }}>
                     {errors.warehouse}
                   </span>
+                )}
+                {isTransitOrOrderedWarehouse && (
+                  <div style={{ marginTop: "8px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: "4px", padding: "6px 8px" }}>
+                    <label style={{ fontSize: "11px", fontWeight: 700, color: "#0369a1", marginBottom: "4px", display: "block" }}>
+                      🚢 Container / Consignment Allocation:
+                    </label>
+                    <Combobox
+                      ariaLabel="Container Allocation"
+                      value={containerAllocation}
+                      onChange={setContainerAllocation}
+                      options={containerOptions}
+                      placeholder="Select container (e.g. Mum 1, Exp 26, Sea 1)"
+                    />
+                    {containerAllocation && (
+                      <span style={{ fontSize: "10.5px", color: "#0284c7", fontWeight: 600, display: "block", marginTop: "3px" }}>
+                        ✓ Allocated to {containerAllocation}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 

@@ -23,6 +23,7 @@ export interface StockBreakupRow {
   date?: string;
   order_date?: string;
   company_name?: string;
+  gst_no?: string;
   supplier_name?: string;
   city_state?: string;
   quantity: number;
@@ -1489,7 +1490,14 @@ export function ProductStockPage({
                                 </div>
                               )}
                             </td>
-                            <td style={{ fontWeight: 600 }}>{row.company_name || "-"}</td>
+                            <td style={{ fontWeight: 600 }}>
+                              <div>{row.company_name || "-"}</div>
+                              {row.gst_no && (
+                                <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace", marginTop: "1px" }}>
+                                  GST: {row.gst_no}
+                                </div>
+                              )}
+                            </td>
                             <td className="col-city-state" style={{ color: "#475569" }}>{row.city_state || "-"}</td>
                             <td className="col-qty" style={{ textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
                               {row.quantity}

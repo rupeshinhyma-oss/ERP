@@ -22,9 +22,67 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
 import { apiDelete, apiGet, apiPatch } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
+import { generateGatePassPdf } from "@/lib/gatePassPdf";
 import type { SaleOrder, SaleSummaryMetrics } from "@/types/saleProcess";
 import { SaleProcessDetailModal } from "./SaleProcessDetailModal";
+
+export const INDIAN_STATES = [
+  "Maharashtra",
+  "Gujarat",
+  "Delhi",
+  "Karnataka",
+  "Tamil Nadu",
+  "Uttar Pradesh",
+  "Madhya Pradesh",
+  "Rajasthan",
+  "West Bengal",
+  "Haryana",
+  "Punjab",
+  "Telangana",
+  "Andhra Pradesh",
+  "Kerala",
+  "Goa",
+  "Chhattisgarh",
+  "Jharkhand",
+  "Bihar",
+  "Assam",
+  "Odisha",
+  "Uttarakhand",
+  "Himachal Pradesh",
+];
+
+export function _yes(val: any): boolean {
+  return ["yes", "y", "true", "1"].includes(String(val || "").trim().toLowerCase());
+}
+
+export function parseDateForCompare(dStr?: string | null): number | null {
+  if (!dStr) return null;
+  const s = dStr.trim();
+  if (s.includes("-")) {
+    const parts = s.split("-");
+    if (parts[0].length === 4) {
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getTime();
+    } else if (parts[2]?.length === 4) {
+      return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
+    }
+  }
+  const t = Date.parse(s);
+  return isNaN(t) ? null : t;
+}
+
+export function getCompanyGst(order: SaleOrder): string | null {
+  if ((order as any).gst_no) return (order as any).gst_no;
+  if ((order as any).buyer_gst) return (order as any).buyer_gst;
+  if (order.billing_address) {
+    const m = order.billing_address.match(/GST(?:IN)?[:\s\-]+([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1})/i) ||
+              order.billing_address.match(/GST(?:IN)?[:\s\-]+([0-9A-Za-z]{15})/i) ||
+              order.billing_address.match(/\b([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1})\b/);
+    if (m) return m[1];
+  }
+  return null;
+}
 
 export function formatIndianCurrency(amount: number | null | undefined): string {
   const val = typeof amount === "number" ? amount : 0;
@@ -181,12 +239,17 @@ export function SaleProcessListPage() {
   const [perPage, setPerPage] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [search, setSearch] = useState("");
+  const { profile } = useAuth();
 
   // Filter criteria
   const [orderDateFrom, setOrderDateFrom] = useState("");
   const [orderDateTo, setOrderDateTo] = useState("");
+  const [invoiceDateFrom, setInvoiceDateFrom] = useState("");
+  const [invoiceDateTo, setInvoiceDateTo] = useState("");
   const [expDateFrom, setExpDateFrom] = useState("");
   const [expDateTo, setExpDateTo] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+  const [dispatchFilter, setDispatchFilter] = useState("");
   const [warehouseFilter, setWarehouseFilter] = useState("");
   const [salesPersonFilter, setSalesPersonFilter] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
@@ -203,13 +266,23 @@ export function SaleProcessListPage() {
   const [selectedNewStatus, setSelectedNewStatus] = useState<string | null>(null);
   const [modalInvoiceNo, setModalInvoiceNo] = useState("");
   const [modalInvoiceDate, setModalInvoiceDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
+  const [modalThirdPartyInvoice, setModalThirdPartyInvoice] = useState("");
   const [modalGpNo, setModalGpNo] = useState("");
   const [modalGpDate, setModalGpDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
   const [modalGpHandledBy, setModalGpHandledBy] = useState("Warehouse Team");
   const [modalGpTransporter, setModalGpTransporter] = useState("");
+  const [modalGpDestination, setModalGpDestination] = useState("");
+  const [modalGpDeliveryType, setModalGpDeliveryType] = useState("Godown");
+  const [modalGpDeliveryCharge, setModalGpDeliveryCharge] = useState("To Pay");
   const [modalLrNo, setModalLrNo] = useState("");
   const [modalLrTransporter, setModalLrTransporter] = useState("");
   const [modalLrDate, setModalLrDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
+
+  // LR Dispatch Modal state (WhatsApp / Email direct notice)
+  const [lrDispatchOrder, setLrDispatchOrder] = useState<SaleOrder | null>(null);
+  const [lrClientPhone, setLrClientPhone] = useState("");
+  const [lrClientEmail, setLrClientEmail] = useState("");
+  const [lrMessageText, setLrMessageText] = useState("");
 
   // Close kebab menu on outside click
   useEffect(() => {
@@ -225,9 +298,17 @@ export function SaleProcessListPage() {
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiGet<{ items: SaleOrder[]; total: number; metrics?: SaleSummaryMetrics }>(
-        "/sales/orders?page_size=500"
-      );
+      let url = "/sales/orders?page_size=500";
+      if (orderDateFrom) url += `&date_from=${orderDateFrom}`;
+      if (orderDateTo) url += `&date_to=${orderDateTo}`;
+      if (invoiceDateFrom) url += `&invoice_date_from=${invoiceDateFrom}`;
+      if (invoiceDateTo) url += `&invoice_date_to=${invoiceDateTo}`;
+      if (expDateFrom) url += `&delivery_date_from=${expDateFrom}`;
+      if (expDateTo) url += `&delivery_date_to=${expDateTo}`;
+      if (stateFilter) url += `&state=${encodeURIComponent(stateFilter)}`;
+      if (dispatchFilter) url += `&dispatch=${dispatchFilter}`;
+
+      const res = await apiGet<{ items: SaleOrder[]; total: number; metrics?: SaleSummaryMetrics }>(url);
       if (res?.data?.items && Array.isArray(res.data.items)) {
         setOrders(res.data.items);
         if (res.data.metrics) {
@@ -244,7 +325,17 @@ export function SaleProcessListPage() {
     } finally {
       setLoading(false);
     }
-  }, [isTestMode]);
+  }, [
+    isTestMode,
+    orderDateFrom,
+    orderDateTo,
+    invoiceDateFrom,
+    invoiceDateTo,
+    expDateFrom,
+    expDateTo,
+    stateFilter,
+    dispatchFilter,
+  ]);
 
   useEffect(() => {
     fetchOrders();
@@ -309,8 +400,12 @@ export function SaleProcessListPage() {
     let cnt = 0;
     if (orderDateFrom) cnt++;
     if (orderDateTo) cnt++;
+    if (invoiceDateFrom) cnt++;
+    if (invoiceDateTo) cnt++;
     if (expDateFrom) cnt++;
     if (expDateTo) cnt++;
+    if (stateFilter) cnt++;
+    if (dispatchFilter) cnt++;
     if (warehouseFilter) cnt++;
     if (salesPersonFilter) cnt++;
     if (companyFilter) cnt++;
@@ -320,8 +415,12 @@ export function SaleProcessListPage() {
   }, [
     orderDateFrom,
     orderDateTo,
+    invoiceDateFrom,
+    invoiceDateTo,
     expDateFrom,
     expDateTo,
+    stateFilter,
+    dispatchFilter,
     warehouseFilter,
     salesPersonFilter,
     companyFilter,
@@ -332,8 +431,12 @@ export function SaleProcessListPage() {
   const handleResetFilters = () => {
     setOrderDateFrom("");
     setOrderDateTo("");
+    setInvoiceDateFrom("");
+    setInvoiceDateTo("");
     setExpDateFrom("");
     setExpDateTo("");
+    setStateFilter("");
+    setDispatchFilter("");
     setWarehouseFilter("");
     setSalesPersonFilter("");
     setCompanyFilter("");
@@ -352,6 +455,54 @@ export function SaleProcessListPage() {
         if (o.status?.toLowerCase() !== activeTab.toLowerCase()) return false;
       }
 
+      // Order Date filter
+      if (orderDateFrom) {
+        const fromT = parseDateForCompare(orderDateFrom);
+        const ordT = parseDateForCompare(o.order_date);
+        if (fromT && (!ordT || ordT < fromT)) return false;
+      }
+      if (orderDateTo) {
+        const toT = parseDateForCompare(orderDateTo);
+        const ordT = parseDateForCompare(o.order_date);
+        if (toT && (!ordT || ordT > toT)) return false;
+      }
+
+      // Invoice Date filter
+      if (invoiceDateFrom) {
+        const fromT = parseDateForCompare(invoiceDateFrom);
+        const invT = parseDateForCompare(o.invoice_date);
+        if (fromT && (!invT || invT < fromT)) return false;
+      }
+      if (invoiceDateTo) {
+        const toT = parseDateForCompare(invoiceDateTo);
+        const invT = parseDateForCompare(o.invoice_date);
+        if (toT && (!invT || invT > toT)) return false;
+      }
+
+      // Expected Delivery Date filter
+      if (expDateFrom) {
+        const fromT = parseDateForCompare(expDateFrom);
+        const expT = parseDateForCompare(o.expected_delivery_date || o.delivery_date);
+        if (fromT && (!expT || expT < fromT)) return false;
+      }
+      if (expDateTo) {
+        const toT = parseDateForCompare(expDateTo);
+        const expT = parseDateForCompare(o.expected_delivery_date || o.delivery_date);
+        if (toT && (!expT || expT > toT)) return false;
+      }
+
+      // State filter
+      if (stateFilter && !o.state?.toLowerCase().includes(stateFilter.toLowerCase())) {
+        return false;
+      }
+
+      // Dispatch filter
+      if (dispatchFilter) {
+        const isDisp = ["dispatched", "lr", "delivered", "completed"].includes((o.status || "").toLowerCase()) || Boolean(o.lr_no);
+        if (dispatchFilter === "yes" && !isDisp) return false;
+        if (dispatchFilter === "no" && isDisp) return false;
+      }
+
       // Warehouse filter
       if (warehouseFilter && o.warehouse !== warehouseFilter) return false;
 
@@ -366,7 +517,7 @@ export function SaleProcessListPage() {
       }
 
       // Third party
-      if (thirdPartyFilter && String(o.third_party).toLowerCase() !== thirdPartyFilter.toLowerCase()) {
+      if (thirdPartyFilter && String(o.third_party || o.third_party_delivery || "no").toLowerCase() !== thirdPartyFilter.toLowerCase()) {
         return false;
       }
 
@@ -384,7 +535,10 @@ export function SaleProcessListPage() {
           (o.warehouse && o.warehouse.toLowerCase().includes(q)) ||
           (o.sales_person && o.sales_person.toLowerCase().includes(q)) ||
           (o.city && o.city.toLowerCase().includes(q)) ||
-          (o.state && o.state.toLowerCase().includes(q));
+          (o.state && o.state.toLowerCase().includes(q)) ||
+          (o.invoice_no && o.invoice_no.toLowerCase().includes(q)) ||
+          (o.gatepass_no && o.gatepass_no.toLowerCase().includes(q)) ||
+          (o.lr_no && o.lr_no.toLowerCase().includes(q));
         if (!match) return false;
       }
 
@@ -393,6 +547,14 @@ export function SaleProcessListPage() {
   }, [
     orders,
     activeTab,
+    orderDateFrom,
+    orderDateTo,
+    invoiceDateFrom,
+    invoiceDateTo,
+    expDateFrom,
+    expDateTo,
+    stateFilter,
+    dispatchFilter,
     warehouseFilter,
     salesPersonFilter,
     companyFilter,
@@ -552,13 +714,26 @@ export function SaleProcessListPage() {
                 setSelectedNewStatus(null);
                 setModalInvoiceNo(order.invoice_no || `INV-INH/${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/${Math.floor(1000 + Math.random() * 9000)}`);
                 setModalInvoiceDate(order.invoice_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
-                setModalGpNo(order.gatepass_no || `GP-${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/${Math.floor(100 + Math.random() * 900)}`);
+                setModalThirdPartyInvoice(order.third_party_invoice || "");
+                const curGp = order.gatepass_no || `GP-${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/0123`;
+                setModalGpNo(curGp);
                 setModalGpDate(order.gatepass_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
-                setModalGpHandledBy(order.gatepass_handled_by || "Warehouse Team");
-                setModalGpTransporter(order.transport_name || order.transporter_name || "");
+                setModalGpHandledBy(order.gatepass_handled_by || profile?.full_name || profile?.username || "Warehouse Team");
+                setModalGpTransporter(order.transport_name || order.transporter_name || "Road");
+                setModalGpDestination(order.transport_destination || order.city || "");
+                setModalGpDeliveryType(order.delivery_type || "Godown");
+                setModalGpDeliveryCharge(order.delivery_charge || "To Pay");
                 setModalLrNo(order.lr_no || "");
                 setModalLrTransporter(order.transport_name || order.transporter_name || "");
                 setModalLrDate(order.lr_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
+
+                if (!order.gatepass_no) {
+                  apiGet<{ gatepass_no: string }>("/sales/next-gatepass-no")
+                    .then((r) => {
+                      if (r?.data?.gatepass_no) setModalGpNo(r.data.gatepass_no);
+                    })
+                    .catch(() => {});
+                }
               }
             }}
             style={{
@@ -579,6 +754,23 @@ export function SaleProcessListPage() {
         ) : null}
       </div>
     );
+  };
+
+  const handleOpenLrDispatch = (order: SaleOrder) => {
+    setLrDispatchOrder(order);
+    const phone = (order.phone || order.mobile || "").replace(/\D/g, "");
+    setLrClientPhone(phone);
+    setLrClientEmail(order.email || "");
+    const invStr = order.invoice_no ? `Invoice: ${order.invoice_no}` : `SO: ${order.order_no}`;
+    const transporterStr = order.transport_name || order.transporter_name || "Road Cargo";
+    const lrStr = order.lr_no ? `LR / Bilty No: ${order.lr_no}` : "LR No: Under Processing";
+    const lrDateStr = order.lr_date || new Date().toLocaleDateString("en-GB").split("/").join("-");
+    const destStr = order.transport_destination || order.destination || order.city || "Client Location";
+    const chargesStr = order.delivery_charge || order.delivery_charges || "To Pay";
+    const delTypeStr = order.delivery_type || "Godown";
+
+    const defaultMsg = `Dear ${order.company_name},\n\nYour order #${order.order_no} (${invStr}) has been dispatched.\n\n*Dispatch & LR Details:*\n- Transporter: ${transporterStr}\n- ${lrStr}\n- Date: ${lrDateStr}\n- Destination: ${destStr}\n- Delivery Type: ${delTypeStr}\n- Delivery Charges: ${chargesStr}\n\nFor any queries or tracking assistance, please reach out to us.\n\nThank you for choosing Inhyma Solutions!\nwww.inhymasolutions.com`;
+    setLrMessageText(defaultMsg);
   };
 
   return (
@@ -858,9 +1050,9 @@ export function SaleProcessListPage() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
                 gap: "12px",
-                marginBottom: "12px",
+                marginBottom: "14px",
               }}
             >
               {/* Order Date From / To */}
@@ -885,6 +1077,89 @@ export function SaleProcessListPage() {
                   onChange={(e) => setOrderDateTo(e.target.value)}
                   style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
                 />
+              </div>
+
+              {/* Invoice Date Range */}
+              <div>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#0369a1", marginBottom: "4px" }}>
+                  Invoice Date From
+                </label>
+                <input
+                  type="date"
+                  value={invoiceDateFrom}
+                  onChange={(e) => setInvoiceDateFrom(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #7dd3fc", fontSize: "12.5px" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#0369a1", marginBottom: "4px" }}>
+                  Invoice Date To
+                </label>
+                <input
+                  type="date"
+                  value={invoiceDateTo}
+                  onChange={(e) => setInvoiceDateTo(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #7dd3fc", fontSize: "12.5px" }}
+                />
+              </div>
+
+              {/* Expected Delivery Date Range */}
+              <div>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                  Exp. Delivery From
+                </label>
+                <input
+                  type="date"
+                  value={expDateFrom}
+                  onChange={(e) => setExpDateFrom(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                  Exp. Delivery To
+                </label>
+                <input
+                  type="date"
+                  value={expDateTo}
+                  onChange={(e) => setExpDateTo(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                />
+              </div>
+
+              {/* State Filter */}
+              <div>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                  State
+                </label>
+                <select
+                  value={stateFilter}
+                  onChange={(e) => setStateFilter(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                >
+                  <option value="">All States</option>
+                  {INDIAN_STATES.map((st) => (
+                    <option key={st} value={st}>
+                      {st}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Dispatch (Yes / No) */}
+              <div>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                  Dispatch Status
+                </label>
+                <select
+                  value={dispatchFilter}
+                  onChange={(e) => setDispatchFilter(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                >
+                  <option value="">All (Dispatch)</option>
+                  <option value="yes">Yes (Dispatched / LR)</option>
+                  <option value="no">No (Pending Dispatch)</option>
+                </select>
               </div>
 
               {/* Warehouse */}
@@ -1182,6 +1457,11 @@ export function SaleProcessListPage() {
                       {/* Company */}
                       <td style={{ padding: "8px 12px" }}>
                         <div style={{ fontWeight: 600, color: "#1e293b" }}>{o.company_name}</div>
+                        {getCompanyGst(o) && (
+                          <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace", marginTop: "1px" }}>
+                            GST: {getCompanyGst(o)}
+                          </div>
+                        )}
                       </td>
 
                       {/* City / State */}
@@ -1280,7 +1560,30 @@ export function SaleProcessListPage() {
 
                       {/* Gatepass */}
                       <td style={{ padding: "8px 12px", textAlign: "center", color: "#334155", fontWeight: 500 }}>
-                        {o.gatepass || "Pending"}
+                        {o.gatepass_no ? (
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px" }}>
+                            <Link
+                              to={`/sales/gatepass-pdf/${o.id}`}
+                              target="_blank"
+                              style={{
+                                color: "#0061f2",
+                                fontWeight: 700,
+                                textDecoration: "none",
+                                fontSize: "12px",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                              onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                              title="Click to view & print official Gate Pass PDF"
+                            >
+                              📄 {o.gatepass_no}
+                            </Link>
+                            {o.gatepass_date && (
+                              <span style={{ fontSize: "10.5px", color: "#64748b" }}>{o.gatepass_date}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ color: "#94a3b8" }}>{o.gatepass || "Pending"}</span>
+                        )}
                       </td>
 
                       {/* Action Menu (⋮) */}
@@ -1317,7 +1620,7 @@ export function SaleProcessListPage() {
                               borderRadius: "4px",
                               boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
                               zIndex: 100,
-                              minWidth: "120px",
+                              minWidth: "150px",
                               textAlign: "left",
                               overflow: "hidden",
                               padding: "4px 0",
@@ -1453,6 +1756,92 @@ export function SaleProcessListPage() {
                             >
                               <span style={{ fontSize: "13px" }}>📦</span>
                               Warehouse SO (No Pricing)
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                window.open(`/sales/gatepass-pdf/${o.id}`, "_blank");
+                                setOpenActionId(null);
+                              }}
+                              style={{
+                                width: "100%",
+                                padding: "7px 12px",
+                                background: "none",
+                                border: "none",
+                                textAlign: "left",
+                                fontSize: "12px",
+                                cursor: "pointer",
+                                color: "#4338ca",
+                                fontWeight: 600,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#eef2ff")}
+                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                            >
+                              <span style={{ fontSize: "13px" }}>📜</span>
+                              Gate Pass PDF
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setOpenActionId(null);
+                                try {
+                                  await generateGatePassPdf(o);
+                                  toast("Gate Pass PDF downloaded", "success");
+                                } catch {
+                                  toast("Failed to download Gate Pass PDF", "error");
+                                }
+                              }}
+                              style={{
+                                width: "100%",
+                                padding: "7px 12px",
+                                background: "none",
+                                border: "none",
+                                textAlign: "left",
+                                fontSize: "12px",
+                                cursor: "pointer",
+                                color: "#047857",
+                                fontWeight: 600,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#ecfdf5")}
+                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                            >
+                              <span style={{ fontSize: "13px" }}>📥</span>
+                              Download Gate Pass
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenActionId(null);
+                                handleOpenLrDispatch(o);
+                              }}
+                              style={{
+                                width: "100%",
+                                padding: "7px 12px",
+                                background: "none",
+                                border: "none",
+                                textAlign: "left",
+                                fontSize: "12px",
+                                cursor: "pointer",
+                                color: "#0284c7",
+                                fontWeight: 600,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f0f9ff")}
+                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                            >
+                              <span style={{ fontSize: "13px" }}>🚀</span>
+                              Send LR to Client
                             </button>
 
                             <button
@@ -1891,6 +2280,24 @@ export function SaleProcessListPage() {
                       />
                     </div>
                   </div>
+
+                  {_yes(editingStatusOrder.third_party) && (
+                    <div style={{ marginTop: "10px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "8px" }}>
+                      <label style={{ display: "block", fontSize: "11.5px", fontWeight: 700, color: "#991b1b", marginBottom: "3px" }}>
+                        Third Party Invoice / Reference <span style={{ color: "#dc2626" }}>* (Mandatory for 3rd-Party Delivery)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={modalThirdPartyInvoice}
+                        onChange={(e) => setModalThirdPartyInvoice(e.target.value)}
+                        placeholder="Enter 3rd Party Vendor Invoice No / Document Ref"
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #f87171" }}
+                      />
+                      <div style={{ fontSize: "10.5px", color: "#b91c1c", marginTop: "3px" }}>
+                        Third-Party Delivery is set to "Yes". Entering/uploading the third-party invoice details is mandatory at the Acc. Confirmed stage.
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1924,7 +2331,7 @@ export function SaleProcessListPage() {
                     </div>
                     <div>
                       <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Handled By
+                        Handled By (from login)
                       </label>
                       <input
                         type="text"
@@ -1935,14 +2342,54 @@ export function SaleProcessListPage() {
                     </div>
                     <div>
                       <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Transporter
+                        Transporter Name
                       </label>
                       <input
                         type="text"
                         value={modalGpTransporter}
                         onChange={(e) => setModalGpTransporter(e.target.value)}
+                        placeholder="e.g. VRL Logistics, SafeXpress"
                         style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
                       />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
+                        Destination
+                      </label>
+                      <input
+                        type="text"
+                        value={modalGpDestination}
+                        onChange={(e) => setModalGpDestination(e.target.value)}
+                        placeholder="Destination city"
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
+                        Delivery Type
+                      </label>
+                      <select
+                        value={modalGpDeliveryType}
+                        onChange={(e) => setModalGpDeliveryType(e.target.value)}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                      >
+                        <option value="Godown">Godown</option>
+                        <option value="Door">Door Delivery</option>
+                      </select>
+                    </div>
+                    <div style={{ gridColumn: "span 2" }}>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
+                        Delivery Charges
+                      </label>
+                      <select
+                        value={modalGpDeliveryCharge}
+                        onChange={(e) => setModalGpDeliveryCharge(e.target.value)}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                      >
+                        <option value="To Pay">To Pay</option>
+                        <option value="Paid">Paid</option>
+                        <option value="Free">Free</option>
+                      </select>
                     </div>
                   </div>
                 </div>
@@ -2012,13 +2459,26 @@ export function SaleProcessListPage() {
                         toast("Invoice Number is required for Acc. Confirmed", "error");
                         return;
                       }
+                      if (_yes(editingStatusOrder.third_party) && !modalThirdPartyInvoice.trim()) {
+                        toast("Third Party Invoice / Reference is mandatory for Third Party Delivery at Acc. Confirmed stage", "error");
+                        return;
+                      }
                       extra.invoice_no = modalInvoiceNo.trim();
                       extra.invoice_date = modalInvoiceDate.trim();
+                      if (modalThirdPartyInvoice.trim()) {
+                        extra.third_party_invoice = modalThirdPartyInvoice.trim();
+                      }
                     } else if (targetStatus === "gatepass_created") {
                       extra.gatepass_no = modalGpNo.trim();
                       extra.gatepass_date = modalGpDate.trim();
                       extra.gatepass_handled_by = modalGpHandledBy.trim();
                       extra.transporter_name = modalGpTransporter.trim();
+                      extra.transport_name = modalGpTransporter.trim();
+                      extra.transport_destination = modalGpDestination.trim();
+                      extra.destination = modalGpDestination.trim();
+                      extra.delivery_type = modalGpDeliveryType;
+                      extra.delivery_charge = modalGpDeliveryCharge;
+                      extra.delivery_charges = modalGpDeliveryCharge;
                       extra.gatepass = "Generated";
                     } else if (targetStatus === "lr") {
                       if (!modalLrNo.trim()) {
@@ -2027,6 +2487,7 @@ export function SaleProcessListPage() {
                       }
                       extra.lr_no = modalLrNo.trim();
                       extra.transporter_name = modalLrTransporter.trim();
+                      extra.transport_name = modalLrTransporter.trim();
                       extra.lr_date = modalLrDate.trim();
                     }
 
@@ -2075,6 +2536,247 @@ export function SaleProcessListPage() {
                 >
                   Save & Update Status
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Direct Dispatch of LR to Client (WhatsApp / Email / Gate Pass) */}
+        {lrDispatchOrder && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "rgba(0, 0, 0, 0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+              padding: "20px",
+            }}
+            onClick={() => setLrDispatchOrder(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#ffffff",
+                borderRadius: "10px",
+                width: "560px",
+                maxWidth: "100%",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                padding: "24px",
+                maxHeight: "90vh",
+                overflowY: "auto",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "20px" }}>🚀</span>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#1e293b" }}>
+                    Direct Dispatch & LR Notice
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  onClick={() => setLrDispatchOrder(null)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    color: "#64748b",
+                    cursor: "pointer",
+                    padding: "2px 6px",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px", marginBottom: "16px" }}>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                  {lrDispatchOrder.company_name}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "12px", color: "#475569", marginTop: "6px" }}>
+                  <div>SO No: <strong>{lrDispatchOrder.order_no}</strong></div>
+                  <div>Invoice No: <strong>{lrDispatchOrder.invoice_no || "N/A"}</strong></div>
+                  <div>Transporter: <strong>{lrDispatchOrder.transport_name || lrDispatchOrder.transporter_name || "—"}</strong></div>
+                  <div>LR / Bilty No: <strong>{lrDispatchOrder.lr_no || "—"}</strong></div>
+                  <div>Destination: <strong>{lrDispatchOrder.transport_destination || lrDispatchOrder.destination || lrDispatchOrder.city || "—"}</strong></div>
+                  <div>Gatepass: <strong>{lrDispatchOrder.gatepass_no || "—"}</strong></div>
+                </div>
+              </div>
+
+              {/* Client WhatsApp Phone & Email */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                    Client Mobile / WhatsApp
+                  </label>
+                  <input
+                    type="text"
+                    value={lrClientPhone}
+                    onChange={(e) => setLrClientPhone(e.target.value)}
+                    placeholder="e.g. 9876543210"
+                    style={{ width: "100%", padding: "7px 10px", fontSize: "12.5px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                    Client Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={lrClientEmail}
+                    onChange={(e) => setLrClientEmail(e.target.value)}
+                    placeholder="e.g. accounts@client.com"
+                    style={{ width: "100%", padding: "7px 10px", fontSize: "12.5px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  />
+                </div>
+              </div>
+
+              {/* Message text area */}
+              <div style={{ marginBottom: "16px" }}>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                  Message Preview / Delivery Notice
+                </label>
+                <textarea
+                  rows={6}
+                  value={lrMessageText}
+                  onChange={(e) => setLrMessageText(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    fontSize: "12px",
+                    fontFamily: "inherit",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    lineHeight: 1.5,
+                  }}
+                />
+              </div>
+
+              {/* Actions row */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await generateGatePassPdf(lrDispatchOrder);
+                        toast("Gate Pass PDF downloaded", "success");
+                      } catch {
+                        toast("Failed to download Gate Pass PDF", "error");
+                      }
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "7px 12px",
+                      background: "#f1f5f9",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "6px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: "#334155",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span>📜</span>
+                    Download Gate Pass
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.open(`/sales/gatepass-pdf/${lrDispatchOrder.id}`, "_blank");
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "7px 12px",
+                      background: "#eef2ff",
+                      border: "1px solid #c7d2fe",
+                      borderRadius: "6px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: "#4338ca",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span>👁️</span>
+                    View PDF
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!lrClientEmail) {
+                        toast("Please enter a client email address", "error");
+                        return;
+                      }
+                      const subject = `Dispatch & LR Advice: Order #${lrDispatchOrder.order_no} - Inhyma Solutions`;
+                      const mailtoUrl = `mailto:${encodeURIComponent(lrClientEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lrMessageText)}`;
+                      window.open(mailtoUrl, "_blank");
+                      toast("Opening email client...", "success");
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "7px 14px",
+                      background: "#0284c7",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: "6px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span>✉️</span>
+                    Send Email
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let cleanedPhone = lrClientPhone.replace(/\D/g, "");
+                      if (cleanedPhone.length === 10) {
+                        cleanedPhone = "91" + cleanedPhone;
+                      }
+                      const waUrl = cleanedPhone
+                        ? `https://wa.me/${cleanedPhone}?text=${encodeURIComponent(lrMessageText)}`
+                        : `https://wa.me/?text=${encodeURIComponent(lrMessageText)}`;
+                      window.open(waUrl, "_blank");
+                      toast("Opening WhatsApp...", "success");
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "7px 16px",
+                      background: "#25D366",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: "6px",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span>💬</span>
+                    Send WhatsApp
+                  </button>
+                </div>
               </div>
             </div>
           </div>

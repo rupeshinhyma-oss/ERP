@@ -1191,11 +1191,18 @@ async def get_product_stock_breakup(
             for idx, (so, so_item) in enumerate(results, start=1):
                 city_state = ", ".join(filter(None, [so.city, so.state])) or "-"
                 status_text = (so.status or "Confirmed").replace("_", " ").title()
+                gst_val = getattr(so, "gst_no", None)
+                if not gst_val and so.billing_address:
+                    import re
+                    m = re.search(r'\b([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1})\b', so.billing_address, re.I)
+                    if m:
+                        gst_val = m.group(1).upper()
                 items.append({
                     "sr_no": idx,
                     "order_no": so.order_no,
                     "order_date": so.order_date or "-",
                     "company_name": so.company_name or so.buyer_name or "-",
+                    "gst_no": gst_val or None,
                     "city_state": city_state,
                     "quantity": so_item.quantity,
                     "status": status_text,

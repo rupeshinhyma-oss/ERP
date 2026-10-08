@@ -174,6 +174,28 @@ export function SalesOrderPdfPage() {
 
   const currentOrder = liveItem || staticItem;
   const orderNo = currentOrder?.order_no || "";
+  const [bankDetails, setBankDetails] = useState<any>(null);
+
+  useEffect(() => {
+    apiGet<any>("/masters/banks")
+      .then((res) => {
+        const list = res?.data?.items || (Array.isArray(res?.data) ? res.data : []);
+        if (list.length > 0) {
+          const matched = list.find((b: any) =>
+            (currentOrder?.company_name && b.account_holder_name?.toLowerCase().includes(currentOrder.company_name.toLowerCase())) ||
+            (currentOrder?.warehouse && b.branch?.toLowerCase().includes(currentOrder.warehouse.toLowerCase()))
+          ) || list[0];
+          setBankDetails({
+            bank_name: matched.bank_name,
+            account_number: matched.account_number,
+            account_holder_name: matched.account_holder_name,
+            ifsc_code: matched.ifsc_code,
+            branch: matched.branch,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [currentOrder?.company_name, currentOrder?.warehouse]);
 
   useEffect(() => {
     if (currentOrder) {
@@ -181,6 +203,7 @@ export function SalesOrderPdfPage() {
         saveFile: false,
         openInNewTab: false,
         hidePricing: isWarehouse,
+        bankDetails: bankDetails || undefined,
       });
       const blob = doc.output("blob");
       const url = URL.createObjectURL(blob);
@@ -194,7 +217,7 @@ export function SalesOrderPdfPage() {
         URL.revokeObjectURL(url);
       };
     }
-  }, [currentOrder, orderNo, isWarehouse]);
+  }, [currentOrder, orderNo, isWarehouse, bankDetails]);
 
   const handleDownload = () => {
     if (currentOrder) {
@@ -202,6 +225,7 @@ export function SalesOrderPdfPage() {
         saveFile: true,
         openInNewTab: false,
         hidePricing: isWarehouse,
+        bankDetails: bankDetails || undefined,
       });
     }
   };

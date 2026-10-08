@@ -17,11 +17,20 @@ export function formatSalesPdfCurrency(amount: number | null | undefined): strin
   );
 }
 
+export interface BankDetails {
+  bank_name?: string;
+  account_number?: string;
+  account_holder_name?: string;
+  ifsc_code?: string;
+  branch?: string;
+}
+
 export interface SalesOrderPdfOptions {
   openInNewTab?: boolean;
   saveFile?: boolean;
   doc?: jsPDF;
   hidePricing?: boolean; // When true: Warehouse Packing Copy without rates or totals
+  bankDetails?: BankDetails;
 }
 
 /**
@@ -552,6 +561,12 @@ export function generateSalesOrderPdf(
     const bankBoxHeight = 26;
     doc.rect(margin, currentY, contentWidth, bankBoxHeight);
 
+    const bank = options?.bankDetails || {};
+    const bName = bank.bank_name || "HDFC BANK";
+    const acHolder = bank.account_holder_name || brandName.toUpperCase();
+    const acNo = bank.account_number || "50200102929151";
+    const branchIfsc = [bank.branch, bank.ifsc_code].filter(Boolean).join(" & ") || "PARMESHWARI PLAZA MULUND (W) & HDFC0001576";
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.text("Bank Details", margin + 4, currentY + 5.5);
@@ -560,28 +575,24 @@ export function generateSalesOrderPdf(
     doc.setFontSize(7);
     doc.text("A/c Holder's Name :", margin + 4, currentY + 10.5);
     doc.setFont("helvetica", "normal");
-    doc.text(brandName.toUpperCase(), margin + 35, currentY + 10.5);
+    doc.text(acHolder, margin + 35, currentY + 10.5);
 
-  doc.setFont("helvetica", "bold");
-  doc.text("Bank Name :", margin + 4, currentY + 14.5);
-  doc.setFont("helvetica", "normal");
-  doc.text("HDFC BANK", margin + 35, currentY + 14.5);
+    doc.setFont("helvetica", "bold");
+    doc.text("Bank Name :", margin + 4, currentY + 14.5);
+    doc.setFont("helvetica", "normal");
+    doc.text(bName, margin + 35, currentY + 14.5);
 
-  doc.setFont("helvetica", "bold");
-  doc.text("A/c No. :", margin + 4, currentY + 18.5);
-  doc.setFont("helvetica", "normal");
-  doc.text("50200102929151", margin + 35, currentY + 18.5);
+    doc.setFont("helvetica", "bold");
+    doc.text("A/c No. :", margin + 4, currentY + 18.5);
+    doc.setFont("helvetica", "normal");
+    doc.text(acNo, margin + 35, currentY + 18.5);
 
-  doc.setFont("helvetica", "bold");
-  doc.text("Branch & IFSC Code :", margin + 4, currentY + 22.5);
-  doc.setFont("helvetica", "normal");
-  doc.text(
-    "PARMESHWARI PLAZA MULUND (W) & HDFC0001576",
-    margin + 35,
-    currentY + 22.5
-  );
+    doc.setFont("helvetica", "bold");
+    doc.text("Branch & IFSC Code :", margin + 4, currentY + 22.5);
+    doc.setFont("helvetica", "normal");
+    doc.text(branchIfsc, margin + 35, currentY + 22.5);
 
-  currentY += bankBoxHeight;
+    currentY += bankBoxHeight;
   }
 
   // ==========================================

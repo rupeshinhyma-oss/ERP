@@ -125,6 +125,14 @@ function formatIndianCurrency(amount: number): string {
   return "₹ " + (amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function getProformaCompanyGst(p: ProformaInvoice): string | null {
+  if ((p as any).gst_no) return (p as any).gst_no;
+  if ((p as any).tax_id_number) return (p as any).tax_id_number;
+  const combined = `${p.billing_address || ""} ${p.shipping_address || ""}`;
+  const m = combined.match(/\b([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1})\b/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
 function parseDateAny(dateStr?: string | null): Date | null {
   if (!dateStr) return null;
   const trimmed = dateStr.trim();
@@ -1964,6 +1972,11 @@ export function ProformaInvoicesPage({
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>{p.expected_delivery_date || "—"}</td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
                         <div style={{ fontWeight: 600, color: "#1e293b" }}>{p.company_name}</div>
+                        {getProformaCompanyGst(p) && (
+                          <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace", marginTop: "1px" }}>
+                            GST: {getProformaCompanyGst(p)}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
                         <div>{p.city || "—"}</div>

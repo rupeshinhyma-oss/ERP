@@ -136,6 +136,12 @@ async def list_sale_orders(
     currency: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    invoice_date_from: str | None = Query(default=None),
+    invoice_date_to: str | None = Query(default=None),
+    delivery_date_from: str | None = Query(default=None),
+    delivery_date_to: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    dispatch: str | None = Query(default=None),
     service: SaleService = Depends(get_sale_service),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
@@ -153,6 +159,12 @@ async def list_sale_orders(
         currency=currency,
         date_from=date_from,
         date_to=date_to,
+        invoice_date_from=invoice_date_from,
+        invoice_date_to=invoice_date_to,
+        delivery_date_from=delivery_date_from,
+        delivery_date_to=delivery_date_to,
+        state=state,
+        dispatch=dispatch,
         limit=page_size,
         offset=offset,
     )
@@ -170,6 +182,17 @@ async def list_sale_orders(
         },
         request_id=req_id,
     )
+
+
+@router.get("/next-gatepass-no", summary="Generate next sequential gatepass number")
+async def get_next_gatepass_no(
+    request: Request,
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    gp_no = await service.repo.generate_gatepass_no()
+    return build_success_response(data={"gatepass_no": gp_no}, request_id=req_id)
 
 
 @router.post("/orders", summary="Create a new sale order", status_code=status.HTTP_201_CREATED)

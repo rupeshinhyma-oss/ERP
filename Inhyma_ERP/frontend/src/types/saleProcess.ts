@@ -22,6 +22,7 @@ export interface SaleOrderItem {
   hsn_code?: string | null;
   hsn?: string;
   quantity: number;
+  uom?: string;
   unit_rate: number;
   unit_price?: number;
   unit_discount?: number;
@@ -82,6 +83,8 @@ export interface SaleOrder {
   billing_address?: string | null;
   shipping_address?: string | null;
   phone?: string | null;
+  mobile?: string | null;
+  email?: string | null;
   gst_no?: string | null;
   contact_person_name?: string | null;
   contact_person_mobile?: string | null;
@@ -89,9 +92,12 @@ export interface SaleOrder {
   transport_name?: string | null;
   transporter_gst?: string | null;
   transport_destination?: string | null;
+  destination?: string | null;
   delivery_type?: string | null;
   delivery_charge?: string | null;
+  delivery_charges?: string | null;
   third_party_delivery?: string | null;
+  third_party_invoice?: string | null;
   payment_terms?: string | null;
   exp_dispatch_date?: string | null;
   terms?: string[] | string | null;

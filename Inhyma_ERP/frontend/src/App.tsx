@@ -45,6 +45,7 @@ import { SuppliersPage } from "@/pages/Suppliers";
 import { ProformaInvoicesPage } from "@/pages/ProformaInvoicesPage";
 import { ProformaInvoicePdfPage } from "@/pages/ProformaInvoicePdfPage";
 import { SalesOrderPdfPage } from "@/pages/SalesOrderPdfPage";
+import { GatePassPdfPage } from "@/pages/GatePassPdfPage";
 import { SaleProcessListPage } from "@/pages/sales/SaleProcessList";
 import { SaleProcessFormPage } from "@/pages/sales/SaleProcessForm";
 import { DiscountPaymentsPage } from "@/pages/sales/DiscountPaymentsPage";
@@ -239,6 +240,10 @@ export function App() {
           <Route path="/sale-order/pdf" element={<SalesOrderPdfPage />} />
           <Route path="/sales/process/pdf/:id" element={<SalesOrderPdfPage />} />
           <Route path="/sales/process/pdf" element={<SalesOrderPdfPage />} />
+          <Route path="/sale-order/gatepass-pdf/:id" element={<GatePassPdfPage />} />
+          <Route path="/sale-order/gatepass-pdf" element={<GatePassPdfPage />} />
+          <Route path="/sales/gatepass-pdf/:id" element={<GatePassPdfPage />} />
+          <Route path="/sales/gatepass-pdf" element={<GatePassPdfPage />} />
           <Route path="/sale-order" element={<Navigate to="/sale-order/list" replace />} />
           <Route path="/discount-payments/list" element={<DiscountPaymentsPage />} />
           <Route path="/discount-payments" element={<Navigate to="/discount-payments/list" replace />} />
