@@ -78,13 +78,34 @@ class SaleService:
         if not sheets:
             return []
 
-        # Filter sheets if buyer_name is given (e.g. Inhyma Mumbai, Inhyma Ahmedabad, etc.)
+        # Filter sheets if buyer_name is given (e.g. Inhyma Mumbai, Darsh Impex, etc.)
         matched_sheets: list[PlanningSheet] = []
         if buyer_name and buyer_name.strip():
             clean_b = buyer_name.strip().lower()
+
+            # 1. Match by Organization Link (e.g. Planning sheets created under 'Darsh Impex' organization)
+            from app.masters.company_list.models import MasterCompany
+            q_orgs = await self.session.execute(
+                select(MasterCompany.id, MasterCompany.name).where(
+                    MasterCompany.deleted_at.is_(None)
+                )
+            )
+            matched_org_ids: set[uuid.UUID] = set()
+            for org_id, org_name in q_orgs.all():
+                if not org_name:
+                    continue
+                o_clean = org_name.strip().lower()
+                if clean_b in o_clean or o_clean in clean_b or any(w in o_clean for w in clean_b.split() if len(w) >= 3):
+                    matched_org_ids.add(org_id)
+
             for s in sheets:
+                # Primary: Sheet belongs to the buyer's organization (e.g. Chennai, Mumbai under Darsh Impex)
+                if s.organization_id and s.organization_id in matched_org_ids:
+                    matched_sheets.append(s)
+                    continue
+
+                # Secondary: Sheet name itself mentions the buyer/branch
                 s_name = s.name.strip().lower()
-                # Check if buyer name or branch matches sheet name or vice versa
                 if clean_b in s_name or s_name in clean_b:
                     matched_sheets.append(s)
                 elif any(word in s_name for word in clean_b.split() if len(word) >= 3):
@@ -108,6 +129,15 @@ class SaleService:
         sheet_cols_map: dict[uuid.UUID, list[PlanningColumn]] = {}
         for c in all_cols:
             sheet_cols_map.setdefault(c.sheet_id, []).append(c)
+
+        # Map organization IDs to names for rich consignment badges
+        from app.masters.company_list.models import MasterCompany
+        q_org_all = await self.session.execute(
+            select(MasterCompany.id, MasterCompany.name).where(
+                MasterCompany.deleted_at.is_(None)
+            )
+        )
+        org_names_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in q_org_all.all() if row[1]}
 
         consignments: list[PlanningConsignmentColumnResponse] = []
         system_meta_names = {
@@ -187,6 +217,8 @@ class SaleService:
                         column_id=col.id,
                         column_name=c_name,
                         code=c_name,
+                        organization_id=sheet.organization_id,
+                        organization_name=org_names_map.get(sheet.organization_id) if sheet.organization_id else None,
                         item_count=item_count,
                         total_quantity=round(total_qty, 2),
                         has_remarks_column=has_remarks,
@@ -1079,11 +1111,15 @@ class SaleService:
             },
         }
 
-    async def export_trade_documents_excel(self, order_id: uuid.UUID) -> io.BytesIO:
+    async def export_trade_documents_excel(self, order_id: uuid.UUID, mode: str = "internal") -> io.BytesIO:
         """
-        Generate official dual-sheet export workbook (CI + Packing List)
-        matching Yinglima_CI_Inhyma_YL-EXP2026-54.xlsx template specifications.
+        Generate official dual-sheet export workbook (CI + Packing List).
+        mode="internal": full 16-column costing sheet + Packing List.
+        mode="customer": clean 7-column customer commercial invoice + Packing List.
         """
+        if mode not in ("internal", "customer"):
+            mode = "internal"
+
         data = await self.get_trade_document_details(order_id)
 
         wb = Workbook()
@@ -1120,8 +1156,11 @@ class SaleService:
         ws_ci.title = "CI"
         ws_ci.views.sheetView[0].showGridLines = True
 
+        max_c = 16 if mode == "internal" else 7
+        max_col_letter = "P" if mode == "internal" else "G"
+
         # Row 1: Letterhead
-        ws_ci.merge_cells("A1:G1")
+        ws_ci.merge_cells(f"A1:{max_col_letter}1")
         ws_ci["A1"] = (
             f"{data['shipper']['company_name']}\n"
             f"Email: {data['shipper']['email']} | Mobile: {data['shipper']['phone']} | WeChat: {data['shipper']['wechat']}\n"
@@ -1132,7 +1171,7 @@ class SaleService:
         ws_ci.row_dimensions[1].height = 45
 
         # Row 2: Title
-        ws_ci.merge_cells("A2:G2")
+        ws_ci.merge_cells(f"A2:{max_col_letter}2")
         ws_ci["A2"] = "COMMERCIAL INVOICE"
         ws_ci["A2"].font = f_title
         ws_ci["A2"].alignment = al_center
@@ -1140,31 +1179,58 @@ class SaleService:
         ws_ci.row_dimensions[2].height = 26
 
         # Row 3: Invoice No & Date
-        ws_ci["A3"] = "Commercial Invoice No"
-        ws_ci["A3"].font = f_bold
-        ws_ci["B3"] = data["consignment_code"]
-        ws_ci["B3"].font = f_bold
-        ws_ci["F3"] = "Date"
-        ws_ci["F3"].font = f_bold
-        ws_ci["G3"] = data["order_date"]
-        ws_ci["G3"].font = f_bold
-        ws_ci["G3"].alignment = al_right
+        if mode == "internal":
+            ws_ci.merge_cells("A3:C3")
+            ws_ci["A3"] = "Commercial Invoice No"
+            ws_ci["A3"].font = f_bold
+            ws_ci.merge_cells("D3:H3")
+            ws_ci["D3"] = data["consignment_code"]
+            ws_ci["D3"].font = f_bold
+            ws_ci.merge_cells("I3:K3")
+            ws_ci["I3"] = "Date"
+            ws_ci["I3"].font = f_bold
+            ws_ci["I3"].alignment = al_center
+            ws_ci.merge_cells("L3:P3")
+            ws_ci["L3"] = data["order_date"]
+            ws_ci["L3"].font = f_bold
+            ws_ci["L3"].alignment = al_right
+        else:
+            ws_ci["A3"] = "Commercial Invoice No"
+            ws_ci["A3"].font = f_bold
+            ws_ci["B3"] = data["consignment_code"]
+            ws_ci["B3"].font = f_bold
+            ws_ci["F3"] = "Date"
+            ws_ci["F3"].font = f_bold
+            ws_ci["G3"] = data["order_date"]
+            ws_ci["G3"].font = f_bold
+            ws_ci["G3"].alignment = al_right
 
-        for col in ["A", "B", "C", "D", "E", "F", "G"]:
-            ws_ci[f"{col}3"].border = b_all
+        for c in range(1, max_c + 1):
+            ws_ci.cell(3, c).border = b_all
 
         # Row 4: Section Headers
-        ws_ci.merge_cells("A4:D4")
-        ws_ci["A4"] = "Shipper's Information"
-        ws_ci["A4"].font = f_bold
-        ws_ci["A4"].fill = fill_head
+        if mode == "internal":
+            ws_ci.merge_cells("A4:H4")
+            ws_ci["A4"] = "Shipper's Information"
+            ws_ci["A4"].font = f_bold
+            ws_ci["A4"].fill = fill_head
 
-        ws_ci.merge_cells("E4:G4")
-        ws_ci["E4"] = "Recipient's Information"
-        ws_ci["E4"].font = f_bold
-        ws_ci["E4"].fill = fill_head
+            ws_ci.merge_cells("I4:P4")
+            ws_ci["I4"] = "Recipient's Information"
+            ws_ci["I4"].font = f_bold
+            ws_ci["I4"].fill = fill_head
+        else:
+            ws_ci.merge_cells("A4:D4")
+            ws_ci["A4"] = "Shipper's Information"
+            ws_ci["A4"].font = f_bold
+            ws_ci["A4"].fill = fill_head
 
-        for c in range(1, 8):
+            ws_ci.merge_cells("E4:G4")
+            ws_ci["E4"] = "Recipient's Information"
+            ws_ci["E4"].font = f_bold
+            ws_ci["E4"].fill = fill_head
+
+        for c in range(1, max_c + 1):
             ws_ci.cell(4, c).border = b_all
 
         # Rows 5 to 9: Details
@@ -1179,19 +1245,35 @@ class SaleService:
         for idx, (lbl_s, val_s, lbl_r, val_r) in enumerate(details, start=5):
             ws_ci.cell(idx, 1, lbl_s).font = f_bold
             ws_ci.cell(idx, 1).border = b_all
-            ws_ci.merge_cells(start_row=idx, start_column=2, end_row=idx, end_column=4)
-            ws_ci.cell(idx, 2, val_s).font = f_regular
-            ws_ci.cell(idx, 2).alignment = al_left
-            for c in range(2, 5):
-                ws_ci.cell(idx, c).border = b_all
 
-            ws_ci.cell(idx, 5, lbl_r).font = f_bold
-            ws_ci.cell(idx, 5).border = b_all
-            ws_ci.merge_cells(start_row=idx, start_column=6, end_row=idx, end_column=7)
-            ws_ci.cell(idx, 6, val_r).font = f_regular
-            ws_ci.cell(idx, 6).alignment = al_left
-            for c in range(6, 8):
-                ws_ci.cell(idx, c).border = b_all
+            if mode == "internal":
+                ws_ci.merge_cells(start_row=idx, start_column=2, end_row=idx, end_column=8)
+                ws_ci.cell(idx, 2, val_s).font = f_regular
+                ws_ci.cell(idx, 2).alignment = al_left
+                for c in range(2, 9):
+                    ws_ci.cell(idx, c).border = b_all
+
+                ws_ci.cell(idx, 9, lbl_r).font = f_bold
+                ws_ci.cell(idx, 9).border = b_all
+                ws_ci.merge_cells(start_row=idx, start_column=10, end_row=idx, end_column=16)
+                ws_ci.cell(idx, 10, val_r).font = f_regular
+                ws_ci.cell(idx, 10).alignment = al_left
+                for c in range(10, 17):
+                    ws_ci.cell(idx, c).border = b_all
+            else:
+                ws_ci.merge_cells(start_row=idx, start_column=2, end_row=idx, end_column=4)
+                ws_ci.cell(idx, 2, val_s).font = f_regular
+                ws_ci.cell(idx, 2).alignment = al_left
+                for c in range(2, 5):
+                    ws_ci.cell(idx, c).border = b_all
+
+                ws_ci.cell(idx, 5, lbl_r).font = f_bold
+                ws_ci.cell(idx, 5).border = b_all
+                ws_ci.merge_cells(start_row=idx, start_column=6, end_row=idx, end_column=7)
+                ws_ci.cell(idx, 6, val_r).font = f_regular
+                ws_ci.cell(idx, 6).alignment = al_left
+                for c in range(6, 8):
+                    ws_ci.cell(idx, c).border = b_all
 
             ws_ci.row_dimensions[idx].height = 28 if idx == 6 else 20
 
@@ -1202,53 +1284,73 @@ class SaleService:
             (12, f"Delivery Time: {data['delivery_time']}"),
         ]
         for r_num, term_txt in terms:
-            ws_ci.merge_cells(f"A{r_num}:G{r_num}")
+            ws_ci.merge_cells(f"A{r_num}:{max_col_letter}{r_num}")
             ws_ci[f"A{r_num}"] = term_txt
             ws_ci[f"A{r_num}"].font = f_bold
             ws_ci[f"A{r_num}"].alignment = al_left
-            for c in range(1, 8):
+            for c in range(1, max_c + 1):
                 ws_ci.cell(r_num, c).border = b_all
 
         # Row 13: Shipment Information Bar
-        ws_ci.merge_cells("A13:K13")
-        ws_ci["A13"] = "Shipment Information"
-        ws_ci["A13"].font = f_bold
-        ws_ci["A13"].fill = fill_head
-        for c in range(1, 12):
-            ws_ci.cell(13, c).border = b_all
-
         costing_params = data.get("totals", {}).get("costing", {})
         ocean_fr = float(costing_params.get("ocean_freight_usd") or 0.0)
         local_coc = float(costing_params.get("local_charges_coc_usd") or 0.0)
         usd_rate = float(costing_params.get("usd_exchange_rate") or 6.70)
         profit_pct = float(costing_params.get("profit_percent") if costing_params.get("profit_percent") is not None else 3.0)
 
-        # Row 14: Table Headers (All 16 columns matching official Yinglima CI template)
-        ci_headers = [
-            "Sr.No",
-            "Description ",
-            "HS CODE AS PER CHINA",
-            "UOM",
-            "Quantity",
-            "Unit Price\n(USD)",
-            "Total Amount\n(USD)",
-            "Unit Price(RMB) Including VAT",
-            "Unit Price(RMB) Excluding VAT",
-            f"Including Profit {int(profit_pct) if profit_pct.is_integer() else profit_pct}%",
-            f"FOB PRICE\n(USD Conversion @{usd_rate})",
-            "Freight, Local charges,COC",
-            "CFR Price/Unit",
-            "Supplier",
-            "Total CBM",
-            "Total Supplier Amount",
-        ]
+        if mode == "internal":
+            ws_ci.merge_cells("A13:K13")
+            ws_ci["A13"] = "Shipment Information"
+            ws_ci["A13"].font = f_bold
+            ws_ci["A13"].fill = fill_head
+            for c in range(1, 12):
+                ws_ci.cell(13, c).border = b_all
+        else:
+            ws_ci.merge_cells("A13:G13")
+            ws_ci["A13"] = "Shipment Information"
+            ws_ci["A13"].font = f_bold
+            ws_ci["A13"].fill = fill_head
+            for c in range(1, 8):
+                ws_ci.cell(13, c).border = b_all
+
+        # Row 14: Table Headers
+        if mode == "internal":
+            ci_headers = [
+                "Sr.No",
+                "Description ",
+                "HS CODE AS PER CHINA",
+                "UOM",
+                "Quantity",
+                "Unit Price\n(USD)",
+                "Total Amount\n(USD)",
+                "Unit Price(RMB)\nIncluding VAT",
+                "Unit Price(RMB)\nExcluding VAT",
+                f"Including Profit\n{int(profit_pct) if profit_pct.is_integer() else profit_pct}%",
+                f"FOB PRICE\n(@{usd_rate})",
+                "Freight, Local\ncharges, COC",
+                "CFR Price/Unit",
+                "Supplier",
+                "Total CBM",
+                "Total Supplier Amount",
+            ]
+        else:
+            ci_headers = [
+                "Sr.No",
+                "Description ",
+                "HS CODE AS PER CHINA",
+                "UOM",
+                "Quantity",
+                "Unit Price\n(USD)",
+                "Total Amount\n(USD)",
+            ]
+
         for c_idx, h in enumerate(ci_headers, start=1):
             cell = ws_ci.cell(14, c_idx, h)
             cell.font = f_header_white
             cell.fill = fill_blue_head
             cell.alignment = al_center
             cell.border = b_all
-        ws_ci.row_dimensions[14].height = 28
+        ws_ci.row_dimensions[14].height = 32
 
         curr_row = 15
         start_data_row = 15
@@ -1267,62 +1369,73 @@ class SaleService:
             c_qty.alignment = al_right
             c_qty.number_format = "#,##0"
 
-            # Col 6: Unit Price (USD) = M{curr_row}
-            c_rate = ws_ci.cell(curr_row, 6, f"=M{curr_row}")
-            c_rate.alignment = al_right
-            c_rate.number_format = "$#,##0.00"
+            if mode == "internal":
+                # Col 6: Unit Price (USD) = M{curr_row}
+                c_rate = ws_ci.cell(curr_row, 6, f"=M{curr_row}")
+                c_rate.alignment = al_right
+                c_rate.number_format = "$#,##0.00"
 
-            # Col 7: Total Amount (USD) = F{curr_row}*E{curr_row}
-            c_tot = ws_ci.cell(curr_row, 7, f"=F{curr_row}*E{curr_row}")
-            c_tot.alignment = al_right
-            c_tot.number_format = "$#,##0.00"
+                # Col 7: Total Amount (USD) = F{curr_row}*E{curr_row}
+                c_tot = ws_ci.cell(curr_row, 7, f"=F{curr_row}*E{curr_row}")
+                c_tot.alignment = al_right
+                c_tot.number_format = "$#,##0.00"
 
-            # Col 8: Unit Price(RMB) Including VAT
-            c_rmb_vat = ws_ci.cell(curr_row, 8, item.get("unit_price_rmb_with_vat", item.get("unit_price_rmb", 0.0)))
-            c_rmb_vat.alignment = al_right
-            c_rmb_vat.number_format = "#,##0.00"
+                # Col 8: Unit Price(RMB) Including VAT
+                c_rmb_vat = ws_ci.cell(curr_row, 8, item.get("unit_price_rmb_with_vat", item.get("unit_price_rmb", 0.0)))
+                c_rmb_vat.alignment = al_right
+                c_rmb_vat.number_format = "#,##0.00"
 
-            # Col 9: Unit Price(RMB) Excluding VAT = H{curr_row}/1.13
-            c_rmb_ex = ws_ci.cell(curr_row, 9, f"=H{curr_row}/1.13")
-            c_rmb_ex.alignment = al_right
-            c_rmb_ex.number_format = "#,##0.00"
+                # Col 9: Unit Price(RMB) Excluding VAT = H{curr_row}/1.13
+                c_rmb_ex = ws_ci.cell(curr_row, 9, f"=H{curr_row}/1.13")
+                c_rmb_ex.alignment = al_right
+                c_rmb_ex.number_format = "#,##0.00"
 
-            # Col 10: Including Profit = (I{curr_row} * (1 + profit_pct/100))
-            p_mult = round(1.0 + (profit_pct / 100.0), 4)
-            c_profit = ws_ci.cell(curr_row, 10, f"=(I{curr_row}*{p_mult})")
-            c_profit.alignment = al_right
-            c_profit.number_format = "#,##0.00"
+                # Col 10: Including Profit = (I{curr_row} * (1 + profit_pct/100))
+                p_mult = round(1.0 + (profit_pct / 100.0), 4)
+                c_profit = ws_ci.cell(curr_row, 10, f"=(I{curr_row}*{p_mult})")
+                c_profit.alignment = al_right
+                c_profit.number_format = "#,##0.00"
 
-            # Col 11: FOB Price USD = J{curr_row} / usd_rate
-            c_fob = ws_ci.cell(curr_row, 11, f"=J{curr_row}/{usd_rate}")
-            c_fob.alignment = al_right
-            c_fob.number_format = "$#,##0.000"
+                # Col 11: FOB Price USD = J{curr_row} / usd_rate
+                c_fob = ws_ci.cell(curr_row, 11, f"=J{curr_row}/{usd_rate}")
+                c_fob.alignment = al_right
+                c_fob.number_format = "$#,##0.000"
 
-            # Col 12: Freight, Local charges, COC = ($L$13*O{curr_row})/E{curr_row}
-            c_fr = ws_ci.cell(curr_row, 12, f"=($L$13*O{curr_row})/E{curr_row}")
-            c_fr.alignment = al_right
-            c_fr.number_format = "$#,##0.000"
+                # Col 12: Freight, Local charges, COC = ($L$13*O{curr_row})/E{curr_row}
+                c_fr = ws_ci.cell(curr_row, 12, f"=($L$13*O{curr_row})/E{curr_row}")
+                c_fr.alignment = al_right
+                c_fr.number_format = "$#,##0.000"
 
-            # Col 13: CFR Price/Unit = ROUNDUP(L{curr_row}+K{curr_row},2)
-            c_cfr = ws_ci.cell(curr_row, 13, f"=ROUNDUP(L{curr_row}+K{curr_row},2)")
-            c_cfr.alignment = al_right
-            c_cfr.number_format = "$#,##0.00"
+                # Col 13: CFR Price/Unit = ROUNDUP(L{curr_row}+K{curr_row},2)
+                c_cfr = ws_ci.cell(curr_row, 13, f"=ROUNDUP(L{curr_row}+K{curr_row},2)")
+                c_cfr.alignment = al_right
+                c_cfr.number_format = "$#,##0.00"
 
-            # Col 14: Supplier
-            c_sup = ws_ci.cell(curr_row, 14, item.get("supplier_name", "—"))
-            c_sup.alignment = al_center
+                # Col 14: Supplier
+                c_sup = ws_ci.cell(curr_row, 14, item.get("supplier_name", "—"))
+                c_sup.alignment = al_center
 
-            # Col 15: Total CBM
-            c_cbm = ws_ci.cell(curr_row, 15, item.get("total_cbm", item.get("cbm", 0.0)))
-            c_cbm.alignment = al_right
-            c_cbm.number_format = "#,##0.000"
+                # Col 15: Total CBM
+                c_cbm = ws_ci.cell(curr_row, 15, item.get("total_cbm", item.get("cbm", 0.0)))
+                c_cbm.alignment = al_right
+                c_cbm.number_format = "#,##0.000"
 
-            # Col 16: Total Supplier Amount = H{curr_row}*E{curr_row}
-            c_sup_amt = ws_ci.cell(curr_row, 16, f"=H{curr_row}*E{curr_row}")
-            c_sup_amt.alignment = al_right
-            c_sup_amt.number_format = "#,##0.00"
+                # Col 16: Total Supplier Amount = H{curr_row}*E{curr_row}
+                c_sup_amt = ws_ci.cell(curr_row, 16, f"=H{curr_row}*E{curr_row}")
+                c_sup_amt.alignment = al_right
+                c_sup_amt.number_format = "#,##0.00"
+            else:
+                # Customer Mode: Col 6 & 7 only
+                unit_price = float(item.get("cfr_price_usd") or item.get("unit_price_usd", 0.0))
+                c_rate = ws_ci.cell(curr_row, 6, unit_price)
+                c_rate.alignment = al_right
+                c_rate.number_format = "$#,##0.00"
 
-            for c in range(1, 17):
+                c_tot = ws_ci.cell(curr_row, 7, f"=F{curr_row}*E{curr_row}")
+                c_tot.alignment = al_right
+                c_tot.number_format = "$#,##0.00"
+
+            for c in range(1, max_c + 1):
                 cell = ws_ci.cell(curr_row, c)
                 cell.font = f_regular
                 cell.border = b_all
@@ -1332,11 +1445,12 @@ class SaleService:
         end_data_row = curr_row - 1
         total_row = curr_row
 
-        # Set cell L13 formula with total container CBM cell reference:
-        ws_ci["L13"] = f"=({ocean_fr}+{local_coc})/O{total_row}"
-        ws_ci["L13"].font = f_bold
-        ws_ci["L13"].alignment = al_right
-        ws_ci["L13"].border = b_all
+        if mode == "internal":
+            # Set cell L13 formula with total container CBM cell reference:
+            ws_ci["L13"] = f"=({ocean_fr}+{local_coc})/O{total_row}"
+            ws_ci["L13"].font = f_bold
+            ws_ci["L13"].alignment = al_right
+            ws_ci["L13"].border = b_all
 
         # Total Row
         ws_ci.merge_cells(f"A{curr_row}:D{curr_row}")
@@ -1356,22 +1470,23 @@ class SaleService:
         c_sum_tot.alignment = al_right
         c_sum_tot.number_format = "$#,##0.00"
 
-        for c in range(8, 15):
-            ws_ci.cell(curr_row, c).border = b_all
+        if mode == "internal":
+            for c in range(8, 15):
+                ws_ci.cell(curr_row, c).border = b_all
 
-        # Total CBM in Col 15
-        c_sum_cbm = ws_ci.cell(curr_row, 15, f"=SUM(O{start_data_row}:O{end_data_row})")
-        c_sum_cbm.font = f_header
-        c_sum_cbm.alignment = al_right
-        c_sum_cbm.number_format = "#,##0.000"
+            # Total CBM in Col 15
+            c_sum_cbm = ws_ci.cell(curr_row, 15, f"=SUM(O{start_data_row}:O{end_data_row})")
+            c_sum_cbm.font = f_header
+            c_sum_cbm.alignment = al_right
+            c_sum_cbm.number_format = "#,##0.000"
 
-        # Total Supplier Amount in Col 16
-        c_sum_sup = ws_ci.cell(curr_row, 16, f"=SUM(P{start_data_row}:P{end_data_row})")
-        c_sum_sup.font = f_header
-        c_sum_sup.alignment = al_right
-        c_sum_sup.number_format = "#,##0.00"
+            # Total Supplier Amount in Col 16
+            c_sum_sup = ws_ci.cell(curr_row, 16, f"=SUM(P{start_data_row}:P{end_data_row})")
+            c_sum_sup.font = f_header
+            c_sum_sup.alignment = al_right
+            c_sum_sup.number_format = "#,##0.00"
 
-        for c in range(1, 17):
+        for c in range(1, max_c + 1):
             cell = ws_ci.cell(curr_row, c)
             cell.fill = fill_yellow
             cell.border = b_all
@@ -1392,45 +1507,55 @@ class SaleService:
             f"ADDRESS: {b['address']}\n"
             f"A/C NO: {b['account_no']}"
         )
-        ws_ci.merge_cells(f"C{curr_row}:G{curr_row+4}")
+        ws_ci.merge_cells(f"C{curr_row}:{max_col_letter}{curr_row+4}")
         ws_ci.cell(curr_row, 3, bank_info).font = f_bank
         ws_ci.cell(curr_row, 3).alignment = al_left
 
         for r in range(curr_row, curr_row + 5):
-            for c in range(1, 8):
+            for c in range(1, max_c + 1):
                 ws_ci.cell(r, c).border = b_all
 
         curr_row += 5
 
-        # Stamp & Signature
-        ws_ci.merge_cells(f"A{curr_row}:D{curr_row+2}")
-        ws_ci.cell(curr_row, 1, "Shipper's Signature and Stamp:").font = f_bold
-        ws_ci.cell(curr_row, 1).alignment = Alignment(horizontal="left", vertical="top")
+        # Stamp & Signature Block (Clean Box Layout matching Image 3)
+        # Left Box (Cols A & B): Text ONLY
+        ws_ci.merge_cells(f"A{curr_row}:B{curr_row+1}")
+        ws_ci.cell(curr_row, 1, "Shipper's Signature and Stamp :").font = f_bold
+        ws_ci.cell(curr_row, 1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-        for r in range(curr_row, curr_row + 3):
-            for c in range(1, 8):
+        # Right Box: Dedicated signature & stamp area
+        ws_ci.merge_cells(f"C{curr_row}:{max_col_letter}{curr_row+1}")
+
+        # Set row heights so images fit cleanly with zero overlap
+        ws_ci.row_dimensions[curr_row].height = 42
+        ws_ci.row_dimensions[curr_row + 1].height = 48
+
+        for r in range(curr_row, curr_row + 2):
+            for c in range(1, max_c + 1):
                 ws_ci.cell(r, c).border = b_all
 
-        if os.path.exists(stamp_path):
-            img = XLImage(stamp_path)
-            img.width = 160
-            img.height = 55
-            ws_ci.add_image(img, f"B{curr_row}")
-
+        # Place Signature in top half (centered in Column D)
         if os.path.exists(sig_path):
             sig = XLImage(sig_path)
-            sig.width = 50
-            sig.height = 50
-            ws_ci.add_image(sig, f"A{curr_row+1}")
+            sig.width = 65
+            sig.height = 36
+            ws_ci.add_image(sig, f"D{curr_row}")
 
-        curr_row += 3
+        # Place Blue Stamp below signature on row curr_row+1
+        if os.path.exists(stamp_path):
+            img = XLImage(stamp_path)
+            img.width = 175
+            img.height = 46
+            ws_ci.add_image(img, f"C{curr_row+1}")
+
+        curr_row += 2
 
         # Declaration
-        ws_ci.merge_cells(f"A{curr_row}:G{curr_row}")
+        ws_ci.merge_cells(f"A{curr_row}:{max_col_letter}{curr_row}")
         ws_ci[f"A{curr_row}"] = data["declaration"]
         ws_ci[f"A{curr_row}"].font = f_bold
         ws_ci[f"A{curr_row}"].alignment = al_center
-        for c in range(1, 8):
+        for c in range(1, max_c + 1):
             ws_ci.cell(curr_row, c).border = b_all
 
         # Widths
@@ -1441,6 +1566,17 @@ class SaleService:
         ws_ci.column_dimensions["E"].width = 12
         ws_ci.column_dimensions["F"].width = 16
         ws_ci.column_dimensions["G"].width = 20
+
+        if mode == "internal":
+            ws_ci.column_dimensions["H"].width = 18
+            ws_ci.column_dimensions["I"].width = 18
+            ws_ci.column_dimensions["J"].width = 16
+            ws_ci.column_dimensions["K"].width = 18
+            ws_ci.column_dimensions["L"].width = 18
+            ws_ci.column_dimensions["M"].width = 16
+            ws_ci.column_dimensions["N"].width = 22
+            ws_ci.column_dimensions["O"].width = 14
+            ws_ci.column_dimensions["P"].width = 20
 
         # -------------------------------------------------------------
         # SHEET 2: PACKING LIST
@@ -1626,28 +1762,35 @@ class SaleService:
 
         curr_row += 1
 
-        # Stamp & Signature
-        ws_pl.merge_cells(f"A{curr_row}:D{curr_row+2}")
-        ws_pl.cell(curr_row, 1, "Shipper's Signature and Stamp:").font = f_bold
-        ws_pl.cell(curr_row, 1).alignment = Alignment(horizontal="left", vertical="top")
+        # Stamp & Signature Block (Clean Box Layout matching Image 3)
+        ws_pl.merge_cells(f"A{curr_row}:B{curr_row+1}")
+        ws_pl.cell(curr_row, 1, "Shipper's Signature and Stamp :").font = f_bold
+        ws_pl.cell(curr_row, 1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-        for r in range(curr_row, curr_row + 3):
+        ws_pl.merge_cells(f"C{curr_row}:G{curr_row+1}")
+
+        ws_pl.row_dimensions[curr_row].height = 42
+        ws_pl.row_dimensions[curr_row + 1].height = 48
+
+        for r in range(curr_row, curr_row + 2):
             for c in range(1, 8):
                 ws_pl.cell(r, c).border = b_all
 
-        if os.path.exists(stamp_path):
-            img = XLImage(stamp_path)
-            img.width = 160
-            img.height = 55
-            ws_pl.add_image(img, f"B{curr_row}")
-
+        # Place Signature in top half (centered in Column D)
         if os.path.exists(sig_path):
             sig = XLImage(sig_path)
-            sig.width = 50
-            sig.height = 50
-            ws_pl.add_image(sig, f"A{curr_row+1}")
+            sig.width = 65
+            sig.height = 36
+            ws_pl.add_image(sig, f"D{curr_row}")
 
-        curr_row += 3
+        # Place Blue Stamp below signature on row curr_row+1
+        if os.path.exists(stamp_path):
+            img = XLImage(stamp_path)
+            img.width = 175
+            img.height = 46
+            ws_pl.add_image(img, f"C{curr_row+1}")
+
+        curr_row += 2
 
         # Declaration
         ws_pl.merge_cells(f"A{curr_row}:G{curr_row}")

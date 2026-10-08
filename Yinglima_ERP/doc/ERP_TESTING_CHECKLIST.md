@@ -71,7 +71,7 @@
 | `PRD-08` | **Product Image Deletion** | 1. Edit product, remove 1 image.<br>2. Save. | Image removed from database and cloud storage without orphan errors. | [ ] PASS<br>[ ] FAIL | |
 | `PRD-09` | **Gross Weight vs Net Weight Validation** | 1. Enter Net Weight = `50 kg` and Gross Weight = `40 kg`. | Form shows validation warning: Gross Weight must be greater than or equal to Net Weight. | [ ] PASS<br>[ ] FAIL | |
 | `PRD-10` | **Status Toggle Switch** | 1. Click active/inactive switch on product row. | Product toggles between Active and Inactive; status updates optimistically in DB. | [ ] PASS<br>[ ] FAIL | |
-| `PRD-11` | **Export Products Catalog** | 1. Click `Export` -> `Full Catalog (Excel)`. | Downloads spreadsheet containing all 3,500+ products with dimensions, CBM, and HSN. | [ ] PASS<br>[ ] FAIL | |
+| `PRD-11` | **Export Products Catalog** | 1. Click `Export` -> `Full Catalog (Excel / CSV)`. | Downloads spreadsheet containing all products with Primary Supplier, dimensions, CBM, and HSN. | [ ] PASS<br>[ ] FAIL | |
 | `PRD-12` | **Quick Filter by Category** | 1. Filter by `Packaging Machinery`. | Table filters instantly; displays matching machines with category badges. | [ ] PASS<br>[ ] FAIL | |
 | `PRD-13` | **Search by China HS Code** | 1. Type `8422` in search bar. | All machinery under HS Code 8422 display with refund tax rates. | [ ] PASS<br>[ ] FAIL | |
 | `PRD-14` | **Soft Delete & Trash Tab** | 1. Delete a product.<br>2. Switch to `Trash / Archive` tab.<br>3. Click `Restore`. | Product restored back to active catalog with original SKU. | [ ] PASS<br>[ ] FAIL | |

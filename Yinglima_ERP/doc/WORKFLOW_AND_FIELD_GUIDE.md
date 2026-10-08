@@ -145,6 +145,7 @@ The central catalog of all purchasable and sellable machinery, spare parts, and 
 | **Product Code / SKU**| Text | User / Auto | Unique | e.g. `INH-01039`. Auto-generated if omitted. |
 | **Category** | Dropdown | Master (`product_categories`) | Required | e.g. `Packaging Machinery`, `Filling Systems`. |
 | **Sub-Category** | Dropdown | Master (`product_sub_categories`)| Optional | Filtered by selected Category. |
+| **Primary Supplier** | Dropdown / Search | Master (`suppliers`) | Optional | Preferred factory mapped to `products.supplier_id`. Fully supported in CSV/Excel Export & Import. |
 | **China HS Code** | Dropdown / Search | Master (`hsn_codes`) | Required | 8 or 10-digit China export HS Code (e.g., `8422.30.00`). |
 | **Primary UOM** | Dropdown | Master (`units_of_measurement`)| Required | Defaults to `NOS` (or `PCS`, `SET`). |
 | **Refund VAT (%)** | Number (%) | Master (`hsn_codes`) | 0.00% to 17.00% | Inherited from HS Code (Default: **13.00%**). Crucial for CI cost breakdown! |

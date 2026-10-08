@@ -2786,14 +2786,19 @@ class PlanningService:
                         )
                         exists = (await self.row_repository.session.execute(exists_stmt)).scalar_one_or_none()
                         if not exists:
-                            await self.auto_populate_rows_from_item_source(
-                                s.id,
-                                limit=None,
-                                user_id=s.created_by,
-                                username="system",
-                                organization_id=s.organization_id,
-                                branch_id=s.branch_id,
+                            existing_rows = await self.row_repository.list_for_sheet(s.id)
+                            item_display = active_prod.product_name_tally or active_prod.product_name
+                            label_val = item_display if item_display is not None else "Product record"
+                            single_row = PlanningRow(
+                                id=uuid.uuid4(),
+                                sheet_id=s.id,
+                                label=label_val,
+                                position=len(existing_rows),
+                                linked_record_id=record_id,
+                                created_by=s.created_by,
                             )
+                            self.row_repository.session.add(single_row)
+                            await self.row_repository.session.flush()
                     else:
                         remove_stmt = (
                             update(PlanningRow)

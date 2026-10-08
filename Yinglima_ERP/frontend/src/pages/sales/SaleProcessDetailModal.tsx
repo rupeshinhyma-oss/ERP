@@ -142,11 +142,12 @@ export function SaleProcessDetailModal({
 
   const currencySymbol = order?.currency === "USD" ? "$" : "¥";
 
-  const handleExportExcel = async () => {
+  const handleExportExcel = async (mode?: "internal" | "customer") => {
+    const selectedMode = mode || (ciViewMode === "costing" ? "internal" : "customer");
     setExportingExcel(true);
     try {
       const token = Auth.getAccessToken() || localStorage.getItem("erp_access_token") || "";
-      const res = await fetch(`/api/v1/sales/orders/${orderId}/export-trade-docs`, {
+      const res = await fetch(`/api/v1/sales/orders/${orderId}/export-trade-docs?mode=${selectedMode}`, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
@@ -157,12 +158,18 @@ export function SaleProcessDetailModal({
       const a = document.createElement("a");
       a.href = url;
       const cleanCode = (order?.consignment_code || `Order_${order?.order_no || orderId}`).replace(/[/\\?%*:|"<> ]/g, "_");
-      a.download = `Yinglima_CI_PL_${cleanCode}.xlsx`;
+      const prefix = selectedMode === "internal" ? "Yinglima_Costing_16Col" : "Yinglima_Customer_CI";
+      a.download = `${prefix}_${cleanCode}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      toast("Commercial Invoice & Packing List downloaded (.xlsx)", "success");
+      toast(
+        selectedMode === "internal"
+          ? "Internal 16-Column Costing Sheet & Packing List downloaded (.xlsx)"
+          : "Customer Commercial Invoice & Packing List downloaded (.xlsx)",
+        "success"
+      );
     } catch (err) {
       toast(errorMessage(err), "error");
     } finally {
@@ -179,24 +186,68 @@ export function SaleProcessDetailModal({
     }
 
     const isCI = targetTab === "ci";
-    const title = isCI ? "COMMERCIAL INVOICE" : "PACKING LIST";
+    const isCostingMode = isCI && ciViewMode === "costing";
+    const title = isCI
+      ? (isCostingMode ? "COMMERCIAL INVOICE & INTERNAL COSTING SHEET" : "COMMERCIAL INVOICE")
+      : "PACKING LIST";
     const docNoLabel = isCI ? "Commercial Invoice No" : "Packing List No";
 
+    const costingParams = docData.totals?.costing || {
+      ocean_freight_usd: Number(order?.ocean_freight_usd) || 0,
+      local_charges_coc_usd: Number(order?.local_charges_coc_usd) || 0,
+      usd_exchange_rate: Number(order?.usd_exchange_rate) || 6.70,
+      profit_percent: Number(order?.profit_percent) || 3.0,
+      total_container_cbm: Number(order?.total_container_cbm) || 0,
+    };
+    const totalFreightUsd = (Number(costingParams.ocean_freight_usd) || 0) + (Number(costingParams.local_charges_coc_usd) || 0);
+    const containerCbm = Number(costingParams.total_container_cbm) || Number(docData.totals?.cbm) || 0;
+    const freightPerCbm = containerCbm > 0 ? totalFreightUsd / containerCbm : 0;
+    const totalSupplierPayableRmb = (docData.items || []).reduce(
+      (sum: number, it: any) => sum + (Number(it.total_supplier_amount_rmb) || (Number(it.unit_price_rmb_with_vat || 0) * Number(it.quantity || 0))),
+      0
+    );
+    const totalItemCbm = (docData.items || []).reduce((sum: number, it: any) => sum + (Number(it.total_cbm) || 0), 0);
+
     const itemsRows = isCI
-      ? docData.items
-          .map(
-            (it: any) => `
-        <tr>
-          <td style="text-align:center; padding: 5px 4px;">${it.sr_no}</td>
-          <td style="padding: 5px 8px;">${it.description}</td>
-          <td style="text-align:center; padding: 5px 6px;">${it.hs_code || "—"}</td>
-          <td style="text-align:center; padding: 5px 6px;">${it.uom}</td>
-          <td style="text-align:right; padding: 5px 6px;">${Number(it.quantity).toLocaleString()}</td>
-          <td style="text-align:right; padding: 5px 6px;">$${Number(it.unit_price_usd).toFixed(2)}</td>
-          <td style="text-align:right; padding: 5px 6px; font-weight:700;">$${Number(it.total_amount_usd).toFixed(2)}</td>
-        </tr>`
-          )
-          .join("")
+      ? (isCostingMode
+          ? docData.items
+              .map(
+                (it: any) => `
+            <tr>
+              <td style="text-align:center; padding: 4px 2px;">${it.sr_no}</td>
+              <td style="padding: 4px 6px; font-weight:600;">${it.description}</td>
+              <td style="text-align:center; padding: 4px 3px;">${it.hs_code || "—"}</td>
+              <td style="text-align:center; padding: 4px 2px;">${it.uom}</td>
+              <td style="text-align:right; padding: 4px 3px; font-weight:700;">${Number(it.quantity).toLocaleString()}</td>
+              <td style="text-align:right; padding: 4px 3px;">$${Number(it.unit_price_usd).toFixed(2)}</td>
+              <td style="text-align:right; padding: 4px 3px; font-weight:700; color:#1e3a8a;">$${Number(it.total_amount_usd).toFixed(2)}</td>
+              <td style="text-align:right; padding: 4px 3px;">¥${Number(it.unit_price_rmb_with_vat || it.unit_price_rmb || 0).toFixed(2)}</td>
+              <td style="text-align:right; padding: 4px 3px;">¥${Number(it.unit_price_rmb_ex_vat || (Number(it.unit_price_rmb_with_vat || it.unit_price_rmb || 0) / 1.13)).toFixed(2)}</td>
+              <td style="text-align:right; padding: 4px 3px;">¥${Number(it.including_profit_rmb || (Number(it.unit_price_rmb_ex_vat || 0) * (1 + (costingParams.profit_percent || 3) / 100))).toFixed(2)}</td>
+              <td style="text-align:right; padding: 4px 3px;">$${Number(it.fob_price_usd || 0).toFixed(3)}</td>
+              <td style="text-align:right; padding: 4px 3px;">$${Number(it.freight_per_unit_usd || 0).toFixed(3)}</td>
+              <td style="text-align:right; padding: 4px 3px; font-weight:700;">$${Number(it.cfr_price_usd || it.unit_price_usd || 0).toFixed(2)}</td>
+              <td style="text-align:center; padding: 4px 3px; font-size:8px;">${it.supplier_name || "—"}</td>
+              <td style="text-align:right; padding: 4px 3px;">${Number(it.total_cbm || 0).toFixed(3)}</td>
+              <td style="text-align:right; padding: 4px 3px; font-weight:700;">¥${Number(it.total_supplier_amount_rmb || (Number(it.unit_price_rmb_with_vat || 0) * Number(it.quantity || 0))).toFixed(2)}</td>
+            </tr>`
+              )
+              .join("")
+          : docData.items
+              .map(
+                (it: any) => `
+            <tr>
+              <td style="text-align:center; padding: 5px 4px;">${it.sr_no}</td>
+              <td style="padding: 5px 8px;">${it.description}</td>
+              <td style="text-align:center; padding: 5px 6px;">${it.hs_code || "—"}</td>
+              <td style="text-align:center; padding: 5px 6px;">${it.uom}</td>
+              <td style="text-align:right; padding: 5px 6px;">${Number(it.quantity).toLocaleString()}</td>
+              <td style="text-align:right; padding: 5px 6px;">$${Number(it.unit_price_usd).toFixed(2)}</td>
+              <td style="text-align:right; padding: 5px 6px; font-weight:700;">$${Number(it.total_amount_usd).toFixed(2)}</td>
+            </tr>`
+              )
+              .join("")
+        )
       : docData.items
           .map(
             (it: any) => `
@@ -213,13 +264,25 @@ export function SaleProcessDetailModal({
           .join("");
 
     const totalsRow = isCI
-      ? `
-        <tr style="background:#fef08a; font-weight:800;">
-          <td colspan="4" style="text-align:center; padding: 6px 10px;">Total Price CIF INDIA:</td>
-          <td style="text-align:right; padding: 6px 6px;">${Number(docData.totals.quantity).toLocaleString()}</td>
-          <td style="text-align:right; padding: 6px 6px;"></td>
-          <td style="text-align:right; padding: 6px 6px;">$${Number(docData.totals.total_amount_usd).toFixed(2)}</td>
-        </tr>`
+      ? (isCostingMode
+          ? `
+            <tr style="background:#fef08a; font-weight:800; font-size:9px;">
+              <td colspan="4" style="text-align:right; padding: 6px 6px;">Total Price CIF INDIA:</td>
+              <td style="text-align:right; padding: 6px 3px;">${Number(docData.totals.quantity).toLocaleString()}</td>
+              <td style="text-align:right; padding: 6px 3px;"></td>
+              <td style="text-align:right; padding: 6px 3px;">$${Number(docData.totals.total_amount_usd).toFixed(2)}</td>
+              <td colspan="7" style="text-align:right; padding: 6px 3px;"></td>
+              <td style="text-align:right; padding: 6px 3px;">${totalItemCbm.toFixed(3)} m³</td>
+              <td style="text-align:right; padding: 6px 3px;">¥${totalSupplierPayableRmb.toFixed(2)}</td>
+            </tr>`
+          : `
+            <tr style="background:#fef08a; font-weight:800;">
+              <td colspan="4" style="text-align:center; padding: 6px 10px;">Total Price CIF INDIA:</td>
+              <td style="text-align:right; padding: 6px 6px;">${Number(docData.totals.quantity).toLocaleString()}</td>
+              <td style="text-align:right; padding: 6px 6px;"></td>
+              <td style="text-align:right; padding: 6px 6px;">$${Number(docData.totals.total_amount_usd).toFixed(2)}</td>
+            </tr>`
+        )
       : `
         <tr style="background:#fef08a; font-weight:800;">
           <td colspan="2" style="text-align:center; padding: 6px 10px;">Total</td>
@@ -231,18 +294,41 @@ export function SaleProcessDetailModal({
         </tr>`;
 
     const tableThead = isCI
-      ? `
-        <thead>
-          <tr style="background: #1e3a8a; color: #ffffff; text-align: center;">
-            <th style="padding: 6px 4px; width: 5%;">SR.NO</th>
-            <th style="padding: 6px 8px; text-align: left; width: 43%;">DESCRIPTION</th>
-            <th style="padding: 6px 6px; width: 14%;">CHINA HS CODE</th>
-            <th style="padding: 6px 6px; width: 8%;">UOM</th>
-            <th style="padding: 6px 6px; width: 10%;">QUANTITY</th>
-            <th style="padding: 6px 6px; width: 10%;">UNIT PRICE (USD)</th>
-            <th style="padding: 6px 6px; width: 10%;">TOTAL AMOUNT (USD)</th>
-          </tr>
-        </thead>`
+      ? (isCostingMode
+          ? `
+            <thead>
+              <tr style="background: #1e3a8a; color: #ffffff; text-align: center; font-size: 8.5px;">
+                <th style="padding: 5px 2px; width: 3%;">SR.NO</th>
+                <th style="padding: 5px 4px; text-align: left; width: 17%;">DESCRIPTION</th>
+                <th style="padding: 5px 3px; width: 7%;">CHINA HS CODE</th>
+                <th style="padding: 5px 2px; width: 4%;">UOM</th>
+                <th style="padding: 5px 3px; width: 5%;">QUANTITY</th>
+                <th style="padding: 5px 3px; width: 6%;">UNIT PRICE (USD)</th>
+                <th style="padding: 5px 3px; width: 7%;">TOTAL AMOUNT (USD)</th>
+                <th style="padding: 5px 3px; width: 6.5%;">UNIT PRICE (RMB) INCL VAT</th>
+                <th style="padding: 5px 3px; width: 6.5%;">UNIT PRICE (RMB) EXCL VAT</th>
+                <th style="padding: 5px 3px; width: 5%;">INCL. PROFIT ${costingParams.profit_percent || 3}%</th>
+                <th style="padding: 5px 3px; width: 6%;">FOB PRICE (USD)</th>
+                <th style="padding: 5px 3px; width: 6%;">FREIGHT/LOCAL</th>
+                <th style="padding: 5px 3px; width: 6%;">CFR PRICE</th>
+                <th style="padding: 5px 3px; width: 7%;">SUPPLIER</th>
+                <th style="padding: 5px 3px; width: 5%;">TOTAL CBM</th>
+                <th style="padding: 5px 3px; width: 7%;">TOTAL SUPPLIER (RMB)</th>
+              </tr>
+            </thead>`
+          : `
+            <thead>
+              <tr style="background: #1e3a8a; color: #ffffff; text-align: center;">
+                <th style="padding: 6px 4px; width: 5%;">SR.NO</th>
+                <th style="padding: 6px 8px; text-align: left; width: 43%;">DESCRIPTION</th>
+                <th style="padding: 6px 6px; width: 14%;">CHINA HS CODE</th>
+                <th style="padding: 6px 6px; width: 8%;">UOM</th>
+                <th style="padding: 6px 6px; width: 10%;">QUANTITY</th>
+                <th style="padding: 6px 6px; width: 10%;">UNIT PRICE (USD)</th>
+                <th style="padding: 6px 6px; width: 10%;">TOTAL AMOUNT (USD)</th>
+              </tr>
+            </thead>`
+        )
       : `
         <thead>
           <tr style="background: #1e3a8a; color: #ffffff; text-align: center;">
@@ -261,17 +347,31 @@ export function SaleProcessDetailModal({
 
     const termsHtml = isCI
       ? `
-        <div style="border: 1px solid #94a3b8; padding: 6px 12px; margin-bottom: 12px; font-size: 11px; line-height: 1.6;">
+        <div style="border: 1px solid #94a3b8; padding: 6px 12px; margin-bottom: 10px; font-size: 11px; line-height: 1.6;">
           <div><strong>Terms of Payment:</strong> ${docData.payment_terms}</div>
           <div><strong>Shipping Terms:</strong> ${docData.shipping_terms}</div>
           <div><strong>Delivery Time:</strong> ${docData.delivery_time}</div>
         </div>`
       : `
-        <div style="border: 1px solid #94a3b8; padding: 6px 12px; margin-bottom: 12px; font-size: 11px; line-height: 1.6;">
+        <div style="border: 1px solid #94a3b8; padding: 6px 12px; margin-bottom: 10px; font-size: 11px; line-height: 1.6;">
           <div><strong>Shipping Terms:</strong> ${docData.shipping_terms}</div>
         </div>`;
 
-    const sectionTitle = isCI ? "SHIPMENT & PRODUCT ITEMS" : "PACKING INFORMATION";
+    const costingBannerHtml = isCostingMode
+      ? `
+        <div style="background: #f1f5f9; border: 1px solid #94a3b8; padding: 6px 10px; margin-bottom: 10px; font-size: 10px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; text-align: center;">
+          <div><strong style="color:#64748b;">Ocean Freight:</strong> <span style="font-weight:700;">$${Number(costingParams.ocean_freight_usd || 0).toFixed(2)}</span></div>
+          <div><strong style="color:#64748b;">Local & COC:</strong> <span style="font-weight:700;">$${Number(costingParams.local_charges_coc_usd || 0).toFixed(2)}</span></div>
+          <div><strong style="color:#64748b;">USD Rate:</strong> <span style="font-weight:700;">¥${Number(costingParams.usd_exchange_rate || 6.70).toFixed(4)}</span></div>
+          <div><strong style="color:#64748b;">Profit Margin:</strong> <span style="font-weight:700;">${costingParams.profit_percent || 3}%</span></div>
+          <div><strong style="color:#64748b;">Container Volume:</strong> <span style="font-weight:700;">${containerCbm.toFixed(3)} m³</span></div>
+          <div><strong style="color:#64748b;">Freight / CBM:</strong> <span style="font-weight:700; color:#1d4ed8;">$${freightPerCbm.toFixed(2)}/m³</span></div>
+        </div>`
+      : "";
+
+    const sectionTitle = isCI
+      ? (isCostingMode ? "SHIPMENT, COSTING & SUPPLIER BREAKDOWN" : "SHIPMENT & PRODUCT ITEMS")
+      : "PACKING INFORMATION";
 
     const printDocHtml = `
       <!DOCTYPE html>
@@ -281,8 +381,8 @@ export function SaleProcessDetailModal({
           <title>${docData.consignment_code} - ${title}</title>
           <style>
             @page {
-              size: A4 portrait;
-              margin: 12mm 10mm 12mm 10mm;
+              size: ${isCostingMode ? "A4 landscape" : "A4 portrait"};
+              margin: ${isCostingMode ? "8mm 6mm 8mm 6mm" : "12mm 10mm 12mm 10mm"};
             }
             * {
               box-sizing: border-box;
@@ -295,24 +395,24 @@ export function SaleProcessDetailModal({
               background: #ffffff;
               margin: 0;
               padding: 0;
-              font-size: 11px;
-              line-height: 1.4;
+              font-size: ${isCostingMode ? "9.5px" : "11px"};
+              line-height: 1.35;
             }
             .header {
               text-align: center;
               border-bottom: 2px solid #1e3a8a;
-              padding-bottom: 10px;
-              margin-bottom: 12px;
+              padding-bottom: 8px;
+              margin-bottom: 10px;
             }
             .company-name {
-              font-size: 17px;
+              font-size: ${isCostingMode ? "16px" : "17px"};
               font-weight: 800;
               color: #1e3a8a;
               letter-spacing: 0.5px;
-              margin: 0 0 4px 0;
+              margin: 0 0 3px 0;
             }
             .company-contact {
-              font-size: 10.5px;
+              font-size: 10px;
               color: #475569;
               margin: 2px 0;
             }
@@ -320,22 +420,22 @@ export function SaleProcessDetailModal({
               background: #f1f5f9;
               border: 1px solid #cbd5e1;
               text-align: center;
-              font-size: 15px;
+              font-size: ${isCostingMode ? "14px" : "15px"};
               font-weight: 800;
               letter-spacing: 1px;
-              padding: 6px 0;
-              margin-bottom: 12px;
+              padding: 5px 0;
+              margin-bottom: 10px;
               border-radius: 3px;
             }
             table {
               width: 100%;
               border-collapse: collapse;
-              margin-bottom: 12px;
-              font-size: 11px;
+              margin-bottom: 10px;
+              font-size: ${isCostingMode ? "9px" : "11px"};
             }
             th, td {
               border: 1px solid #94a3b8;
-              padding: 5px 6px;
+              padding: ${isCostingMode ? "4px 3px" : "5px 6px"};
             }
             th {
               font-weight: 700;
@@ -343,7 +443,7 @@ export function SaleProcessDetailModal({
             .party-th {
               background: #e2e8f0;
               font-weight: 700;
-              padding: 6px 10px;
+              padding: 5px 10px;
               text-align: left;
               width: 50%;
             }
@@ -421,7 +521,9 @@ export function SaleProcessDetailModal({
 
             ${termsHtml}
 
-            <div style="background: #e2e8f0; padding: 6px 10px; font-weight: 700; border: 1px solid #94a3b8; border-bottom: none;">
+            ${costingBannerHtml}
+
+            <div style="background: #e2e8f0; padding: 5px 10px; font-weight: 700; border: 1px solid #94a3b8; border-bottom: none; font-size: 10.5px;">
               ${sectionTitle}
             </div>
           </div>
@@ -434,7 +536,7 @@ export function SaleProcessDetailModal({
             </tbody>
           </table>
 
-          <div class="non-breaking" style="margin-top: 14px;">
+          <div class="non-breaking" style="margin-top: 12px;">
             <table class="bank-table">
               <tr>
                 <td style="width: 58%; vertical-align: top; padding: 8px 12px; background: #fafafa;">
@@ -447,19 +549,19 @@ export function SaleProcessDetailModal({
                   <div><strong>ADDRESS:</strong> ${docData.bank_details.address}</div>
                   <div><strong>A/C NO.:</strong> ${docData.bank_details.account_no}</div>
                 </td>
-                <td style="width: 42%; vertical-align: middle; text-align: center; padding: 10px;">
-                  <div style="font-weight: 700; font-size: 11px; margin-bottom: 6px;">
+                <td style="width: 42%; vertical-align: middle; text-align: center; padding: 8px;">
+                  <div style="font-weight: 700; font-size: 11px; margin-bottom: 4px;">
                     Shipper's Signature and Stamp:
                   </div>
-                  <div style="display: inline-flex; align-items: center; justify-content: center; gap: 14px; margin-top: 4px;">
-                    <img src="/yinglima_signature.png" alt="Signature" style="height: 48px; object-fit: contain;" />
-                    <img src="/yinglima_stamp.jpeg" alt="Stamp" style="height: 55px; object-fit: contain;" />
+                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; margin-top: 2px;">
+                    <img src="/yinglima_signature.png" alt="Signature" style="height: 38px; object-fit: contain;" />
+                    <img src="/yinglima_stamp.jpeg" alt="Stamp" style="height: 48px; object-fit: contain;" />
                   </div>
                 </td>
               </tr>
             </table>
 
-            <div style="text-align: center; font-size: 10.5px; font-weight: 700; color: #334155; margin-top: 10px;">
+            <div style="text-align: center; font-size: 10.5px; font-weight: 700; color: #334155; margin-top: 8px;">
               ${docData.declaration}
             </div>
           </div>
@@ -706,17 +808,17 @@ export function SaleProcessDetailModal({
           </div>
 
           {/* Action Toolbar */}
-          <div className="no-print" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div className="no-print" style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <button
               type="button"
-              onClick={handleExportExcel}
+              onClick={() => handleExportExcel(ciViewMode === "costing" ? "internal" : "customer")}
               disabled={exportingExcel}
               style={{
                 padding: "6px 13px",
                 borderRadius: "6px",
                 border: "1px solid #16a34a",
                 background: "#f0fdf4",
-                fontSize: "13px",
+                fontSize: "12.5px",
                 fontWeight: 700,
                 color: "#15803d",
                 cursor: exportingExcel ? "wait" : "pointer",
@@ -725,11 +827,50 @@ export function SaleProcessDetailModal({
                 gap: "5px",
                 boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
               }}
-              title="Download official dual-sheet Excel (.xlsx) matching Yinglima CI and Packing List template"
+              title={
+                ciViewMode === "costing"
+                  ? "Download official 16-Column Costing Excel (.xlsx) with container formulas and Packing List"
+                  : "Download clean 7-Column Customer Commercial Invoice & Packing List (.xlsx)"
+              }
             >
               <span>📥</span>
-              <span>{exportingExcel ? "Generating..." : "Download Excel (.xlsx)"}</span>
+              <span>
+                {exportingExcel
+                  ? "Generating..."
+                  : activeDocTab === "ci"
+                  ? (ciViewMode === "costing" ? "Download 16-Col Excel" : "Download Customer Excel")
+                  : "Download Excel (.xlsx)"}
+              </span>
             </button>
+
+            {/* If on CI tab, offer 1-click button for the alternative export mode */}
+            {activeDocTab === "ci" && (
+              <button
+                type="button"
+                onClick={() => handleExportExcel(ciViewMode === "costing" ? "customer" : "internal")}
+                disabled={exportingExcel}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#475569",
+                  cursor: exportingExcel ? "wait" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+                title={
+                  ciViewMode === "costing"
+                    ? "Export clean 7-column Customer Excel (safe to email to clients)"
+                    : "Export full 16-column Internal Costing Excel (with factory costs and profit)"
+                }
+              >
+                <span>{ciViewMode === "costing" ? "📄 Customer Excel" : "📊 16-Col Excel"}</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -739,7 +880,7 @@ export function SaleProcessDetailModal({
                 borderRadius: "6px",
                 border: "1px solid #0284c7",
                 background: "#f0f9ff",
-                fontSize: "13px",
+                fontSize: "12.5px",
                 fontWeight: 700,
                 color: "#0369a1",
                 cursor: "pointer",
@@ -748,10 +889,20 @@ export function SaleProcessDetailModal({
                 gap: "5px",
                 boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
               }}
-              title="Print or save document as official PDF"
+              title={
+                activeDocTab === "ci" && ciViewMode === "costing"
+                  ? "Print full 16-column Costing Sheet in A4 Landscape mode"
+                  : "Print clean document in A4 Portrait mode"
+              }
             >
               <span>🖨️</span>
-              <span>Print / PDF</span>
+              <span>
+                {activeDocTab === "ci" && ciViewMode === "costing"
+                  ? "Print 16-Col Costing (Landscape)"
+                  : activeDocTab === "ci"
+                  ? "Print Customer CI (Portrait)"
+                  : "Print / PDF (Portrait)"}
+              </span>
             </button>
 
             <button

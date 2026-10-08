@@ -46,7 +46,7 @@ export function SaleProcessFormPage() {
   const [buyerOpen, setBuyerOpen] = useState(false);
   const buyerDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Shipment Planning Consignment Integration
+  // Shipment Planning Consignment Integration (Searchable Combobox)
   const [consignments, setConsignments] = useState<PlanningConsignmentColumn[]>([]);
   const [selectedColumnId, setSelectedColumnId] = useState("");
   const [selectedConsignmentCode, setSelectedConsignmentCode] = useState("");
@@ -54,6 +54,9 @@ export function SaleProcessFormPage() {
   const [loadingConsignments, setLoadingConsignments] = useState(false);
   const [extractingItems, setExtractingItems] = useState(false);
   const [consignmentLoadedInfo, setConsignmentLoadedInfo] = useState<string | null>(null);
+  const [consignmentSearch, setConsignmentSearch] = useState("");
+  const [consignmentOpen, setConsignmentOpen] = useState(false);
+  const consignmentDropdownRef = useRef<HTMLDivElement>(null);
 
   // Order Details
   const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
@@ -124,11 +127,14 @@ export function SaleProcessFormPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Close buyer dropdown on outside click
+  // Close buyer & consignment dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (buyerDropdownRef.current && !buyerDropdownRef.current.contains(e.target as Node)) {
         setBuyerOpen(false);
+      }
+      if (consignmentDropdownRef.current && !consignmentDropdownRef.current.contains(e.target as Node)) {
+        setConsignmentOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -203,18 +209,13 @@ export function SaleProcessFormPage() {
     };
   }, [id, isEdit, toast]);
 
-  // Fetch consignment columns when buyer changes
+  // Fetch ALL consignment columns across the ERP once on mount
   useEffect(() => {
     let mounted = true;
     async function fetchConsignments() {
       setLoadingConsignments(true);
       try {
-        const params = new URLSearchParams();
-        if (buyerName) params.set("buyer_name", buyerName);
-
-        const res = await apiGet<PlanningConsignmentColumn[]>(
-          `/sales/planning-consignments?${params.toString()}`
-        );
+        const res = await apiGet<PlanningConsignmentColumn[]>("/sales/planning-consignments");
         if (mounted && res.data) {
           setConsignments(res.data);
         }
@@ -229,7 +230,66 @@ export function SaleProcessFormPage() {
     return () => {
       mounted = false;
     };
-  }, [buyerName]);
+  }, []);
+
+  // Filtered & smart-sorted consignments for the combobox
+  const filteredConsignments = useMemo(() => {
+    let list = [...consignments];
+    if (consignmentSearch.trim()) {
+      const q = consignmentSearch.trim().toLowerCase();
+      list = list.filter((c) => {
+        const nameMatch = c.column_name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q);
+        const sheetMatch = c.sheet_name.toLowerCase().includes(q);
+        const orgMatch = (c.organization_name || "").toLowerCase().includes(q);
+        return nameMatch || sheetMatch || orgMatch;
+      });
+    }
+
+    // If a buyer is selected and user hasn't typed a search, put the buyer's consignments first
+    if (buyerName && !consignmentSearch.trim()) {
+      const cleanB = buyerName.toLowerCase().trim();
+      list.sort((a, b) => {
+        const aOrg = (a.organization_name || "").toLowerCase();
+        const bOrg = (b.organization_name || "").toLowerCase();
+        const aSheet = a.sheet_name.toLowerCase();
+        const bSheet = b.sheet_name.toLowerCase();
+        const aMatch = aOrg.includes(cleanB) || cleanB.includes(aOrg) || aSheet.includes(cleanB) || cleanB.includes(aSheet);
+        const bMatch = bOrg.includes(cleanB) || cleanB.includes(bOrg) || bSheet.includes(cleanB) || cleanB.includes(bSheet);
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
+      });
+    }
+    return list;
+  }, [consignments, consignmentSearch, buyerName]);
+
+  const handleSelectConsignment = (col: PlanningConsignmentColumn) => {
+    setSelectedColumnId(col.column_id);
+    setSelectedConsignmentCode(col.code || col.column_name);
+    setSelectedSheetId(col.sheet_id);
+
+    // If buyer is not selected, auto-select buyer based on organization_name or sheet_name
+    if (!buyerId && buyerLookup.items) {
+      const targetOrg = (col.organization_name || "").toLowerCase().trim();
+      const targetSheet = (col.sheet_name || "").toLowerCase().trim();
+      const matchedBuyer = buyerLookup.items.find((b) => {
+        const bName = (b.company_name || b.name || "").toLowerCase().trim();
+        if (targetOrg && (bName.includes(targetOrg) || targetOrg.includes(bName))) return true;
+        if (targetSheet && (bName.includes(targetSheet) || targetSheet.includes(bName))) return true;
+        return false;
+      });
+      if (matchedBuyer) {
+        setBuyerId(matchedBuyer.id);
+        setBuyerName(matchedBuyer.company_name || matchedBuyer.name || "");
+      }
+    }
+
+    setConsignmentOpen(false);
+    setConsignmentSearch("");
+
+    // Auto-load items immediately on selection
+    handleExtractConsignment(col.column_id);
+  };
 
   // Handle buyer change
   const handleBuyerSelect = (bId: string) => {
@@ -894,7 +954,7 @@ export function SaleProcessFormPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           {/* Card 1: Core Order & Shipment Planning Consignment Section */}
           <div
             style={{
@@ -1075,8 +1135,8 @@ export function SaleProcessFormPage() {
                 )}
               </div>
 
-              {/* Consignment Selection from Shipment Planning */}
-              <div style={{ minWidth: "320px", gridColumn: "span 2" }}>
+              {/* Consignment Selection from Shipment Planning (Searchable Combobox) */}
+              <div ref={consignmentDropdownRef} style={{ minWidth: "360px", gridColumn: "span 2", position: "relative" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                   <label style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>
                     Planning Consignment Column
@@ -1087,50 +1147,164 @@ export function SaleProcessFormPage() {
                     <span style={{ fontSize: "11px", color: "#64748b" }}>{consignments.length} available</span>
                   )}
                 </div>
+
                 <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <select
-                    value={selectedColumnId}
-                    onChange={(e) => {
-                      const colId = e.target.value;
-                      setSelectedColumnId(colId);
-                      const col = consignments.find((c) => c.column_id === colId);
-                      if (col) {
-                        setSelectedConsignmentCode(col.code || col.column_name);
-                        setSelectedSheetId(col.sheet_id);
+                  {/* Combobox Trigger Button */}
+                  <div style={{ flex: 1, position: "relative" }}>
+                    <button
+                      type="button"
+                      onClick={() => setConsignmentOpen((prev) => !prev)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        background: "#fff",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        color: selectedColumnId ? "#0f172a" : "#94a3b8",
+                      }}
+                    >
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {selectedColumnId ? (() => {
+                          const col = consignments.find((c) => c.column_id === selectedColumnId);
+                          if (!col) return selectedConsignmentCode || "Consignment Selected";
+                          const orgBadge = col.organization_name ? ` [${col.organization_name}]` : "";
+                          return `${col.column_name}${orgBadge} (${col.sheet_name} • ${col.item_count} items • ${col.total_quantity} pcs)`;
+                        })() : "🔍 Type or select consignment column..."}
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        {selectedColumnId && (
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedColumnId("");
+                              setSelectedConsignmentCode("");
+                              setSelectedSheetId("");
+                            }}
+                            style={{
+                              fontSize: "12px",
+                              color: "#94a3b8",
+                              padding: "2px 4px",
+                              borderRadius: "3px",
+                              cursor: "pointer",
+                            }}
+                            title="Clear selected consignment"
+                          >
+                            ✕
+                          </span>
+                        )}
+                        <span style={{ fontSize: "10px", color: "#64748b" }}>{consignmentOpen ? "▲" : "▼"}</span>
+                      </div>
+                    </button>
 
-                        // Auto-match buyer from sheet name if not yet selected
-                        if (!buyerId && buyerLookup.items) {
-                          const matchedBuyer = buyerLookup.items.find((b) => {
-                            const bName = (b.company_name || b.name || "").toLowerCase();
-                            const sName = col.sheet_name.toLowerCase();
-                            return bName.includes(sName) || sName.includes(bName);
-                          });
-                          if (matchedBuyer) {
-                            setBuyerId(matchedBuyer.id);
-                            setBuyerName(matchedBuyer.company_name || matchedBuyer.name || "");
-                          }
-                        }
+                    {/* Dropdown Panel */}
+                    {consignmentOpen && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 4px)",
+                          left: 0,
+                          right: 0,
+                          background: "#fff",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "8px",
+                          boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+                          zIndex: 50,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {/* Search Input */}
+                        <div style={{ padding: "8px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                          <input
+                            type="text"
+                            placeholder="Type to filter consignment, sheet, or buyer..."
+                            value={consignmentSearch}
+                            onChange={(e) => setConsignmentSearch(e.target.value)}
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              width: "100%",
+                              padding: "6px 10px",
+                              borderRadius: "5px",
+                              border: "1px solid #e2e8f0",
+                              fontSize: "12px",
+                              outline: "none",
+                              boxSizing: "border-box",
+                              background: "#ffffff",
+                            }}
+                          />
+                        </div>
 
-                        // Auto-load items immediately on selection
-                        handleExtractConsignment(colId);
-                      }
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      background: "#ffffff",
-                    }}
-                  >
-                    <option value="">-- Select Consignment Column (Auto-Loads Items) --</option>
-                    {consignments.map((c) => (
-                      <option key={c.column_id} value={c.column_id}>
-                        {c.column_name} ({c.sheet_name} • {c.item_count} items • {c.total_quantity.toLocaleString()} pcs)
-                      </option>
-                    ))}
-                  </select>
+                        {/* Options List */}
+                        <div style={{ maxHeight: "250px", overflowY: "auto" }}>
+                          {filteredConsignments.length === 0 ? (
+                            <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "12px" }}>
+                              No consignments match "{consignmentSearch}"
+                            </div>
+                          ) : (
+                            filteredConsignments.map((c) => {
+                              const isSelected = c.column_id === selectedColumnId;
+                              const isRecommended = buyerName && (
+                                (c.organization_name && (c.organization_name.toLowerCase().includes(buyerName.toLowerCase()) || buyerName.toLowerCase().includes(c.organization_name.toLowerCase()))) ||
+                                (c.sheet_name && (c.sheet_name.toLowerCase().includes(buyerName.toLowerCase()) || buyerName.toLowerCase().includes(c.sheet_name.toLowerCase())))
+                              );
+
+                              return (
+                                <div
+                                  key={c.column_id}
+                                  onClick={() => handleSelectConsignment(c)}
+                                  style={{
+                                    padding: "8px 12px",
+                                    fontSize: "12.5px",
+                                    cursor: "pointer",
+                                    background: isSelected ? "#eff6ff" : "transparent",
+                                    borderBottom: "1px solid #f1f5f9",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    if (!isSelected) e.currentTarget.style.background = "#f8fafc";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = isSelected ? "#eff6ff" : "transparent";
+                                  }}
+                                >
+                                  <div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                      {isSelected && <span style={{ color: "#2563eb", fontSize: "10px" }}>✔</span>}
+                                      <span style={{ fontWeight: 700, color: "#0f172a" }}>{c.column_name}</span>
+                                      {c.organization_name && (
+                                        <span style={{ fontSize: "11px", background: "#e0f2fe", color: "#0369a1", padding: "1px 6px", borderRadius: "4px", fontWeight: 600 }}>
+                                          {c.organization_name}
+                                        </span>
+                                      )}
+                                      <span style={{ fontSize: "11px", color: "#64748b" }}>
+                                        ({c.sheet_name})
+                                      </span>
+                                      {isRecommended && (
+                                        <span style={{ fontSize: "10px", background: "#dcfce7", color: "#15803d", padding: "1px 5px", borderRadius: "3px", fontWeight: 600 }}>
+                                          Matched Buyer
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 500 }}>
+                                    {c.item_count} items • {c.total_quantity.toLocaleString()} pcs
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                   <button
                     type="button"
@@ -1445,7 +1619,7 @@ export function SaleProcessFormPage() {
                   </label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="any"
                     min="0"
                     placeholder="0.00"
                     value={oceanFreightUsd === 0 ? "" : oceanFreightUsd}
@@ -1474,7 +1648,7 @@ export function SaleProcessFormPage() {
                   </label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="any"
                     min="0"
                     placeholder="0.00"
                     value={localChargesCocUsd === 0 ? "" : localChargesCocUsd}
@@ -1503,8 +1677,8 @@ export function SaleProcessFormPage() {
                   </label>
                   <input
                     type="number"
-                    step="0.01"
-                    min="0.01"
+                    step="any"
+                    min="0.0001"
                     placeholder="6.70"
                     value={usdExchangeRate === 0 ? "" : usdExchangeRate}
                     onFocus={(e) => e.target.select()}
@@ -1532,7 +1706,7 @@ export function SaleProcessFormPage() {
                   </label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="any"
                     min="0"
                     placeholder="3.00"
                     value={profitPercent === 0 ? "" : profitPercent}
@@ -1561,7 +1735,7 @@ export function SaleProcessFormPage() {
                   </label>
                   <input
                     type="number"
-                    step="0.001"
+                    step="any"
                     min="0"
                     placeholder="0.000"
                     value={totalContainerCbm === 0 ? "" : totalContainerCbm}
@@ -2116,7 +2290,7 @@ export function SaleProcessFormPage() {
                             <td style={{ padding: "6px 6px" }}>
                               <input
                                 type="number"
-                                step="0.001"
+                                step="any"
                                 min="0"
                                 placeholder="0.000"
                                 value={item.total_cbm === 0 ? "" : item.total_cbm}

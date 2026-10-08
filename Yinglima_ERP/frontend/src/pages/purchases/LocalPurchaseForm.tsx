@@ -656,12 +656,16 @@ export function LocalPurchaseFormPage() {
             total_landing_rate: Number((it.quantity * it.unit_rate).toFixed(2)),
           }));
           setItems(newRows);
+          toast(
+            `Extracted ${d.items.length} item(s) from bill successfully!`,
+            "success"
+          );
+        } else {
+          toast(
+            d.notes || "Could not extract items from bill: No readable line items found. Please upload a digital text PDF or Excel sheet.",
+            "error"
+          );
         }
-
-        toast(
-          `Extracted ${d.items?.length || 0} items from bill successfully!`,
-          "success"
-        );
       }
     } catch (err) {
       toast(errorMessage(err), "error");

@@ -112,6 +112,8 @@ export interface PlanningConsignmentColumn {
   column_id: string;
   column_name: string;
   code: string;
+  organization_id?: string | null;
+  organization_name?: string | null;
   item_count: number;
   total_quantity: number;
   has_remarks_column: boolean;

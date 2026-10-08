@@ -637,6 +637,18 @@ export function SuppliersPage() {
     }, { replace: true });
   }, [setSearchParams]);
 
+  const handleOpenDrawer = useCallback(async (supplier: Supplier) => {
+    setDrawerSupplier(supplier);
+    try {
+      const { data } = await apiGet<Supplier>(`/suppliers/${supplier.id}`);
+      if (data) {
+        setDrawerSupplier(data);
+      }
+    } catch (err) {
+      console.error("Failed to load full supplier detail for drawer:", err);
+    }
+  }, []);
+
   // Sync browser back arrow with modal & drawer so it closes them instead of
   // navigating back to Dashboard.
   useModalHistorySync(modalOpen, () => setModalOpen(false));
@@ -4494,7 +4506,7 @@ export function SuppliersPage() {
                                     title={s.company_name}
                                     onClick={(e) => {
                                       e.preventDefault();
-                                      setDrawerSupplier(s);
+                                      void handleOpenDrawer(s);
                                     }}
                                     style={{
                                       display: "-webkit-box",

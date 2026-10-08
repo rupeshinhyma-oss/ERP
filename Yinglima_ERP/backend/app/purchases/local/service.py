@@ -611,7 +611,10 @@ class LocalPurchaseService:
                 full_text += t + "\n"
 
         if not full_text.strip():
-            return BillExtractionResponse(notes="Could not extract text from PDF.")
+            return BillExtractionResponse(
+                notes="Could not extract text from PDF: The document contains no selectable digital text layer (it may be a scanned image or vector drawing). Please upload a digital text invoice or Excel sheet (.xlsx/.csv).",
+                items=[],
+            )
 
         # Attempt AI extraction if OpenAI or Gemini key is configured
         openai_key = os.getenv("OPENAI_API_KEY", "").strip()

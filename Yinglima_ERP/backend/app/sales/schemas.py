@@ -241,6 +241,8 @@ class PlanningConsignmentColumnResponse(BaseModel):
     column_id: uuid.UUID
     column_name: str
     code: str
+    organization_id: uuid.UUID | None = None
+    organization_name: str | None = None
     item_count: int = 0
     total_quantity: float = 0.0
     has_remarks_column: bool = False

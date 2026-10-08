@@ -498,14 +498,21 @@ export function ProductsPage() {
   if (brandFilter) extraFilters.brand_id = brandFilter;
 
   /** Fetches the product fresh and opens the detail drawer, matching openProductDetailView() in the source. */
-  async function openProductDetailView(productId: string) {
-    setDrawerLoading(true);
-    setDrawerProduct(null);
+  async function openProductDetailView(productId: string, initialProduct?: Product) {
+    if (initialProduct) {
+      setDrawerProduct(initialProduct);
+      setDrawerLoading(false);
+    } else {
+      setDrawerLoading(true);
+      setDrawerProduct(null);
+    }
     try {
       const { data } = await apiGet<Product>(`/masters/products/${productId}`);
       setDrawerProduct(data);
     } catch (err) {
-      alert(`Failed to load product detail: ${err instanceof Error ? err.message : String(err)}`);
+      if (!initialProduct) {
+        alert(`Failed to load product detail: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } finally {
       setDrawerLoading(false);
     }
@@ -716,7 +723,7 @@ export function ProductsPage() {
                   }}
                   onClick={(e) => {
                     e.preventDefault();
-                    openProductDetailView(p.id);
+                    openProductDetailView(p.id, p);
                   }}
                 >
                   {name}
