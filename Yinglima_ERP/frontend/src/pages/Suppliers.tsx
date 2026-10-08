@@ -2637,7 +2637,9 @@ export function SuppliersPage() {
                         onChange={(newCatIds) => {
                           setFormCategoryIds(newCatIds);
                           // Auto-prune any subCategoryIds that no longer belong to selected categories
-                          if (newCatIds.length > 0) {
+                          if (newCatIds.length === 0) {
+                            setFormSubCategoryIds([]);
+                          } else {
                             setFormSubCategoryIds((prevSubIds) => {
                               const validCategorySubIds = subCategoriesLookup.items
                                 .filter((sc) => newCatIds.includes(sc.category_id))
@@ -2660,8 +2662,12 @@ export function SuppliersPage() {
                       <SearchableDropdownMultiPanel
                         values={formSubCategoryIds}
                         onChange={setFormSubCategoryIds}
-                        placeholder={formCategoryIds.length > 0 ? "-- Select Sub-Categories --" : "-- Select Categories First (or search all) --"}
+                        disabled={formCategoryIds.length === 0}
+                        placeholder={formCategoryIds.length > 0 ? "-- Select Sub-Categories --" : "-- Please select Category first --"}
                         fetchOptions={async (query, signal) => {
+                          if (formCategoryIds.length === 0) {
+                            return [];
+                          }
                           const q = query.trim().toLowerCase();
                           let items = subCategoriesLookup.items;
                           if (items.length === 0) {
@@ -2675,15 +2681,13 @@ export function SuppliersPage() {
                               // fallback
                             }
                           }
-                          if (formCategoryIds.length > 0) {
-                            items = items.filter((sc) => formCategoryIds.includes(sc.category_id));
-                            items = [...items].sort((a, b) => {
-                              const idxA = formCategoryIds.indexOf(a.category_id);
-                              const idxB = formCategoryIds.indexOf(b.category_id);
-                              if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
-                              return a.name.localeCompare(b.name);
-                            });
-                          }
+                          items = items.filter((sc) => formCategoryIds.includes(sc.category_id));
+                          items = [...items].sort((a, b) => {
+                            const idxA = formCategoryIds.indexOf(a.category_id);
+                            const idxB = formCategoryIds.indexOf(b.category_id);
+                            if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                            return a.name.localeCompare(b.name);
+                          });
                           if (q) {
                             items = items.filter(
                               (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
