@@ -21,15 +21,38 @@ class TaxRefRead(BaseModel):
     import_duty_percent: float
 
 
+def compute_client_cbm(length: float | None, width: float | None, height: float | None) -> float:
+    """Compute CBM rounded to 2 decimal places using client rounding rule:
+    <= 0.025 -> 0.02, 0.026 - 0.029 -> 0.03.
+    """
+    if length is None or width is None or height is None:
+        return 0.0
+    try:
+        l, w, h = float(length), float(width), float(height)
+    except (ValueError, TypeError):
+        return 0.0
+    if l <= 0 or w <= 0 or h <= 0:
+        return 0.0
+    raw = (l * w * h) / 1_000_000.0
+    scaled = raw * 100.0
+    int_part = int(scaled)
+    rem = scaled - int_part
+    cbm = (int_part / 100.0) if rem <= 0.500001 else ((int_part + 1) / 100.0)
+    return round(cbm, 2)
+
+
 class ProductDimensionRowIn(BaseModel):
     """One row of the "Dimensions" table, as submitted by the Add/Edit form."""
 
     id: str | None = None  # Client-generated row id; ignored on write, just echoed back
+    package_name: str | None = Field(default=None, max_length=255)
     title: str | None = Field(default=None, max_length=255)
     length: float | None = Field(default=None, ge=0)
     width: float | None = Field(default=None, ge=0)
     height: float | None = Field(default=None, ge=0)
     cbm: float | None = Field(default=None, ge=0)
+    net_weight: float | None = Field(default=None, ge=0)
+    gross_weight: float | None = Field(default=None, ge=0)
 
 
 class ProductDimensionRowRead(BaseModel):
@@ -38,11 +61,14 @@ class ProductDimensionRowRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    package_name: str | None = None
     title: str | None = None
     length: float | None = None
     width: float | None = None
     height: float | None = None
     cbm: float | None = None
+    net_weight: float | None = None
+    gross_weight: float | None = None
 
 
 class ProductCreate(BaseModel):
@@ -53,6 +79,8 @@ class ProductCreate(BaseModel):
     product_name_invoice: str | None = Field(default=None, max_length=255)
     product_name: str | None = Field(default=None, max_length=255)  # Optional alias (defaults to product_name_tally)
     barcode: str | None = Field(default=None, max_length=100)
+    product_type: str = Field(default="Machine", max_length=50, description="Machine vs Spare Part")
+    applicable_machine_ids: list[uuid.UUID] | None = None
 
     category_id: uuid.UUID
     sub_category_id: uuid.UUID | None = None
@@ -97,6 +125,7 @@ class ProductCreate(BaseModel):
     reorder_level: float | None = Field(default=None, ge=0)
     standard_cost: float | None = Field(default=None, ge=0)
     standard_price: float | None = Field(default=None, ge=0)
+    minimum_price: float | None = Field(default=None, ge=0)
     is_purchasable: bool = True
     is_sellable: bool = True
     is_active_for_inventory: bool = True
@@ -108,12 +137,12 @@ class ProductCreate(BaseModel):
         if self.packaging_gross_weight is None or self.packaging_gross_weight <= 0:
             raise ValueError("Packaging Gross Weight (kg) is required and must be greater than 0.")
 
-        # Compute CBM if dimensions are given and CBM is missing or 0
+        # Compute CBM using client rounding rule if dimensions are given and CBM is missing or 0
         l = self.length_cm or self.length
         w = self.width_cm or self.width
         h = self.height_cm or self.height
         if (self.packaging_unit_cbm is None or self.packaging_unit_cbm <= 0) and (l and w and h and l > 0 and w > 0 and h > 0):
-            self.packaging_unit_cbm = round((float(l) * float(w) * float(h)) / 1_000_000.0, 6)
+            self.packaging_unit_cbm = compute_client_cbm(l, w, h)
 
         if self.packaging_unit_cbm is None or self.packaging_unit_cbm <= 0:
             raise ValueError("Packaging Unit CBM is required (enter Length, Width, Height to auto-calculate or enter Packaging Unit CBM directly).")
@@ -129,6 +158,8 @@ class ProductUpdate(BaseModel):
     product_name_invoice: str | None = Field(default=None, max_length=255)
     product_name: str | None = Field(default=None, max_length=255)
     barcode: str | None = Field(default=None, max_length=100)
+    product_type: str | None = Field(default=None, max_length=50)
+    applicable_machine_ids: list[uuid.UUID] | None = None
 
     category_id: uuid.UUID | None = None
     sub_category_id: uuid.UUID | None = None
@@ -168,6 +199,7 @@ class ProductUpdate(BaseModel):
     reorder_level: float | None = Field(default=None, ge=0)
     standard_cost: float | None = Field(default=None, ge=0)
     standard_price: float | None = Field(default=None, ge=0)
+    minimum_price: float | None = Field(default=None, ge=0)
     is_purchasable: bool | None = None
     is_sellable: bool | None = None
     is_active_for_inventory: bool | None = None
@@ -186,6 +218,8 @@ class ProductRead(BaseModel):
     product_name_invoice: str | None = None
     product_name: str
     barcode: str | None
+    product_type: str = "Machine"
+    applicable_machine_ids: list[uuid.UUID] | None = None
 
     category_id: uuid.UUID
     sub_category_id: uuid.UUID | None
@@ -252,6 +286,7 @@ class ProductRead(BaseModel):
     reorder_level: float | None
     standard_cost: float | None
     standard_price: float | None
+    minimum_price: float | None = None
     is_purchasable: bool
     is_sellable: bool
     is_active_for_inventory: bool
@@ -262,6 +297,69 @@ class ProductRead(BaseModel):
 
 
 ProductRead.model_rebuild()
+
+
+class BulkDeletePayload(BaseModel):
+    """Payload to bulk-delete products."""
+
+    product_ids: list[uuid.UUID] = Field(..., min_length=1)
+
+
+class MachineSpareMappingIn(BaseModel):
+    """Payload to link a spare part to a machine."""
+
+    machine_id: uuid.UUID
+    spare_part_id: uuid.UUID
+    remarks: str | None = Field(default=None, max_length=255)
+
+
+class MachineSpareUnmapIn(BaseModel):
+    """Payload to unlink a spare part from a machine."""
+
+    machine_id: uuid.UUID
+    spare_part_id: uuid.UUID
+
+
+class MachineSpareItemRead(BaseModel):
+    """A spare part linked to a machine."""
+
+    spare_part_id: uuid.UUID
+    spare_part_name: str
+    spare_part_code: str | None = None
+    uom: str | None = None
+    standard_price: float | None = None
+    current_stock: float = 0.0
+    remarks: str | None = None
+
+
+class MachineWithSparesRead(BaseModel):
+    """Universal view representation of a machine and its mapped spare parts."""
+
+    machine_id: uuid.UUID
+    machine_name: str
+    machine_code: str | None = None
+    current_stock: float = 0.0
+    brand_name: str | None = None
+    category_name: str | None = None
+    spares: list[MachineSpareItemRead] = Field(default_factory=list)
+
+
+class PackageDimensionReportRow(BaseModel):
+    """One row in the package dimensions report."""
+
+    dimension_id: uuid.UUID | None = None
+    product_id: uuid.UUID
+    product_name: str
+    product_code: str | None = None
+    product_type: str = "Machine"
+    package_name: str | None = None
+    title: str | None = None
+    length: float | None = None
+    width: float | None = None
+    height: float | None = None
+    cbm: float | None = None
+    net_weight: float | None = None
+    gross_weight: float | None = None
 
 
 class ImportSummaryRead(BaseModel):

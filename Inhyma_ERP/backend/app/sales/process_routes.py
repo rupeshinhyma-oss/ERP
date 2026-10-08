@@ -136,12 +136,20 @@ async def list_sale_orders(
     currency: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    invoice_date_from: str | None = Query(default=None),
+    invoice_date_to: str | None = Query(default=None),
+    delivery_date_from: str | None = Query(default=None),
+    delivery_date_to: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    dispatch: str | None = Query(default=None),
     service: SaleService = Depends(get_sale_service),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     offset = (page - 1) * page_size
+    visibility = await service.visible_filters(current_user)
     records, total = await service.repo.list_with_filters(
+        **visibility,
         search=search,
         organization_id=organization_id,
         buyer_id=buyer_id,
@@ -151,46 +159,17 @@ async def list_sale_orders(
         currency=currency,
         date_from=date_from,
         date_to=date_to,
+        invoice_date_from=invoice_date_from,
+        invoice_date_to=invoice_date_to,
+        delivery_date_from=delivery_date_from,
+        delivery_date_to=delivery_date_to,
+        state=state,
+        dispatch=dispatch,
         limit=page_size,
         offset=offset,
     )
 
-    items = []
-    for r in records:
-        items.append(
-            SaleOrderResponse(
-                id=r.id,
-                order_no=r.order_no,
-                organization_id=r.organization_id,
-                organization_name=r.organization_name,
-                buyer_id=r.buyer_id,
-                buyer_name=r.buyer_name,
-                buyer_branch_id=r.buyer_branch_id,
-                buyer_branch_name=r.buyer_branch_name,
-                consignment_code=r.consignment_code,
-                planning_sheet_id=r.planning_sheet_id,
-                planning_column_id=r.planning_column_id,
-                order_date=r.order_date,
-                delivery_date=r.delivery_date,
-                currency=r.currency,
-                status=r.status,
-                total_basic=float(r.total_basic),
-                total_tax=float(r.total_tax),
-                total_amount=float(r.total_amount),
-                total_quantity=float(r.total_quantity),
-                item_count=len(r.items),
-                container_no=r.container_no,
-                bl_no=r.bl_no,
-                lr_no=r.lr_no,
-                transporter_name=r.transporter_name,
-                port_of_loading=r.port_of_loading,
-                port_of_discharge=r.port_of_discharge,
-                remarks=r.remarks,
-                created_by_name=r.created_by_name,
-                created_at=r.created_at,
-                updated_at=r.updated_at,
-            ).model_dump()
-        )
+    items = [SaleOrderResponse.model_validate(r).model_dump() for r in records]
 
     return build_success_response(
         data={
@@ -199,9 +178,21 @@ async def list_sale_orders(
             "page": page,
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size if total > 0 else 1,
+            "status_rules": await service.load_status_rules(),
         },
         request_id=req_id,
     )
+
+
+@router.get("/next-gatepass-no", summary="Generate next sequential gatepass number")
+async def get_next_gatepass_no(
+    request: Request,
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    gp_no = await service.repo.generate_gatepass_no()
+    return build_success_response(data={"gatepass_no": gp_no}, request_id=req_id)
 
 
 @router.post("/orders", summary="Create a new sale order", status_code=status.HTTP_201_CREATED)
@@ -234,6 +225,11 @@ async def get_sale_order(
     order = await service.repo.get_by_id(id)
     if not order:
         raise NotFoundException(f"Sale order {id} not found.")
+    visibility = await service.visible_filters(current_user)
+    if visibility and (
+        order.warehouse not in visibility["warehouses"] or order.status in visibility["exclude_statuses"]
+    ):
+        raise NotFoundException(f"Sale order {id} not found.")  # hidden from this role, as if it did not exist
     return build_success_response(
         data=SaleOrderDetailResponse.model_validate(order).model_dump(),
         request_id=req_id,
@@ -249,7 +245,7 @@ async def update_sale_order(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    order = await service.update_order(id, payload)
+    order = await service.update_order(id, payload, current_user)
     loaded = await service.repo.get_by_id(order.id)
     if not loaded:
         raise NotFoundException("Updated order could not be reloaded.")
@@ -268,7 +264,7 @@ async def update_order_status(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    order = await service.update_status(id, payload.status, payload.remarks)
+    order = await service.update_status(id, payload, current_user)
     loaded = await service.repo.get_by_id(order.id)
     if not loaded:
         raise NotFoundException("Order could not be reloaded.")
@@ -278,7 +274,7 @@ async def update_order_status(
     )
 
 
-@router.delete("/orders/{id}", summary="Soft delete a sale order")
+@router.delete("/orders/{id}", summary="Delete a sale order (stage rules apply; stock is returned)")
 async def delete_sale_order(
     id: uuid.UUID,
     request: Request,
@@ -286,12 +282,24 @@ async def delete_sale_order(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    deleted_by = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
-    ok = await service.repo.soft_delete(id, deleted_by=deleted_by)
-    if not ok:
-        raise NotFoundException(f"Sale order {id} not found.")
+    await service.delete_order(id, current_user)
     return build_success_response(
         data={"id": str(id), "deleted": True},
+        request_id=req_id,
+    )
+
+
+@router.post("/orders/{id}/restore", summary="Restore a soft-deleted sale order (administrators only)")
+async def restore_sale_order(
+    id: uuid.UUID,
+    request: Request,
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    await service.restore_order(id, current_user)
+    return build_success_response(
+        data={"id": str(id), "restored": True},
         request_id=req_id,
     )
 
@@ -311,6 +319,7 @@ async def export_sale_orders(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Response:
     records, _ = await service.repo.list_with_filters(
+        **(await service.visible_filters(current_user)),
         search=search,
         organization_id=organization_id,
         buyer_id=buyer_id,

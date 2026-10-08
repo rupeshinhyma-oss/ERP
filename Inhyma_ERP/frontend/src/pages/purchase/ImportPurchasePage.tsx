@@ -1,700 +1,74 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { useToast } from "@/lib/toast";
-import { apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, apiPut, errorMessage as apiErrorText } from "@/lib/api";
 import { DatePicker } from "@/components/DatePicker";
 import { formatIndianCurrency, formatUsdCurrency } from "@/lib/importPurchasePdf";
-import { getCachedBrandName } from "@/lib/brand";
+import { useAuth } from "@/lib/hooks";
+import { useLookup } from "@/lib/lookups";
+import { useOptions } from "@/lib/options";
+import { EMPTY_DATE_FILTER, RANGE_PRESET_OPTIONS, inDateRange, type DateFilter } from "@/lib/dateRanges";
+import {
+  availableTransitions,
+  canDelete as ruleCanDelete,
+  canEdit as ruleCanEdit,
+  needsReason,
+  type WorkflowRules,
+} from "@/lib/workflowRules";
+import {
+  IMPORT_PURCHASE_API,
+  buildImportPayload,
+  fetchImportPurchases,
+  mapImportPurchase,
+  previewImport,
+  type ImportFormValues,
+  type ImportPreview,
+  type ImportPurchaseRecord,
+} from "@/lib/purchaseApi";
 
-export interface ImportPurchaseItem {
-  id: string;
-  sr_no?: number;
-  product_name: string;
-  quantity: number;
-  unit?: string;
-  pkg_unit_cbm?: number;
-  pkg_qty?: number;
-  total_cbm?: number;
-  unit_rate_usd: number;
-  unit_rate_inr?: number;
-  total_usd: number;
-  unit_id_inr?: number;
-  item_total_id_inr?: number;
-  exp_per_unit_vb?: number;
-  exp_per_unit_cb?: number;
-  unit_landing_rate_vb?: number;
-  unit_landing_rate_cb?: number;
-  diff_cb_vb?: number;
-  unit_landing_inr?: number;
-  total_landing_inr?: number;
+// The record types live in the shared data layer; re-exported so existing imports keep working.
+export type { ImportPurchaseItem, ImportPurchaseRecord } from "@/lib/purchaseApi";
+
+const IMPORT_OPTION_GROUPS = ["purchase.import.defaults"] as const;
+
+type CatalogProduct = { product_name: string };
+
+const todayDDMMYYYY = () => new Date().toLocaleDateString("en-GB").split("/").join("-");
+
+// Row colours by position in the DB-configured workflow (purely visual)
+const STATUS_PALETTE = [
+  { bg: "#fef9c3", fg: "#a16207", border: "#fde047" },
+  { bg: "#e0f2fe", fg: "#0284c7", border: "#bae6fd" },
+  { bg: "#dcfce7", fg: "#15803d", border: "#bbf7d0" },
+  { bg: "#f1f5f9", fg: "#475569", border: "#cbd5e1" },
+];
+
+const FIELD_LABEL: React.CSSProperties = { fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" };
+const FIELD_INPUT: React.CSSProperties = {
+  width: "100%", height: "34px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 8px", fontSize: "13px",
+  background: "#ffffff", color: "#334155", outline: "none", boxSizing: "border-box",
+};
+const FIELD_ERROR: React.CSSProperties = { color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" };
+const CARD: React.CSSProperties = {
+  background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "16px 20px", marginBottom: "16px",
+  boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+};
+const CARD_TITLE: React.CSSProperties = { fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "14px" };
+const GRID4: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", marginBottom: "16px" };
+
+function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label style={FIELD_LABEL}>
+        {label} {required && <span style={{ color: "#ef4444" }}>*</span>}
+      </label>
+      {children}
+      {error && <span style={FIELD_ERROR}>{error}</span>}
+    </div>
+  );
 }
-
-export interface ImportPurchaseRecord {
-  id: string;
-  consignment_no: string;
-  supplier_name: string;
-  warehouse: string;
-  ordered_date: string;
-  etd_origin_date?: string;
-  eta_port_date?: string;
-  arrival_date?: string;
-  exp_arri_date?: string;
-  invoice_total_usd: number;
-  exchange_rate: number;
-  con_rate_usd_to_inr?: number;
-  custom_con_rate_usd_to_inr?: number;
-  total_imp_duty?: number;
-  invoice_total_inr: number;
-  total_cbm?: number;
-  total_expenses?: number;
-  freight_exp?: number;
-  insurance_exp?: number;
-  stamp_duty_exp?: number;
-  shipping_line_charges?: number;
-  cfs_charges?: number;
-  clearing_transport?: number;
-  offloading_exp?: number;
-  misc_charges?: number;
-  total_all_expenses?: number;
-  loading_expense_percent?: number;
-  loading_exp_cb?: number;
-  loading_amount_per_cbm?: number;
-  gross_weight?: number;
-  gross_amount?: number;
-  gross_total_landing?: number;
-  status: "Pending" | "Confirmed" | "Received" | "Closed";
-  bill_file?: string;
-  created_by?: string;
-  added_on?: string;
-  created_at_time?: string;
-  supplier_email?: string;
-  supplier_phone?: string;
-  supplier_gst?: string;
-  to_name?: string;
-  to_address?: string;
-  to_email?: string;
-  to_phone?: string;
-  to_gst?: string;
-  updated_date?: string;
-  invoice_no?: string;
-  invoice_date?: string;
-  remarks?: string;
-  items?: ImportPurchaseItem[];
-}
-
-export const DEFAULT_MODAL_IMPORT_ITEMS: ImportPurchaseItem[] = [
-  {
-    id: "item-1",
-    sr_no: 1,
-    product_name: "ISL350XDAN Flow Wrap Machine W/O End Seal Chain",
-    quantity: 1,
-    unit: "Nos",
-    pkg_unit_cbm: 2.05,
-    pkg_qty: 1,
-    total_cbm: 2.05,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 1.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 8.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-2",
-    sr_no: 2,
-    product_name: "ISL350XDAN Flow Wrap Machine W/O End Seal Chain With Batch Cutting",
-    quantity: 2,
-    unit: "Nos",
-    pkg_unit_cbm: 2.17,
-    pkg_qty: 0,
-    total_cbm: 4.34,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 2.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 16.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-3",
-    sr_no: 3,
-    product_name: "ISL350XDAP Flow Wrap Machine W/O End Seal Chain Pusher",
-    quantity: 5,
-    unit: "Nos",
-    pkg_unit_cbm: 2.2,
-    pkg_qty: 1,
-    total_cbm: 11.0,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 5.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 39.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-4",
-    sr_no: 4,
-    product_name: "ISL350XDAN Flow Wrap Machine With End Seal Chain",
-    quantity: 3,
-    unit: "Nos",
-    pkg_unit_cbm: 2.06,
-    pkg_qty: 1,
-    total_cbm: 6.18,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 3.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 24.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-5",
-    sr_no: 5,
-    product_name: "ISL350DAP Flow Wrap Machine W/O End Seal Chain",
-    quantity: 3,
-    unit: "Nos",
-    pkg_unit_cbm: 2.42,
-    pkg_qty: 1,
-    total_cbm: 7.26,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 3.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 24.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-6",
-    sr_no: 6,
-    product_name: "ISL450XDAN Flow Wrap Machine With End Seal Chain",
-    quantity: 2,
-    unit: "Nos",
-    pkg_unit_cbm: 2.17,
-    pkg_qty: 1,
-    total_cbm: 4.34,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 2.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 16.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-7",
-    sr_no: 7,
-    product_name: "ISL450DAP Flow Wrap Machine W/O End Seal Chain",
-    quantity: 3,
-    unit: "Nos",
-    pkg_unit_cbm: 2.7,
-    pkg_qty: 1,
-    total_cbm: 8.1,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 3.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 24.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-8",
-    sr_no: 8,
-    product_name: "ISL450XDAP Flow Wrap With Double Row Chain",
-    quantity: 1,
-    unit: "Nos",
-    pkg_unit_cbm: 0,
-    pkg_qty: 1,
-    total_cbm: 0.0,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 1.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 8.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-9",
-    sr_no: 9,
-    product_name: "A10/1.6T Multi Head Weigher With Timing Bucket",
-    quantity: 1,
-    unit: "Nos",
-    pkg_unit_cbm: 2.01,
-    pkg_qty: 1,
-    total_cbm: 2.01,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 1.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 8.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-10",
-    sr_no: 10,
-    product_name: "A14/1.6T Multi Head Weigher With Timing Bucket",
-    quantity: 1,
-    unit: "Nos",
-    pkg_unit_cbm: 2.14,
-    pkg_qty: 1,
-    total_cbm: 2.14,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 1.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 8.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-11",
-    sr_no: 11,
-    product_name: "ISL250 Rotary PFS 8 Head",
-    quantity: 1,
-    unit: "Nos",
-    pkg_unit_cbm: 6.4,
-    pkg_qty: 1,
-    total_cbm: 6.4,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 1.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 8.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-  {
-    id: "item-12",
-    sr_no: 12,
-    product_name: "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen",
-    quantity: 1,
-    unit: "Nos",
-    pkg_unit_cbm: 0,
-    pkg_qty: 1,
-    total_cbm: 0.0,
-    unit_rate_usd: 1.0,
-    unit_rate_inr: 95.0,
-    total_usd: 1.0,
-    unit_id_inr: 8.0,
-    item_total_id_inr: 8.0,
-    exp_per_unit_vb: 0.0,
-    exp_per_unit_cb: 0.0,
-    unit_landing_rate_vb: 102.84,
-    unit_landing_rate_cb: 102.84,
-    diff_cb_vb: 0.0,
-  },
-];
-
-export const IMPORT_WAREHOUSE_OPTIONS = [
-  "Select",
-  "Mumbai Ordered",
-  "Ahmedabad Ordered",
-  "Indore Ordered",
-  "Delhi Ordered",
-  "Chennai Ordered",
-];
-
-export const IMPORT_SUPPLIER_OPTIONS = [
-  "Select",
-  "Yinglima",
-  "Yinglima Machinery Co., Ltd.",
-  "Zhejiang Packing Tech Co.",
-  "Ningbo Brother Machinery",
-  "Shanghai Royal Packing",
-];
-
-
-export const INITIAL_IMPORT_ORDERS: ImportPurchaseRecord[] = [
-  {
-    id: "imp-51",
-    consignment_no: "MUM51",
-    supplier_name: "Yinglima",
-    warehouse: "Mumbai Ordered",
-    ordered_date: "19-09-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    exp_arri_date: "",
-    invoice_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 95.0,
-    con_rate_usd_to_inr: 95.0,
-    custom_con_rate_usd_to_inr: 95.0,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_imp_duty: 0.0,
-    total_expenses: 0,
-    freight_exp: 0.0,
-    insurance_exp: 0.0,
-    stamp_duty_exp: 0.0,
-    shipping_line_charges: 0.0,
-    cfs_charges: 0.0,
-    clearing_transport: 0.0,
-    offloading_exp: 0.0,
-    misc_charges: 0.0,
-    total_all_expenses: 0.0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    loading_amount_per_cbm: 0.0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    gross_total_landing: 0.0,
-    status: "Pending",
-    created_at_time: "19-09-2026 03:52 PM",
-    created_by: "Akshata Wadekar",
-    supplier_email: "9654123654",
-    supplier_phone: "",
-    supplier_gst: "07ABCDE1234F1Z5",
-    to_name: `${getCachedBrandName().toUpperCase()} (M)`,
-    to_address: "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate",
-    to_email: "Payment.Darsh@Gmail.Com",
-    to_phone: "9653261742",
-    to_gst: "27AAKFI9869H1ZL",
-    added_on: "19-09-2026",
-    updated_date: "19-09-2026",
-    bill_file: "MUM51_Commercial_Invoice.pdf",
-    remarks: "A10/1.6T Multi Head Weigher With Timing Bucket HDM & A14/1.6T Multi Head Weigher With Timing Bucket HDM",
-    items: DEFAULT_MODAL_IMPORT_ITEMS,
-  },
-  {
-    id: "imp-50",
-    consignment_no: "MUM50",
-    supplier_name: "Yinglima",
-    warehouse: "Mumbai Ordered",
-    ordered_date: "19-09-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    exp_arri_date: "",
-    invoice_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 95.0,
-    con_rate_usd_to_inr: 95.0,
-    custom_con_rate_usd_to_inr: 95.0,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_imp_duty: 0.0,
-    total_expenses: 0,
-    freight_exp: 0.0,
-    insurance_exp: 0.0,
-    stamp_duty_exp: 0.0,
-    shipping_line_charges: 0.0,
-    cfs_charges: 0.0,
-    clearing_transport: 0.0,
-    offloading_exp: 0.0,
-    misc_charges: 0.0,
-    total_all_expenses: 0.0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    loading_amount_per_cbm: 0.0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    gross_total_landing: 0.0,
-    status: "Pending",
-    created_at_time: "19-09-2026 03:52 PM",
-    created_by: "Akshata Wadekar",
-    supplier_email: "9654123654",
-    supplier_phone: "",
-    supplier_gst: "07ABCDE1234F1Z5",
-    to_name: `${getCachedBrandName().toUpperCase()} (M)`,
-    to_address: "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate",
-    to_email: "Payment.Darsh@Gmail.Com",
-    to_phone: "9653261742",
-    to_gst: "27AAKFI9869H1ZL",
-    added_on: "19-09-2026",
-    updated_date: "19-09-2026",
-    bill_file: "MUM50_Packing_List.pdf",
-    remarks: "A10/1.6T Multi Head Weigher With Timing Bucket HDM & A14/1.6T Multi Head Weigher With Timing Bucket HDM",
-    items: DEFAULT_MODAL_IMPORT_ITEMS,
-  },
-  {
-    id: "imp-49",
-    consignment_no: "MUM49",
-    supplier_name: "Yinglima",
-    warehouse: "Mumbai Ordered",
-    ordered_date: "19-09-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 83.5,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_expenses: 0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    status: "Pending",
-    created_by: "Akshata Wadekar",
-    added_on: "19-09-2026",
-    updated_date: "19-09-2026",
-  },
-  {
-    id: "imp-gj14",
-    consignment_no: "GJ14",
-    supplier_name: "Yinglima",
-    warehouse: "Ahmedabad Ordered",
-    ordered_date: "19-09-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 83.5,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_expenses: 0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    status: "Pending",
-    created_by: "Akshata Wadekar",
-    added_on: "19-09-2026",
-    updated_date: "19-09-2026",
-  },
-  {
-    id: "imp-45",
-    consignment_no: "MUM45",
-    supplier_name: "Yinglima",
-    warehouse: "Mumbai Ordered",
-    ordered_date: "12-09-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 83.5,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_expenses: 0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    status: "Pending",
-    created_by: "Akshata Wadekar",
-    added_on: "12-09-2026",
-    updated_date: "19-09-2026",
-  },
-  {
-    id: "imp-46",
-    consignment_no: "MUM46",
-    supplier_name: "Yinglima",
-    warehouse: "Mumbai Ordered",
-    ordered_date: "10-09-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 83.5,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_expenses: 0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    status: "Pending",
-    created_by: "Akshata Wadekar",
-    added_on: "10-09-2026",
-    updated_date: "12-09-2026",
-  },
-  {
-    id: "imp-47",
-    consignment_no: "MUM47",
-    supplier_name: "Yinglima",
-    warehouse: "Mumbai Ordered",
-    ordered_date: "08-09-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 83.5,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_expenses: 0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    status: "Pending",
-    created_by: "Akshata Wadekar",
-    added_on: "08-09-2026",
-    updated_date: "19-09-2026",
-  },
-  {
-    id: "imp-mp05",
-    consignment_no: "MP05",
-    supplier_name: "Yinglima",
-    warehouse: "Indore Ordered",
-    ordered_date: "02-09-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 83.5,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_expenses: 0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    status: "Pending",
-    created_by: "Akshata Wadekar",
-    added_on: "02-09-2026",
-    updated_date: "08-09-2026",
-  },
-  {
-    id: "imp-gj13",
-    consignment_no: "GJ13",
-    supplier_name: "Yinglima",
-    warehouse: "Ahmedabad Ordered",
-    ordered_date: "31-08-2026",
-    etd_origin_date: "",
-    eta_port_date: "",
-    arrival_date: "",
-    invoice_total_usd: 0,
-    exchange_rate: 83.5,
-    invoice_total_inr: 0.0,
-    total_cbm: 0,
-    total_expenses: 0,
-    loading_expense_percent: 0,
-    loading_exp_cb: 0,
-    gross_weight: 0,
-    gross_amount: 0.0,
-    status: "Pending",
-    created_by: "Akshata Wadekar",
-    added_on: "31-08-2026",
-    updated_date: "19-09-2026",
-  },
-  // Remaining 14 Pending consignments summing to ₹ 4,92,08,413.90 exactly
-  ...Array.from({ length: 14 }).map((_, i) => {
-    const num = 44 - i;
-    const conNo = `MUM${num}`;
-    // 13 orders get 3514886.71, and 14th gets 3514886.67 => exactly 49208413.90
-    const inr = i === 13 ? 3514886.67 : 3514886.71;
-    const usd = Math.round((inr / 83.5) * 100) / 100;
-    return {
-      id: `imp-p-${num}`,
-      consignment_no: conNo,
-      supplier_name: "Yinglima",
-      warehouse: i % 2 === 0 ? "Mumbai Ordered" : "Ahmedabad Ordered",
-      ordered_date: "25-08-2026",
-      invoice_total_usd: usd,
-      exchange_rate: 83.5,
-      invoice_total_inr: inr,
-      total_cbm: 45.0,
-      total_expenses: 0,
-      loading_expense_percent: 0,
-      loading_exp_cb: 0,
-      gross_weight: 8500,
-      gross_amount: inr,
-      status: "Pending" as const,
-      created_by: "Akshata Wadekar",
-      added_on: "25-08-2026",
-      updated_date: "19-09-2026",
-    };
-  }),
-  // Received orders (42 orders): Total = ₹ 19,52,33,923.54
-  ...Array.from({ length: 42 }).map((_, i) => {
-    const conNo = `REC-YG-${i + 1}`;
-    // 41 orders get 4648426.75, and 42nd gets 4648426.79 => exactly 195233923.54
-    const inr = i === 41 ? 4648426.79 : 4648426.75;
-    const usd = Math.round((inr / 83.5) * 100) / 100;
-    return {
-      id: `imp-rec-${i + 1}`,
-      consignment_no: conNo,
-      supplier_name: "Yinglima",
-      warehouse: i % 3 === 0 ? "Mumbai Ordered" : i % 3 === 1 ? "Ahmedabad Ordered" : "Indore Ordered",
-      ordered_date: "15-07-2026",
-      etd_origin_date: "25-07-2026",
-      eta_port_date: "12-08-2026",
-      arrival_date: "18-08-2026",
-      invoice_total_usd: usd,
-      exchange_rate: 83.5,
-      invoice_total_inr: inr,
-      total_cbm: 40 + (i % 25),
-      total_expenses: 245000,
-      loading_expense_percent: 5.2,
-      loading_exp_cb: 1500,
-      gross_weight: 9500 + i * 200,
-      gross_amount: inr,
-      status: "Received" as const,
-      created_by: "Akshata Wadekar",
-      added_on: "15-07-2026",
-      updated_date: "18-08-2026",
-      bill_file: `${conNo}_Customs_Clearance.pdf`,
-    };
-  }),
-  // Closed order (1 order): Total = ₹ 37,42,460.56
-  {
-    id: "imp-closed-1",
-    consignment_no: "MUM-CLS-01",
-    supplier_name: "Yinglima",
-    warehouse: "Mumbai Ordered",
-    ordered_date: "10-06-2026",
-    etd_origin_date: "20-06-2026",
-    eta_port_date: "08-07-2026",
-    arrival_date: "15-07-2026",
-    invoice_total_usd: 44820,
-    exchange_rate: 83.5,
-    invoice_total_inr: 3742460.56,
-    total_cbm: 58.0,
-    total_expenses: 320000,
-    loading_expense_percent: 8.5,
-    loading_exp_cb: 2100,
-    gross_weight: 11200,
-    gross_amount: 3742460.56,
-    status: "Closed",
-    created_by: "Akshata Wadekar",
-    added_on: "10-06-2026",
-    updated_date: "15-07-2026",
-    bill_file: "MUM_CLS_01_Settled.pdf",
-  },
-];
 
 export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean }) {
   const navigate = useNavigate();
@@ -744,35 +118,61 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
-  // Orders State with localStorage persistence
-  const [orders, setOrders] = useState<ImportPurchaseRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem("inhyma_import_purchase_orders");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((item: any, idx: number) => {
-            const initial = INITIAL_IMPORT_ORDERS[idx];
-            return {
-              ...item,
-              created_by: item.created_by || initial?.created_by || "Akshata Wadekar",
-              updated_date: item.updated_date || initial?.updated_date || item.added_on || item.ordered_date || "19-09-2026",
-            };
-          });
-        }
-      }
-    } catch {}
-    return INITIAL_IMPORT_ORDERS;
-  });
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const actor = useMemo(
+    () => ({ isAdmin: isSuperAdmin || profile?.username === "admin", has: hasPermission }),
+    [isSuperAdmin, profile?.username, hasPermission]
+  );
+  const { id: routeOrderId } = useParams<{ id: string }>();
 
-  useEffect(() => {
+  const [orders, setOrders] = useState<ImportPurchaseRecord[]>([]);
+  const [statusRules, setStatusRules] = useState<WorkflowRules>({});
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadOrders = async () => {
     try {
-      localStorage.setItem("inhyma_import_purchase_orders", JSON.stringify(orders));
-    } catch {}
-  }, [orders]);
+      const { orders: rows, rules } = await fetchImportPurchases();
+      setOrders(rows);
+      setStatusRules(rules);
+      setPageError(null);
+    } catch (err) {
+      setPageError(apiErrorText(err));
+    }
+  };
+  useEffect(() => {
+    void loadOrders();
+  }, []);
+
+  // dropdowns and form defaults come from the database
+  const supplierList = useLookup<{ id: string; company_name: string }>("/suppliers", 500);
+  const warehouseList = useLookup<{ name: string; main_warehouse_id?: string | null }>("/masters/warehouses", 250);
+  const supplierNames = useMemo(() => supplierList.items.map((x) => x.company_name), [supplierList.items]);
+  const warehouseNames = useMemo(() => warehouseList.items.map((x) => x.name), [warehouseList.items]);
+  const physicalWarehouses = useMemo(
+    () => new Set(warehouseList.items.filter((w) => !w.main_warehouse_id).map((w) => w.name)),
+    [warehouseList.items]
+  );
+  const { options: optionGroups } = useOptions(IMPORT_OPTION_GROUPS);
+  const DEFAULTS = useMemo(
+    () => Object.fromEntries((optionGroups["purchase.import.defaults"] || []).map((o) => [o.value, o.label])) as Record<string, string>,
+    [optionGroups]
+  );
+
+  // what each row may offer this user (rules come from the database)
+  const statusKeys = Object.keys(statusRules);
+  const isInitialStatus = (o: ImportPurchaseRecord) => !!statusRules[o.status_key]?.initial;
+  const canEditOrder = (o: ImportPurchaseRecord) => ruleCanEdit(statusRules, o.status_key, actor);
+  const canDeleteOrder = (o: ImportPurchaseRecord) => ruleCanDelete(statusRules, o.status_key, actor);
+  const nextStatus = (o: ImportPurchaseRecord) => availableTransitions(statusRules, o.status_key, actor)[0];
+  const confirmLabel = (o: ImportPurchaseRecord) => {
+    const t = nextStatus(o);
+    return (t && statusRules[t]?.action_label) || "Confirm";
+  };
+  const palette = (o: { status_key: string }) => STATUS_PALETTE[Math.max(0, statusKeys.indexOf(o.status_key))] || STATUS_PALETTE[3];
 
   // Tab Filter & Search
-  const [selectedTab, setSelectedTab] = useState<"ALL" | "Pending" | "Confirmed" | "Received" | "Closed">("ALL");
+  const [selectedTab, setSelectedTab] = useState<string>("ALL");
   const [searchTerm, setSearchTerm] = useState("");
   const [perPage, setPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
@@ -782,35 +182,54 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filterWarehouse, setFilterWarehouse] = useState("ALL");
   const [filterSupplier, setFilterSupplier] = useState("ALL");
+  const [filterArrival, setFilterArrival] = useState<DateFilter>(EMPTY_DATE_FILTER);
+  const [filterEtd, setFilterEtd] = useState<DateFilter>(EMPTY_DATE_FILTER);
+  const [filterEta, setFilterEta] = useState<DateFilter>(EMPTY_DATE_FILTER);
 
   // Selection & Bulk Actions matching Companies design
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
 
-  const handleBulkConfirm = () => {
+  const handleBulkConfirm = async () => {
     if (selectedIds.length === 0) return;
-    setOrders((prev) =>
-      prev.map((o) => (selectedIds.includes(o.id) ? { ...o, status: "Confirmed" as const } : o))
-    );
-    toast(`${selectedIds.length} import consignment(s) confirmed`, "success");
+    let done = 0;
+    let failed = 0;
+    for (const o of orders.filter((x) => selectedIds.includes(x.id))) {
+      const target = nextStatus(o);
+      if (!target) {
+        failed++;
+        continue;
+      }
+      try {
+        await apiPatch(`${IMPORT_PURCHASE_API}/${o.id}/status`, { status: target });
+        done++;
+      } catch {
+        failed++;
+      }
+    }
+    toast(failed ? `${done} moved on, ${failed} could not be moved` : `${done} import consignment(s) updated`, failed ? "error" : "success");
     setSelectedIds([]);
     setBulkMenuOpen(false);
+    await loadOrders();
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return;
-    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected consignments?`)) {
-      setOrders((prev) => {
-        const updated = prev.filter((o) => !selectedIds.includes(o.id));
-        try {
-          localStorage.setItem("inhyma_import_purchase_orders", JSON.stringify(updated));
-        } catch {}
-        return updated;
-      });
-      toast(`${selectedIds.length} import consignment(s) deleted`, "success");
-      setSelectedIds([]);
-      setBulkMenuOpen(false);
+    if (!window.confirm(`Are you sure you want to delete ${selectedIds.length} selected consignments?`)) return;
+    let done = 0;
+    let failed = 0;
+    for (const o of orders.filter((x) => selectedIds.includes(x.id))) {
+      try {
+        await apiDelete(`${IMPORT_PURCHASE_API}/${o.id}`);
+        done++;
+      } catch {
+        failed++;
+      }
     }
+    toast(failed ? `${done} deleted, ${failed} could not be deleted` : `${done} import consignment(s) deleted`, failed ? "error" : "success");
+    setSelectedIds([]);
+    setBulkMenuOpen(false);
+    await loadOrders();
   };
 
   useEffect(() => {
@@ -832,50 +251,23 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
   // Dynamic KPI calculations based on current orders pool
   const kpis = useMemo(() => {
-    let allTotal = 0;
-    let pendingTotal = 0;
-    let confirmedTotal = 0;
-    let receivedTotal = 0;
-    let closedTotal = 0;
-
-    let allCount = orders.length;
-    let pendingCount = 0;
-    let confirmedCount = 0;
-    let receivedCount = 0;
-    let closedCount = 0;
-
-    orders.forEach((o) => {
+    const out: Record<string, { amount: number; count: number }> = { all: { amount: 0, count: orders.length } };
+    for (const o of orders) {
       const val = Number(o.invoice_total_inr) || 0;
-      allTotal += val;
-      if (o.status === "Pending") {
-        pendingTotal += val;
-        pendingCount++;
-      } else if (o.status === "Confirmed") {
-        confirmedTotal += val;
-        confirmedCount++;
-      } else if (o.status === "Received") {
-        receivedTotal += val;
-        receivedCount++;
-      } else if (o.status === "Closed") {
-        closedTotal += val;
-        closedCount++;
-      }
-    });
-
-    return {
-      all: { amount: allTotal, count: allCount },
-      pending: { amount: pendingTotal, count: pendingCount },
-      confirmed: { amount: confirmedTotal, count: confirmedCount },
-      received: { amount: receivedTotal, count: receivedCount },
-      closed: { amount: closedTotal, count: closedCount },
-    };
+      out.all.amount += val;
+      out[o.status_key] = out[o.status_key] || { amount: 0, count: 0 };
+      out[o.status_key].amount += val;
+      out[o.status_key].count += 1;
+    }
+    return out;
   }, [orders]);
+  const kpi = (key: string) => kpis[key] || { amount: 0, count: 0 };
 
   // Filtering
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
       // Tab filter
-      if (selectedTab !== "ALL" && o.status !== selectedTab) {
+      if (selectedTab !== "ALL" && o.status_key !== selectedTab) {
         return false;
       }
       // Warehouse filter
@@ -886,6 +278,10 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       if (filterSupplier !== "ALL" && o.supplier_name !== filterSupplier) {
         return false;
       }
+      // Date-range filters (spec: Expected Arrival, ETD Origin and ETA Port)
+      if (!inDateRange(o.exp_arri_date, filterArrival)) return false;
+      if (!inDateRange(o.etd_origin_date, filterEtd)) return false;
+      if (!inDateRange(o.eta_port_date, filterEta)) return false;
       // Search
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
@@ -899,7 +295,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       }
       return true;
     });
-  }, [orders, selectedTab, filterWarehouse, filterSupplier, searchTerm]);
+  }, [orders, selectedTab, filterWarehouse, filterSupplier, filterArrival, filterEtd, filterEta, searchTerm]);
 
   // Sorting
   const sortedOrders = useMemo(() => {
@@ -927,7 +323,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedTab, searchTerm, perPage, filterWarehouse, filterSupplier]);
+  }, [selectedTab, searchTerm, perPage, filterWarehouse, filterSupplier, filterArrival, filterEtd, filterEta]);
 
   const handleSort = (field: keyof ImportPurchaseRecord) => {
     if (sortField === field) {
@@ -939,107 +335,215 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   };
 
   // ==========================================
-  // Add / Edit Form State
+  // Add / Edit Form State (Import Purchase spec)
   // ==========================================
-  const [formWarehouse, setFormWarehouse] = useState("Mumbai Ordered");
-  const [formSupplier, setFormSupplier] = useState("Yinglima");
-  const [formConsignmentNo, setFormConsignmentNo] = useState("");
-  const [formOrderedDate, setFormOrderedDate] = useState("22-09-2026");
-  const [formEtdOrigin, setFormEtdOrigin] = useState("10-10-2026");
-  const [formEtaPort, setFormEtaPort] = useState("25-10-2026");
-  const [formTotalUsd, setFormTotalUsd] = useState("");
-  const [formExchangeRate, setFormExchangeRate] = useState("83.50");
-  const [formTotalCbm, setFormTotalCbm] = useState("65.0");
-  const [formGrossWeight, setFormGrossWeight] = useState("12000");
-  const [formOceanFreight, setFormOceanFreight] = useState("250000");
-  const [formCustomsDuty, setFormCustomsDuty] = useState("380000");
-  const [formInlandTransport, setFormInlandTransport] = useState("65000");
+  type FormItem = { id: string; product_name: string; quantity: number | string; unit_rate_usd: number | string };
+
+  const blankForm = (): ImportFormValues => ({
+    consignment_no: "",
+    supplier_name: DEFAULTS.supplier || "",
+    warehouse: DEFAULTS.warehouse || "",
+    ordered_date: todayDDMMYYYY(),
+    invoice_date: "",
+    etd_origin_date: "",
+    eta_port_date: "",
+    expected_arrival_date: "",
+    conversion_rate: "",
+    customs_conversion_rate: "",
+    invoice_total_usd: "",
+    total_cbm: "",
+    total_import_duty: "",
+    freight: "",
+    insurance: "",
+    stamp_duty: "",
+    shipping_line_charges: "",
+    cfs_charges: "",
+    clearing_transport: "",
+    offloading: "",
+    misc_charges: "",
+    misc_remarks: "",
+    remarks: "",
+    items: [],
+  });
+
+  const [form, setForm] = useState<ImportFormValues>(blankForm);
+  const [formItems, setFormItems] = useState<FormItem[]>([]);
+  const [originalWarehouse, setOriginalWarehouse] = useState("");
   const [formBillFileName, setFormBillFileName] = useState("");
-  const [formRemarks, setFormRemarks] = useState("Direct overseas procurement from Yinglima China.");
-  const [formLineItems, setFormLineItems] = useState<ImportPurchaseItem[]>([]);
+  const [formBillFile, setFormBillFile] = useState<File | null>(null);
+  const [removeBill, setRemoveBill] = useState(false);
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
+  const [productSearchQuery, setProductSearchQuery] = useState("");
+  const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const billInputRef = useRef<HTMLInputElement>(null);
+  const previewSeq = useRef(0);
+  const productSearchSeq = useRef(0);
 
-  const totalCalculatedInr = useMemo(() => {
-    const usd = parseFloat(formTotalUsd) || 0;
-    const rate = parseFloat(formExchangeRate) || 83.5;
-    return Math.round(usd * rate * 100) / 100;
-  }, [formTotalUsd, formExchangeRate]);
+  const setField = (key: keyof ImportFormValues, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
+  const values: ImportFormValues = { ...form, items: formItems };
 
-  const totalCalculatedExpenses = useMemo(() => {
-    const sea = parseFloat(formOceanFreight) || 0;
-    const duty = parseFloat(formCustomsDuty) || 0;
-    const inland = parseFloat(formInlandTransport) || 0;
-    return sea + duty + inland;
-  }, [formOceanFreight, formCustomsDuty, formInlandTransport]);
+  // Fill the DB-configured defaults (supplier, warehouse) into a still-blank new form once they load
+  useEffect(() => {
+    if (editingOrderId) return;
+    setForm((prev) => ({
+      ...prev,
+      supplier_name: prev.supplier_name || DEFAULTS.supplier || "",
+      warehouse: prev.warehouse || DEFAULTS.warehouse || "",
+    }));
+  }, [DEFAULTS, editingOrderId]);
+
+  // Live landing cost: the server runs the exact formulas used on save, so the figures shown here are what gets stored
+  const previewKey = JSON.stringify({ ...form, items: formItems.map((i) => [i.product_name, i.quantity, i.unit_rate_usd]) });
+  useEffect(() => {
+    if (!isFormOpen) return;
+    const seq = ++previewSeq.current;
+    const timer = setTimeout(() => {
+      previewImport(values)
+        .then((p) => {
+          if (seq === previewSeq.current) {
+            setPreview(p);
+            setPreviewError(null);
+          }
+        })
+        .catch((err) => {
+          if (seq === previewSeq.current) {
+            setPreview(null);
+            setPreviewError(apiErrorText(err));
+          }
+        });
+    }, 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey, isFormOpen]);
+
+  const namedRows = formItems.filter((i) => i.product_name.trim());
+  const previewRow = (id: string) => {
+    const idx = namedRows.findIndex((r) => r.id === id);
+    return idx >= 0 ? preview?.items[idx] : undefined;
+  };
+  const dash = (n: number | undefined, fmt: (v: number) => string = (v) => String(v)) => (n === undefined ? "—" : fmt(n));
+
+  const warehouseLocked = Boolean(editingOrderId) && physicalWarehouses.has(originalWarehouse);
+
+  const resetForm = () => {
+    setForm(blankForm());
+    setFormItems([]);
+    setOriginalWarehouse("");
+    setFormBillFileName("");
+    setFormBillFile(null);
+    setRemoveBill(false);
+    setFormErrors({});
+    setPreview(null);
+    setPreviewError(null);
+    setProductSearchQuery("");
+    setProductSearchMatches([]);
+  };
+
+  const populateForm = (order: ImportPurchaseRecord) => {
+    const s = (n: number | undefined) => (n ? String(n) : "");
+    setEditingOrderId(order.id);
+    setOriginalWarehouse(order.warehouse);
+    setForm({
+      consignment_no: order.consignment_no,
+      supplier_name: order.supplier_name,
+      warehouse: order.warehouse,
+      ordered_date: order.ordered_date,
+      invoice_date: order.invoice_date || "",
+      etd_origin_date: order.etd_origin_date || "",
+      eta_port_date: order.eta_port_date || "",
+      expected_arrival_date: order.exp_arri_date || "",
+      conversion_rate: s(order.con_rate_usd_to_inr),
+      customs_conversion_rate: s(order.custom_con_rate_usd_to_inr),
+      invoice_total_usd: s(order.invoice_total_usd),
+      total_cbm: s(order.total_cbm),
+      total_import_duty: s(order.total_imp_duty),
+      freight: s(order.freight_exp),
+      insurance: s(order.insurance_exp),
+      stamp_duty: s(order.stamp_duty_exp),
+      shipping_line_charges: s(order.shipping_line_charges),
+      cfs_charges: s(order.cfs_charges),
+      clearing_transport: s(order.clearing_transport),
+      offloading: s(order.offloading_exp),
+      misc_charges: s(order.misc_charges),
+      misc_remarks: order.misc_remarks || "",
+      remarks: order.remarks || "",
+      items: [],
+    });
+    setFormItems((order.items || []).map((it, idx) => ({ id: it.id || `row-${idx}`, product_name: it.product_name, quantity: it.quantity, unit_rate_usd: it.unit_rate_usd })));
+    setFormBillFileName(order.bill_file || "");
+    setFormBillFile(null);
+    setRemoveBill(false);
+    setFormErrors({});
+    setIsFormOpen(true);
+  };
 
   const handleOpenCreate = () => {
     setEditingOrderId(null);
-    setFormWarehouse("Mumbai Ordered");
-    setFormSupplier("Yinglima");
-    setFormConsignmentNo("");
-    setFormOrderedDate("22-09-2026");
-    setFormEtdOrigin("10-10-2026");
-    setFormEtaPort("25-10-2026");
-    setFormTotalUsd("");
-    setFormExchangeRate("83.50");
-    setFormTotalCbm("65.0");
-    setFormGrossWeight("12000");
-    setFormOceanFreight("250000");
-    setFormCustomsDuty("380000");
-    setFormInlandTransport("65000");
-    setFormBillFileName("");
-    setFormRemarks("Direct overseas procurement from Yinglima China.");
-    setFormLineItems([]);
-    setFormErrors({});
+    resetForm();
     setIsFormOpen(true);
     navigate("/purchase-order/import-purchase/addedit");
   };
 
   const handleOpenEdit = (order: ImportPurchaseRecord) => {
-    setEditingOrderId(order.id);
-    setFormWarehouse(order.warehouse || "Mumbai Ordered");
-    setFormSupplier(order.supplier_name || "Yinglima");
-    setFormConsignmentNo(order.consignment_no || "");
-    setFormOrderedDate(order.ordered_date || "22-09-2026");
-    setFormEtdOrigin(order.etd_origin_date || "10-10-2026");
-    setFormEtaPort(order.eta_port_date || "25-10-2026");
-    setFormTotalUsd(order.invoice_total_usd ? String(order.invoice_total_usd) : "");
-    setFormExchangeRate(order.exchange_rate ? String(order.exchange_rate) : "83.50");
-    setFormTotalCbm(order.total_cbm ? String(order.total_cbm) : "65.0");
-    setFormGrossWeight(order.gross_weight ? String(order.gross_weight) : "12000");
-    setFormBillFileName(order.bill_file || "");
-    setFormRemarks(order.remarks || "Direct overseas procurement from Yinglima China.");
-    setFormLineItems(order.items && order.items.length > 0 ? [...order.items] : []);
-    setFormErrors({});
-    setIsFormOpen(true);
+    populateForm(order);
     navigate(`/purchase-order/import-purchase/addedit/${order.id}`);
   };
 
-  const handleConfirmOrder = (order: ImportPurchaseRecord) => {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === order.id ? { ...o, status: "Confirmed" as const } : o))
-    );
-    apiPost(`/purchase/import/orders/${order.id}/confirm`, { status: "Confirmed" }).catch(() => {});
-    toast(`Consignment ${order.consignment_no} confirmed successfully`, "success");
+  // Opening .../addedit/:id loads that consignment into the form
+  useEffect(() => {
+    if (!routeOrderId || editingOrderId === routeOrderId) return;
+    let cancelled = false;
+    apiGet<any>(`${IMPORT_PURCHASE_API}/${routeOrderId}`)
+      .then((res) => {
+        if (!cancelled && res?.data) populateForm(mapImportPurchase(res.data, statusRules));
+      })
+      .catch((err) => {
+        if (!cancelled) setPageError(apiErrorText(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeOrderId]);
+
+  // Moves a consignment to its next status through the API; the server applies the rules
+  const transitionOrder = async (order: ImportPurchaseRecord, target: string, reason?: string) => {
+    try {
+      await apiPatch(`${IMPORT_PURCHASE_API}/${order.id}/status`, { status: target, reason });
+      toast(`Consignment ${order.consignment_no} ${statusRules[target]?.label?.toLowerCase() || target}`, "success");
+      await loadOrders();
+    } catch (err) {
+      toast(apiErrorText(err), "error");
+    }
   };
 
-  const handleDeleteOrder = (order: ImportPurchaseRecord) => {
-    if (window.confirm(`Are you sure you want to delete consignment ${order.consignment_no}?`)) {
-      setOrders((prev) => {
-        const updated = prev.filter((o) => o.id !== order.id);
-        try {
-          localStorage.setItem("inhyma_import_purchase_orders", JSON.stringify(updated));
-        } catch {}
-        return updated;
-      });
-      apiPost(`/purchase/import/orders/${order.id}/delete`, {}).catch(() => {});
+  const handleConfirmOrder = (order: ImportPurchaseRecord) => {
+    const target = nextStatus(order);
+    if (!target) return;
+    if (needsReason(statusRules, order.status_key, target)) {
+      const reason = window.prompt("Please give a reason");
+      if (!reason?.trim()) return;
+      void transitionOrder(order, target, reason.trim());
+      return;
+    }
+    void transitionOrder(order, target);
+  };
+
+  const handleDeleteOrder = async (order: ImportPurchaseRecord) => {
+    if (!window.confirm(`Are you sure you want to delete consignment ${order.consignment_no}?`)) return;
+    try {
+      await apiDelete(`${IMPORT_PURCHASE_API}/${order.id}`);
       toast(`Consignment ${order.consignment_no} deleted successfully`, "success");
+      await loadOrders();
+    } catch (err) {
+      toast(apiErrorText(err), "error");
     }
   };
 
   const handleOpenBillPdf = (order: ImportPurchaseRecord) => {
-    const targetId = order.consignment_no ? encodeURIComponent(order.consignment_no) : order.id;
-    window.open(`/purchase-order/import-bill-file/${targetId}`, "_blank");
+    window.open(`/purchase-order/import-bill-file/${order.id}`, "_blank");
   };
 
   const handleBack = () => {
@@ -1048,91 +552,79 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     navigate("/purchase/importpurchase");
   };
 
-  const handleSaveImportOrder = (e: React.FormEvent) => {
+  // Product search: the Product Master
+  const handleProductSearchChange = (val: string) => {
+    setProductSearchQuery(val);
+    if (!val.trim()) {
+      setProductSearchMatches([]);
+      return;
+    }
+    const seq = ++productSearchSeq.current;
+    void apiGet<any[]>(`/masters/products?page=1&page_size=10&status=active&search=${encodeURIComponent(val.trim())}`)
+      .then((res) => {
+        if (seq === productSearchSeq.current) setProductSearchMatches((res?.data || []).map((p) => ({ product_name: p.product_name })));
+      })
+      .catch(() => {
+        if (seq === productSearchSeq.current) setProductSearchMatches([]);
+      });
+  };
+
+  const handleSelectProductMatch = (prod: CatalogProduct) => {
+    setFormItems((prev) => [...prev, { id: "row-" + Date.now() + Math.random().toString(36).slice(2, 6), product_name: prod.product_name, quantity: 1, unit_rate_usd: "" }]);
+    setProductSearchQuery("");
+    setProductSearchMatches([]);
+  };
+
+  const updateItem = (id: string, field: "quantity" | "unit_rate_usd", value: string) =>
+    setFormItems((prev) => prev.map((i) => (i.id === id ? { ...i, [field]: value } : i)));
+  const removeItem = (id: string) => setFormItems((prev) => prev.filter((i) => i.id !== id));
+
+  const handleSaveImportOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs: { [key: string]: string } = {};
-
-    if (!formConsignmentNo.trim()) {
-      errs.consignment_no = "Consignment No. is required.";
+    if (!form.supplier_name.trim()) errs.supplier = "Supplier is required.";
+    else if (supplierNames.length > 0 && !supplierNames.some((n) => n.toLowerCase() === form.supplier_name.trim().toLowerCase())) {
+      errs.supplier = "Select a supplier from the list.";
     }
-    if (!formOrderedDate.trim()) {
-      errs.ordered_date = "Ordered Date is required.";
-    }
-    if (!formTotalUsd.trim()) {
-      errs.invoice_total_usd = "Invoice Total ($ USD) is required.";
-    }
-
+    if (!form.warehouse) errs.warehouse = "Warehouse is required.";
+    if (!form.consignment_no.trim()) errs.consignment_no = "Invoice / Consignment No. is required.";
+    if (!form.ordered_date.trim()) errs.ordered_date = "Ordered Date is required.";
+    if (!(Number(form.conversion_rate) > 0)) errs.conversion_rate = "Conversion rate is required.";
+    if (!(Number(form.customs_conversion_rate) > 0)) errs.customs_conversion_rate = "Customs conversion rate is required.";
+    if (namedRows.length === 0) errs.items = "Please add at least one product.";
+    else if (namedRows.some((r) => !(Number(r.quantity) > 0))) errs.items = "Every product needs a quantity above zero.";
     if (Object.keys(errs).length > 0) {
       setFormErrors(errs);
       return;
     }
     setFormErrors({});
-
-    const usd = parseFloat(formTotalUsd) || 0;
-    const rate = parseFloat(formExchangeRate) || 83.5;
-    const inr = totalCalculatedInr;
-
-    if (editingOrderId) {
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.id === editingOrderId
-            ? {
-                ...o,
-                consignment_no: formConsignmentNo.trim(),
-                warehouse: formWarehouse,
-                supplier_name: formSupplier,
-                ordered_date: formOrderedDate.trim(),
-                etd_origin_date: formEtdOrigin.trim(),
-                eta_port_date: formEtaPort.trim(),
-                invoice_total_usd: usd,
-                exchange_rate: rate,
-                invoice_total_inr: inr,
-                total_cbm: parseFloat(formTotalCbm) || 0,
-                gross_weight: parseFloat(formGrossWeight) || 0,
-                total_expenses: totalCalculatedExpenses,
-                gross_amount: inr + totalCalculatedExpenses,
-                remarks: formRemarks,
-                bill_file: formBillFileName || o.bill_file,
-                items: formLineItems,
-              }
-            : o
-        )
-      );
-      toast("Import consignment updated successfully", "success");
+    setSaving(true);
+    try {
+      const canonicalSupplier = supplierNames.find((n) => n.toLowerCase() === form.supplier_name.trim().toLowerCase());
+      const body = buildImportPayload({ ...values, supplier_name: canonicalSupplier || form.supplier_name.trim() });
+      const res = editingOrderId
+        ? await apiPut<{ id: string }>(`${IMPORT_PURCHASE_API}/${editingOrderId}`, body)
+        : await apiPost<{ id: string }>(IMPORT_PURCHASE_API, body);
+      const savedId = (res.data as { id: string }).id;
+      if (formBillFile) {
+        const fd = new FormData();
+        fd.append("file", formBillFile);
+        await apiPostMultipart(`${IMPORT_PURCHASE_API}/${savedId}/bill`, fd);
+      } else if (editingOrderId && removeBill) {
+        await apiDelete(`${IMPORT_PURCHASE_API}/${savedId}/bill`);
+      }
+      toast(editingOrderId ? "Import consignment updated successfully" : "Import consignment created successfully", "success");
       setEditingOrderId(null);
       setIsFormOpen(false);
       navigate("/purchase/importpurchase");
-      return;
+      await loadOrders();
+    } catch (err) {
+      // stay on the form and show the real reason; never pretend it was saved
+      setFormErrors({ submit: apiErrorText(err) });
+      toast(apiErrorText(err), "error");
+    } finally {
+      setSaving(false);
     }
-
-    const newOrder: ImportPurchaseRecord = {
-      id: `imp-${Date.now()}`,
-      consignment_no: formConsignmentNo.trim(),
-      warehouse: formWarehouse,
-      supplier_name: formSupplier,
-      ordered_date: formOrderedDate.trim(),
-      etd_origin_date: formEtdOrigin.trim(),
-      eta_port_date: formEtaPort.trim(),
-      invoice_total_usd: usd,
-      exchange_rate: rate,
-      invoice_total_inr: inr,
-      total_cbm: parseFloat(formTotalCbm) || 65.0,
-      gross_weight: parseFloat(formGrossWeight) || 12000,
-      total_expenses: totalCalculatedExpenses,
-      gross_amount: inr + totalCalculatedExpenses,
-      status: "Confirmed",
-      created_by: "Akshata Wadekar",
-      added_on: "22-09-2026",
-      updated_date: "22-09-2026",
-      remarks: formRemarks,
-      bill_file: formBillFileName || "Import_Commercial_Invoice.pdf",
-      items: formLineItems,
-    };
-
-    setOrders([newOrder, ...orders]);
-    toast("Import consignment created successfully", "success");
-    setIsFormOpen(false);
-    navigate("/purchase/importpurchase");
   };
 
   const handleExport = () => {
@@ -1169,9 +661,9 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       o.total_cbm || "",
       o.total_expenses || 0,
       o.loading_expense_percent ? `${o.loading_expense_percent}%` : "",
-      o.loading_exp_cb || 0,
-      o.gross_amount || o.invoice_total_inr,
-      o.created_by || "Akshata Wadekar",
+      o.loading_amount_per_cbm || 0,
+      o.gross_total_landing || o.invoice_total_inr,
+      o.created_by || "—",
       o.bill_file || "",
       o.updated_date || o.added_on || o.ordered_date,
       o.status,
@@ -1192,13 +684,54 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   // VIEW 1: Add/Edit Import Purchase View
   // ==========================================
   if (isFormOpen) {
+    // At Pending the goods are still ordered / in transit: physical warehouses are hidden (General Points). A consignment that
+    // already sits in a physical warehouse keeps being offered every warehouse, since its warehouse is locked anyway.
+    const offeredWarehouses = (() => {
+      const base =
+        editingOrderId && physicalWarehouses.has(originalWarehouse)
+          ? warehouseNames
+          : warehouseNames.filter((n) => !physicalWarehouses.has(n));
+      return form.warehouse && !base.includes(form.warehouse) ? [...base, form.warehouse] : base;
+    })();
+    const numField = (key: keyof ImportFormValues, label: string, opts: { required?: boolean; error?: string } = {}) => (
+      <Field label={label} required={opts.required} error={opts.error}>
+        <input
+          type="number"
+          step="any"
+          min="0"
+          aria-label={label}
+          value={form[key] as string}
+          onChange={(e) => setField(key, e.target.value)}
+          style={FIELD_INPUT}
+        />
+      </Field>
+    );
+    const dateField = (key: keyof ImportFormValues, label: string, required = false, error?: string) => (
+      <Field label={label} required={required} error={error}>
+        <DatePicker
+          value={form[key] as string}
+          onChange={(val) => setField(key, val)}
+          ariaLabel={label}
+          placeholder="DD-MM-YYYY"
+          inputStyle={{ height: "34px", fontSize: "13px", color: "#334155" }}
+        />
+      </Field>
+    );
+    const readOnlyField = (label: string, value: string) => (
+      <Field label={label}>
+        <input aria-label={label} readOnly value={value} style={{ ...FIELD_INPUT, background: "#f8fafc", fontWeight: 600 }} />
+      </Field>
+    );
+    const th: React.CSSProperties = { padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" };
+    const td: React.CSSProperties = { padding: "6px 10px", fontSize: "12.5px", textAlign: "right", color: "#334155", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" };
+    const money = (v: number) => formatIndianCurrency(v);
+
     return (
       <AppShell activeKey="import-purchases">
         <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
           <div style={{ marginBottom: "12px" }}>
             <Breadcrumb trail={["Purchase", "Import Purchase", editingOrderId ? "Edit Import Purchase" : "Add Import Purchase"]} />
           </div>
-          {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
               {editingOrderId ? "Edit Import Purchase" : "Add Import Purchase"}
@@ -1206,397 +739,243 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             <button
               type="button"
               onClick={handleBack}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                background: "#ffffff",
-                border: "1px solid #cbd5e1",
-                borderRadius: "4px",
-                padding: "6px 14px",
-                fontSize: "13px",
-                fontWeight: 600,
-                color: "#334155",
-                cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-              }}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "6px 14px", fontSize: "13px", fontWeight: 600, color: "#334155", cursor: "pointer" }}
             >
               ← BACK
             </button>
           </div>
 
-          <form onSubmit={handleSaveImportOrder}>
-            {/* General Details Card */}
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e2e8f0",
-                borderRadius: "6px",
-                padding: "16px 20px",
-                marginBottom: "16px",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
-              }}
-            >
-              <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "14px" }}>
-                General Details
-              </div>
+          {formErrors.submit && (
+            <div role="alert" style={{ padding: "10px 14px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "12px" }}>
+              ⚠️ {formErrors.submit}
+            </div>
+          )}
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
-                  gap: "16px",
-                  marginBottom: "16px",
-                }}
-              >
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Warehouse <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
+          <form onSubmit={handleSaveImportOrder} noValidate>
+            {/* General Details */}
+            <div style={CARD}>
+              <div style={CARD_TITLE}>General Details</div>
+              <div style={GRID4}>
+                <Field label="Supplier" required error={formErrors.supplier}>
+                  <input
+                    aria-label="Supplier"
+                    list="import-supplier-options"
+                    autoComplete="off"
+                    placeholder="Type to search suppliers"
+                    value={form.supplier_name}
+                    onChange={(e) => setField("supplier_name", e.target.value)}
+                    style={FIELD_INPUT}
+                  />
+                  <datalist id="import-supplier-options">
+                    {supplierNames.map((n) => (
+                      <option key={n} value={n} />
+                    ))}
+                  </datalist>
+                </Field>
+                <Field label="Warehouse" required error={formErrors.warehouse}>
                   <select
-                    value={formWarehouse}
-                    onChange={(e) => setFormWarehouse(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 8px",
-                      fontSize: "13px",
-                      background: "#ffffff",
-                      color: "#334155",
-                      outline: "none",
-                    }}
+                    aria-label="Warehouse"
+                    value={form.warehouse}
+                    disabled={warehouseLocked}
+                    title={warehouseLocked ? "Stock has been received into a physical warehouse, so the warehouse can no longer be changed." : undefined}
+                    onChange={(e) => setField("warehouse", e.target.value)}
+                    style={FIELD_INPUT}
                   >
-                    {IMPORT_WAREHOUSE_OPTIONS.map((w) => (
-                      <option key={w} value={w}>{w}</option>
+                    <option value="">Select</option>
+                    {offeredWarehouses.map((n) => (
+                      <option key={n} value={n}>{n}</option>
                     ))}
                   </select>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Supplier (Foreign) <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <select
-                    value={formSupplier}
-                    onChange={(e) => setFormSupplier(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 8px",
-                      fontSize: "13px",
-                      background: "#ffffff",
-                      color: "#334155",
-                      outline: "none",
-                    }}
-                  >
-                    {IMPORT_SUPPLIER_OPTIONS.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Consignment / Inv No. <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formConsignmentNo}
-                    onChange={(e) => setFormConsignmentNo(e.target.value)}
-                    placeholder="e.g. MUM52"
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 10px",
-                      fontSize: "13px",
-                      color: "#334155",
-                      outline: "none",
-                    }}
-                  />
-                  {formErrors.consignment_no && (
-                    <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" }}>
-                      {formErrors.consignment_no}
-                    </span>
-                  )}
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Ordered Date <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <DatePicker
-                    value={formOrderedDate}
-                    onChange={(val) => setFormOrderedDate(val)}
-                    ariaLabel="Ordered Date"
-                    placeholder="DD-MM-YYYY"
-                    inputStyle={{ height: "34px", fontSize: "13px", color: "#334155" }}
-                  />
-                </div>
-              </div>
-
-              {/* Row 2: ETD, ETA, USD Total, Exchange Rate */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
-                  gap: "16px",
-                }}
-              >
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    ETD Origin Date
-                  </label>
-                  <DatePicker
-                    value={formEtdOrigin}
-                    onChange={(val) => setFormEtdOrigin(val)}
-                    ariaLabel="ETD Origin Date"
-                    placeholder="DD-MM-YYYY"
-                    inputStyle={{ height: "34px", fontSize: "13px", color: "#334155" }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    ETA Port Date
-                  </label>
-                  <DatePicker
-                    value={formEtaPort}
-                    onChange={(val) => setFormEtaPort(val)}
-                    ariaLabel="ETA Port Date"
-                    placeholder="DD-MM-YYYY"
-                    inputStyle={{ height: "34px", fontSize: "13px", color: "#334155" }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Invoice Total ($ USD) <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={formTotalUsd}
-                    onChange={(e) => setFormTotalUsd(e.target.value)}
-                    placeholder="e.g. 42500"
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 10px",
-                      fontSize: "13px",
-                      color: "#334155",
-                      outline: "none",
-                    }}
-                  />
-                  {formErrors.invoice_total_usd && (
-                    <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" }}>
-                      {formErrors.invoice_total_usd}
-                    </span>
-                  )}
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Exchange Rate (1 USD = INR)
-                  </label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={formExchangeRate}
-                    onChange={(e) => setFormExchangeRate(e.target.value)}
-                    placeholder="83.50"
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 10px",
-                      fontSize: "13px",
-                      color: "#334155",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Total in INR banner */}
-              <div
-                style={{
-                  marginTop: "16px",
-                  padding: "10px 14px",
-                  borderRadius: "4px",
-                  background: "#f0f9ff",
-                  border: "1px solid #bae6fd",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ fontSize: "12.5px", color: "#0369a1", fontWeight: 600 }}>
-                  Estimated Converted Value (INR):
-                </div>
-                <div style={{ fontSize: "15px", color: "#0284c7", fontWeight: 700 }}>
-                  {formatIndianCurrency(totalCalculatedInr)}
-                </div>
+                </Field>
+                <Field label="Invoice / Consignment No." required error={formErrors.consignment_no}>
+                  <input aria-label="Invoice / Consignment No." value={form.consignment_no} onChange={(e) => setField("consignment_no", e.target.value)} style={FIELD_INPUT} />
+                </Field>
+                {dateField("ordered_date", "Ordered Date", true, formErrors.ordered_date)}
+                {dateField("invoice_date", "Invoice Date")}
+                {dateField("etd_origin_date", "ETD Origin Date")}
+                {dateField("eta_port_date", "ETA Port Date")}
+                {dateField("expected_arrival_date", "Expected Arrival Date")}
+                {numField("conversion_rate", "Conversion Rate (USD to INR)", { required: true, error: formErrors.conversion_rate })}
+                {numField("customs_conversion_rate", "Customs Conversion Rate (USD to INR)", { required: true, error: formErrors.customs_conversion_rate })}
+                {numField("invoice_total_usd", "Invoice Total Value (USD)")}
+                {numField("total_cbm", "Total CBM")}
+                {numField("total_import_duty", "Total Import Duty (INR)")}
+                <Field label="Attach Invoice">
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <input
+                      ref={billInputRef}
+                      type="file"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setFormBillFileName(e.target.files[0].name);
+                          setFormBillFile(e.target.files[0]);
+                          setRemoveBill(false);
+                        }
+                      }}
+                    />
+                    <button type="button" onClick={() => billInputRef.current?.click()} style={{ height: "34px", padding: "0 12px", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "12px", cursor: "pointer" }}>
+                      Choose File
+                    </button>
+                    <span style={{ fontSize: "12.5px", color: "#475569", overflow: "hidden", textOverflow: "ellipsis" }}>{formBillFileName || "No file chosen"}</span>
+                    {formBillFileName && (
+                      <button
+                        type="button"
+                        aria-label="Remove file"
+                        onClick={() => {
+                          setFormBillFileName("");
+                          setFormBillFile(null);
+                          setRemoveBill(true);
+                        }}
+                        style={{ border: "none", background: "none", color: "#ef4444", cursor: "pointer" }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </Field>
               </div>
             </div>
 
-            {/* International & Port Expenses Card */}
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e2e8f0",
-                borderRadius: "6px",
-                padding: "16px 20px",
-                marginBottom: "16px",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
-              }}
-            >
-              <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "14px" }}>
-                International Shipping & Customs Expenses
+            {/* Expenses */}
+            <div style={CARD}>
+              <div style={CARD_TITLE}>EXPENSES</div>
+              <div style={GRID4}>
+                {numField("freight", "Freight")}
+                {numField("insurance", "Insurance")}
+                {numField("stamp_duty", "Stamp Duty")}
+                {numField("shipping_line_charges", "Shipping Line Charges")}
+                {numField("cfs_charges", "CFS Charges")}
+                {numField("clearing_transport", "Clearing & Transport")}
+                {numField("offloading", "Offloading")}
+                {numField("misc_charges", "Miscellaneous")}
+                <Field label="Miscellaneous Remarks">
+                  <input aria-label="Miscellaneous Remarks" value={form.misc_remarks} onChange={(e) => setField("misc_remarks", e.target.value)} style={FIELD_INPUT} />
+                </Field>
               </div>
+              <div style={{ ...GRID4, marginBottom: 0 }}>
+                {readOnlyField("Total Expenses", dash(preview?.total_expenses, money))}
+                {readOnlyField("Invoice Total Value (INR)", dash(preview?.invoice_total_inr, money))}
+                {readOnlyField("Gross Total Landing (INR)", dash(preview?.gross_total_landing, money))}
+                {readOnlyField("% Loading Expense (Value Based)", dash(preview?.loading_percent_vb, (v) => `${v}%`))}
+                {readOnlyField("Loading Amount per CBM", dash(preview?.loading_amount_per_cbm, money))}
+              </div>
+              {previewError && <span role="alert" style={{ ...FIELD_ERROR, marginTop: "8px" }}>{previewError}</span>}
+            </div>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: "16px",
-                }}
-              >
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Ocean Freight / Shipping (INR)
-                  </label>
-                  <input
-                    type="number"
-                    value={formOceanFreight}
-                    onChange={(e) => setFormOceanFreight(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 10px",
-                      fontSize: "13px",
-                      color: "#334155",
-                      outline: "none",
-                    }}
-                  />
-                </div>
+            {/* Product search */}
+            <div style={CARD}>
+              <div style={CARD_TITLE}>PRODUCT SEARCH</div>
+              <div style={{ position: "relative", maxWidth: "460px" }}>
+                <input
+                  aria-label="Product Search"
+                  placeholder="Enter Product Name / Model No"
+                  value={productSearchQuery}
+                  onChange={(e) => handleProductSearchChange(e.target.value)}
+                  style={FIELD_INPUT}
+                />
+                {productSearchMatches.length > 0 && (
+                  <div style={{ position: "absolute", top: "36px", left: 0, right: 0, background: "#fff", border: "1px solid #cbd5e1", borderRadius: "4px", zIndex: 20, maxHeight: "220px", overflowY: "auto" }}>
+                    {productSearchMatches.map((p) => (
+                      <div
+                        key={p.product_name}
+                        role="option"
+                        onClick={() => handleSelectProductMatch(p)}
+                        style={{ padding: "8px 12px", fontSize: "13px", cursor: "pointer", borderBottom: "1px solid #f1f5f9" }}
+                      >
+                        {p.product_name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {formErrors.items && <span style={FIELD_ERROR}>{formErrors.items}</span>}
+            </div>
 
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Customs Duty & Port Handling (INR)
-                  </label>
-                  <input
-                    type="number"
-                    value={formCustomsDuty}
-                    onChange={(e) => setFormCustomsDuty(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 10px",
-                      fontSize: "13px",
-                      color: "#334155",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Inland Transport & Offloading (INR)
-                  </label>
-                  <input
-                    type="number"
-                    value={formInlandTransport}
-                    onChange={(e) => setFormInlandTransport(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 10px",
-                      fontSize: "13px",
-                      color: "#334155",
-                      outline: "none",
-                    }}
-                  />
-                </div>
+            {/* Product items with landing cost */}
+            <div style={CARD}>
+              <div style={CARD_TITLE}>PRODUCT ITEM</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      {["Sr.", "Product", "Qty", "UOM", "Pkg Unit CBM", "Pkg Qty", "Total CBM", "Unit Rate (USD)", "Total (USD)", "Unit Rate (INR)",
+                        "Import Duty %", "Unit Import Duty (INR)", "Item Total Import Duty (INR)", "Exp / Unit (VB)", "Exp / Unit (CB)", "Unit Landing (VB)", "Unit Landing (CB)", "Diff (CB - VB)", ""].map((h, i) => (
+                          <th key={i} style={{ ...th, textAlign: i === 1 ? "left" : "right" }}>{h}</th>
+                        ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {formItems.length === 0 && (
+                      <tr>
+                        <td colSpan={19} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>Search and add products above</td>
+                      </tr>
+                    )}
+                    {formItems.map((row, idx) => {
+                      const p = previewRow(row.id);
+                      return (
+                        <tr key={row.id}>
+                          <td style={td}>{idx + 1}</td>
+                          <td style={{ ...td, textAlign: "left" }}>{row.product_name}</td>
+                          <td style={td}>
+                            <input type="number" min="0" step="any" aria-label={`Quantity ${idx + 1}`} value={row.quantity} onChange={(e) => updateItem(row.id, "quantity", e.target.value)} style={{ ...FIELD_INPUT, width: "80px", textAlign: "right" }} />
+                          </td>
+                          <td style={td}>{p?.unit || "—"}</td>
+                          <td style={td}>{dash(p?.pkg_unit_cbm)}</td>
+                          <td style={td}>{dash(p?.pkg_qty)}</td>
+                          <td style={td}>{dash(p?.total_cbm)}</td>
+                          <td style={td}>
+                            <input type="number" min="0" step="any" aria-label={`Unit Rate USD ${idx + 1}`} value={row.unit_rate_usd} onChange={(e) => updateItem(row.id, "unit_rate_usd", e.target.value)} style={{ ...FIELD_INPUT, width: "100px", textAlign: "right" }} />
+                          </td>
+                          <td style={td}>{dash(p?.total_usd, formatUsdCurrency)}</td>
+                          <td style={td}>{dash(p?.unit_rate_inr, money)}</td>
+                          <td style={td}>{dash(p?.duty_percent, (v) => `${v}%`)}</td>
+                          <td style={td}>{dash(p?.unit_id_inr, money)}</td>
+                          <td style={td}>{dash(p?.item_total_id_inr, money)}</td>
+                          <td style={td}>{dash(p?.exp_per_unit_vb, money)}</td>
+                          <td style={td}>{dash(p?.exp_per_unit_cb, money)}</td>
+                          <td style={{ ...td, fontWeight: 700 }}>{dash(p?.unit_landing_rate_vb, money)}</td>
+                          <td style={{ ...td, fontWeight: 700 }}>{dash(p?.unit_landing_rate_cb, money)}</td>
+                          <td style={td}>{dash(p?.diff_cb_vb, money)}</td>
+                          <td style={td}>
+                            <button type="button" aria-label={`Remove ${row.product_name}`} onClick={() => removeItem(row.id)} style={{ border: "none", background: "none", color: "#ef4444", cursor: "pointer" }}>✕</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {formItems.length > 0 && (
+                    <tfoot>
+                      <tr>
+                        <td colSpan={6} style={{ ...td, fontWeight: 700 }}>Total</td>
+                        <td style={{ ...td, fontWeight: 700 }} data-testid="sum-cbm">{dash(preview?.sum_cbm)}</td>
+                        <td style={td} />
+                        <td style={{ ...td, fontWeight: 700 }} data-testid="sum-usd">{dash(preview?.sum_usd, formatUsdCurrency)}</td>
+                        <td colSpan={3} style={td} />
+                        <td style={{ ...td, fontWeight: 700 }} data-testid="sum-duty">{dash(preview?.sum_duty, money)}</td>
+                        <td colSpan={6} style={td} />
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
               </div>
             </div>
 
-            {/* Remarks & Submit */}
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e2e8f0",
-                borderRadius: "6px",
-                padding: "16px 20px",
-                marginBottom: "20px",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
-              }}
-            >
-              <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                Remarks / Consignment Notes
-              </label>
-              <textarea
-                rows={3}
-                value={formRemarks}
-                onChange={(e) => setFormRemarks(e.target.value)}
-                style={{
-                  width: "100%",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  padding: "8px 10px",
-                  fontSize: "13px",
-                  color: "#334155",
-                  outline: "none",
-                  resize: "vertical",
-                }}
-              />
-
-              <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                <button
-                  type="button"
-                  onClick={handleBack}
-                  style={{
-                    padding: "7px 18px",
-                    background: "#f1f5f9",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "4px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    color: "#475569",
-                    cursor: "pointer",
-                  }}
-                >
+            {/* Remarks + actions */}
+            <div style={CARD}>
+              <Field label="Remarks">
+                <textarea aria-label="Remarks" rows={3} placeholder="Enter remarks" value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} style={{ ...FIELD_INPUT, height: "auto", padding: "8px" }} />
+              </Field>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "14px" }}>
+                <button type="button" onClick={handleBack} style={{ padding: "7px 18px", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px", fontWeight: 600, color: "#475569", cursor: "pointer" }}>
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  style={{
-                    padding: "7px 24px",
-                    background: "#0061f2",
-                    border: "none",
-                    borderRadius: "4px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    color: "#ffffff",
-                    cursor: "pointer",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                  }}
+                  disabled={saving}
+                  style={{ padding: "7px 24px", background: saving ? "#94a3b8" : "#0061f2", border: "none", borderRadius: "4px", fontSize: "13px", fontWeight: 600, color: "#ffffff", cursor: saving ? "not-allowed" : "pointer" }}
                 >
-                  {editingOrderId ? "Update Consignment" : "Submit Consignment"}
+                  {saving ? "Saving…" : editingOrderId ? "Update Consignment" : "Submit Consignment"}
                 </button>
               </div>
             </div>
@@ -1612,6 +991,11 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   return (
     <AppShell activeKey="import-purchases">
       <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
+        {pageError && (
+          <div role="alert" style={{ padding: "12px 16px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "16px" }}>
+            ⚠️ {pageError}
+          </div>
+        )}
         <div style={{ marginBottom: "12px" }}>
           <Breadcrumb trail={["Purchase", "Import Purchase"]} />
         </div>
@@ -1784,210 +1168,57 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
           </div>
         </div>
 
-        {/* 5 KPI Stat Cards matching screenshot exactly */}
+        {/* KPI cards and status tabs: one per status in the DB-configured workflow */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(5, 1fr)",
+            gridTemplateColumns: `repeat(${statusKeys.length + 1}, 1fr)`,
             gap: "14px",
             marginBottom: "16px",
           }}
         >
-          {/* Card 1: ALL */}
-          <div
-            data-testid="kpi-card-all"
-            style={{
-              background: "#ffffff",
-              border: "1px solid #e2e8f0",
-              borderRadius: "6px",
-              padding: "14px 18px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
-            }}
-          >
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              ALL
+          {["all", ...statusKeys].map((key) => (
+            <div
+              key={key}
+              data-testid={`kpi-card-${key}`}
+              style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.02)" }}
+            >
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {key === "all" ? "ALL" : statusRules[key]?.card_label || statusRules[key]?.label || key}
+              </div>
+              <div style={{ fontSize: "15.5px", fontWeight: 700, color: "#1e293b", marginTop: "4px" }}>
+                {formatIndianCurrency(kpi(key).amount)} ({kpi(key).count})
+              </div>
             </div>
-            <div style={{ fontSize: "15.5px", fontWeight: 700, color: "#1e293b", marginTop: "4px" }}>
-              {formatIndianCurrency(kpis.all.amount)} ({kpis.all.count})
-            </div>
-          </div>
-
-          {/* Card 2: PENDING */}
-          <div
-            data-testid="kpi-card-pending"
-            style={{
-              background: "#ffffff",
-              border: "1px solid #e2e8f0",
-              borderRadius: "6px",
-              padding: "14px 18px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
-            }}
-          >
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              PENDING
-            </div>
-            <div style={{ fontSize: "15.5px", fontWeight: 700, color: "#1e293b", marginTop: "4px" }}>
-              {formatIndianCurrency(kpis.pending.amount)} ({kpis.pending.count})
-            </div>
-          </div>
-
-          {/* Card 3: CONFIRMED */}
-          <div
-            data-testid="kpi-card-confirmed"
-            style={{
-              background: "#ffffff",
-              border: "1px solid #e2e8f0",
-              borderRadius: "6px",
-              padding: "14px 18px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
-            }}
-          >
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              CONFIRMED
-            </div>
-            <div style={{ fontSize: "15.5px", fontWeight: 700, color: "#1e293b", marginTop: "4px" }}>
-              {formatIndianCurrency(kpis.confirmed.amount)} ({kpis.confirmed.count})
-            </div>
-          </div>
-
-          {/* Card 4: RECEIVED */}
-          <div
-            data-testid="kpi-card-received"
-            style={{
-              background: "#ffffff",
-              border: "1px solid #e2e8f0",
-              borderRadius: "6px",
-              padding: "14px 18px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
-            }}
-          >
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              RECEIVED
-            </div>
-            <div style={{ fontSize: "15.5px", fontWeight: 700, color: "#1e293b", marginTop: "4px" }}>
-              {formatIndianCurrency(kpis.received.amount)} ({kpis.received.count})
-            </div>
-          </div>
-
-          {/* Card 5: CLOSED */}
-          <div
-            data-testid="kpi-card-closed"
-            style={{
-              background: "#ffffff",
-              border: "1px solid #e2e8f0",
-              borderRadius: "6px",
-              padding: "14px 18px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
-            }}
-          >
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              CLOSED
-            </div>
-            <div style={{ fontSize: "15.5px", fontWeight: 700, color: "#1e293b", marginTop: "4px" }}>
-              {formatIndianCurrency(kpis.closed.amount)} ({kpis.closed.count})
-            </div>
-          </div>
+          ))}
         </div>
 
         {/* Status Tabs underneath KPI cards */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "24px",
-            borderBottom: "1px solid #e2e8f0",
-            marginBottom: "16px",
-          }}
-        >
-          <button
-            type="button"
-            data-testid="tab-all"
-            onClick={() => setSelectedTab("ALL")}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: selectedTab === "ALL" ? "2px solid #0061f2" : "2px solid transparent",
-              padding: "8px 4px",
-              fontSize: "13.5px",
-              fontWeight: selectedTab === "ALL" ? 700 : 500,
-              color: selectedTab === "ALL" ? "#0061f2" : "#64748b",
-              cursor: "pointer",
-            }}
-          >
-            All ({kpis.all.count})
-          </button>
-
-          <button
-            type="button"
-            data-testid="tab-pending"
-            onClick={() => setSelectedTab("Pending")}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: selectedTab === "Pending" ? "2px solid #0061f2" : "2px solid transparent",
-              padding: "8px 4px",
-              fontSize: "13.5px",
-              fontWeight: selectedTab === "Pending" ? 700 : 500,
-              color: selectedTab === "Pending" ? "#0061f2" : "#64748b",
-              cursor: "pointer",
-            }}
-          >
-            Pending ({kpis.pending.count})
-          </button>
-
-          <button
-            type="button"
-            data-testid="tab-confirmed"
-            onClick={() => setSelectedTab("Confirmed")}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: selectedTab === "Confirmed" ? "2px solid #0061f2" : "2px solid transparent",
-              padding: "8px 4px",
-              fontSize: "13.5px",
-              fontWeight: selectedTab === "Confirmed" ? 700 : 500,
-              color: selectedTab === "Confirmed" ? "#0061f2" : "#64748b",
-              cursor: "pointer",
-            }}
-          >
-            Confirmed ({kpis.confirmed.count})
-          </button>
-
-          <button
-            type="button"
-            data-testid="tab-received"
-            onClick={() => setSelectedTab("Received")}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: selectedTab === "Received" ? "2px solid #0061f2" : "2px solid transparent",
-              padding: "8px 4px",
-              fontSize: "13.5px",
-              fontWeight: selectedTab === "Received" ? 700 : 500,
-              color: selectedTab === "Received" ? "#0061f2" : "#64748b",
-              cursor: "pointer",
-            }}
-          >
-            Received ({kpis.received.count})
-          </button>
-
-          <button
-            type="button"
-            data-testid="tab-closed"
-            onClick={() => setSelectedTab("Closed")}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: selectedTab === "Closed" ? "2px solid #0061f2" : "2px solid transparent",
-              padding: "8px 4px",
-              fontSize: "13.5px",
-              fontWeight: selectedTab === "Closed" ? 700 : 500,
-              color: selectedTab === "Closed" ? "#0061f2" : "#64748b",
-              cursor: "pointer",
-            }}
-          >
-            Closed ({kpis.closed.count})
-          </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "24px", borderBottom: "1px solid #e2e8f0", marginBottom: "16px" }}>
+          {["ALL", ...statusKeys].map((key) => {
+            const tabKey = key === "ALL" ? "all" : key;
+            const active = selectedTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                data-testid={`tab-${tabKey}`}
+                onClick={() => setSelectedTab(key)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: active ? "2px solid #0061f2" : "2px solid transparent",
+                  padding: "8px 4px",
+                  fontSize: "13.5px",
+                  fontWeight: active ? 700 : 500,
+                  color: active ? "#0061f2" : "#64748b",
+                  cursor: "pointer",
+                }}
+              >
+                {key === "ALL" ? "All" : statusRules[key]?.label || key} ({kpi(tabKey).count})
+              </button>
+            );
+          })}
         </div>
 
         {/* Collapsible Filter Panel */}
@@ -2003,7 +1234,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
               boxShadow: "0 2px 4px rgba(0,0,0,0.03)",
             }}
           >
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "14px", alignItems: "flex-end" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "14px", alignItems: "flex-end" }}>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px", display: "block" }}>
                   Warehouse
@@ -2014,9 +1245,11 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                   style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 8px", fontSize: "12.5px" }}
                 >
                   <option value="ALL">All Warehouses</option>
-                  <option value="Mumbai Ordered">Mumbai Ordered</option>
-                  <option value="Ahmedabad Ordered">Ahmedabad Ordered</option>
-                  <option value="Indore Ordered">Indore Ordered</option>
+                  {warehouseNames.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -2030,9 +1263,43 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                   style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 8px", fontSize: "12.5px" }}
                 >
                   <option value="ALL">All Suppliers</option>
-                  <option value="Yinglima">Yinglima</option>
+                  {supplierNames.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
                 </select>
               </div>
+
+              {(
+                [
+                  ["Expected Arrival Date Range", filterArrival, setFilterArrival],
+                  ["ETD Origin Date Range", filterEtd, setFilterEtd],
+                  ["ETA Port Date Range", filterEta, setFilterEta],
+                ] as [string, DateFilter, (f: DateFilter) => void][]
+              ).map(([label, value, setValue]) => (
+                <div key={label}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px", display: "block" }}>{label}</label>
+                  <select
+                    aria-label={label}
+                    value={value.preset}
+                    onChange={(e) => setValue({ ...value, preset: e.target.value as DateFilter["preset"] })}
+                    style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 8px", fontSize: "12.5px" }}
+                  >
+                    {RANGE_PRESET_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {value.preset === "custom" && (
+                    <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
+                      <DatePicker value={value.from} onChange={(v) => setValue({ ...value, from: v })} ariaLabel={`${label} From`} placeholder="From" inputStyle={{ height: "30px", fontSize: "12px" }} />
+                      <DatePicker value={value.to} onChange={(v) => setValue({ ...value, to: v })} ariaLabel={`${label} To`} placeholder="To" inputStyle={{ height: "30px", fontSize: "12px" }} />
+                    </div>
+                  )}
+                </div>
+              ))}
 
               <div style={{ display: "flex", gap: "8px" }}>
                 <button
@@ -2040,6 +1307,9 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                   onClick={() => {
                     setFilterWarehouse("ALL");
                     setFilterSupplier("ALL");
+                    setFilterArrival(EMPTY_DATE_FILTER);
+                    setFilterEtd(EMPTY_DATE_FILTER);
+                    setFilterEta(EMPTY_DATE_FILTER);
                   }}
                   style={{
                     padding: "6px 14px",
@@ -2317,6 +1587,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                         >
                           {order.consignment_no}
                         </button>
+                        {order.invoice_date && <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>{order.invoice_date}</div>}
                       </td>
 
                       {/* Supplier */}
@@ -2376,17 +1647,17 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
                       {/* Loading Exp(CB)(₹) */}
                       <td style={{ padding: "10px 14px", textAlign: "right", color: "#334155" }}>
-                        {formatIndianCurrency(order.loading_exp_cb || 0)}
+                        {formatIndianCurrency(order.loading_amount_per_cbm || 0)}
                       </td>
 
                       {/* Gross Total Landing(₹) */}
                       <td style={{ padding: "10px 14px", textAlign: "right", color: "#334155" }}>
-                        {formatIndianCurrency(order.gross_amount || order.invoice_total_inr || 0)}
+                        {formatIndianCurrency(order.gross_total_landing || order.invoice_total_inr || 0)}
                       </td>
 
                       {/* Created By */}
                       <td style={{ padding: "10px 14px", color: "#334155" }}>
-                        {order.created_by || "Akshata Wadekar"}
+                        {order.created_by || "—"}
                       </td>
 
                       {/* Invoice */}
@@ -2421,38 +1692,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                       {/* Status */}
                       <td style={{ padding: "10px 14px", textAlign: "center" }}>
                         <span
-                          style={{
-                            display: "inline-block",
-                            padding: "2px 10px",
-                            borderRadius: "9999px",
-                            fontSize: "11px",
-                            fontWeight: 600,
-                            background:
-                              order.status === "Pending"
-                                ? "#fef9c3"
-                                : order.status === "Confirmed"
-                                ? "#e0f2fe"
-                                : order.status === "Received"
-                                ? "#dcfce7"
-                                : "#f1f5f9",
-                            color:
-                              order.status === "Pending"
-                                ? "#a16207"
-                                : order.status === "Confirmed"
-                                ? "#0284c7"
-                                : order.status === "Received"
-                                ? "#15803d"
-                                : "#475569",
-                            border: `1px solid ${
-                              order.status === "Pending"
-                                ? "#fde047"
-                                : order.status === "Confirmed"
-                                ? "#bae6fd"
-                                : order.status === "Received"
-                                ? "#bbf7d0"
-                                : "#cbd5e1"
-                            }`,
-                          }}
+                          style={{ display: "inline-block", padding: "2px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: 600, background: palette(order).bg, color: palette(order).fg, border: `1px solid ${palette(order).border}` }}
                         >
                           {order.status}
                         </span>
@@ -2519,50 +1759,52 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                               padding: "3px 0",
                             }}
                           >
-                            {order.status === "Confirmed" || order.status === "Received" || order.status === "Closed" ? (
+                            {!isInitialStatus(order) ? (
                               <>
-                                <button
-                                  type="button"
-                                  data-testid={`action-edit-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleOpenEdit(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    style={{ color: "#334155" }}
+                                {canEditOrder(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-edit-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleOpenEdit(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <path d="M12 20h9" />
-                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                                  </svg>
-                                  <span>Edit</span>
-                                </button>
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M12 20h9" />
+                                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                    </svg>
+                                    <span>Edit</span>
+                                  </button>
+                                )}
 
                                 <button
                                   type="button"
@@ -2607,134 +1849,225 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                                   </svg>
                                   <span>Download Purchase</span>
                                 </button>
+                                {!!nextStatus(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-confirm-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleConfirmOrder(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                  >
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="currentColor"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                                    </svg>
+                                    <span>{confirmLabel(order)}</span>
+                                  </button>
+                                )}
+                                {canDeleteOrder(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-delete-confirmed-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleDeleteOrder(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                  >
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <polyline points="3 6 5 6 21 6" />
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                      <line x1="10" y1="11" x2="10" y2="17" />
+                                      <line x1="14" y1="11" x2="14" y2="17" />
+                                    </svg>
+                                    <span>Delete</span>
+                                  </button>
+                                )}
                               </>
                             ) : (
                               <>
-                                <button
-                                  type="button"
-                                  data-testid={`action-edit-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleOpenEdit(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    style={{ color: "#334155" }}
+                                {canEditOrder(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-edit-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleOpenEdit(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <path d="M12 20h9" />
-                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                                  </svg>
-                                  <span>Edit</span>
-                                </button>
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M12 20h9" />
+                                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                    </svg>
+                                    <span>Edit</span>
+                                  </button>
+                                )}
 
-                                <button
-                                  type="button"
-                                  data-testid={`action-confirm-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleConfirmOrder(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
-                                    style={{ color: "#334155" }}
+                                {!!nextStatus(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-confirm-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleConfirmOrder(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                                  </svg>
-                                  <span>Confirm</span>
-                                </button>
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="currentColor"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                                    </svg>
+                                    <span>{confirmLabel(order)}</span>
+                                  </button>
+                                )}
 
-                                <button
-                                  type="button"
-                                  data-testid={`action-delete-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleDeleteOrder(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    style={{ color: "#334155" }}
+                                {canDeleteOrder(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-delete-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleDeleteOrder(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <polyline points="3 6 5 6 21 6" />
-                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                    <line x1="10" y1="11" x2="10" y2="17" />
-                                    <line x1="14" y1="11" x2="14" y2="17" />
-                                  </svg>
-                                  <span>Delete</span>
-                                </button>
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <polyline points="3 6 5 6 21 6" />
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                      <line x1="10" y1="11" x2="10" y2="17" />
+                                      <line x1="14" y1="11" x2="14" y2="17" />
+                                    </svg>
+                                    <span>Delete</span>
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>
@@ -2764,9 +2097,9 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
               {sortedOrders.length === 0
                 ? "Showing 0 To 0 Of 0 Entries"
                 : `Showing ${(currentPage - 1) * perPage + 1} To ${Math.min(
-                    currentPage * perPage,
-                    sortedOrders.length
-                  )} Of ${sortedOrders.length} Entries`}
+                  currentPage * perPage,
+                  sortedOrders.length
+                )} Of ${sortedOrders.length} Entries`}
             </div>
 
             <div style={{ display: "flex", gap: "6px" }}>
@@ -2810,9 +2143,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
         {/* Import Purchase Details Modal */}
         {selectedOrder && (() => {
-          const modalItems = (selectedOrder.items && selectedOrder.items.length > 0)
-            ? selectedOrder.items
-            : DEFAULT_MODAL_IMPORT_ITEMS;
+          const modalItems = selectedOrder.items || [];
 
           const modalTotalCbm = modalItems.reduce((acc, it) => acc + (it.total_cbm ?? (it.pkg_unit_cbm ? (it.pkg_unit_cbm * (it.quantity || 1)) : 0)), 0);
           const modalTotalUsd = modalItems.reduce((acc, it) => acc + (it.total_usd ?? (it.quantity * (it.unit_rate_usd || 1))), 0);
@@ -2878,38 +2209,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                       Import Purchase Details
                     </h2>
                     <span
-                      style={{
-                        display: "inline-block",
-                        padding: "2px 8px",
-                        borderRadius: "9999px",
-                        fontSize: "11px",
-                        fontWeight: 600,
-                        background:
-                          selectedOrder.status === "Pending"
-                            ? "#fef9c3"
-                            : selectedOrder.status === "Confirmed"
-                            ? "#e0f2fe"
-                            : selectedOrder.status === "Received"
-                            ? "#dcfce7"
-                            : "#f1f5f9",
-                        color:
-                          selectedOrder.status === "Pending"
-                            ? "#a16207"
-                            : selectedOrder.status === "Confirmed"
-                            ? "#0284c7"
-                            : selectedOrder.status === "Received"
-                            ? "#15803d"
-                            : "#475569",
-                        border: `1px solid ${
-                          selectedOrder.status === "Pending"
-                            ? "#fde047"
-                            : selectedOrder.status === "Confirmed"
-                            ? "#bae6fd"
-                            : selectedOrder.status === "Received"
-                            ? "#bbf7d0"
-                            : "#cbd5e1"
-                        }`,
-                      }}
+                      style={{ display: "inline-block", padding: "2px 10px", borderRadius: "9999px", fontSize: "11px", fontWeight: 600, background: palette(selectedOrder).bg, color: palette(selectedOrder).fg, border: `1px solid ${palette(selectedOrder).border}` }}
                     >
                       {selectedOrder.status}
                     </span>
@@ -2990,21 +2290,23 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                     <tbody>
                       <tr>
                         <td style={{ padding: "10px 12px", verticalAlign: "top", borderRight: "1px solid #e2e8f0", color: "#334155", lineHeight: "1.7" }}>
-                          <div><span style={{ fontWeight: 600 }}>Created: </span>{selectedOrder.created_at_time || "19-09-2026 03:52 PM"}</div>
-                          <div><span style={{ fontWeight: 600 }}>Created By: </span>{selectedOrder.created_by || "Akshata Wadekar"}</div>
+                          <div><span style={{ fontWeight: 600 }}>Ordered Date: </span>{selectedOrder.ordered_date || "—"}</div>
+                          <div><span style={{ fontWeight: 600 }}>Created: </span>{selectedOrder.created_at_time || selectedOrder.added_on || "—"}</div>
+                          <div><span style={{ fontWeight: 600 }}>Created By: </span>{selectedOrder.created_by || "—"}</div>
                         </td>
                         <td style={{ padding: "10px 12px", verticalAlign: "top", borderRight: "1px solid #e2e8f0", color: "#334155", lineHeight: "1.7" }}>
-                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "2px" }}>{selectedOrder.supplier_name || "Yinglima"}</div>
-                          <div><span style={{ fontWeight: 600 }}>Email: </span>{selectedOrder.supplier_email || "9654123654"}</div>
+                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "2px" }}>{selectedOrder.supplier_name || ""}</div>
+                          <div>{selectedOrder.supplier_address || ""}</div>
+                          <div><span style={{ fontWeight: 600 }}>Email: </span>{selectedOrder.supplier_email || "—"}</div>
                           <div><span style={{ fontWeight: 600 }}>Phone: </span>{selectedOrder.supplier_phone || ""}</div>
-                          <div><span style={{ fontWeight: 600 }}>GST No: </span>{selectedOrder.supplier_gst || "07ABCDE1234F1Z5"}</div>
+                          <div><span style={{ fontWeight: 600 }}>GST No: </span>{selectedOrder.supplier_gst || "—"}</div>
                         </td>
                         <td style={{ padding: "10px 12px", verticalAlign: "top", color: "#334155", lineHeight: "1.7" }}>
-                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "2px" }}>{selectedOrder.to_name || `${getCachedBrandName().toUpperCase()} (M)`}</div>
-                          <div>{selectedOrder.to_address || "4th Floor, Office No 421, Supremus II,Road No 22, Near Passport Office, Wagle Estate"}</div>
-                          <div><span style={{ fontWeight: 600 }}>Email: </span>{selectedOrder.to_email || "Payment.Darsh@Gmail.Com"}</div>
-                          <div><span style={{ fontWeight: 600 }}>Phone: </span>{selectedOrder.to_phone || "9653261742"}</div>
-                          <div><span style={{ fontWeight: 600 }}>GST No: </span>{selectedOrder.to_gst || "27AAKFI9869H1ZL"}</div>
+                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "2px" }}>{selectedOrder.to_name || ""}</div>
+                          <div>{selectedOrder.to_address || ""}</div>
+                          <div><span style={{ fontWeight: 600 }}>Email: </span>{selectedOrder.to_email || "—"}</div>
+                          <div><span style={{ fontWeight: 600 }}>Phone: </span>{selectedOrder.to_phone || "—"}</div>
+                          <div><span style={{ fontWeight: 600 }}>GST No: </span>{selectedOrder.to_gst || "—"}</div>
                         </td>
                       </tr>
                     </tbody>
@@ -3122,6 +2424,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                         <td style={{ padding: "8px 10px", borderRight: "1px solid #e2e8f0" }}>
                           <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: "2px" }}>Misc. Charges:</div>
                           <div style={{ color: "#475569" }}>{formatIndianCurrency(selectedOrder.misc_charges || 0)}</div>
+                          {selectedOrder.misc_remarks && <div style={{ color: "#64748b", fontSize: "11.5px", marginTop: "3px" }}>Remarks: {selectedOrder.misc_remarks}</div>}
                         </td>
                         <td style={{ padding: "8px 10px", borderRight: "1px solid #e2e8f0" }}>
                           <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: "2px" }}>Total Of All Expenses:</div>
@@ -3137,7 +2440,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                         </td>
                         <td style={{ padding: "8px 10px" }}>
                           <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: "2px" }}>Gross Total Landing:</div>
-                          <div style={{ color: "#475569" }}>{formatIndianCurrency(selectedOrder.gross_total_landing || selectedOrder.gross_amount || 0)}</div>
+                          <div style={{ color: "#475569" }}>{formatIndianCurrency(selectedOrder.gross_total_landing || 0)}</div>
                         </td>
                       </tr>
                     </tbody>
@@ -3192,7 +2495,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                               {item.product_name}
                             </td>
                             <td style={{ padding: "6px 8px", textAlign: "center", borderRight: "1px solid #e2e8f0", color: "#475569" }}>
-                              {item.quantity} {item.unit || "Nos"}
+                              {item.quantity} {item.unit || ""}
                             </td>
                             <td style={{ padding: "6px 8px", textAlign: "right", borderRight: "1px solid #e2e8f0", color: "#475569" }}>
                               {item.pkg_unit_cbm ?? "0.00"}
@@ -3275,7 +2578,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                     }}
                   >
                     <span style={{ fontWeight: 600 }}>Remarks : </span>
-                    {selectedOrder.remarks || "A10/1.6T Multi Head Weigher With Timing Bucket HDM & A14/1.6T Multi Head Weigher With Timing Bucket HDM"}
+                    {selectedOrder.remarks || ""}
                   </div>
                 </div>
               </div>

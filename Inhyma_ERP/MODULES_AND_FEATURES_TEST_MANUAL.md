@@ -55,6 +55,11 @@
 44. [CALL LOG: Follow Ups Management & Inquiries Tracking](#44-call-log-follow-ups-management--inquiries-tracking)
 45. [HRMS: Leave Management Module (Phase 1: Foundation & Master Data)](#45-hrms-leave-management-module-phase-1-foundation--master-data)
 46. [MASTERS MODULE: Interactive Status Toggle Switch & Payment Terms Master](#46-masters-module-interactive-status-toggle-switch--payment-terms-master)
+47. [PURCHASE: Local Purchase Management & Costing Engine](#47-purchase-local-purchase-management--costing-engine)
+48. [PURCHASE: Import Purchase Consignments & Customs Landing Matrix](#48-purchase-import-purchase-consignments--customs-landing-matrix)
+49. [SALE: Proforma Invoices (Extended Commercial Terms, Address Routing, Approvals Workflow)](#49-sale-proforma-invoices-extended-commercial-terms-address-routing-approvals-workflow)
+50. [COMPANIES: Advanced Specification Fields (Monthly Turnover, Potential Analysis, Direct Import from China)](#50-companies-advanced-specification-fields-monthly-turnover-potential-analysis-direct-import-from-china)
+51. [SUPPLIERS: Mandatory Calling Number Validation & Contact Phone Rules](#51-suppliers-mandatory-calling-number-validation--contact-phone-rules)
 
 ---
 
@@ -86,9 +91,12 @@
 | **INVENTORY** | Supplier Types | `/masters/supplier-types` | `masters-supplier-types` | `network` | `suppliertype.view` |
 | **INVENTORY** | Buyer Types | `/masters/buyer-types` | `masters-buyer-types` | `idCard` | `buyertype.view` |
 | **SALE** | Inquiries | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
+| **SALE** | Proforma Invoices | `/proforma-invoice/list` | `proforma` | `fileText` | `sale.pi.view` |
+| **PURCHASE** | Local Purchase | `/purchase/localpurchase` | `local-purchases` | `shoppingBag` | `purchase.view` |
+| **PURCHASE** | Import Purchase | `/purchase/importpurchase` | `import-purchases` | `ship` | `purchase.view` |
+| **PURCHASE** | Purchase Suppliers | `/purchase/suppliers` | `purchase-suppliers` | `factory` | `supplier.view` |
 | **TASK** | Tasks | `/tasks` | `tasks` | `checkSquare` | `task.view` |
 | **TASK** | Technical Tasks | `/technical-task/list` | `technical-tasks` | `wrench` | `technicaltask.view` |
-| **TASK** | Marketing Tasks | `/marketing-task/list` | `marketing-tasks` | `messageSquare` | `task.view` |
 | **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
 | **USER MANAGEMENT** | Positions | `/positions` | `positions` | `briefcase` | `position.view` |
 | **USER MANAGEMENT** | Organization Chart | `/org-chart` | `org-chart` | `orgChart` | `reporting.view` |
@@ -2169,4 +2177,218 @@ Checklist to execute:
 - [ ] Verify non-master modules (Leads, Users, Inquiries, Sales, HRMS) remain completely unaffected and retain their standard status badges.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 6, 2026 (Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, and HRMS Full Suite).*
+
+## 47. PURCHASE: Local Purchase Management & Costing Engine
+
+### Overview & Route Mapping
+- **Primary Routes:** `/purchase/localpurchase`, `/purchase/localpurchase/addedit`, `/purchase-order/list`, `/purchase-order/addedit/:id`.
+- **Primary Permissions:** `purchase.local.view`, `purchase.local.create`, `purchase.local.update`, `purchase.local.delete`, `purchase.local.approve`, `purchase.local.stock_in`.
+- **Purpose:** Full lifecycle management of domestic purchase orders, commercial vendor terms, dynamic line-item tax calculation, overhead expense allocation (landing cost engine), database workflow status transitions, and atomic warehouse stock-in vouchers.
+
+### Key Visual & Functional Components
+1. **Summary KPI Header:**
+   - Total Orders count badge.
+   - Total Order Value in INR (₹).
+   - Aggregate Landed Valuation (₹).
+   - Stock-In Completed vs. Pending counts.
+2. **Interactive Filter Toolbar:**
+   - **Tab Status Pills:** `All`, `Pending`, `Approved`, `Dispatched`, `Delivered`, `Cancelled`.
+   - **Multi-Date Range Presets:** `Today`, `Yesterday`, `Last 7 Days`, `This Month`, `Last Month`, `Custom Range`.
+   - **Date Range Selector:** Allows filtering across `Order Date`, `Invoice Date`, or `Created Date`.
+   - **Search Input:** Fast typeahead search across Order Number, Supplier Name, and Invoice Number.
+3. **Master Orders Table Columns:**
+   - Checkbox (multi-row selection for bulk operations).
+   - Order Number (clickable link opening detailed order drawer).
+   - Order Date (`YYYY-MM-DD`).
+   - Supplier Name (linked to Supplier directory).
+   - Billing Legal Entity & Destination Warehouse.
+   - Net Taxable Value (₹) & GST Amount (CGST+SGST or IGST).
+   - Total Order Amount (₹).
+   - Landed Cost Total (₹) and Landed Factor %.
+   - Dynamic Workflow Status Badge (`Draft`, `Pending`, `Approved`, `Dispatched`, `Delivered`, `Cancelled`).
+   - Stock-In Status Indicator (`Pending` / `Completed`).
+   - Row Actions: `View Details`, `Edit Order`, `Delete`, `Stock-In`, `Download PDF`.
+4. **Add / Edit Order Architecture:**
+   - **Header Section:** Supplier (Typeahead Autocomplete), Billing Legal Entity, Destination Warehouse, Order Date, Invoice Number, Invoice Date, Transport Carrier, Tracking/LR Number, Payment Terms, Remarks.
+   - **Dynamic Line Items Grid:** Product Selector, HSN/SAC code, UOM, Quantity, Unit Rate (₹), Discount %, Line Taxable Subtotal, GST % selector, GST Amount, Total Line Value.
+   - **Direct Overhead Allocation:** Freight Charges, Handling/Labour Charges, Transit Insurance, Other Direct Charges.
+   - **Automated Costing Engine:**
+     $$\text{Expense Factor} = \frac{\text{Total Overheads}}{\sum \text{Line Taxable Amounts}}$$
+     $$\text{Line Landed Unit Cost} = \text{Unit Rate} \times (1 + \text{Expense Factor})$$
+5. **Database Workflow Integration:**
+   - Status changes are validated against `app_workflow_rules` (`purchase.local.status`).
+   - Unauthorized users cannot trigger state changes outside configured transitions.
+6. **Atomic Warehouse Stock-In:**
+   - Executing Stock-In (`POST /api/v1/purchase/local-orders/{id}/stock-in`) atomically increments warehouse inventory ledgers with unit landed cost valuation and locks the purchase order against subsequent modifications.
+
+### Test Cases
+- [ ] Verify navigating to `/purchase/localpurchase` renders the Local Purchase orders table with all KPI summary cards.
+- [ ] Verify switching tabs (Pending, Approved, Dispatched, Delivered, Cancelled) correctly filters the dataset.
+- [ ] Verify date preset buttons (Today, Yesterday, Last 7 Days, This Month, Custom Range) accurately update table results based on the chosen Date Range By filter.
+- [ ] Verify clicking "+ ADD LOCAL PURCHASE" opens the order form with empty line items and current date prefilled.
+- [ ] Verify selecting a supplier populates supplier contact and billing information.
+- [ ] Verify adding products calculates Taxable Value, GST Amount, and Line Total in real time.
+- [ ] Verify adding overhead expenses (Freight, Loading, Insurance) updates the Landed Cost and Expense Factor across all line items automatically.
+- [ ] Verify form validation prevents submission if Supplier, Billing Entity, Warehouse, or Line Items are missing.
+- [ ] Verify status transition buttons strictly obey database workflow rules and user permissions.
+- [ ] Verify executing Stock-In updates the warehouse stock ledger and marks the order status as completed.
+- [ ] Verify clicking "Download PDF" streams a valid print-ready Purchase Order document.
+- [ ] Verify all 16 automated tests in `LocalPurchasePage.test.tsx` pass without errors.
+
+---
+
+## 48. PURCHASE: Import Purchase Consignments & Customs Landing Matrix
+
+### Overview & Route Mapping
+- **Primary Routes:** `/purchase/importpurchase`, `/purchase/importpurchase/addedit`, `/purchase-order/import-purchase-list`.
+- **Primary Permissions:** `purchase.import.view`, `purchase.import.create`, `purchase.import.update`, `purchase.import.delete`, `purchase.import.approve`, `purchase.import.stock_in`.
+- **Purpose:** End-to-end management of overseas import consignments, international shipping logistics (BL, containers, vessel details), multi-currency conversions, Indian Customs statutory duty assessment (Assessable Value, BCD, SWS, IGST), dual landed cost matrices, and warehouse receipt.
+
+### Key Visual & Functional Components
+1. **KPI Summary Metrics:**
+   - Total Consignments Count.
+   - Total Foreign Value ($ / ¥ / €).
+   - Total Landed INR Valuation (₹).
+   - In-Transit vs. Custom-Cleared Consignment breakdown.
+2. **Consignment Logistics & Shipping Header:**
+   - Overseas Supplier / Manufacturer picker.
+   - Foreign Currency selector (USD, CNY, EUR, etc.) with live Exchange Rate to INR.
+   - Port of Loading (Foreign origin) & Port of Discharge (Indian port).
+   - Bill of Lading (BL) / Air Waybill (AWB) number and BL Date.
+   - Commercial Invoice Number and Invoice Date.
+   - Vessel / Flight Name, Container Numbers, Shipping Date, and Expected Arrival Date.
+3. **Customs Duty & Statutory Assessment Engine:**
+   - **Assessable Value (CIF INR):**
+     $$\text{Assessable Value} = (\text{FOB Value Foreign} \times \text{Exchange Rate}) + \text{Ocean/Air Freight} + \text{Insurance}$$
+   - **Basic Customs Duty (BCD):** Configurable percentage and amount.
+   - **Social Welfare Surcharge (SWS):** Automatically calculated as 10% of BCD.
+   - **Integrated GST (IGST):** Assessed on $(\text{Assessable Value} + \text{BCD} + \text{SWS})$.
+   - **Clearing & Local Logistics:** C&F Agent charges, Port Demurrage/Detention, and Inland Transport to warehouse.
+4. **Dual Landed Costing Matrices:**
+   - **Landed Cost (With Duty & Tax):** Comprehensive inventory valuation including all statutory duties, surcharges, and local port clearance.
+   - **Landed Cost (Without Duty & Tax):** Base commercial landed valuation for international cost-benefit and pricing margin analysis.
+5. **Workflow & Receiving Rules:**
+   - Governed by `purchase.import.status` workflow transitions.
+   - Final Stock-In atomically updates bonded or domestic warehouse inventory with foreign lot reference and landed unit cost.
+
+### Test Cases
+- [ ] Verify navigating to `/purchase/importpurchase` loads import consignments table with foreign currency and INR totals.
+- [ ] Verify filtering by date range works across BL Date, Shipping Date, and Invoice Date.
+- [ ] Verify opening the Add Import Consignment form allows selecting foreign currency and entering an exchange rate.
+- [ ] Verify entering line items in foreign currency converts them to INR line subtotals accurately.
+- [ ] Verify entering Freight and Insurance calculates the correct Customs Assessable Value.
+- [ ] Verify Basic Customs Duty (BCD) and Social Welfare Surcharge (SWS at 10% of BCD) compute correctly.
+- [ ] Verify Integrated GST (IGST) is computed on the sum of Assessable Value, BCD, and SWS.
+- [ ] Verify both Landed Cost (With Duty) and Landed Cost (Without Duty) calculate and display accurately.
+- [ ] Verify saving the consignment updates table records and KPI cards.
+- [ ] Verify Stock-In atomic execution transfers stock into destination warehouse and sets consignment state to received.
+- [ ] Verify all 16 automated tests in `ImportPurchasePage.test.tsx` pass without errors.
+
+---
+
+## 49. SALE: Proforma Invoices (Extended Commercial Terms, Address Routing, Approvals Workflow)
+
+### Overview & Route Mapping
+- **Primary Routes:** `/proforma-invoice/list`, `/proforma-invoice/addedit`, `/sales/proforma-invoices`.
+- **Primary Permissions:** `sale.pi.view`, `sale.pi.create`, `sale.pi.update`, `sale.pi.delete`, `sale.pi.approve`.
+- **Purpose:** Commercial sales quotations, formal Proforma Invoices (PI), dual address routing (billing vs. shipping), dynamic inter/intra-state tax resolution, commercial payment & delivery terms, and database workflow approval tracking.
+
+### Key Visual & Functional Components
+1. **Client Master & Dual Address Matrix:**
+   - Customer picker with auto-filling of legal trade name, GSTIN, PAN, and contact details.
+   - **Billing Address vs. Shipping Address:** Independent selection and custom edit capability for Billing Address and Dispatch/Delivery Address.
+2. **Extended Commercial Terms:**
+   - Payment Terms dropdown (from Payment Terms Master).
+   - Delivery Timeline / Lead Time (e.g. 2-3 weeks).
+   - Incoterms / Freight Terms (Ex-Works, FOR Destination, CIF, FOB).
+   - Logistics Carrier & Dispatch Port.
+   - Corporate Bank Account selector (auto-prints RTGS/NEFT banking credentials on invoice PDF).
+3. **Multi-Item Sales Ledger:**
+   - Product SKU, description, HSN code, UOM, Quantity, Unit Rate, Discount %.
+   - Dynamic Tax Engine: Automatically applies CGST+SGST (if Billing State equals Client State) or IGST (if Interstate).
+   - Subtotal, Round Off, and Grand Total in figures and words.
+4. **Approval & Conversion Workflow:**
+   - Governed by `proforma.status` workflow transitions (`Draft` $\rightarrow$ `Sent` $\rightarrow$ `Approved` $\rightarrow$ `PO Received` $\rightarrow$ `Converted to Sales Order`).
+5. **Print & PDF Generation:**
+   - High-fidelity PDF generation with company letterhead, tax breakdown table, authorized signature, and bank RTGS/NEFT payment coordinates.
+
+### Test Cases
+- [ ] Verify navigating to `/proforma-invoice/list` renders the proforma invoice list with status badges and customer details.
+- [ ] Verify clicking "+ CREATE PROFORMA INVOICE" opens the PI builder form.
+- [ ] Verify selecting a customer populates default billing and shipping addresses.
+- [ ] Verify modifying the shipping address independently does not affect the billing address.
+- [ ] Verify selecting line items calculates Taxable Value and applies correct GST rates (CGST+SGST or IGST based on states).
+- [ ] Verify selecting a Bank Account embeds correct account number and IFSC into the preview.
+- [ ] Verify status transition buttons reflect permissions and database workflow rules.
+- [ ] Verify clicking "Download PDF" streams a valid, professional Proforma Invoice PDF.
+- [ ] Verify soft delete and restore actions function properly through the Recycle Bin.
+
+---
+
+## 50. COMPANIES: Advanced Specification Fields (Monthly Turnover, Potential Analysis, Direct Import from China)
+
+### Overview & Route Mapping
+- **Primary Routes:** `/companies`, Company Detail Drawer, Company Add/Edit Modal.
+- **Primary Permissions:** `company.view`, `company.create`, `company.update`, `company.delete`.
+- **Purpose:** Enhanced business intelligence fields for customer relationship management, revenue qualification, overseas sourcing feasibility, and personalized contact milestone tracking.
+
+### Key Visual & Functional Components
+1. **Monthly Turnover Tracking:**
+   - Dedicated numerical input field for monthly business turnover with currency formatting.
+   - Enables commercial sales prioritization and credit tier assignments.
+2. **Potential Reason / Monthly Business Analysis:**
+   - Multi-line descriptive field capturing account capacity, seasonal demand factors, and expansion outlook.
+3. **Direct Import from China Cluster:**
+   - Restricted strictly to **B2B** business classifications; suppressed for B2C/Retail accounts.
+   - Main Toggle: `Direct Import from China` (Boolean Yes/No).
+   - Dynamic Child Fields (visible when toggle is Active):
+     - `China Agent / Sourcing Partner Name`
+     - `Preferred China Origin Port` (e.g. Ningbo, Shanghai, Shenzhen, Qingdao)
+     - `Customs Broker / CHA Reference`
+     - `Expected Annual Import Volume (Containers / TEU)`
+4. **Contact Birthday & Anniversary Tracking:**
+   - Multi-contact person entries include `Date of Birth` (`dob`) and `Anniversary Date`.
+   - Contact card automatically displays calculated current age and years of relationship.
+   - Enables CRM greeting automations and relationship management reminders.
+
+### Test Cases
+- [ ] Verify navigating to `/companies` and opening Add/Edit Company modal displays `Monthly Turnover` and `Potential Reason / Monthly Business` fields.
+- [ ] Verify entering numerical values into Monthly Turnover formats cleanly without character corruption.
+- [ ] Verify the `Direct Import from China` checkbox renders only when Company Type is set to B2B.
+- [ ] Verify toggling `Direct Import from China` on reveals China Agent, Origin Port, and Customs Broker fields.
+- [ ] Verify saving the company preserves all newly added intelligence fields in the database.
+- [ ] Verify adding a contact with DOB and Anniversary Date renders calculated age and anniversary milestones in the contact card.
+
+---
+
+## 51. SUPPLIERS: Mandatory Calling Number Validation & Contact Phone Rules
+
+### Overview & Route Mapping
+- **Primary Routes:** `/suppliers`, Supplier Detail Drawer, Supplier Add/Edit Modal.
+- **Primary Permissions:** `supplier.view`, `supplier.create`, `supplier.update`, `supplier.delete`.
+- **Purpose:** Strict data validation ensuring every active supplier has a verified, dialable primary contact calling phone number, separating direct voice calls from messaging channels.
+
+### Key Visual & Functional Components
+1. **Mandatory Calling Number (`contact_calling_number`):**
+   - Labeled with a mandatory red asterisk: `Primary Calling Number *`.
+   - Dedicated input field with country code support.
+   - Client-side validation: Requires minimum 7 to maximum 15 digits; non-numeric characters (except `+`, `-`, and spaces) are rejected.
+   - Form Submission Lockout: The Submit button is disabled or triggers an immediate validation banner if calling number is blank or malformed.
+2. **Channel Separation:**
+   - Distinct fields for `Calling Number`, `WhatsApp Number`, `Alternate Mobile`, and `Landline / Office Ext`.
+   - Prevents communication failures caused by recording WhatsApp-only numbers for urgent voice calls.
+3. **Backend Schema Enforcement:**
+   - FastAPI Pydantic schema (`SupplierCreate`, `SupplierUpdate`) strictly enforces string length and regex pattern, raising HTTP 422 if omitted.
+4. **Directory Action Integration:**
+   - Calling number renders as a direct one-click `tel:` link in table rows and supplier profile drawers.
+
+### Test Cases
+- [ ] Verify opening the Add Supplier modal displays `Primary Calling Number *` with mandatory indicator.
+- [ ] Verify attempting to save a supplier with an empty calling number triggers an error message and prevents submission.
+- [ ] Verify entering invalid alphabetic characters is blocked or flagged by validation.
+- [ ] Verify entering a valid phone number (e.g. `+91 9876543210`) passes validation and saves successfully.
+- [ ] Verify supplier table displays calling number with working click-to-call link.
+- [ ] Verify existing suppliers without calling numbers display an inline warning indicator prompting data enrichment.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 6, 2026 (Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, and Database Workflow Rules Engine).*

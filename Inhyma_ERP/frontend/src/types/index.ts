@@ -295,6 +295,8 @@ export interface Product extends MasterRecord {
   product_name_tally?: string | null;
   product_name_invoice?: string | null;
   barcode?: string | null;
+  product_type?: "Machine" | "Spare Part" | string;
+  applicable_machine_ids?: string[] | null;
   category_id: string;
   sub_category_id?: string | null;
   brand_id?: string | null;
@@ -324,6 +326,7 @@ export interface Product extends MasterRecord {
   packaging_unit_cbm?: number | null;
   color?: string | null;
   material?: string | null;
+  current_stock?: number;
   minimum_order_quantity?: number | null;
   reorder_level?: number | null;
   standard_cost?: number | null;
@@ -341,11 +344,50 @@ export interface Product extends MasterRecord {
 
 export interface ProductDimensionRow {
   id?: string;
+  package_name?: string;
   title?: string;
   length?: number | string;
   width?: number | string;
   height?: number | string;
   cbm?: number | string;
+  net_weight?: number | string;
+  gross_weight?: number | string;
+}
+
+export interface MachineSpareItemRead {
+  spare_part_id: string;
+  spare_part_name: string;
+  spare_part_code?: string | null;
+  uom?: string | null;
+  standard_price?: number | null;
+  current_stock?: number | null;
+  remarks?: string | null;
+}
+
+export interface MachineWithSparesRead {
+  machine_id: string;
+  machine_name: string;
+  machine_code?: string | null;
+  current_stock?: number | null;
+  brand_name?: string | null;
+  category_name?: string | null;
+  spares: MachineSpareItemRead[];
+}
+
+export interface PackageDimensionReportRow {
+  dimension_id?: string | null;
+  product_id: string;
+  product_name: string;
+  product_code?: string | null;
+  product_type: string;
+  package_name?: string | null;
+  title?: string | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  cbm?: number | null;
+  net_weight?: number | null;
+  gross_weight?: number | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -370,6 +412,7 @@ export interface ProformaLineItem {
   gst_amount?: number;
   total?: number;
   is_additional_charge?: boolean;
+  charge_type?: string | null;
 }
 
 export interface ProformaInvoice {
@@ -393,12 +436,36 @@ export interface ProformaInvoice {
   shipping_address?: string | null;
   terms_and_conditions?: string | null;
   amount_inc_gst: number;
+  taxable_amount?: number;
+  gst_amount?: number;
   discount: number;
   status: string;
+  below_min_price?: boolean;
   remark?: string | null;
+  cancel_reason?: string | null;
   created_by: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  confirmed_by?: string | null;
+  confirmed_at?: string | null;
+  cancelled_by?: string | null;
+  cancelled_at?: string | null;
   items: ProformaLineItem[];
 }
+
+/** Workflow rules for one proforma status, configured in the `proforma.status` option list. */
+export interface ProformaStatusRule {
+  next: string[];
+  admin_only_to?: string[];
+  reason_required_to?: string[];
+  edit?: "any" | "admin" | "none";
+  delete?: boolean;
+  initial?: boolean;
+  action_label?: string;
+  action_color?: string;
+}
+
+export type ProformaStatusRules = Record<string, ProformaStatusRule>;
 
 export interface ProformaStatusCounts {
   count: number;
@@ -734,6 +801,8 @@ export interface CompanyContact {
   whatsapp_number?: string | null;
   wechat_number?: string | null;
   email?: string | null;
+  birth_date?: string | null;
+  anniversary_date?: string | null;
   is_primary?: boolean;
 }
 
@@ -768,7 +837,9 @@ export interface Company {
   primary_website?: string | null;
   secondary_website?: string | null;
   company_category?: string | null;
+  business_category?: string | null;
   sector?: string | null;
+  monthly_turnover?: string | null;
   product_manufacture_or_supply?: string | null;
   machines_buying_from?: string | null;
   spares_buying_from?: string | null;
@@ -780,6 +851,10 @@ export interface Company {
   current_status?: string | null;
   potential?: string | null;
   potential_reason?: string | null;
+  potential_business_per_month?: string | null;
+  direct_import_from_china?: string | null;
+  monthly_import_volume?: string | null;
+  products_needed_for_imports?: string | null;
   secondary_products_description?: string | null;
   visited_factory_office?: boolean;
   visit_remarks?: string | null;
@@ -889,8 +964,83 @@ export interface Lead {
   allotted_to?: string | null;
   created_by?: string | null;
   lead_status?: string | null;
+  call_type?: string | null;
   notes?: string | null;
   added_on?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
+
+/* ------------------------------------------------------------------ */
+/* Price List Management                                              */
+/* ------------------------------------------------------------------ */
+
+export interface SupplierQuoteItem {
+  link_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_code?: string | null;
+  calling_number?: string | null;
+  unit_price?: number | null;
+  currency: string;
+  moq?: number | null;
+  notes?: string | null;
+  updated_at?: string | null;
+}
+
+export interface PriceListItem {
+  product_id: string;
+  product_code?: string | null;
+  product_name: string;
+  product_name_tally: string;
+  product_name_invoice?: string | null;
+  barcode?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  sub_category_id?: string | null;
+  sub_category_name?: string | null;
+  brand_id?: string | null;
+  brand_name?: string | null;
+  uom_id?: string | null;
+  uom_code?: string | null;
+  hsn_id?: string | null;
+  hsn_number?: string | null;
+  gst_percent: number;
+  import_duty_percent: number;
+  current_stock: number;
+  images?: string[] | null;
+  image_url?: string | null;
+  status: string;
+  standard_price?: number | null;
+  minimum_price?: number | null;
+  standard_cost?: number | null;
+  standard_price_gst_amount?: number | null;
+  minimum_price_gst_amount?: number | null;
+  standard_cost_gst_amount?: number | null;
+  standard_price_inc_gst?: number | null;
+  minimum_price_inc_gst?: number | null;
+  standard_cost_inc_gst?: number | null;
+  margin_amount?: number | null;
+  margin_percent?: number | null;
+  has_price: boolean;
+  has_min_price: boolean;
+  supplier_count: number;
+  suppliers: SupplierQuoteItem[];
+}
+
+export interface PriceListMetrics {
+  total_products: number;
+  priced_products: number;
+  unpriced_products: number;
+  avg_standard_price_ex_gst: number;
+  avg_standard_price_inc_gst: number;
+  avg_min_price_ex_gst: number;
+  avg_min_price_inc_gst: number;
+}
+
+export interface PriceListUpdatePayload {
+  standard_price?: number | null;
+  minimum_price?: number | null;
+  standard_cost?: number | null;
+  is_inclusive?: boolean;
+}

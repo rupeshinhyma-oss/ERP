@@ -34,6 +34,19 @@ def _phone_validator(field_label: str):
 # ---------------------------------------------------------------------------
 
 
+
+def _clean_tax_id(value: str | None, *, allow_none: bool) -> str | None:
+    """GST numbers are stored trimmed and upper-case; a provided value may not be blank."""
+    if value is None:
+        if allow_none:
+            return None
+        raise ValueError("GST number is required.")
+    cleaned = value.strip().upper()
+    if not cleaned:
+        raise ValueError("GST number cannot be blank.")
+    return cleaned
+
+
 class SupplierContactCreate(BaseModel):
     """Payload to add a contact person to a supplier."""
 
@@ -123,13 +136,18 @@ class SupplierCreate(BaseModel):
     contact_salutation: str | None = Field(default=None, max_length=10)
     contact_full_name: str | None = Field(default=None, max_length=150)
     contact_designation: str | None = Field(default=None, max_length=150)
-    contact_calling_number: str | None = Field(default=None, max_length=50)
+    contact_calling_number: str = Field(..., min_length=1, max_length=50, description="Calling number (mandatory).")
     contact_whatsapp_number: str | None = Field(default=None, max_length=50)
     contact_wechat_number: str | None = Field(default=None, max_length=50)
     emails: list[EmailStr] = Field(default_factory=list, description="Email ID (multiple emails).")
 
     # --- Second form ---
-    tax_id_number: str | None = Field(default=None, max_length=100)
+    tax_id_number: str = Field(..., min_length=1, max_length=100, description="GST number (mandatory).")
+
+    @field_validator("tax_id_number")
+    @classmethod
+    def _validate_tax_id(cls, value: str) -> str:
+        return _clean_tax_id(value, allow_none=False)  # type: ignore[return-value]
     address: str | None = None
     town: str | None = Field(default=None, max_length=150)
     primary_website: str | None = Field(default=None, max_length=5000)
@@ -170,9 +188,17 @@ class SupplierCreate(BaseModel):
             return cleaned
         return value
 
-    _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
-    _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
+    @field_validator("contact_calling_number")
+    @classmethod
+    def _validate_calling_required(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Calling number is required.")
+        try:
+            return validate_phone_number(value, field_label="Calling number")  # type: ignore[return-value]
+        except BadRequestException as exc:
+            raise ValueError(exc.message) from exc
 
+    _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
 
 
 class SupplierUpdate(BaseModel):
@@ -195,6 +221,18 @@ class SupplierUpdate(BaseModel):
     emails: list[EmailStr] | None = None
 
     tax_id_number: str | None = Field(default=None, max_length=100)
+
+    @field_validator("contact_calling_number")
+    @classmethod
+    def _validate_calling_not_blanked(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Calling number cannot be blanked.")
+        return value
+
+    @field_validator("tax_id_number")
+    @classmethod
+    def _validate_tax_id_update(cls, value: str | None) -> str | None:
+        return _clean_tax_id(value, allow_none=True)
     address: str | None = None
     town: str | None = Field(default=None, max_length=150)
     primary_website: str | None = Field(default=None, max_length=5000)
@@ -299,6 +337,20 @@ class SupplierRead(BaseModel):
     product_ids: list[uuid.UUID] = Field(default_factory=list)
     contacts: list[SupplierContactRead] = Field(default_factory=list)
 
+    @field_validator("supplier_grade", "current_status", "potential", mode="before")
+    @classmethod
+    def _normalize_enums(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --"):
+                return None
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+        return value
+
 
 class SupplierListItemRead(BaseModel):
     """A supplier, as returned in the list view (per the document's "Fields in List")."""
@@ -325,6 +377,21 @@ class SupplierListItemRead(BaseModel):
     secondary_products_description: str | None = None
     visit_media: list[str] | None = None
     media_urls: str | None = None
+
+    @field_validator("supplier_grade", "current_status", "potential", mode="before")
+    @classmethod
+    def _normalize_enums(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --"):
+                return None
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+        return value
+
 
 
 class ImportSummaryRead(BaseModel):

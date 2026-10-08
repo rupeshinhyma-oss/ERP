@@ -31,6 +31,7 @@ from app.masters.districts.routes import router as districts_router
 from app.masters.product_categories.routes import router as product_categories_router
 from app.masters.product_sub_categories.routes import router as product_sub_categories_router
 from app.masters.products.routes import router as products_router
+from app.masters.price_list.routes import router as price_list_router
 from app.masters.states.routes import router as states_router
 from app.masters.buyer_types.routes import router as buyer_types_router
 from app.masters.supplier_types.routes import router as supplier_types_router
@@ -65,12 +66,16 @@ from app.suppliers.routes import router as suppliers_router
 from app.notifications.routes import router as notifications_router
 from app.tasks.routes import router as tasks_router
 from app.technical_tasks.routes import router as technical_tasks_router
+from app.technician_operations.routes import router as technician_operations_router
 from app.leads.routes import router as leads_router
 from app.follow_ups.routes import router as follow_ups_router
+from app.agents.routes import router as agents_router
+from app.industrial_zones.routes import router as industrial_zones_router
 from app.trash.routes import router as trash_router
 from app.users.routes import router as users_router
 from app.inventory.routes import router as inventory_router
 from app.sales.routes import router as sales_router
+from app.purchase.routes import router as purchase_router
 from app.hrms.routes import router as hrms_router
 from app.hrms.attendance_routes import router as hrms_attendance_router
 from app.hrms.leave_routes import router as hrms_leave_router
@@ -133,6 +138,9 @@ api_router.include_router(brands_router)
 api_router.include_router(product_categories_router)
 api_router.include_router(product_sub_categories_router)
 api_router.include_router(products_router)
+api_router.include_router(price_list_router)
+api_router.include_router(price_list_router, prefix="/inventory/price-list")
+api_router.include_router(price_list_router, prefix="/inventory/product-prices")
 api_router.include_router(company_list_router)
 api_router.include_router(supplier_types_router)
 api_router.include_router(buyer_types_router)
@@ -181,10 +189,15 @@ api_router.include_router(public_quotes_router)
 # Standalone Task Management & In-App Notifications
 api_router.include_router(tasks_router)
 api_router.include_router(technical_tasks_router)
+api_router.include_router(technician_operations_router)
 api_router.include_router(leads_router, prefix="/leads")
 api_router.include_router(leads_router, prefix="/lead")
 api_router.include_router(follow_ups_router, prefix="/follow-ups")
 api_router.include_router(follow_ups_router, prefix="/follow-up")
+api_router.include_router(agents_router, prefix="/agents")
+api_router.include_router(agents_router, prefix="/agent")
+api_router.include_router(industrial_zones_router, prefix="/industrial-zones")
+api_router.include_router(industrial_zones_router, prefix="/industrial/zones")
 api_router.include_router(notifications_router)
 
 api_router.include_router(events_router)
@@ -193,6 +206,7 @@ api_router.include_router(internal_users_router)
 api_router.include_router(integration_router)
 api_router.include_router(inventory_router)
 api_router.include_router(sales_router)
+api_router.include_router(purchase_router)
 
 from app.durable_events.routes import router as durable_events_router  # noqa: E402
 

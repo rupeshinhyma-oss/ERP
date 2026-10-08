@@ -4,355 +4,44 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { DatePicker } from "@/components/DatePicker";
 import { useToast } from "@/lib/toast";
-import { apiPost } from "@/lib/api";
-import { getCachedBrandName } from "@/lib/brand";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, apiPut, errorMessage as apiErrorText } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
+import { useLookup } from "@/lib/lookups";
+import { availableTransitions, canDelete as ruleCanDelete, canEdit as ruleCanEdit, needsReason, type WorkflowRules } from "@/lib/workflowRules";
+import {
+  LOCAL_PURCHASE_API,
+  buildLocalPayload,
+  fetchLocalPurchases,
+  mapLocalPurchase,
+  type LocalPurchaseItem,
+  type PurchaseOrderRecord,
+} from "@/lib/purchaseApi";
 
-export interface LocalPurchaseItem {
-  id: string;
-  product_name: string;
-  quantity: number | "";
-  unit_rate: number | "";
-  item_total: number;
-  expense_per_unit: number;
-  unit_landing_rate: number;
-  total_landing_rate: number;
-}
+// The record types live in the shared data layer; re-exported so existing imports keep working.
+export type { LocalPurchaseItem, PurchaseOrderRecord } from "@/lib/purchaseApi";
 
-export interface PurchaseOrderRecord {
-  id: string;
-  invoice_no: string;
-  invoice_date: string;
-  supplier_name: string;
-  supplier_address?: string;
-  supplier_email?: string;
-  supplier_phone?: string;
-  supplier_gst?: string;
-  to_name?: string;
-  to_address?: string;
-  to_email?: string;
-  to_phone?: string;
-  to_gst?: string;
-  created_at_time?: string;
-  warehouse: string;
-  basic_amount?: number;
-  invoice_total: number;
-  bill_file?: string;
-  created_by: string;
-  added_on: string;
-  status: "Pending" | "Confirmed" | "Cancelled";
-  packing_forwarding?: number;
-  transport_expense?: number;
-  offloading_expense?: number;
-  total_expenses?: number;
-  loading_expense_percent?: number;
-  remarks?: string | null;
-  items?: LocalPurchaseItem[];
-}
+type CatalogProduct = { product_name: string; product_code?: string | null; uom?: string | null; rate: number };
 
-const SAMPLE_PRODUCTS = [
-  { product_name: "G43 Online Printer TIJ 4.3", hsn: "84433200", rate: 6400 },
-  { product_name: "XF12.7 Handy Printer Fiber Body 12.7mm", hsn: "84433200", rate: 3450 },
-  { product_name: "Continuous Band Sealer", hsn: "84223000", rate: 25000 },
-  { product_name: "Induction Cap Sealing Machine", hsn: "84223000", rate: 72203 },
-  { product_name: "Shrink Wrapping Machine", hsn: "84224000", rate: 45000 },
-  { product_name: "Carton Sealer Machine", hsn: "84223000", rate: 38000 },
-  { product_name: "Vacuum Packaging Machine", hsn: "84224000", rate: 65000 },
-  { product_name: "Pouch Packing Machine", hsn: "84223000", rate: 120000 },
-  { product_name: "Automatic Liquid Filling Machine", hsn: "84223000", rate: 185000 },
-  { product_name: "Semi-Automatic Strapping Machine", hsn: "84224000", rate: 28000 },
-  { product_name: "ISL150 Rotary PFS 4 Stations", hsn: "84223000", rate: 1850000 },
-  { product_name: "DZ800 Double Face Shaping Vacuum Machine 10Kgs", hsn: "84224000", rate: 271400 },
-  { product_name: "Sensor (Banding)", hsn: "84229090", rate: 15000 },
-  { product_name: "Industrial Thermal Inkjet Cartridge (Black)", hsn: "84433200", rate: 4500 },
-];
-
-const WAREHOUSE_OPTIONS = ["Select", "Mumbai", "Ahmedabad", "Delhi", "Surat"];
-
-const SUPPLIER_OPTIONS = [
-  "Select",
-  "S B Inks & Packaging Co.",
-  "Darsh Impex India LLP Mumbai",
-  "GLOBAL IMPEX MACHINERY",
-  "GENIUS PACK MACHINERY",
-  "WELCOME ELECTRICALS SOLUTION",
-  "Apex Industrial Supplies Ltd",
-  "Kavitsu Robotronix Pvt Ltd",
-  "Prasad Koch Glass LLP",
-];
-
-export const INITIAL_PURCHASE_ORDERS: PurchaseOrderRecord[] = [
-  {
-    id: "po-1",
-    invoice_no: "2026-27/SO/1534",
-    invoice_date: "19-09-2026",
-    supplier_name: "S B Inks & Packaging Co.",
-    warehouse: "Mumbai",
-    basic_amount: 423500.0,
-    invoice_total: 499730.0,
-    created_by: "Akshata Wadekar",
-    added_on: "21-09-2026",
-    created_at_time: "21-09-2026 10:49 AM",
-    status: "Pending",
-    packing_forwarding: 0,
-    transport_expense: 0,
-    offloading_expense: 0,
-    total_expenses: 0,
-    loading_expense_percent: 0,
-    supplier_address:
-      "6/7, Ripal Shopping Complex, Near Cosmo Vila Row House, Premchand Nagar Road, Bodakdev\nAhmedabad 380015",
-    supplier_email: "8799513908",
-    supplier_phone: "",
-    supplier_gst: "24ACSF51727J1ZB",
-    to_name: `${getCachedBrandName().toUpperCase()} (M)`,
-    to_address:
-      "4th Floor, Office No 421, Supremus - [I, Road No- 22, Near Passport Office, Wagle Estate",
-    to_email: "Payment.Darsh@Gmail.Com",
-    to_phone: "9653261742",
-    to_gst: "27AAKFI9869H1ZL",
-    items: [
-      {
-        id: "poi-1",
-        product_name: "G43 Online Printer TIJ 4.3",
-        quantity: 50,
-        unit_rate: 6400,
-        item_total: 320000,
-        expense_per_unit: 0,
-        unit_landing_rate: 6400,
-        total_landing_rate: 320000,
-      },
-      {
-        id: "poi-2",
-        product_name: "XF12.7 Handy Printer Fiber Body 12.7mm",
-        quantity: 30,
-        unit_rate: 3450,
-        item_total: 103500,
-        expense_per_unit: 0,
-        unit_landing_rate: 3450,
-        total_landing_rate: 103500,
-      },
-    ],
-  },
-  {
-    id: "po-2",
-    invoice_no: "752/26-27",
-    invoice_date: "17-09-2026",
-    supplier_name: "Darsh Impex India LLP Mumbai",
-    warehouse: "Mumbai",
-    basic_amount: 5260.0,
-    invoice_total: 6207.0,
-    created_by: "Akshata Wadekar",
-    added_on: "17-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-3",
-    invoice_no: "748/26-27",
-    invoice_date: "17-09-2026",
-    supplier_name: "Darsh Impex India LLP Mumbai",
-    warehouse: "Mumbai",
-    basic_amount: 22899.0,
-    invoice_total: 27022.0,
-    created_by: "Akshata Wadekar",
-    added_on: "17-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-4",
-    invoice_no: "GST-436/26-27",
-    invoice_date: "17-09-2026",
-    supplier_name: "GLOBAL IMPEX MACHINERY",
-    warehouse: "Ahmedabad",
-    basic_amount: 1960.0,
-    invoice_total: 2313.0,
-    created_by: "Akshata Wadekar",
-    added_on: "17-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-5",
-    invoice_no: "506/26-27",
-    invoice_date: "20-08-2026",
-    supplier_name: "Darsh Impex India LLP Mumbai",
-    warehouse: "Mumbai",
-    basic_amount: 720.0,
-    invoice_total: 850.0,
-    created_by: "Akshata Wadekar",
-    added_on: "16-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-6",
-    invoice_no: "26-27/GPM-262",
-    invoice_date: "15-09-2026",
-    supplier_name: "GENIUS PACK MACHINERY",
-    warehouse: "Mumbai",
-    basic_amount: 62500.0,
-    invoice_total: 73750.0,
-    created_by: "Akshata Wadekar",
-    added_on: "15-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-7",
-    invoice_no: "Wes/4361/2026-27",
-    invoice_date: "12-09-2026",
-    supplier_name: "WELCOME ELECTRICALS SOLUTION",
-    warehouse: "Mumbai",
-    basic_amount: 3300.0,
-    invoice_total: 3894.0,
-    created_by: "Akshata Wadekar",
-    added_on: "15-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-8",
-    invoice_no: "GST-422/26-27",
-    invoice_date: "11-09-2026",
-    supplier_name: "GLOBAL IMPEX MACHINERY",
-    warehouse: "Ahmedabad",
-    basic_amount: 3500.0,
-    invoice_total: 4130.0,
-    created_by: "Akshata Wadekar",
-    added_on: "11-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-9",
-    invoice_no: "419/26-27",
-    invoice_date: "08-08-2026",
-    supplier_name: "Darsh Impex India LLP Mumbai",
-    warehouse: "Mumbai",
-    basic_amount: 874.0,
-    invoice_total: 1031.0,
-    created_by: "Akshata Wadekar",
-    added_on: "11-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-10",
-    invoice_no: "507/26-27",
-    invoice_date: "20-08-2026",
-    supplier_name: "Darsh Impex India LLP Mumbai",
-    warehouse: "Mumbai",
-    basic_amount: 52188.0,
-    invoice_total: 61582.0,
-    created_by: "Akshata Wadekar",
-    added_on: "11-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-11",
-    invoice_no: "GST-403/26-27",
-    invoice_date: "07-09-2026",
-    supplier_name: "GLOBAL IMPEX MACHINERY",
-    warehouse: "Mumbai",
-    basic_amount: 5420.0,
-    invoice_total: 6396.0,
-    created_by: "Akshata Wadekar",
-    added_on: "07-09-2026",
-    status: "Confirmed",
-  },
-  {
-    id: "po-12",
-    invoice_no: "2026-27/SO/1394",
-    invoice_date: "01-09-2026",
-    supplier_name: "S B Inks & Packaging Co.",
-    warehouse: "Mumbai",
-    basic_amount: 207700.0,
-    invoice_total: 245086.0,
-    created_by: "Inhyma Admin",
-    added_on: "01-09-2026",
-    status: "Confirmed",
-  },
-];
+const todayDDMMYYYY = () => new Date().toLocaleDateString("en-GB").split("/").join("-");
 
 function formatIndianCurrency(amount: number): string {
   return "₹ " + (amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** Supplier and buyer details for the detail view / PDF: exactly what the server read from the masters (blank when unknown). */
 function getOrderDisplayDetails(order: PurchaseOrderRecord) {
-  const isSbInks = order.supplier_name.includes("S B Inks");
-  const isDarsh = order.supplier_name.includes("Darsh Impex");
-  const isGlobal = order.supplier_name.includes("GLOBAL IMPEX");
-  const isGenius = order.supplier_name.includes("GENIUS PACK");
-  const isWelcome = order.supplier_name.includes("WELCOME");
-
-  const supplierAddress =
-    order.supplier_address ||
-    (isSbInks
-      ? "6/7, Ripal Shopping Complex, Near Cosmo Vila Row House, Premchand Nagar Road, Bodakdev\nAhmedabad 380015"
-      : isDarsh
-      ? "Shop No. 12, Ground Floor, Industrial Estate, Kanjurmarg West\nMumbai 400078"
-      : isGlobal
-      ? "Plot No. 44, GIDC Industrial Area, Phase 2, Vatva\nAhmedabad 382445"
-      : isGenius
-      ? "Unit 102, Shanti Industrial Park, Waliv, Vasai East\nPalghar 401208"
-      : isWelcome
-      ? "Gala No. 5, Electric Market, Lamington Road, Grant Road\nMumbai 400007"
-      : "Industrial Area, Phase 1, GIDC\nAhmedabad 380001");
-
-  const supplierEmail =
-    order.supplier_email ||
-    (isSbInks
-      ? "8799513908"
-      : isDarsh
-      ? "darsh.impex@gmail.com"
-      : isGlobal
-      ? "contact@globalimpex.in"
-      : "supplier@example.com");
-
-  const supplierPhone = order.supplier_phone || "";
-
-  const supplierGst =
-    order.supplier_gst ||
-    (isSbInks
-      ? "24ACSF51727J1ZB"
-      : isDarsh
-      ? "27AABCD1234E1Z5"
-      : isGlobal
-      ? "24AABCG5566K1Z9"
-      : "27AAECK9988P1Z4");
-
-  const toName = order.to_name || `${getCachedBrandName().toUpperCase()} (M)`;
-  const toAddress =
-    order.to_address ||
-    "4th Floor, Office No 421, Supremus - [I, Road No- 22, Near Passport Office, Wagle Estate";
-  const toEmail = order.to_email || "Payment.Darsh@Gmail.Com";
-  const toPhone = order.to_phone || "9653261742";
-  const toGst = order.to_gst || "27AAKFI9869H1ZL";
-
-  const createdAt = order.created_at_time || `${order.added_on} 10:49 AM`;
-
-  const items =
-    order.items && order.items.length > 0
-      ? order.items
-      : [
-          {
-            id: `${order.id}-item-1`,
-            product_name: "G43 Online Printer TIJ 4.3",
-            quantity: 1,
-            unit_rate: order.basic_amount || Math.round((order.invoice_total / 1.18) * 100) / 100,
-            item_total: order.basic_amount || Math.round((order.invoice_total / 1.18) * 100) / 100,
-            expense_per_unit: 0,
-            unit_landing_rate:
-              order.basic_amount || Math.round((order.invoice_total / 1.18) * 100) / 100,
-            total_landing_rate:
-              order.basic_amount || Math.round((order.invoice_total / 1.18) * 100) / 100,
-          },
-        ];
-
   return {
-    supplierAddress,
-    supplierEmail,
-    supplierPhone,
-    supplierGst,
-    toName,
-    toAddress,
-    toEmail,
-    toPhone,
-    toGst,
-    createdAt,
-    items,
+    supplierAddress: order.supplier_address || "",
+    supplierEmail: order.supplier_email || "",
+    supplierPhone: order.supplier_phone || "",
+    supplierGst: order.supplier_gst || "",
+    toName: order.to_name || "",
+    toAddress: order.to_address || "",
+    toEmail: order.to_email || "",
+    toPhone: order.to_phone || "",
+    toGst: order.to_gst || "",
+    createdAt: order.created_at_time || order.added_on,
+    items: order.items || [],
   };
 }
 
@@ -405,24 +94,53 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const { id: routeOrderId } = useParams<{ id: string }>();
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
-  const [orders, setOrders] = useState<PurchaseOrderRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem("inhyma_local_purchase_orders");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch {}
-    return INITIAL_PURCHASE_ORDERS;
-  });
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const actor = useMemo(
+    () => ({ isAdmin: isSuperAdmin || profile?.username === "admin", has: hasPermission }),
+    [isSuperAdmin, profile?.username, hasPermission]
+  );
 
-  useEffect(() => {
+  const [orders, setOrders] = useState<PurchaseOrderRecord[]>([]);
+  const [statusRules, setStatusRules] = useState<WorkflowRules>({});
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadOrders = async () => {
     try {
-      localStorage.setItem("inhyma_local_purchase_orders", JSON.stringify(orders));
-    } catch {}
-  }, [orders]);
+      const { orders: rows, rules } = await fetchLocalPurchases();
+      setOrders(rows);
+      setStatusRules(rules);
+      setPageError(null);
+    } catch (err) {
+      setPageError(apiErrorText(err));
+    }
+  };
+  useEffect(() => {
+    void loadOrders();
+  }, []);
+
+  // dropdowns come from their masters: suppliers, and physical warehouses only (spec)
+  const supplierList = useLookup<{ id: string; company_name: string }>("/suppliers", 500);
+  const warehouseList = useLookup<{ name: string; main_warehouse_id?: string | null }>("/masters/warehouses", 250);
+  // The product search returns only a unit id; the unit's name comes from the UOM master
+  const uomList = useLookup<{ id: string; name: string; short_name?: string | null }>("/masters/uom", 250);
+  const uomMapRef = useRef(new Map<string, string>());
+  uomMapRef.current = new Map(uomList.items.map((u) => [u.id, u.short_name || u.name]));
+  const supplierNames = useMemo(() => supplierList.items.map((x) => x.company_name), [supplierList.items]);
+  const warehouseOptions = useMemo(
+    () => ["Select", ...warehouseList.items.filter((w) => !w.main_warehouse_id).map((w) => w.name)],
+    [warehouseList.items]
+  );
+
+  // what each row's menu may offer this user (rules come from the database)
+  const isInitialStatus = (o: PurchaseOrderRecord) => !!statusRules[o.status_key]?.initial;
+  const canEditOrder = (o: PurchaseOrderRecord) => ruleCanEdit(statusRules, o.status_key, actor);
+  const canDeleteOrder = (o: PurchaseOrderRecord) => ruleCanDelete(statusRules, o.status_key, actor);
+  const nextStatus = (o: PurchaseOrderRecord) => availableTransitions(statusRules, o.status_key, actor)[0];
+  const confirmLabel = (o: PurchaseOrderRecord) => {
+    const t = nextStatus(o);
+    return (t && statusRules[t]?.action_label) || "Confirm";
+  };
 
   const [searchTerm, setSearchTerm] = useState("");
   const [perPage, setPerPage] = useState(50);
@@ -439,28 +157,6 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
 
   // Import states
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importRows, setImportRows] = useState<
-    Array<{
-      invoice_no: string;
-      invoice_date: string;
-      supplier_name: string;
-      warehouse: string;
-      invoice_total: number;
-      created_by: string;
-      added_on: string;
-      status: "Pending" | "Confirmed" | "Cancelled";
-      raw: Record<string, any>;
-    }>
-  >([]);
-  const [importErrors, setImportErrors] = useState<string[]>([]);
-  const [isParsing, setIsParsing] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [importDuplicateAction, setImportDuplicateAction] = useState<"skip" | "update">("skip");
-  const importFileInputRef = useRef<HTMLInputElement>(null);
-
   const handleResetFilters = () => {
     setFilterSupplier("");
     setFilterWarehouse("");
@@ -470,30 +166,46 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     setCurrentPage(1);
   };
 
-  const handleBulkConfirm = () => {
+  const handleBulkConfirm = async () => {
     if (selectedIds.length === 0) return;
-    setOrders((prev) =>
-      prev.map((o) => (selectedIds.includes(o.id) ? { ...o, status: "Confirmed" as const } : o))
-    );
-    toast(`${selectedIds.length} purchase order(s) confirmed`, "success");
+    let done = 0;
+    let failed = 0;
+    for (const o of orders.filter((x) => selectedIds.includes(x.id))) {
+      const target = nextStatus(o);
+      if (!target) {
+        failed++;
+        continue;
+      }
+      try {
+        await apiPatch(`${LOCAL_PURCHASE_API}/${o.id}/status`, { status: target });
+        done++;
+      } catch {
+        failed++;
+      }
+    }
+    toast(failed ? `${done} confirmed, ${failed} could not be confirmed` : `${done} purchase order(s) confirmed`, failed ? "error" : "success");
     setSelectedIds([]);
     setBulkMenuOpen(false);
+    await loadOrders();
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return;
-    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected orders?`)) {
-      setOrders((prev) => {
-        const updated = prev.filter((o) => !selectedIds.includes(o.id));
-        try {
-          localStorage.setItem("inhyma_local_purchase_orders", JSON.stringify(updated));
-        } catch {}
-        return updated;
-      });
-      toast(`${selectedIds.length} purchase order(s) deleted`, "success");
-      setSelectedIds([]);
-      setBulkMenuOpen(false);
+    if (!window.confirm(`Are you sure you want to delete ${selectedIds.length} selected orders?`)) return;
+    let done = 0;
+    let failed = 0;
+    for (const o of orders.filter((x) => selectedIds.includes(x.id))) {
+      try {
+        await apiDelete(`${LOCAL_PURCHASE_API}/${o.id}`);
+        done++;
+      } catch {
+        failed++;
+      }
     }
+    toast(failed ? `${done} deleted, ${failed} could not be deleted` : `${done} purchase order(s) deleted`, failed ? "error" : "success");
+    setSelectedIds([]);
+    setBulkMenuOpen(false);
+    await loadOrders();
   };
 
   useEffect(() => {
@@ -521,10 +233,12 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const [formWarehouse, setFormWarehouse] = useState("Select");
   const [formSupplier, setFormSupplier] = useState("Select");
   const [formInvoiceNo, setFormInvoiceNo] = useState("");
-  const [formInvoiceDate, setFormInvoiceDate] = useState("22-09-2026");
+  const [formInvoiceDate, setFormInvoiceDate] = useState(todayDDMMYYYY());
   const [formBasicValue, setFormBasicValue] = useState("");
   const [formTotalValueWithGst, setFormTotalValueWithGst] = useState("");
   const [billFileName, setBillFileName] = useState<string>("");
+  const [billFile, setBillFile] = useState<File | null>(null);
+  const [removeBill, setRemoveBill] = useState(false);
 
   // Card 2: Expenses
   const [packingForwarding, setPackingForwarding] = useState<string>("");
@@ -533,9 +247,9 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
 
   // Section 3 & 4: Products
   const [productSearchQuery, setProductSearchQuery] = useState("");
-  const [productSearchMatches, setProductSearchMatches] = useState<typeof SAMPLE_PRODUCTS>([]);
+  const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
   const [formLineItems, setFormLineItems] = useState<LocalPurchaseItem[]>([]);
-  const [formRemarks, setFormRemarks] = useState("Make all cheque payable to USER");
+  const [formRemarks, setFormRemarks] = useState("");
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
 
   // Calculations for Expenses
@@ -746,388 +460,107 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     document.body.removeChild(link);
   };
 
-  const handleDownloadSampleCsv = () => {
-    const sampleHeaders = [
-      "Invoice No",
-      "Invoice Date",
-      "Supplier",
-      "Warehouse",
-      "Invoice Total Value (INR)",
-      "Created By",
-      "Added On",
-      "Status",
-    ];
-    const sampleRows = [
-      ["2026-27/SO/1535", "22-09-2026", "S B Inks & Packaging Co.", "Mumbai", "125000.00", "Akshata Wadekar", "22-09-2026", "Pending"],
-      ["755/26-27", "21-09-2026", "Darsh Impex India LLP Mumbai", "Mumbai", "18500.00", "Akshata Wadekar", "21-09-2026", "Confirmed"],
-      ["GST-440/26-27", "20-09-2026", "GLOBAL IMPEX MACHINERY", "Ahmedabad", "45000.00", "Akshata Wadekar", "20-09-2026", "Confirmed"],
-    ];
-    const csvContent =
-      "data:text/csv;charset=utf-8," +
-      [sampleHeaders.join(","), ...sampleRows.map((r) => r.map((c) => `"${c}"`).join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "local_purchase_sample_template.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const resetFormFields = () => {
+    setFormWarehouse("Select");
+    setFormSupplier("Select");
+    setFormInvoiceNo("");
+    setFormInvoiceDate(todayDDMMYYYY());
+    setFormBasicValue("");
+    setFormTotalValueWithGst("");
+    setBillFileName("");
+    setBillFile(null);
+    setRemoveBill(false);
+    setPackingForwarding("");
+    setTransportExpense("");
+    setOffloadingExpense("");
+    setFormRemarks("");
+    setFormLineItems([]);
+    setFormErrors({});
   };
 
-  const handleDownloadSampleExcel = async () => {
-    try {
-      const XLSX = await import("xlsx");
-      const sampleData = [
-        {
-          "Invoice No": "2026-27/SO/1535",
-          "Invoice Date": "22-09-2026",
-          "Supplier": "S B Inks & Packaging Co.",
-          "Warehouse": "Mumbai",
-          "Invoice Total Value (INR)": 125000.0,
-          "Created By": "Akshata Wadekar",
-          "Added On": "22-09-2026",
-          "Status": "Pending",
-        },
-        {
-          "Invoice No": "755/26-27",
-          "Invoice Date": "21-09-2026",
-          "Supplier": "Darsh Impex India LLP Mumbai",
-          "Warehouse": "Mumbai",
-          "Invoice Total Value (INR)": 18500.0,
-          "Created By": "Akshata Wadekar",
-          "Added On": "21-09-2026",
-          "Status": "Confirmed",
-        },
-        {
-          "Invoice No": "GST-440/26-27",
-          "Invoice Date": "20-09-2026",
-          "Supplier": "GLOBAL IMPEX MACHINERY",
-          "Warehouse": "Ahmedabad",
-          "Invoice Total Value (INR)": 45000.0,
-          "Created By": "Akshata Wadekar",
-          "Added On": "20-09-2026",
-          "Status": "Confirmed",
-        },
-      ];
-      const ws = XLSX.utils.json_to_sheet(sampleData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Local Purchases");
-      XLSX.writeFile(wb, "local_purchase_sample_template.xlsx");
-    } catch {
-      handleDownloadSampleCsv();
-    }
-  };
-
-  const handleProcessImportFile = async (file: File) => {
-    setImportFile(file);
-    setIsParsing(true);
-    setImportErrors([]);
-    setImportRows([]);
-
-    try {
-      let rawRows: Array<Record<string, any>> = [];
-      const lowerName = file.name.toLowerCase();
-
-      if (lowerName.endsWith(".csv")) {
-        const { default: Papa } = await import("papaparse");
-        rawRows = await new Promise((resolve, reject) => {
-          Papa.parse(file, {
-            header: true,
-            skipEmptyLines: "greedy",
-            complete: (results) => resolve(results.data as Array<Record<string, any>>),
-            error: (err) => reject(err),
-          });
-        });
-      } else if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-        const XLSX = await import("xlsx");
-        const buffer = await file.arrayBuffer();
-        const wb = XLSX.read(buffer, { type: "array" });
-        const firstSheet = wb.Sheets[wb.SheetNames[0]];
-        rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
-      } else {
-        throw new Error("Unsupported format. Please select a .csv, .xlsx, or .xls file.");
-      }
-
-      if (!rawRows || rawRows.length === 0) {
-        throw new Error("The selected file contains no data rows.");
-      }
-
-      const findVal = (row: Record<string, any>, candidates: string[]) => {
-        const keys = Object.keys(row);
-        for (const cand of candidates) {
-          const matched = keys.find(
-            (k) => k.trim().toLowerCase().replace(/[^a-z0-9]/g, "") === cand.replace(/[^a-z0-9]/g, "")
-          );
-          if (matched && row[matched] !== undefined && String(row[matched]).trim() !== "") {
-            return String(row[matched]).trim();
-          }
-        }
-        return "";
-      };
-
-      const parsed: Array<{
-        invoice_no: string;
-        invoice_date: string;
-        supplier_name: string;
-        warehouse: string;
-        invoice_total: number;
-        created_by: string;
-        added_on: string;
-        status: "Pending" | "Confirmed" | "Cancelled";
-        raw: Record<string, any>;
-      }> = [];
-      const errors: string[] = [];
-
-      rawRows.forEach((row, idx) => {
-        const invoice_no = findVal(row, [
-          "invoiceno",
-          "invoicenumber",
-          "invoice",
-          "billno",
-          "billnumber",
-        ]);
-        const supplier_name = findVal(row, [
-          "supplier",
-          "suppliername",
-          "vendor",
-          "vendorname",
-          "party",
-          "partyname",
-        ]);
-        const invoice_date =
-          findVal(row, ["invoicedate", "date", "billdate"]) ||
-          new Date().toISOString().slice(0, 10);
-        const warehouse = findVal(row, ["warehouse", "location", "branch"]) || "Mumbai";
-        const totalStr = findVal(row, [
-          "invoicetotalvalueinr",
-          "invoicetotalvalue",
-          "invoicetotal",
-          "totalvalue",
-          "total",
-          "amount",
-          "totalamount",
-          "grandtotal",
-        ]);
-        const rawTotal = parseFloat(totalStr.replace(/[^0-9.-]/g, ""));
-        const invoice_total = !isNaN(rawTotal) ? rawTotal : 0;
-        const created_by =
-          findVal(row, ["createdby", "created_by", "addedby", "user"]) || "Akshata Wadekar";
-        const added_on =
-          findVal(row, ["addedon", "added_on", "date"]) ||
-          new Date().toISOString().slice(0, 10);
-        const statusRaw = findVal(row, ["status", "orderstatus"]).toLowerCase();
-        let status: "Pending" | "Confirmed" | "Cancelled" = "Pending";
-        if (statusRaw.includes("confirm")) status = "Confirmed";
-        else if (statusRaw.includes("cancel")) status = "Cancelled";
-
-        if (!invoice_no && !supplier_name) {
-          return;
-        }
-
-        if (!invoice_no) {
-          errors.push(`Row ${idx + 2}: Missing Invoice No`);
-        } else if (!supplier_name) {
-          errors.push(`Row ${idx + 2} (${invoice_no}): Missing Supplier Name`);
-        }
-
-        parsed.push({
-          invoice_no: invoice_no || `INV-${Date.now()}-${idx + 1}`,
-          invoice_date,
-          supplier_name: supplier_name || "Unknown Supplier",
-          warehouse,
-          invoice_total,
-          created_by,
-          added_on,
-          status,
-          raw: row,
-        });
-      });
-
-      if (parsed.length === 0) {
-        throw new Error("No valid data rows found in the uploaded file.");
-      }
-
-      setImportRows(parsed);
-      setImportErrors(errors);
-    } catch (err: any) {
-      setImportErrors([err.message || "Failed to parse file."]);
-      setImportRows([]);
-    } finally {
-      setIsParsing(false);
-    }
-  };
-
-  const handleExecuteImport = () => {
-    if (importRows.length === 0) return;
-    setIsImporting(true);
-
-    try {
-      const existingMap = new Map<string, PurchaseOrderRecord>();
-      orders.forEach((o) => {
-        existingMap.set(o.invoice_no.toLowerCase().trim(), o);
-      });
-
-      const newOrders: PurchaseOrderRecord[] = [];
-      let updatedCount = 0;
-      let skippedCount = 0;
-      let insertedCount = 0;
-
-      const brand = getCachedBrandName().toUpperCase();
-
-      importRows.forEach((row, idx) => {
-        const key = row.invoice_no.toLowerCase().trim();
-        const exists = existingMap.get(key);
-
-        if (exists) {
-          if (importDuplicateAction === "skip") {
-            skippedCount++;
-            return;
-          } else {
-            updatedCount++;
-            existingMap.set(key, {
-              ...exists,
-              invoice_date: row.invoice_date || exists.invoice_date,
-              supplier_name: row.supplier_name || exists.supplier_name,
-              warehouse: row.warehouse || exists.warehouse,
-              invoice_total: row.invoice_total || exists.invoice_total,
-              status: row.status || exists.status,
-            });
-            return;
-          }
-        }
-
-        insertedCount++;
-        const newRecord: PurchaseOrderRecord = {
-          id: `po-import-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-          invoice_no: row.invoice_no,
-          invoice_date: row.invoice_date,
-          supplier_name: row.supplier_name,
-          warehouse: row.warehouse,
-          basic_amount: row.invoice_total,
-          invoice_total: row.invoice_total,
-          created_by: row.created_by,
-          added_on: row.added_on,
-          status: row.status,
-          to_name: `${brand} (M)`,
-          items: [],
-        };
-        newOrders.push(newRecord);
-      });
-
-      let finalOrders: PurchaseOrderRecord[];
-      if (importDuplicateAction === "update") {
-        const updatedExisting = orders.map((o) => {
-          const key = o.invoice_no.toLowerCase().trim();
-          return existingMap.get(key) || o;
-        });
-        finalOrders = [...newOrders, ...updatedExisting];
-      } else {
-        finalOrders = [...newOrders, ...orders];
-      }
-
-      setOrders(finalOrders);
-      setCurrentPage(1);
-
-      toast(
-        `Import complete: ${insertedCount} added${
-          updatedCount > 0 ? `, ${updatedCount} updated` : ""
-        }${skippedCount > 0 ? `, ${skippedCount} skipped` : ""}!`,
-        "success"
-      );
-
-      setIsImportModalOpen(false);
-      setImportFile(null);
-      setImportRows([]);
-      setImportErrors([]);
-    } catch (err: any) {
-      toast(err.message || "Failed to import orders.", "error");
-    } finally {
-      setIsImporting(false);
-    }
+  const populateForm = (order: PurchaseOrderRecord) => {
+    setEditingOrderId(order.id);
+    setFormWarehouse(order.warehouse || "Select");
+    setFormSupplier(order.supplier_name || "Select");
+    setFormInvoiceNo(order.invoice_no || "");
+    setFormInvoiceDate(order.invoice_date || todayDDMMYYYY());
+    setFormBasicValue(order.basic_amount ? String(order.basic_amount) : "");
+    setFormTotalValueWithGst(order.invoice_total ? String(order.invoice_total) : "");
+    setBillFileName(order.bill_file || "");
+    setBillFile(null);
+    setRemoveBill(false);
+    setPackingForwarding(order.packing_forwarding ? String(order.packing_forwarding) : "");
+    setTransportExpense(order.transport_expense ? String(order.transport_expense) : "");
+    setOffloadingExpense(order.offloading_expense ? String(order.offloading_expense) : "");
+    setFormRemarks(order.remarks || "");
+    setFormLineItems(order.items && order.items.length > 0 ? [...order.items] : []);
+    setFormErrors({});
+    setIsFormOpen(true);
   };
 
   const handleOpenCreate = () => {
     setEditingOrderId(null);
-    setFormWarehouse("Select");
-    setFormSupplier("Select");
-    setFormInvoiceNo("");
-    setFormInvoiceDate("22-09-2026");
-    setFormBasicValue("");
-    setFormTotalValueWithGst("");
-    setBillFileName("");
-    setPackingForwarding("");
-    setTransportExpense("");
-    setOffloadingExpense("");
-    setFormRemarks("Make all cheque payable to USER");
-    setFormLineItems([]);
-    setFormErrors({});
+    resetFormFields();
     setIsFormOpen(true);
     navigate("/purchase-order/addedit");
   };
 
   const handleOpenEdit = (order: PurchaseOrderRecord) => {
-    setEditingOrderId(order.id);
-    setFormWarehouse(order.warehouse || "Select");
-    setFormSupplier(order.supplier_name || "Select");
-    setFormInvoiceNo(order.invoice_no || "");
-    setFormInvoiceDate(order.invoice_date || "22-09-2026");
-    setFormBasicValue(order.basic_amount ? String(order.basic_amount) : "");
-    setFormTotalValueWithGst(order.invoice_total ? String(order.invoice_total) : "");
-    setBillFileName(order.bill_file || "");
-    setPackingForwarding(order.packing_forwarding ? String(order.packing_forwarding) : "");
-    setTransportExpense(order.transport_expense ? String(order.transport_expense) : "");
-    setOffloadingExpense(order.offloading_expense ? String(order.offloading_expense) : "");
-    setFormRemarks(order.remarks || "Make all cheque payable to USER");
-    setFormLineItems(order.items && order.items.length > 0 ? [...order.items] : []);
-    setFormErrors({});
-    setIsFormOpen(true);
+    populateForm(order);
     navigate(`/purchase-order/addedit/${order.id}`);
   };
 
+  // Moves an order to another status through the API; the server applies the rules and the stock effect.
+  const transitionOrder = async (order: PurchaseOrderRecord, target: string, reason?: string) => {
+    try {
+      await apiPatch(`${LOCAL_PURCHASE_API}/${order.id}/status`, { status: target, reason });
+      toast(`Purchase order ${order.invoice_no} ${statusRules[target]?.label?.toLowerCase() || target}`, "success");
+      await loadOrders();
+    } catch (err) {
+      toast(apiErrorText(err), "error");
+    }
+  };
+
   const handleConfirmOrder = (order: PurchaseOrderRecord) => {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === order.id ? { ...o, status: "Confirmed" as const } : o))
-    );
-    apiPost(`/purchase/orders/${order.id}/confirm`, { status: "Confirmed" }).catch(() => {});
-    toast(`Purchase order ${order.invoice_no} confirmed successfully`, "success");
+    const target = nextStatus(order);
+    if (!target) return;
+    if (needsReason(statusRules, order.status_key, target)) {
+      const reason = window.prompt("Please give a reason");
+      if (!reason?.trim()) return;
+      void transitionOrder(order, target, reason.trim());
+      return;
+    }
+    void transitionOrder(order, target);
   };
 
-  const handleDeleteOrder = (order: PurchaseOrderRecord) => {
-    if (window.confirm(`Are you sure you want to delete purchase order ${order.invoice_no}?`)) {
-      setOrders((prev) => {
-        const updated = prev.filter((o) => o.id !== order.id);
-        try {
-          localStorage.setItem("inhyma_local_purchase_orders", JSON.stringify(updated));
-        } catch {}
-        return updated;
-      });
-      apiPost(`/purchase/orders/${order.id}/delete`, {}).catch(() => {});
+  const handleDeleteOrder = async (order: PurchaseOrderRecord) => {
+    if (!window.confirm(`Are you sure you want to delete purchase order ${order.invoice_no}?`)) return;
+    try {
+      await apiDelete(`${LOCAL_PURCHASE_API}/${order.id}`);
       toast(`Purchase order ${order.invoice_no} deleted successfully`, "success");
+      await loadOrders();
+    } catch (err) {
+      toast(apiErrorText(err), "error");
     }
   };
 
+  // Opening /purchase-order/addedit/:id loads that order into the form
   useEffect(() => {
-    if (routeOrderId && location.pathname.includes("/purchase-order/addedit/")) {
-      const found = orders.find(
-        (o) => o.id === routeOrderId || o.invoice_no === decodeURIComponent(routeOrderId)
-      );
-      if (found && editingOrderId !== found.id) {
-        setEditingOrderId(found.id);
-        setFormWarehouse(found.warehouse || "Select");
-        setFormSupplier(found.supplier_name || "Select");
-        setFormInvoiceNo(found.invoice_no || "");
-        setFormInvoiceDate(found.invoice_date || "22-09-2026");
-        setFormBasicValue(found.basic_amount ? String(found.basic_amount) : "");
-        setFormTotalValueWithGst(found.invoice_total ? String(found.invoice_total) : "");
-        setBillFileName(found.bill_file || "");
-        setPackingForwarding(found.packing_forwarding ? String(found.packing_forwarding) : "");
-        setTransportExpense(found.transport_expense ? String(found.transport_expense) : "");
-        setOffloadingExpense(found.offloading_expense ? String(found.offloading_expense) : "");
-        setFormRemarks(found.remarks || "Make all cheque payable to USER");
-        setFormLineItems(found.items && found.items.length > 0 ? [...found.items] : []);
-      }
-    }
-  }, [routeOrderId, orders, editingOrderId, location.pathname]);
+    if (!routeOrderId || !location.pathname.includes("/purchase-order/addedit/")) return;
+    if (editingOrderId === routeOrderId) return;
+    let cancelled = false;
+    apiGet<any>(`${LOCAL_PURCHASE_API}/${routeOrderId}`)
+      .then((res) => {
+        if (!cancelled && res?.data) populateForm(mapLocalPurchase(res.data, statusRules));
+      })
+      .catch((err) => {
+        if (!cancelled) setPageError(apiErrorText(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeOrderId, location.pathname]);
 
   const handleBack = () => {
     setEditingOrderId(null);
@@ -1136,32 +569,43 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   };
 
   const handleOpenBillPdf = (order: PurchaseOrderRecord) => {
-    const targetId = order.invoice_no ? encodeURIComponent(order.invoice_no) : order.id;
-    window.open(`/purchase-order/bill-file/${targetId}`, "_blank");
+    window.open(`/purchase-order/bill-file/${order.id}`, "_blank");
   };
 
-  // Product Search autocomplete
+  // Product search: the Product Master
+  const productSearchSeq = useRef(0);
   const handleProductSearchChange = (val: string) => {
     setProductSearchQuery(val);
     if (!val.trim()) {
       setProductSearchMatches([]);
       return;
     }
-    const q = val.toLowerCase().replace(/[-_]/g, " ");
-    const matches = SAMPLE_PRODUCTS.filter(
-      (p) =>
-        p.product_name.toLowerCase().replace(/[-_]/g, " ").includes(q) ||
-        p.product_name.toLowerCase().includes(val.toLowerCase())
-    );
-    setProductSearchMatches(matches);
+    const seq = ++productSearchSeq.current;
+    void apiGet<any[]>(`/masters/products?page=1&page_size=10&status=active&search=${encodeURIComponent(val.trim())}`)
+      .then((res) => {
+        if (seq !== productSearchSeq.current) return;
+        setProductSearchMatches(
+          (res?.data || []).map((p) => ({
+            product_name: p.product_name,
+            product_code: p.product_code,
+            uom: uomMapRef.current.get(p.uom_id) || null,
+            rate: Number(p.standard_cost) || 0,
+          }))
+        );
+      })
+      .catch(() => {
+        if (seq === productSearchSeq.current) setProductSearchMatches([]);
+      });
   };
 
-  const handleSelectProductMatch = (prod: (typeof SAMPLE_PRODUCTS)[0]) => {
+  const handleSelectProductMatch = (prod: CatalogProduct) => {
     const newItem: LocalPurchaseItem = {
       id: "prod-" + Date.now() + Math.random().toString(36).substring(2, 5),
       product_name: prod.product_name,
+      product_code: prod.product_code,
+      uom: prod.uom,
       quantity: 1,
-      unit_rate: prod.rate,
+      unit_rate: prod.rate || "",
       item_total: prod.rate,
       expense_per_unit: 0,
       unit_landing_rate: prod.rate,
@@ -1198,32 +642,25 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     setFormLineItems((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleSavePurchaseOrder = (e: React.FormEvent) => {
+  const handleSavePurchaseOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs: { [key: string]: string } = {};
 
-    if (formWarehouse === "Select") {
-      errs.warehouse = "Warehouse is required.";
+    if (formWarehouse === "Select") errs.warehouse = "Warehouse is required.";
+    if (formSupplier === "Select" || !formSupplier.trim()) errs.supplier = "Supplier is required.";
+    else if (supplierNames.length > 0 && !supplierNames.some((n) => n.toLowerCase() === formSupplier.trim().toLowerCase())) {
+      errs.supplier = "Select a supplier from the list.";
     }
-    if (formSupplier === "Select") {
-      errs.supplier = "Supplier is required.";
-    }
-    if (!formInvoiceNo.trim()) {
-      errs.invoice_no = "Invoice No. is required.";
-    }
-    if (!formInvoiceDate.trim()) {
-      errs.invoice_date = "Invoice Date is required.";
-    }
-    if (!formBasicValue) {
-      errs.basic_amount = "Invoice Basic Value is required.";
-    }
-    if (!formTotalValueWithGst) {
-      errs.invoice_total = "Invoice Total Value (Including GST) is required.";
-    }
+    if (!formInvoiceNo.trim()) errs.invoice_no = "Invoice No. is required.";
+    if (!formInvoiceDate.trim()) errs.invoice_date = "Invoice Date is required.";
+    if (!formBasicValue) errs.basic_amount = "Invoice Basic Value is required.";
+    if (!formTotalValueWithGst) errs.invoice_total = "Invoice Total Value (Including GST) is required.";
 
     const validItems = computedLineItems.filter((it) => it.product_name.trim());
     if (validItems.length === 0) {
       errs.items = "Please add at least one product item.";
+    } else if (validItems.some((it) => !(Number(it.quantity) > 0))) {
+      errs.items = "Every product needs a quantity above zero.";
     }
 
     if (Object.keys(errs).length > 0) {
@@ -1231,76 +668,45 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
       return;
     }
     setFormErrors({});
+    setSaving(true);
 
-    const totalVal = parseFloat(formTotalValueWithGst) || 0;
-    const basicVal = parseFloat(formBasicValue) || 0;
-
-    if (editingOrderId) {
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.id === editingOrderId
-            ? {
-                ...o,
-                invoice_no: formInvoiceNo.trim(),
-                invoice_date: formInvoiceDate.trim() || "22-09-2026",
-                supplier_name: formSupplier,
-                warehouse: formWarehouse,
-                basic_amount: basicVal,
-                invoice_total: totalVal,
-                bill_file: billFileName || o.bill_file,
-                packing_forwarding: parseFloat(packingForwarding) || 0,
-                transport_expense: parseFloat(transportExpense) || 0,
-                offloading_expense: parseFloat(offloadingExpense) || 0,
-                total_expenses: totalExpenses,
-                loading_expense_percent: loadingExpensePercent,
-                remarks: formRemarks.trim() || undefined,
-                items: validItems,
-              }
-            : o
-        )
-      );
-      apiPost(`/purchase/orders/${editingOrderId}`, {
-        invoice_no: formInvoiceNo.trim(),
-        invoice_date: formInvoiceDate.trim(),
-        supplier_name: formSupplier,
+    try {
+      const body = buildLocalPayload({
+        supplier_name: supplierNames.find((n) => n.toLowerCase() === formSupplier.trim().toLowerCase()) || formSupplier.trim(),
         warehouse: formWarehouse,
-        basic_amount: basicVal,
-        invoice_total: totalVal,
+        invoice_no: formInvoiceNo,
+        invoice_date: formInvoiceDate,
+        basic_amount: formBasicValue,
+        invoice_total: formTotalValueWithGst,
+        packing_forwarding: packingForwarding,
+        transport: transportExpense,
+        offloading: offloadingExpense,
+        remarks: formRemarks,
         items: validItems,
-      }).catch(() => {});
-      toast("Local purchase order updated successfully", "success");
+      });
+      const res = editingOrderId
+        ? await apiPut<{ id: string }>(`${LOCAL_PURCHASE_API}/${editingOrderId}`, body)
+        : await apiPost<{ id: string }>(LOCAL_PURCHASE_API, body);
+      const savedId = (res.data as { id: string }).id;
+      if (billFile) {
+        const fd = new FormData();
+        fd.append("file", billFile);
+        await apiPostMultipart(`${LOCAL_PURCHASE_API}/${savedId}/bill`, fd);
+      } else if (editingOrderId && removeBill) {
+        await apiDelete(`${LOCAL_PURCHASE_API}/${savedId}/bill`);
+      }
+      toast(editingOrderId ? "Local purchase order updated successfully" : "Local purchase order created successfully", "success");
       setEditingOrderId(null);
       setIsFormOpen(false);
       navigate("/purchase/localpurchase");
-      return;
+      await loadOrders();
+    } catch (err) {
+      // stay on the form and show the real reason; never pretend it was saved
+      setFormErrors({ submit: apiErrorText(err) });
+      toast(apiErrorText(err), "error");
+    } finally {
+      setSaving(false);
     }
-
-    const newOrder: PurchaseOrderRecord = {
-      id: `po-${Date.now()}`,
-      invoice_no: formInvoiceNo.trim(),
-      invoice_date: formInvoiceDate.trim() || "22-09-2026",
-      supplier_name: formSupplier,
-      warehouse: formWarehouse,
-      basic_amount: basicVal,
-      invoice_total: totalVal,
-      bill_file: billFileName || undefined,
-      created_by: "Akshata Wadekar",
-      added_on: "22-09-2026",
-      status: "Confirmed",
-      packing_forwarding: parseFloat(packingForwarding) || 0,
-      transport_expense: parseFloat(transportExpense) || 0,
-      offloading_expense: parseFloat(offloadingExpense) || 0,
-      total_expenses: totalExpenses,
-      loading_expense_percent: loadingExpensePercent,
-      remarks: formRemarks.trim() || undefined,
-      items: validItems,
-    };
-
-    setOrders([newOrder, ...orders]);
-    apiPost("/purchase/orders", newOrder).catch(() => {});
-    toast("Local purchase order created successfully", "success");
-    setIsFormOpen(false);
-    navigate("/purchase/localpurchase");
   };
 
   // ==========================================
@@ -1341,6 +747,11 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
           </div>
 
           <form onSubmit={handleSavePurchaseOrder}>
+            {formErrors.submit && (
+              <div role="alert" style={{ padding: "10px 14px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "12px" }}>
+                ⚠️ {formErrors.submit}
+              </div>
+            )}
             {/* Top Card: General Details */}
             <div
               style={{
@@ -1382,7 +793,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                       outline: "none",
                     }}
                   >
-                    {WAREHOUSE_OPTIONS.map((w) => (
+                    {warehouseOptions.map((w) => (
                       <option key={w} value={w}>
                         {w}
                       </option>
@@ -1399,9 +810,13 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                   <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Supplier <span style={{ color: "#ef4444" }}>*</span>
                   </label>
-                  <select
-                    value={formSupplier}
-                    onChange={(e) => setFormSupplier(e.target.value)}
+                  <input
+                    aria-label="Supplier"
+                    list="local-supplier-options"
+                    autoComplete="off"
+                    placeholder="Type to search suppliers"
+                    value={formSupplier === "Select" ? "" : formSupplier}
+                    onChange={(e) => setFormSupplier(e.target.value || "Select")}
                     style={{
                       width: "100%",
                       height: "34px",
@@ -1410,16 +825,15 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                       padding: "0 8px",
                       fontSize: "13px",
                       background: "#ffffff",
-                      color: formSupplier === "Select" ? "#94a3b8" : "#334155",
-                      outline: "none",
+                      color: "#334155",
+                      boxSizing: "border-box",
                     }}
-                  >
-                    {SUPPLIER_OPTIONS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
+                  />
+                  <datalist id="local-supplier-options">
+                    {supplierNames.map((n) => (
+                      <option key={n} value={n} />
                     ))}
-                  </select>
+                  </datalist>
                   {formErrors.supplier && (
                     <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" }}>
                       {formErrors.supplier}
@@ -1561,6 +975,8 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
                           setBillFileName(e.target.files[0].name);
+                          setBillFile(e.target.files[0]);
+                          setRemoveBill(false);
                         }
                       }}
                       style={{ display: "none" }}
@@ -1586,6 +1002,20 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                     <span style={{ padding: "0 10px", fontSize: "12.5px", color: billFileName ? "#334155" : "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {billFileName || "No file chosen"}
                     </span>
+                    {billFileName && (
+                      <button
+                        type="button"
+                        aria-label="Remove file"
+                        onClick={() => {
+                          setBillFileName("");
+                          setBillFile(null);
+                          setRemoveBill(true);
+                        }}
+                        style={{ border: "none", background: "none", color: "#ef4444", cursor: "pointer", padding: "0 8px" }}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1830,6 +1260,11 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                               onChange={(e) => handleUpdateLineItem(idx, "quantity", e.target.value)}
                               style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 8px", fontSize: "12.5px" }}
                             />
+                            {row.uom && (
+                              <span aria-label={`Unit ${idx + 1}`} style={{ marginLeft: "6px", fontSize: "12px", color: "#64748b" }}>
+                                {row.uom}
+                              </span>
+                            )}
                           </td>
                           <td style={{ padding: "6px 10px", borderBottom: "1px solid #e2e8f0" }}>
                             <input
@@ -1918,7 +1353,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                 </label>
                 <textarea
                   rows={4}
-                  placeholder="Make all cheque payable to USER"
+                  placeholder="Enter remarks"
                   value={formRemarks}
                   onChange={(e) => setFormRemarks(e.target.value)}
                   style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "10px 12px", fontSize: "13px", resize: "vertical" }}
@@ -1930,19 +1365,20 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
             <div style={{ marginTop: "16px" }}>
               <button
                 type="submit"
+                disabled={saving}
                 style={{
-                  background: "#0061f2",
+                  background: saving ? "#94a3b8" : "#0061f2",
                   color: "#ffffff",
                   border: "none",
                   borderRadius: "4px",
                   padding: "8px 24px",
                   fontSize: "13.5px",
                   fontWeight: 600,
-                  cursor: "pointer",
+                  cursor: saving ? "not-allowed" : "pointer",
                   boxShadow: "0 2px 4px rgba(0, 97, 242, 0.2)",
                 }}
               >
-                Submit
+                {saving ? "Saving…" : "Submit"}
               </button>
             </div>
           </form>
@@ -1957,6 +1393,11 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   return (
     <AppShell activeKey="local-purchases">
       <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
+        {pageError && (
+          <div role="alert" style={{ padding: "12px 16px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "16px" }}>
+            ⚠️ {pageError}
+          </div>
+        )}
         <div style={{ marginBottom: "12px" }}>
           <Breadcrumb trail={["Purchase", "Local Purchase"]} />
         </div>
@@ -2032,49 +1473,6 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
               }}
             >
               Export
-            </button>
-
-            {/* Import Button */}
-            <button
-              type="button"
-              className="btn btn-import"
-              data-testid="btn-import"
-              onClick={() => {
-                setImportFile(null);
-                setImportRows([]);
-                setImportErrors([]);
-                setIsImportModalOpen(true);
-              }}
-              style={{
-                background: "#0284c7",
-                color: "#ffffff",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
-                border: "none",
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(2,132,199,0.2)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              Import
             </button>
 
             {/* Bulk Actions Button */}
@@ -2254,8 +1652,11 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                   }}
                 >
                   <option value="">All Statuses</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Confirmed">Confirmed</option>
+                  {Object.entries(statusRules).map(([key, r]) => (
+                    <option key={key} value={r.label || key}>
+                      {r.label || key}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -2634,9 +2035,9 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                             borderRadius: "9999px",
                             fontSize: "11.5px",
                             fontWeight: 600,
-                            background: order.status === "Pending" ? "#fef9c3" : "#e0f2fe",
-                            color: order.status === "Pending" ? "#a16207" : "#0284c7",
-                            border: `1px solid ${order.status === "Pending" ? "#fde047" : "#bae6fd"}`,
+                            background: isInitialStatus(order) ? "#fef9c3" : "#e0f2fe",
+                            color: isInitialStatus(order) ? "#a16207" : "#0284c7",
+                            border: `1px solid ${isInitialStatus(order) ? "#fde047" : "#bae6fd"}`,
                           }}
                         >
                           {order.status}
@@ -2702,50 +2103,52 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                               padding: "3px 0",
                             }}
                           >
-                            {order.status === "Confirmed" ? (
+                            {!isInitialStatus(order) ? (
                               <>
-                                <button
-                                  type="button"
-                                  data-testid={`action-edit-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleOpenEdit(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    style={{ color: "#334155" }}
+                                {canEditOrder(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-edit-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleOpenEdit(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <path d="M12 20h9" />
-                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                                  </svg>
-                                  <span>Edit</span>
-                                </button>
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M12 20h9" />
+                                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                    </svg>
+                                    <span>Edit</span>
+                                  </button>
+                                )}
 
                                 <button
                                   type="button"
@@ -2790,134 +2193,225 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                                   </svg>
                                   <span>Download Purchase</span>
                                 </button>
+                                {!!nextStatus(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-confirm-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleConfirmOrder(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                  >
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="currentColor"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                                    </svg>
+                                    <span>{confirmLabel(order)}</span>
+                                  </button>
+                                )}
+                                {canDeleteOrder(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-delete-confirmed-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleDeleteOrder(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                  >
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <polyline points="3 6 5 6 21 6" />
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                      <line x1="10" y1="11" x2="10" y2="17" />
+                                      <line x1="14" y1="11" x2="14" y2="17" />
+                                    </svg>
+                                    <span>Delete</span>
+                                  </button>
+                                )}
                               </>
                             ) : (
                               <>
-                                <button
-                                  type="button"
-                                  data-testid={`action-edit-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleOpenEdit(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    style={{ color: "#334155" }}
+                                {canEditOrder(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-edit-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleOpenEdit(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <path d="M12 20h9" />
-                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                                  </svg>
-                                  <span>Edit</span>
-                                </button>
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M12 20h9" />
+                                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                    </svg>
+                                    <span>Edit</span>
+                                  </button>
+                                )}
 
-                                <button
-                                  type="button"
-                                  data-testid={`action-confirm-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleConfirmOrder(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
-                                    style={{ color: "#334155" }}
+                                {!!nextStatus(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-confirm-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleConfirmOrder(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                                  </svg>
-                                  <span>Confirm</span>
-                                </button>
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="currentColor"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                                    </svg>
+                                    <span>{confirmLabel(order)}</span>
+                                  </button>
+                                )}
 
-                                <button
-                                  type="button"
-                                  data-testid={`action-delete-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleDeleteOrder(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    style={{ color: "#334155" }}
+                                {canDeleteOrder(order) && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-delete-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleDeleteOrder(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <polyline points="3 6 5 6 21 6" />
-                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                    <line x1="10" y1="11" x2="10" y2="17" />
-                                    <line x1="14" y1="11" x2="14" y2="17" />
-                                  </svg>
-                                  <span>Delete</span>
-                                </button>
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <polyline points="3 6 5 6 21 6" />
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                      <line x1="10" y1="11" x2="10" y2="17" />
+                                      <line x1="14" y1="11" x2="14" y2="17" />
+                                    </svg>
+                                    <span>Delete</span>
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>
@@ -2947,9 +2441,9 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
               {sortedOrders.length === 0
                 ? "Showing 0 To 0 Of 0 Entries"
                 : `Showing ${(currentPage - 1) * perPage + 1} To ${Math.min(
-                    currentPage * perPage,
-                    sortedOrders.length
-                  )} Of ${sortedOrders.length} Entries`}
+                  currentPage * perPage,
+                  sortedOrders.length
+                )} Of ${sortedOrders.length} Entries`}
             </div>
 
             <div style={{ display: "flex", gap: "6px" }}>
@@ -3069,9 +2563,9 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                         borderRadius: "9999px",
                         fontSize: "11px",
                         fontWeight: 600,
-                        background: selectedOrder.status === "Pending" ? "#fef9c3" : "#e0f2fe",
-                        color: selectedOrder.status === "Pending" ? "#a16207" : "#0284c7",
-                        border: `1px solid ${selectedOrder.status === "Pending" ? "#fde047" : "#bae6fd"}`,
+                        background: isInitialStatus(selectedOrder) ? "#fef9c3" : "#e0f2fe",
+                        color: isInitialStatus(selectedOrder) ? "#a16207" : "#0284c7",
+                        border: `1px solid ${isInitialStatus(selectedOrder) ? "#fde047" : "#bae6fd"}`,
                       }}
                     >
                       {selectedOrder.status}
@@ -3432,439 +2926,6 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
           );
         })()}
 
-        {/* Local Purchase Import Modal */}
-        {isImportModalOpen && (
-          <div
-            data-testid="local-purchase-import-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="import-modal-title"
-            style={{
-              position: "fixed",
-              inset: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.55)",
-              zIndex: 9999,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "20px",
-              backdropFilter: "blur(2px)",
-            }}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                setIsImportModalOpen(false);
-              }
-            }}
-          >
-            <div
-              style={{
-                backgroundColor: "#ffffff",
-                borderRadius: "8px",
-                width: "100%",
-                maxWidth: "760px",
-                maxHeight: "90vh",
-                overflowY: "auto",
-                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
-                border: "1px solid #cbd5e1",
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              {/* Modal Header */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "16px 22px",
-                  borderBottom: "1px solid #e2e8f0",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <div
-                    style={{
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "8px",
-                      background: "#e0f2fe",
-                      color: "#0284c7",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "18px",
-                    }}
-                  >
-                    📥
-                  </div>
-                  <div>
-                    <h2
-                      id="import-modal-title"
-                      style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1e293b" }}
-                    >
-                      Import Local Purchase Orders
-                    </h2>
-                    <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>
-                      Upload CSV or Excel files (.csv, .xlsx, .xls) to batch import orders
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  aria-label="Close"
-                  data-testid="btn-close-import-modal"
-                  onClick={() => setIsImportModalOpen(false)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    fontSize: "20px",
-                    color: "#94a3b8",
-                    cursor: "pointer",
-                    padding: "4px 8px",
-                    lineHeight: 1,
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Modal Body */}
-              <div style={{ padding: "20px 22px", display: "flex", flexDirection: "column", gap: "18px" }}>
-                {/* Step 1: Download Sample Templates */}
-                <div
-                  style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "6px",
-                    padding: "14px 16px",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    gap: "10px",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
-                      Need a sample file to get started?
-                    </div>
-                    <div style={{ fontSize: "11.5px", color: "#64748b" }}>
-                      Download the template with sample headers and data rows.
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <button
-                      type="button"
-                      onClick={handleDownloadSampleCsv}
-                      data-testid="btn-download-sample-csv"
-                      style={{
-                        background: "#ffffff",
-                        border: "1px solid #cbd5e1",
-                        color: "#334155",
-                        padding: "6px 12px",
-                        borderRadius: "5px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                      }}
-                    >
-                      📄 Sample CSV
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDownloadSampleExcel}
-                      data-testid="btn-download-sample-excel"
-                      style={{
-                        background: "#ffffff",
-                        border: "1px solid #cbd5e1",
-                        color: "#166534",
-                        padding: "6px 12px",
-                        borderRadius: "5px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                      }}
-                    >
-                      📊 Sample Excel (.xlsx)
-                    </button>
-                  </div>
-                </div>
-
-                {/* Step 2: Dropzone / Upload Area */}
-                <div
-                  data-testid="import-dropzone"
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setIsDragging(true);
-                  }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDragging(false);
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) handleProcessImportFile(file);
-                  }}
-                  onClick={() => importFileInputRef.current?.click()}
-                  style={{
-                    border: `2px dashed ${isDragging ? "#0284c7" : "#cbd5e1"}`,
-                    backgroundColor: isDragging ? "#f0f9ff" : "#fcfcfd",
-                    borderRadius: "8px",
-                    padding: "28px 20px",
-                    textAlign: "center",
-                    cursor: "pointer",
-                    transition: "all 0.2s ease",
-                  }}
-                >
-                  <input
-                    ref={importFileInputRef}
-                    type="file"
-                    data-testid="file-import-input"
-                    accept=".csv, .xlsx, .xls"
-                    style={{ display: "none" }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleProcessImportFile(file);
-                    }}
-                  />
-                  <div
-                    style={{
-                      width: "48px",
-                      height: "48px",
-                      borderRadius: "50%",
-                      background: isDragging ? "#e0f2fe" : "#f1f5f9",
-                      color: isDragging ? "#0284c7" : "#64748b",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      margin: "0 auto 12px",
-                      fontSize: "22px",
-                    }}
-                  >
-                    📁
-                  </div>
-                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "4px" }}>
-                    {importFile ? importFile.name : "Click to select a file or drag & drop here"}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#64748b" }}>
-                    {importFile
-                      ? `${(importFile.size / 1024).toFixed(1)} KB — Click to change file`
-                      : "Supports CSV, XLSX, and XLS formats"}
-                  </div>
-                </div>
-
-                {/* Parsing indicator */}
-                {isParsing && (
-                  <div style={{ textAlign: "center", padding: "12px", color: "#0284c7", fontSize: "13px", fontWeight: 600 }}>
-                    Parsing file, please wait...
-                  </div>
-                )}
-
-                {/* Errors display */}
-                {importErrors.length > 0 && (
-                  <div
-                    data-testid="import-errors-box"
-                    style={{
-                      background: "#fef2f2",
-                      border: "1px solid #fecaca",
-                      borderRadius: "6px",
-                      padding: "12px 16px",
-                      fontSize: "12px",
-                      color: "#991b1b",
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, marginBottom: "4px" }}>
-                      ⚠️ Please check the following warnings/errors:
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: "18px" }}>
-                      {importErrors.map((err, i) => (
-                        <li key={i}>{err}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Data preview table if rows parsed */}
-                {importRows.length > 0 && (
-                  <div data-testid="import-preview-section">
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginBottom: "8px",
-                      }}
-                    >
-                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
-                        Preview ({importRows.length} order{importRows.length === 1 ? "" : "s"} found)
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px" }}>
-                        <span style={{ color: "#475569" }}>Duplicate invoices:</span>
-                        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-                          <input
-                            type="radio"
-                            name="dupAction"
-                            checked={importDuplicateAction === "skip"}
-                            onChange={() => setImportDuplicateAction("skip")}
-                          />
-                          Skip
-                        </label>
-                        <label style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-                          <input
-                            type="radio"
-                            name="dupAction"
-                            checked={importDuplicateAction === "update"}
-                            onChange={() => setImportDuplicateAction("update")}
-                          />
-                          Update
-                        </label>
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        maxHeight: "220px",
-                        overflowY: "auto",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "6px",
-                      }}
-                    >
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
-                        <thead>
-                          <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left", color: "#475569" }}>
-                            <th style={{ padding: "8px 10px" }}>Invoice No</th>
-                            <th style={{ padding: "8px 10px" }}>Date</th>
-                            <th style={{ padding: "8px 10px" }}>Supplier</th>
-                            <th style={{ padding: "8px 10px" }}>Warehouse</th>
-                            <th style={{ padding: "8px 10px" }}>Total (INR)</th>
-                            <th style={{ padding: "8px 10px" }}>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {importRows.map((r, i) => (
-                            <tr
-                              key={i}
-                              style={{
-                                borderBottom: "1px solid #f1f5f9",
-                                background: i % 2 === 0 ? "#ffffff" : "#fcfcfd",
-                              }}
-                            >
-                              <td style={{ padding: "8px 10px", fontWeight: 600, color: "#0061f2" }}>{r.invoice_no}</td>
-                              <td style={{ padding: "8px 10px", color: "#475569" }}>{r.invoice_date}</td>
-                              <td style={{ padding: "8px 10px", color: "#1e293b" }}>{r.supplier_name}</td>
-                              <td style={{ padding: "8px 10px", color: "#475569" }}>{r.warehouse}</td>
-                              <td style={{ padding: "8px 10px", fontWeight: 600, color: "#1e293b" }}>
-                                ₹ {Number(r.invoice_total || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                              <td style={{ padding: "8px 10px" }}>
-                                <span
-                                  style={{
-                                    display: "inline-block",
-                                    padding: "2px 8px",
-                                    borderRadius: "12px",
-                                    fontSize: "11px",
-                                    fontWeight: 600,
-                                    background: r.status === "Confirmed" ? "#dcfce7" : r.status === "Cancelled" ? "#fee2e2" : "#fef9c3",
-                                    color: r.status === "Confirmed" ? "#15803d" : r.status === "Cancelled" ? "#b91c1c" : "#854d0e",
-                                  }}
-                                >
-                                  {r.status}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Modal Footer */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "14px 22px",
-                  borderTop: "1px solid #e2e8f0",
-                  background: "#f8fafc",
-                  borderRadius: "0 0 8px 8px",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsImportModalOpen(false);
-                    setImportFile(null);
-                    setImportRows([]);
-                    setImportErrors([]);
-                  }}
-                  style={{
-                    background: "#ffffff",
-                    border: "1px solid #cbd5e1",
-                    color: "#475569",
-                    padding: "8px 16px",
-                    borderRadius: "6px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-
-                <div style={{ display: "flex", gap: "10px" }}>
-                  {importRows.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setImportFile(null);
-                        setImportRows([]);
-                        setImportErrors([]);
-                      }}
-                      style={{
-                        background: "#ffffff",
-                        border: "1px solid #cbd5e1",
-                        color: "#64748b",
-                        padding: "8px 14px",
-                        borderRadius: "6px",
-                        fontSize: "13px",
-                        fontWeight: 500,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Clear File
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    data-testid="btn-confirm-import"
-                    disabled={importRows.length === 0 || isImporting}
-                    onClick={handleExecuteImport}
-                    style={{
-                      background: importRows.length === 0 || isImporting ? "#94a3b8" : "#0284c7",
-                      color: "#ffffff",
-                      border: "none",
-                      padding: "8px 20px",
-                      borderRadius: "6px",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      cursor: importRows.length === 0 || isImporting ? "not-allowed" : "pointer",
-                      boxShadow: importRows.length === 0 ? "none" : "0 2px 4px rgba(2, 132, 199, 0.2)",
-                    }}
-                  >
-                    {isImporting ? "Importing..." : `Import ${importRows.length > 0 ? `${importRows.length} ` : ""}Orders`}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
     </AppShell>
   );

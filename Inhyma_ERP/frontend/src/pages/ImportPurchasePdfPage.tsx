@@ -1,65 +1,34 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { INITIAL_IMPORT_ORDERS, type ImportPurchaseRecord } from "@/pages/purchase/ImportPurchasePage";
 import { generateImportPurchaseBillPdf } from "@/lib/importPurchasePdf";
-import { apiGet } from "@/lib/api";
+import { apiGet, errorMessage } from "@/lib/api";
+import { IMPORT_PURCHASE_API, mapImportPurchase, type ImportPurchaseRecord } from "@/lib/purchaseApi";
 
 export function ImportPurchasePdfPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [liveItem, setLiveItem] = useState<ImportPurchaseRecord | null>(null);
+  const [currentItem, setCurrentItem] = useState<ImportPurchaseRecord | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Find item from localStorage or static INITIAL_IMPORT_ORDERS
-  const staticItem = useMemo(() => {
-    let orderPool = INITIAL_IMPORT_ORDERS;
-    try {
-      const saved = localStorage.getItem("inhyma_import_purchase_orders");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          orderPool = parsed;
-        }
-      }
-    } catch {}
-
-    if (!id) return orderPool[0];
-    const decodedId = decodeURIComponent(id).trim().toLowerCase();
-
-    const found = orderPool.find((item) => {
-      const itemNo = item.consignment_no.toLowerCase();
-      const itemId = item.id.toLowerCase();
-      return (
-        itemId === decodedId ||
-        itemNo === decodedId ||
-        itemNo.replace(/[\/\-_]/g, "") === decodedId.replace(/[\/\-_]/g, "") ||
-        itemNo.includes(decodedId) ||
-        decodedId.includes(itemNo)
-      );
-    });
-
-    return found || orderPool[0];
-  }, [id]);
-
-  // Fetch live from API if available
+  // The consignment (with real supplier / buyer details) comes from the API; nothing is made up if it fails.
   useEffect(() => {
     let cancelled = false;
     if (id) {
-      apiGet<ImportPurchaseRecord>(`/purchase/import/orders/${id}`)
+      apiGet<any>(`${IMPORT_PURCHASE_API}/${encodeURIComponent(id)}`)
         .then((res) => {
-          if (!cancelled && res?.data) {
-            setLiveItem(res.data);
-          }
+          if (!cancelled && res?.data) setCurrentItem(mapImportPurchase(res.data, {}));
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (!cancelled) setLoadError(errorMessage(err));
+        });
     }
     return () => {
       cancelled = true;
     };
   }, [id]);
 
-  const currentItem = liveItem || staticItem;
-  const consignmentNo = currentItem?.consignment_no || "MUM51";
+  const consignmentNo = currentItem?.consignment_no || "";
 
   useEffect(() => {
     if (currentItem) {
@@ -100,7 +69,7 @@ export function ImportPurchasePdfPage() {
         window.close();
         return;
       }
-    } catch {}
+    } catch { }
     navigate("/purchase/importpurchase");
   };
 
@@ -216,7 +185,7 @@ export function ImportPurchasePdfPage() {
               fontSize: "15px",
             }}
           >
-            Generating Import Bill File PDF...
+            {loadError || (id ? "Generating Import Bill File PDF..." : "No consignment selected.")}
           </div>
         )}
       </div>

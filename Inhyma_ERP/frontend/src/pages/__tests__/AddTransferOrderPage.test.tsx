@@ -203,4 +203,20 @@ describe("AddTransferOrderPage", () => {
     fireEvent.click(addNewBtn);
     expect(mockNavigate).toHaveBeenCalledWith("/transfer/addEdit");
   });
+
+  it("supports selecting a transit warehouse as destination and displays in-transit guidance (Point 69)", async () => {
+    render(
+      <BrowserRouter>
+        <AddTransferOrderPage />
+      </BrowserRouter>
+    );
+
+    const fromWh = screen.getByLabelText(/From Warehouse/i);
+    const toWh = screen.getByLabelText(/To Warehouse/i);
+
+    fireEvent.change(fromWh, { target: { value: "Ahmedabad" } });
+    fireEvent.change(toWh, { target: { value: "Mumbai Transit" } });
+
+    expect(screen.getByText(/Goods will sit in transit stock until marked received/i)).toBeTruthy();
+  });
 });

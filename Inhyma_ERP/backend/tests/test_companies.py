@@ -235,3 +235,113 @@ async def test_lookup_companies_empty_query():
     assert data[0]["state_id"] is None
     assert data[0]["tax_id_number"] is None
 
+
+
+def test_company_create_accepts_the_new_spec_fields():
+    """Monthly Turnover, Potential Business per month, and the Direct Import from China cluster."""
+    from app.companies.schemas import CompanyCreate
+
+    payload = CompanyCreate(
+        company_name="Acme Packaging",
+        company_type="B2B",
+        monthly_turnover="25-50 L",
+        potential="yes",
+        potential_business_per_month="5-10 L",
+        direct_import_from_china="yes",
+        monthly_import_volume="25-50 L",
+        products_needed_for_imports="Flow wrap film, sealing rollers",
+    )
+    dumped = payload.model_dump()
+    assert dumped["monthly_turnover"] == "25-50 L"
+    assert dumped["potential_business_per_month"] == "5-10 L"
+    assert dumped["direct_import_from_china"] == "Yes"  # normalised to title case
+    assert dumped["monthly_import_volume"] == "25-50 L"
+    assert dumped["products_needed_for_imports"] == "Flow wrap film, sealing rollers"
+
+
+def test_direct_import_requires_b2b_business_type():
+    from app.companies.schemas import CompanyCreate
+
+    with pytest.raises(Exception, match="only applicable when Business Type is B2B"):
+        CompanyCreate(company_name="X", company_type="B2C", direct_import_from_china="Yes")
+    with pytest.raises(Exception, match="only applicable when Business Type is B2B"):
+        CompanyCreate(company_name="X", direct_import_from_china="Yes")  # business type blank
+    # B2B with no import flag at all is fine
+    CompanyCreate(company_name="X", company_type="B2B")
+
+
+def test_import_volume_and_products_require_direct_import_yes():
+    from app.companies.schemas import CompanyCreate
+
+    with pytest.raises(Exception, match="require Direct Import from China = Yes"):
+        CompanyCreate(company_name="X", company_type="B2B", direct_import_from_china="No", monthly_import_volume="10-25 L")
+    with pytest.raises(Exception, match="require Direct Import from China = Yes"):
+        CompanyCreate(company_name="X", company_type="B2B", products_needed_for_imports="Rollers")
+    # fine when Direct Import is Yes
+    CompanyCreate(company_name="X", company_type="B2B", direct_import_from_china="Yes", monthly_import_volume="10-25 L")
+
+
+def test_potential_no_requires_a_reason_and_yes_allows_a_monthly_band():
+    from app.companies.schemas import CompanyCreate
+
+    with pytest.raises(Exception, match="reason is required when Potential is 'No'"):
+        CompanyCreate(company_name="X", potential="no")
+    CompanyCreate(company_name="X", potential="no", potential_reason="Budget constraints this year")
+    with pytest.raises(Exception, match="Potential Business per month requires Potential = Yes"):
+        CompanyCreate(company_name="X", potential="no", potential_reason="Not interested", potential_business_per_month="0-2 L")
+    CompanyCreate(company_name="X", potential="yes", potential_business_per_month="0-2 L")
+
+
+def test_company_contact_accepts_birth_and_anniversary_dates():
+    from app.companies.schemas import CompanyContactCreate, CompanyContactUpdate
+
+    created = CompanyContactCreate(person_name="Rajiv Kadam", birth_date="15-08-1990", anniversary_date="02-12-2015")
+    assert created.birth_date == "15-08-1990"
+    assert created.anniversary_date == "02-12-2015"
+    updated = CompanyContactUpdate(birth_date="01-01-1985")
+    assert updated.birth_date == "01-01-1985"
+    assert updated.anniversary_date is None
+
+
+def test_company_schemas_accept_business_category():
+    from app.companies.schemas import CompanyCreate, CompanyUpdate, CompanyListItemRead, CompanyRead
+
+    c = CompanyCreate(company_name="Manufacturer Co", business_category="Manufacturer")
+    assert c.business_category == "Manufacturer"
+
+    u = CompanyUpdate(business_category="Trader")
+    assert u.business_category == "Trader"
+
+
+@pytest.mark.asyncio
+async def test_company_service_duplicate_checks():
+    from unittest.mock import AsyncMock, MagicMock
+    from app.companies.service import CompanyService
+    from app.core.exceptions import ConflictException
+
+    repo = MagicMock()
+    repo.name_city_exists = AsyncMock(return_value=False)
+    repo.tax_id_exists = AsyncMock(return_value=True)
+    repo.calling_number_exists = AsyncMock(return_value=True)
+
+    service = CompanyService(
+        repository=repo,
+        contact_repository=MagicMock(),
+        country_repository=MagicMock(),
+        state_repository=MagicMock(),
+        city_repository=MagicMock(),
+        category_repository=MagicMock(),
+        sub_category_repository=MagicMock(),
+        cache_manager=MagicMock(),
+    )
+    service._validate_geography = AsyncMock()
+    service._validate_categories = AsyncMock()
+    service._validate_sub_categories = AsyncMock()
+    service._validate_products = AsyncMock()
+
+    with pytest.raises(ConflictException, match="already exists"):
+        await service.create(company_name="Test Company", tax_id_number="27AABCU9603R1ZM")
+
+    repo.tax_id_exists = AsyncMock(return_value=False)
+    with pytest.raises(ConflictException, match="already exists"):
+        await service.create(company_name="Test Company", contact_calling_number="9876543210")

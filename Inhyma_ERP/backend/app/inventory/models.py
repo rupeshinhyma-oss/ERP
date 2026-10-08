@@ -57,6 +57,8 @@ class ProductStock(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Soft
     indore_ordered: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
 
     total_qty: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    reorder_level: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
+    minimum_order_quantity: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
     uom: Mapped[str] = mapped_column(String(50), default="SET", server_default="SET", nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     orders_info: Mapped[Optional[Any]] = mapped_column(JSON, default=list, nullable=True)

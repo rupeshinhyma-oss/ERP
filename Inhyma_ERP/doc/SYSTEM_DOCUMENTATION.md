@@ -38,6 +38,10 @@
    - 8.18. [Contact: Companies & Multi-Contact Directory](#818-contact-companies--multi-contact-directory)
    - 8.19. [Task: Technical Tasks & Field Service Dispatch](#819-task-technical-tasks--field-service-dispatch)
    - 8.20. [HRMS: Leave Management Foundation & Master Data Architecture (Phase 1)](#820-hrms-leave-management-foundation--master-data-architecture-phase-1)
+   - 8.21. [Purchase: Local Purchase Management & Costing Engine](#821-purchase-local-purchase-management--costing-engine)
+   - 8.22. [Purchase: Import Purchase Consignments & Customs Landing Matrix](#822-purchase-import-purchase-consignments--customs-landing-matrix)
+   - 8.23. [Sales: Proforma Invoices (PI) & Extended Commercial Terms](#823-sales-proforma-invoices-pi--extended-commercial-terms)
+   - 8.24. [Database-Driven Status Rules & Dynamic Workflow Engine](#824-database-driven-status-rules--dynamic-workflow-engine)
 
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
@@ -350,6 +354,10 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 ### 8.6. Supplier Directory & Tokenized Public Portal
 - **Endpoints:** `GET /suppliers`, `POST /suppliers`, `PATCH /suppliers/{id}`, `POST /suppliers/{id}/contacts`, `POST /suppliers/import`, `GET /suppliers/export`.
 - **Features:** Vendor directory with multi-contact management, payment terms, and bank details. Generates secure, tokenized public quote portal links (`/quotes/public/:token`) allowing vendors to submit bids without system accounts.
+- **Mandatory Calling Number Validation:**
+  - `contact_calling_number` is strictly mandatory (`min_length=1`) on supplier creation.
+  - Updates enforce `_validate_calling_not_blanked`, preventing operators from wiping or blanking out the contact telephone number.
+  - Frontend enforces this in both the quick add drawer and full edit view with required asterisk indicators (`*`) and client-side pre-submission validation.
 - **Dynamic Geography & Phone Dialing Code Sync:** When changing Country in the Supplier Profile (e.g., China &rarr; India), Province and City dropdowns reset automatically, and the country dialing code prefixes on Calling Number, WhatsApp Number, and WeChat Number auto-update dynamically (e.g., `+86 7304240120` &rarr; `+91 7304240120`).
 
 ### 8.7. Buyer & Client Management
@@ -684,6 +692,18 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     - `gst_registration_date`: Tax authority registration timestamp.
     - `age_of_company`: Operational tenure in years.
     - `social_media`: Dynamic JSON matrix `[{"platform": "LinkedIn", "url": "https://..."}, ...]` managed via interactive frontend repeater.
+  - **Company Intelligence Specification Extensions (Release 2026-10-06):**
+    - `monthly_turnover`: Estimated monthly turnover band, conditionally activated when Business Type (`company_type`) is selected.
+    - `potential_reason`: Mandatory text justification required whenever `potential == "no"` explaining why the account is currently unqualified.
+    - `potential_business_per_month`: Projected business band required whenever `potential == "yes"`.
+    - **Direct Import From China Cluster:**
+      - `direct_import_from_china`: Dedicated section restricted exclusively to B2B companies (`company_type == "B2B"`).
+      - `monthly_import_volume`: Conditional monthly volume band (e.g. 5-10 L, 25-50 L), active only when `direct_import_from_china == "Yes"`.
+      - `products_needed_for_imports`: Target sourcing product list, active only when `direct_import_from_china == "Yes"`.
+      - Client-side helper `clearInapplicableCompanyFields()` automatically wipes dependent fields whenever parent conditions switch (e.g. B2B &rarr; B2C or Yes &rarr; No).
+    - **Contact Birth Date, Anniversary Date & Age Calculation:**
+      - Sub-contact model (`company_contacts`) stores `birth_date` and `anniversary_date` in `DD-MM-YYYY` format.
+      - Automated client-side age computation (`computeAge()`) displays exact integer age alongside contact names.
   - **Cascading Address Hierarchy:**
     - Strict 3-level geographical cascade: State (`/masters/states/lookup`) ➔ District (`/masters/districts/lookup?state_id=...`) ➔ City (`/masters/cities/lookup?district_id=...&state_id=...`).
     - Selecting State clears and filters District; selecting District clears and filters City.
@@ -757,6 +777,73 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - 6 dedicated tabs: `My Leaves`, `Leave Approvals`, `Holiday`, `Leave Adjustment`, `Leave Plans`, `Leave Types`.
   - Matrix table features sticky left columns (`Employee`) and sticky right columns (`Action`) for frictionless horizontal scrolling across dense leave types.
   - Real-time adjustment drawer preview dynamically calculating resulting balances before commit.
+
+### 8.21. Purchase: Local Purchase Management & Costing Engine
+- **Files:** `backend/app/purchase/local_routes.py`, `backend/app/purchase/models.py`, `backend/app/purchase/schemas.py`, `backend/app/purchase/costing.py`, `backend/app/purchase/common.py`, `frontend/src/pages/purchase/LocalPurchasePage.tsx`, `frontend/src/lib/purchaseApi.ts`, `frontend/src/lib/localPurchasePdf.ts`.
+- **Endpoints:**
+  - `GET /api/v1/purchase/local-orders`: List local purchases with status tab counts (`all`, `pending`, `confirmed`), search, warehouse, and date range filters.
+  - `POST /api/v1/purchase/local-orders`: Create local purchase order with multi-line items. Server calculates expense loading percent and landing costs.
+  - `GET /api/v1/purchase/local-orders/{id}`: Detailed local purchase record and pricing matrix.
+  - `PUT /api/v1/purchase/local-orders/{id}`: Update editable local purchase fields and items (locked once confirmed).
+  - `PATCH /api/v1/purchase/local-orders/{id}/status`: Transition status (`pending` -> `confirmed`). Automatically increases physical warehouse stock.
+  - `DELETE /api/v1/purchase/local-orders/{id}`: Soft-delete local purchase record (restricted to administrators).
+  - `POST /api/v1/purchase/local-orders/{id}/bill`: Upload scanned invoice attachment.
+  - `DELETE /api/v1/purchase/local-orders/{id}/bill`: Delete attached invoice file.
+  - `GET /api/v1/purchase/local-orders/{id}/bill-file`: Stream or download attached invoice bill.
+- **Costing Engine & Stock-In Mechanics:**
+  - Expense Aggregation: $\text{Total Expenses} = \text{Packing \& Forwarding} + \text{Transport} + \text{Offloading}$.
+  - Expense Loading: $\text{Loading \%} = \frac{\text{Total Expenses}}{\text{Basic Invoice Value}} \times 100$.
+  - Line Item Landing: $\text{Expense Per Unit} = \text{Unit Rate} \times \frac{\text{Loading \%}}{100}$, $\text{Unit Landing Value} = \text{Unit Rate} + \text{Expense Per Unit}$.
+  - **Stock Movement Hook:** Transitioning to `confirmed` status invokes `move_stock(db, warehouse, [(product, qty)], +1)` and sets `stock_applied = True`, `confirmed_by`, and `confirmed_at`.
+- **Frontend Architecture:**
+  - Live landing rate calculation in client table matching server formula.
+  - Datalist supplier lookup (`<datalist id="local-supplier-options">`) enforcing selection from known suppliers.
+  - UOM badge display pulled dynamically from `/masters/uom`.
+  - A4 Local Purchase Order PDF generation with company header, party details, and tax breakdowns.
+
+### 8.22. Purchase: Import Purchase Consignments & Customs Landing Matrix
+- **Files:** `backend/app/purchase/import_routes.py`, `backend/app/purchase/models.py`, `backend/app/purchase/schemas.py`, `backend/app/purchase/costing.py`, `frontend/src/pages/purchase/ImportPurchasePage.tsx`, `frontend/src/lib/purchaseApi.ts`, `frontend/src/lib/importPurchasePdf.ts`.
+- **Endpoints:**
+  - `GET /api/v1/purchase/import-orders`: List import consignments with status counts (`all`, `pending`, `confirmed`, `received`, `closed`) and date range filters.
+  - `POST /api/v1/purchase/import-orders`: Create import consignment with exchange rates, duties, and dual VB/CB landing calculations.
+  - `POST /api/v1/purchase/import-orders/preview`: Live calculation preview endpoint returning computed CBM, duty, and landed costs while typing in the form.
+  - `GET /api/v1/purchase/import-orders/{id}`: Detailed consignment profile and volumetric lines.
+  - `PUT /api/v1/purchase/import-orders/{id}`: Update editable consignment record.
+  - `PATCH /api/v1/purchase/import-orders/{id}/status`: Move consignment through workflow (`pending` -> `confirmed` -> `received` -> `closed`).
+  - `DELETE /api/v1/purchase/import-orders/{id}`: Soft-delete consignment.
+- **Dual Landing Valuation Matrix:**
+  - Calculates landing rates on both **Value Basis (VB)** (allocated proportionally by line-item USD valuation) and **CBM Volume Basis (CB)** (allocated proportionally by volumetric cubic meters).
+  - Calculates differential $\text{Diff (CB - VB)} = \text{Unit Landing (CB)} - \text{Unit Landing (VB)}$ to reveal volume penalties on bulky cargo.
+- **Multi-Date Range Filtering & In-Transit Restraints:**
+  - Supports filtering across **Expected Arrival**, **ETD Origin**, and **ETA Port** with presets and custom date pickers.
+  - During `pending` status, consignments can only be allocated to transit holding warehouses (e.g. `Mumbai Ordered`), preventing false stock availability before physical port receipt.
+
+### 8.23. Sales: Proforma Invoices (PI) & Extended Commercial Terms
+- **Files:** `backend/app/sales/routes.py`, `backend/app/sales/models.py`, `backend/app/sales/schemas.py`, `backend/app/sales/proforma_service.py`, `frontend/src/pages/ProformaInvoicesPage.tsx`, `frontend/src/lib/proformaInvoicePdf.ts`.
+- **Endpoints:**
+  - `GET /api/v1/sales/proforma-invoices`: List proforma invoices with status tabs (`all`, `pending`, `admin_approved`, `confirmed`, `cancelled`).
+  - `POST /api/v1/sales/proforma-invoices`: Create PI with line items, additional charges, and commercial terms.
+  - `GET /api/v1/sales/proforma-invoices/{id}`: Retrieve PI detail with billing/shipping address and item tax breakdown.
+  - `PUT /api/v1/sales/proforma-invoices/{id}`: Edit proforma invoice (locked once confirmed).
+  - `PATCH /api/v1/sales/proforma-invoices/{id}/status`: Workflow transition with approval and cancellation reasons.
+- **Features:**
+  - Extended commercial terms: Payment Terms, Delivery Type (Godown/Door), Delivery Charge (To Pay/Paid), Third-Party Delivery.
+  - Address routing: Billing Address and Shipping Address snapshotting with GSTIN details.
+  - Sequential PI numbering rules (`proforma.numbering` group in `option_lists`).
+
+### 8.24. Database-Driven Status Rules & Dynamic Workflow Engine
+- **Files:** `backend/app/common/workflow.py`, `backend/alembic/versions/k1a2b3c4d5e8_seed_proforma_rules.py`, `backend/alembic/versions/m1a2b3c4d5ea_seed_purchase_rules.py`, `frontend/src/lib/workflowRules.ts`.
+- **Architecture:**
+  - Document workflow logic is decoupled from application code and stored in `option_lists.meta` under groups (`purchase.local.status`, `purchase.import.status`, `proforma.status`).
+  - Rules specify:
+    - `next`: Array of allowable destination status keys.
+    - `admin_only_to`: Statuses restricted strictly to administrators.
+    - `perm_to`: Object mapping `{ target_status: required_permission_code }`.
+    - `reason_required_to`: Statuses requiring a non-empty text reason.
+    - `edit`: Edit capability (`"any"`, `"admin"`, `"none"`, `"perm:<code>"`).
+    - `delete`: Deletion capability (`"admin"`, `"any"`, `False`).
+    - `stock_in`: Boolean indicating if entering this status increments physical stock balances.
+  - **Fail-Safe Fallbacks:** Built-in `FALLBACK_RULES` dictionary ensures API endpoints never crash with 503 if option lists are unseeded.
 
 ---
 
@@ -1009,6 +1096,32 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Masters** | `GET/POST`| `/api/v1/masters/lead-sources` | Manage lead generation sources & marketing channels | `leadsource.*` |
 | **Masters** | `GET/POST`| `/api/v1/masters/adjustment-purposes` | Manage stock adjustment reasons (Damage, Split, Return, Count Variance) | `adjustmentpurpose.*` |
 | **Masters** | `GET/POST`| `/api/v1/masters/call-types` | Manage field service call types (Installation, Breakdown, Maintenance) | `calltype.*` |
+| **Purchase: Local** | `GET` | `/api/v1/purchase/local-orders` | List local purchase orders with filters, search, multi-date range & summary KPIs | `purchase.local.view` |
+| **Purchase: Local** | `POST` | `/api/v1/purchase/local-orders` | Create local purchase order with line items, tax, and automated landing cost | `purchase.local.create` |
+| **Purchase: Local** | `GET` | `/api/v1/purchase/local-orders/{id}` | Retrieve local purchase order with line items & landed cost breakdown | `purchase.local.view` |
+| **Purchase: Local** | `PUT` | `/api/v1/purchase/local-orders/{id}` | Update local purchase order details & line items | `purchase.local.update` |
+| **Purchase: Local** | `DELETE`| `/api/v1/purchase/local-orders/{id}` | Soft-delete local purchase order | `purchase.local.delete` |
+| **Purchase: Local** | `POST` | `/api/v1/purchase/local-orders/{id}/status` | Transition local order status via dynamic workflow engine | `purchase.local.approve` |
+| **Purchase: Local** | `POST` | `/api/v1/purchase/local-orders/{id}/stock-in` | Execute atomic warehouse stock-in voucher generation | `purchase.local.stock_in` |
+| **Purchase: Local** | `GET` | `/api/v1/purchase/local-orders/export` | Export local purchase orders to Excel / CSV | `purchase.local.view` |
+| **Purchase: Import** | `GET` | `/api/v1/purchase/import-orders` | List import consignments with filters, search, custom date ranges & summary KPIs | `purchase.import.view` |
+| **Purchase: Import** | `POST` | `/api/v1/purchase/import-orders` | Create import consignment with multi-currency, duty calculations & dual landing costs | `purchase.import.create` |
+| **Purchase: Import** | `GET` | `/api/v1/purchase/import-orders/{id}` | Retrieve import consignment details with line items & landing calculations | `purchase.import.view` |
+| **Purchase: Import** | `PUT` | `/api/v1/purchase/import-orders/{id}` | Update import consignment details & line items | `purchase.import.update` |
+| **Purchase: Import** | `DELETE`| `/api/v1/purchase/import-orders/{id}` | Soft-delete import consignment | `purchase.import.delete` |
+| **Purchase: Import** | `POST` | `/api/v1/purchase/import-orders/{id}/status` | Transition consignment status via dynamic workflow engine | `purchase.import.approve` |
+| **Purchase: Import** | `POST` | `/api/v1/purchase/import-orders/{id}/stock-in` | Execute atomic inventory stock-in into destination warehouse | `purchase.import.stock_in` |
+| **Purchase: Import** | `GET` | `/api/v1/purchase/import-orders/export` | Export import consignments to Excel / CSV | `purchase.import.view` |
+| **Sales: Proforma** | `GET` | `/api/v1/sales/proforma-invoices` | List proforma invoices with customer, date, status & search filters | `sale.pi.view` |
+| **Sales: Proforma** | `POST` | `/api/v1/sales/proforma-invoices` | Create proforma invoice with billing/shipping address routing & line items | `sale.pi.create` |
+| **Sales: Proforma** | `GET` | `/api/v1/sales/proforma-invoices/{id}` | Retrieve proforma invoice details, line items & commercial terms | `sale.pi.view` |
+| **Sales: Proforma** | `PUT` | `/api/v1/sales/proforma-invoices/{id}` | Update proforma invoice details & commercial terms | `sale.pi.update` |
+| **Sales: Proforma** | `DELETE`| `/api/v1/sales/proforma-invoices/{id}` | Soft-delete proforma invoice | `sale.pi.delete` |
+| **Sales: Proforma** | `POST` | `/api/v1/sales/proforma-invoices/{id}/status` | Transition proforma status via dynamic workflow engine | `sale.pi.approve` |
+| **Sales: Proforma** | `GET` | `/api/v1/sales/proforma-invoices/{id}/pdf` | Generate/stream official branded Proforma Invoice PDF | `sale.pi.view` |
+| **Sales: Proforma** | `GET` | `/api/v1/sales/proforma-invoices/export` | Export proforma invoices to Excel / CSV | `sale.pi.view` |
+| **Workflow Engine** | `GET` | `/api/v1/masters/workflow-rules` | List registered workflow status transition rules | `workflow.view` |
+| **Workflow Engine** | `POST` | `/api/v1/masters/workflow-rules` | Create or update database-driven workflow transition rule | `workflow.manage` |
 | **Federation** | `POST` | `/api/v1/federation/sso-handover` | Generate cross-ERP single sign-on handover ticket | Authenticated |
 | **Federation** | `POST` | `/api/v1/federation/token` | Exchange SSO ticket for local JWT session pair | Public (Ticket Validated) |
 | **Organizations** | `GET` | `/api/v1/organizations/public` | Fetch public organization name and logo for login page | Public |
@@ -1124,4 +1237,4 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Spin-Button Styling Suppression**: Universal CSS removal of `-webkit-outer-spin-button` and `-webkit-inner-spin-button` alongside `-moz-appearance: textfield` to maintain clean visual input boundaries.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 29, 2026 (Extended Company Profile Intelligence, Cascading Geographic Hierarchy, Global Autocomplete Blocker, and Wheel Scroll Protection).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, Advanced Company Specs & Supplier Mandatory Phone Validation).*

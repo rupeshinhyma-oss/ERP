@@ -126,7 +126,13 @@ async def _to_company_read(service: CompanyService, company) -> dict:
         "primary_website": company.primary_website,
         "secondary_website": company.secondary_website,
         "company_category": company.company_category,
+        "business_category": getattr(company, "business_category", None),
         "sector": company.sector,
+        "monthly_turnover": company.monthly_turnover,
+        "potential_business_per_month": company.potential_business_per_month,
+        "direct_import_from_china": company.direct_import_from_china,
+        "monthly_import_volume": company.monthly_import_volume,
+        "products_needed_for_imports": company.products_needed_for_imports,
         "product_manufacture_or_supply": company.product_manufacture_or_supply,
         "machines_buying_from": company.machines_buying_from,
         "spares_buying_from": company.spares_buying_from,
@@ -370,6 +376,8 @@ async def lookup_companies(
 ) -> dict:
     """Return matching company names and details for typeahead autocomplete."""
     from app.companies.models import Company
+    from app.masters.cities.models import City
+    from app.masters.states.models import State
     from sqlalchemy import select
     stmt = (
         select(
@@ -381,6 +389,10 @@ async def lookup_companies(
             Company.district,
             Company.city_id,
             Company.state_id,
+            Company.address,
+            Company.pincode,
+            City.name.label("city_name"),
+            State.name.label("state_name"),
             Company.contact_salutation,
             Company.contact_full_name,
             Company.contact_designation,
@@ -390,6 +402,8 @@ async def lookup_companies(
             Company.primary_website,
             Company.sales_person_id,
         )
+        .outerjoin(City, City.id == Company.city_id)
+        .outerjoin(State, State.id == Company.state_id)
         .where(Company.deleted_at.is_(None))
     )
     if q.strip():
@@ -408,6 +422,10 @@ async def lookup_companies(
             "district": r.district,
             "city_id": str(r.city_id) if r.city_id else None,
             "state_id": str(r.state_id) if r.state_id else None,
+            "address": r.address,
+            "pincode": r.pincode,
+            "city_name": r.city_name,
+            "state_name": r.state_name,
             "contact_salutation": r.contact_salutation,
             "contact_full_name": r.contact_full_name,
             "contact_designation": r.contact_designation,

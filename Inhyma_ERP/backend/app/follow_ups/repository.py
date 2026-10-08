@@ -90,6 +90,8 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         client_grade: str | None = None,
         potential_type: str | None = None,
         business_category: str | None = None,
+        company_name: str | None = None,
+        call_category: str | None = None,
         added_date: Any | None = None,
         date_from: Any | None = None,
         date_to: Any | None = None,
@@ -102,6 +104,10 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         stmt = self._base_select()
 
         # Filters
+        if company_name and company_name.strip():
+            stmt = stmt.where(func.lower(FollowUp.company_name) == company_name.strip().lower())
+        if call_category and call_category.strip() and call_category.strip().lower() not in ("all", "select"):
+            stmt = stmt.where(func.lower(FollowUp.call_category) == call_category.strip().lower())
         if call_type and call_type.strip() and call_type.strip().lower() not in ("all", "select"):
             stmt = stmt.where(func.lower(FollowUp.call_type) == call_type.strip().lower())
         if marketing_person and marketing_person.strip() and marketing_person.strip().lower() not in ("all", "select"):

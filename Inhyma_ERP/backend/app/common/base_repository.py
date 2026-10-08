@@ -187,10 +187,15 @@ class BaseRepository(Generic[ModelT]):
             except (NotImplementedError, AttributeError):
                 is_bool_col = False
 
+            is_str_col = (
+                isinstance(column.type, (String, Text))
+                or isinstance(getattr(column.type, "impl", None), (String, Text))
+                or hasattr(column.type, "enum_class")
+            )
             if is_bool_col:
                 bool_val = value.lower() in ("true", "1", "t", "yes") if isinstance(value, str) else bool(value)
                 stmt = stmt.where(column == bool_val)
-            elif isinstance(value, str) and isinstance(column.type, (String, Text)):
+            elif isinstance(value, str) and is_str_col:
                 if value.lower() == "blank":
                     stmt = stmt.where(or_(column.is_(None), column == "", func.lower(column) == "blank"))
                 else:
@@ -309,10 +314,15 @@ class BaseRepository(Generic[ModelT]):
             except (NotImplementedError, AttributeError):
                 is_bool_col = False
 
+            is_str_col = (
+                isinstance(column.type, (String, Text))
+                or isinstance(getattr(column.type, "impl", None), (String, Text))
+                or hasattr(column.type, "enum_class")
+            )
             if is_bool_col:
                 bool_val = value.lower() in ("true", "1", "t", "yes") if isinstance(value, str) else bool(value)
                 stmt = stmt.where(column == bool_val)
-            elif isinstance(value, str) and isinstance(column.type, (String, Text)):
+            elif isinstance(value, str) and is_str_col:
                 if value.lower() == "blank":
                     stmt = stmt.where(or_(column.is_(None), column == "", func.lower(column) == "blank"))
                 else:

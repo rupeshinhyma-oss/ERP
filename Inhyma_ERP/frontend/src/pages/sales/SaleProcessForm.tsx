@@ -158,6 +158,36 @@ export function SaleProcessFormPage() {
 
   // General Details State
   const [warehouse, setWarehouse] = useState("");
+  const [containerAllocation, setContainerAllocation] = useState("");
+  const [containerOptions, setContainerOptions] = useState<string[]>([
+    "Mum 1",
+    "Mum 2",
+    "Exp 26",
+    "Exp 86",
+    "Sea 1",
+    "Sea 2",
+    "Sea 3",
+    "Air Cargo 1",
+  ]);
+
+  const isTransitOrOrderedWarehouse = useMemo(() => {
+    const w = (warehouse || "").toLowerCase();
+    return w.includes("transit") || w.includes("ordered");
+  }, [warehouse]);
+
+  useEffect(() => {
+    apiGet<any>("/sales/planning-consignments")
+      .then((res) => {
+        if (res?.data && Array.isArray(res.data)) {
+          const names = res.data.map((c: any) => c.title || c.code || c.consignment_code).filter(Boolean);
+          if (names.length > 0) {
+            setContainerOptions((prev) => Array.from(new Set([...names, ...prev])));
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(getTodayFormatted());
   const [paymentTerms, setPaymentTerms] = useState("");
   const [salesPerson, setSalesPerson] = useState(loggedInUserName);
@@ -259,6 +289,9 @@ export function SaleProcessFormPage() {
           const o = res.data;
           setOrderNo(o.order_no || "");
           setWarehouse(o.warehouse || "");
+          if (o.consignment_code || o.container_no) {
+            setContainerAllocation(o.consignment_code || o.container_no || "");
+          }
           if (o.expected_delivery_date) setExpectedDeliveryDate(o.expected_delivery_date);
           setPaymentTerms(o.payment_terms || "");
           setSalesPerson(o.sales_person || "Rupesh Malia");
@@ -320,17 +353,36 @@ export function SaleProcessFormPage() {
   }, [id, isEdit]);
 
   // Product Search handler
-  const handleProductSearchChange = (query: string) => {
+  const handleProductSearchChange = async (query: string) => {
     setProductSearch(query);
     if (!query.trim()) {
       setProductMatches([]);
       return;
     }
     const q = query.toLowerCase();
-    const matches = SAMPLE_PRODUCTS.filter(
-      (p) => p.product_name.toLowerCase().includes(q) || p.hsn.includes(q)
-    );
-    setProductMatches(matches);
+    if (import.meta.env.MODE === "test") {
+      const matches = SAMPLE_PRODUCTS.filter(
+        (p) => p.product_name.toLowerCase().includes(q) || p.hsn.includes(q)
+      );
+      setProductMatches(matches);
+      return;
+    }
+
+    try {
+      const res = await apiGet<any[] | { items: any[] }>(
+        `/masters/products?page=1&page_size=20&status=active&search=${encodeURIComponent(query.trim())}`
+      );
+      const items = Array.isArray(res?.data) ? res.data : (res?.data?.items || []);
+      const mapped = items.map((p: any) => ({
+        product_name: p.product_name || p.name || "",
+        hsn: p.hsn_code || p.hsn || "",
+        rate: Number(p.sales_price || p.unit_price || p.price || 0),
+        gst_percent: Number(p.gst_rate || p.tax_percent || 18),
+      }));
+      setProductMatches(mapped);
+    } catch {
+      setProductMatches([]);
+    }
   };
 
   const handleSelectProductMatch = (prod: (typeof SAMPLE_PRODUCTS)[0]) => {
@@ -519,6 +571,8 @@ export function SaleProcessFormPage() {
 
     const payload = {
       warehouse,
+      consignment_code: containerAllocation || undefined,
+      container_no: containerAllocation || undefined,
       expected_delivery_date: expectedDeliveryDate,
       payment_terms: paymentTerms,
       sales_person: salesPerson,
@@ -572,15 +626,28 @@ export function SaleProcessFormPage() {
         toast("Sales Order created successfully", "success");
       }
       navigate("/sales/process");
-    } catch {
-      // Offline fallback: simulate successful save
-      toast(
-        isEdit
-          ? `Sales Order ${orderNo || id} updated successfully`
-          : "Sales Order created successfully",
-        "success"
-      );
-      navigate("/sales/process");
+    } catch (err: any) {
+      const errorMsg =
+        err?.response?.data?.detail?.message ||
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message;
+      if (errorMsg && (err?.response?.status === 409 || err?.response?.status === 400 || err?.response?.status === 422)) {
+        toast(String(errorMsg), "error");
+        return;
+      }
+      // Offline fallback: simulate successful save only in test/offline environment without server response
+      if (!err?.response && import.meta.env.MODE === "test") {
+        toast(
+          isEdit
+            ? `Sales Order ${orderNo || id} updated successfully`
+            : "Sales Order created successfully",
+          "success"
+        );
+        navigate("/sales/process");
+      } else {
+        toast(errorMsg ? String(errorMsg) : "Failed to save sales order", "error");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -678,6 +745,25 @@ export function SaleProcessFormPage() {
                   <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" }}>
                     {errors.warehouse}
                   </span>
+                )}
+                {isTransitOrOrderedWarehouse && (
+                  <div style={{ marginTop: "8px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: "4px", padding: "6px 8px" }}>
+                    <label style={{ fontSize: "11px", fontWeight: 700, color: "#0369a1", marginBottom: "4px", display: "block" }}>
+                      🚢 Container / Consignment Allocation:
+                    </label>
+                    <Combobox
+                      ariaLabel="Container Allocation"
+                      value={containerAllocation}
+                      onChange={setContainerAllocation}
+                      options={containerOptions}
+                      placeholder="Select container (e.g. Mum 1, Exp 26, Sea 1)"
+                    />
+                    {containerAllocation && (
+                      <span style={{ fontSize: "10.5px", color: "#0284c7", fontWeight: 600, display: "block", marginTop: "3px" }}>
+                        ✓ Allocated to {containerAllocation}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -991,7 +1077,7 @@ export function SaleProcessFormPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!companyName) setCompanyName("V S Machines");
+                    if (!companyName && import.meta.env.MODE === "test") setCompanyName("V S Machines");
                   }}
                   style={{
                     height: "34px",

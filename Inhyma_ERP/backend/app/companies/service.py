@@ -215,6 +215,16 @@ class CompanyService:
         potential_blocks_delete = company.potential is not None and company.potential.value == "yes"
         return not (status_blocks_delete or potential_blocks_delete)
 
+    async def _ensure_tax_id_unique(self, tax_id: str | None, *, exclude_id: uuid.UUID | None = None) -> None:
+        """Spec: a duplicate GST number must be refused with an 'already exists' message."""
+        if tax_id and await self.repository.tax_id_exists(tax_id, exclude_id=exclude_id):
+            raise ConflictException(f"A company with GST number {tax_id.strip().upper()!r} already exists.")
+
+    async def _ensure_calling_number_unique(self, calling_number: str | None, *, exclude_id: uuid.UUID | None = None) -> None:
+        """Spec: Contact Number (Direct) must show 'already exists' and not allow to save."""
+        if calling_number and await self.repository.calling_number_exists(calling_number, exclude_id=exclude_id):
+            raise ConflictException(f"A company with Contact Number (Direct) {calling_number.strip()!r} already exists.")
+
     async def _invalidate_cache(self) -> None:
         """Invalidate the companies dropdown cache after mutation."""
         await self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)
@@ -248,6 +258,12 @@ class CompanyService:
         self._validate_visit_remarks(
             field_values.get("visited_factory_office", False), field_values.get("visit_remarks")
         )
+
+        # Duplicate checks
+        if field_values.get("tax_id_number"):
+            await self._ensure_tax_id_unique(field_values["tax_id_number"])
+        if field_values.get("contact_calling_number"):
+            await self._ensure_calling_number_unique(field_values["contact_calling_number"])
 
         if await self.repository.name_city_exists(company_name, city_id):
             existing = await self.repository.get_by_name_city(company_name, city_id)
@@ -304,6 +320,11 @@ class CompanyService:
             await self._validate_sub_categories(sub_category_ids)
         if product_ids is not None:
             await self._validate_products(product_ids)
+
+        if field_values.get("tax_id_number") is not None:
+            await self._ensure_tax_id_unique(field_values["tax_id_number"], exclude_id=company_id)
+        if field_values.get("contact_calling_number") is not None:
+            await self._ensure_calling_number_unique(field_values["contact_calling_number"], exclude_id=company_id)
 
         new_company_name = field_values.get("company_name") or company.company_name
         new_city_id = field_values.get("city_id") or company.city_id

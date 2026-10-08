@@ -92,9 +92,10 @@ describe("TechnicalTasksPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/All\s*\(\s*1\s*\)/)).toBeTruthy();
-      expect(screen.getByText(/Pending\s*\(\s*0\s*\)/)).toBeTruthy();
-      expect(screen.getByText(/Approved\s*\(\s*1\s*\)/)).toBeTruthy();
+      expect(screen.getByText(/^All\s*\(\s*1\s*\)$/)).toBeTruthy();
+      expect(screen.getByText(/^Pending\s*\(\s*0\s*\)$/)).toBeTruthy();
+      expect(screen.getByText(/^Approved\s*\(\s*1\s*\)$/)).toBeTruthy();
+      expect(screen.getByText(/^Payment Pending\s*\(\s*0\s*\)$/)).toBeTruthy();
     });
   });
 
@@ -275,5 +276,146 @@ describe("TechnicalTasksPage", () => {
       expect(screen.getByRole("heading", { name: "Add Technical Task" })).toBeTruthy();
     });
   });
+
+  it("filters tasks by serial number and displays serial badge in table", async () => {
+    const tasksWithSerial = [
+      {
+        ...sampleTasks[0],
+        id: "task-sn-1",
+        serial_number: "INH-2026-MC001",
+      },
+    ];
+
+    const fetchSpy = vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+      data: tasksWithSerial as any,
+      meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+    });
+
+    render(
+      <MemoryRouter>
+        <TechnicalTasksPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-row-serial-number")).toBeTruthy();
+      expect(screen.getByText("SN: INH-2026-MC001")).toBeTruthy();
+    });
+
+    // Clicking the serial badge triggers filtering by serial number
+    fireEvent.click(screen.getByTestId("task-row-serial-number"));
+
+    await waitFor(() => {
+      expect((screen.getByTestId("filter-serial-number") as HTMLInputElement).value).toBe("INH-2026-MC001");
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serial_number: "INH-2026-MC001",
+        })
+      );
+    });
+  });
+
+  it("autofills machine and customer details when looking up serial number in Add modal", async () => {
+    vi.spyOn(technicalTasksApi, "lookupTaskSerialNumber").mockResolvedValue({
+      serial_number: "INH-2026-MC001",
+      machine_model: "XM12.7 Handy Printer Metal Body 12.7mm",
+      company_name: "SHREE KHODIYAR ENTERPRISE",
+      city: "Ahmedabad",
+      contact_person: "Rajesh Patel",
+      contact_phone: "+91 98250 11223",
+      warranty_status: "UNDER_WARRANTY",
+      warranty_end_date: "2027-09-17",
+      invoice_number: "INV-2026-001",
+      past_tasks_count: 2,
+      past_tasks: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <TechnicalTasksPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /\+ ADD NEW/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("field-serial-number")).toBeTruthy();
+    });
+
+    const snInput = screen.getByTestId("field-serial-number");
+    fireEvent.change(snInput, { target: { value: "INH-2026-MC001" } });
+
+    const lookupBtn = screen.getByTestId("btn-lookup-serial");
+    expect(lookupBtn).toBeTruthy();
+    fireEvent.click(lookupBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("serial-lookup-info")).toBeTruthy();
+      expect(screen.getByText(/Customer: SHREE KHODIYAR ENTERPRISE/i)).toBeTruthy();
+      expect((screen.getByPlaceholderText("Search for Company Name") as HTMLInputElement).value).toBe(
+        "SHREE KHODIYAR ENTERPRISE"
+      );
+    });
+  });
+
+  it("enforces mandatory cancellation remarks and performs reopen/reassign workflow", async () => {
+    const cancelledTask = {
+      ...sampleTasks[0],
+      id: "task-cancelled-1",
+      status: "Cancel",
+      cancel_remarks: "Customer decided to defer visit",
+    };
+
+    vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+      data: [cancelledTask] as any,
+      meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+    });
+
+    const reopenSpy = vi.spyOn(technicalTasksApi, "reopenTechnicalTask").mockResolvedValue({
+      ...cancelledTask,
+      status: "Approved",
+      task_allotted_to: "Devendra Marade",
+      cancel_remarks: null,
+    } as any);
+
+    render(
+      <MemoryRouter>
+        <TechnicalTasksPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SHREE KHODIYAR ENTERPRISE")).toBeTruthy();
+    });
+
+    // Open detail drawer
+    const detailButtons = screen.getAllByRole("button", { name: /Detail/i });
+    fireEvent.click(detailButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("drawer-btn-reopen-task")).toBeTruthy();
+    });
+
+    // Click reopen action
+    fireEvent.click(screen.getByTestId("drawer-btn-reopen-task"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Reopen \/ Reassign Cancelled Task/i)).toBeTruthy();
+      expect(screen.getByTestId("btn-save-status")).toBeTruthy();
+    });
+
+    // Submit reopen
+    fireEvent.click(screen.getByTestId("btn-save-status"));
+
+    await waitFor(() => {
+      expect(reopenSpy).toHaveBeenCalledWith(
+        "task-cancelled-1",
+        expect.objectContaining({
+          status: "Approved",
+        })
+      );
+    });
+  });
 });
+
 

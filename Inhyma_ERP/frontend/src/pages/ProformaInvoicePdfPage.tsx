@@ -32,10 +32,36 @@ export function ProformaInvoicePdfPage() {
 
   const currentItem = liveItem;
   const piNo = currentItem?.proforma_no || "";
+  const [bankDetails, setBankDetails] = useState<any>(null);
+
+  useEffect(() => {
+    apiGet<any>("/masters/banks")
+      .then((res) => {
+        const list = res?.data?.items || (Array.isArray(res?.data) ? res.data : []);
+        if (list.length > 0) {
+          const matched = list.find((b: any) =>
+            (currentItem?.company_name && b.account_holder_name?.toLowerCase().includes(currentItem.company_name.toLowerCase())) ||
+            (currentItem?.warehouse && b.branch?.toLowerCase().includes(currentItem.warehouse.toLowerCase()))
+          ) || list[0];
+          setBankDetails({
+            bank_name: matched.bank_name,
+            account_number: matched.account_number,
+            account_holder_name: matched.account_holder_name,
+            ifsc_code: matched.ifsc_code,
+            branch: matched.branch,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [currentItem?.company_name, currentItem?.warehouse]);
 
   useEffect(() => {
     if (currentItem) {
-      const doc = generateProformaInvoicePdf(currentItem, { saveFile: false, openInNewTab: false });
+      const doc = generateProformaInvoicePdf(currentItem, {
+        saveFile: false,
+        openInNewTab: false,
+        bankDetails: bankDetails || undefined,
+      });
       const blob = doc.output("blob");
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
@@ -47,11 +73,15 @@ export function ProformaInvoicePdfPage() {
         URL.revokeObjectURL(url);
       };
     }
-  }, [currentItem, piNo]);
+  }, [currentItem, piNo, bankDetails]);
 
   const handleDownload = () => {
     if (currentItem) {
-      generateProformaInvoicePdf(currentItem, { saveFile: true, openInNewTab: false });
+      generateProformaInvoicePdf(currentItem, {
+        saveFile: true,
+        openInNewTab: false,
+        bankDetails: bankDetails || undefined,
+      });
     }
   };
 

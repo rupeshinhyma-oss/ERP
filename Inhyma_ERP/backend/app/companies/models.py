@@ -105,7 +105,9 @@ class Company(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     secondary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     company_category: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    business_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     sector: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    monthly_turnover: Mapped[str | None] = mapped_column(String(50), nullable=True)
     product_manufacture_or_supply: Mapped[str | None] = mapped_column(Text, nullable=True)
     machines_buying_from: Mapped[str | None] = mapped_column(Text, nullable=True)
     spares_buying_from: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -125,6 +127,12 @@ class Company(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
         SAEnum(CompanyPotential, name="company_potential_enum", native_enum=False, length=10), nullable=True
     )
     potential_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    potential_business_per_month: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # --- Direct Import from China cluster (spec: shown only when Business Type is B2B) ---
+    direct_import_from_china: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    monthly_import_volume: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    products_needed_for_imports: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     secondary_products_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -194,6 +202,8 @@ class CompanyContact(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin)
     whatsapp_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     wechat_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    birth_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    anniversary_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 

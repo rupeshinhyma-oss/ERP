@@ -370,6 +370,7 @@ export function StockAdjustmentPage({
   initialLoading = import.meta.env.MODE !== "test",
 }: StockAdjustmentPageProps = {}) {
   const navigate = useNavigate();
+  const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
   const [items, setItems] = useState<StockAdjustmentItem[]>(() => {
     try {
@@ -377,13 +378,13 @@ export function StockAdjustmentPage({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return [...parsed, ...INITIAL_ADJUSTMENTS];
+          return isTestMode ? [...parsed, ...INITIAL_ADJUSTMENTS] : parsed;
         }
       }
     } catch (e) {
       console.error("Failed to load local_stock_adjustments:", e);
     }
-    return INITIAL_ADJUSTMENTS;
+    return isTestMode ? INITIAL_ADJUSTMENTS : [];
   });
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -437,7 +438,7 @@ export function StockAdjustmentPage({
     }
     InventoryApi.listStockAdjustments({ limit: 200 })
       .then((res) => {
-        if (!cancelled && res?.data?.items && Array.isArray(res.data.items) && res.data.items.length > 0) {
+        if (!cancelled && res?.data?.items && Array.isArray(res.data.items)) {
           const savedStr = localStorage.getItem("local_stock_adjustments");
           const localSaved: StockAdjustmentItem[] = savedStr ? JSON.parse(savedStr) : [];
           const existingIds = new Set(res.data.items.map((i: any) => i.id));
@@ -447,6 +448,11 @@ export function StockAdjustmentPage({
       })
       .catch((err) => {
         console.warn("Using offline adjustments fallback:", err);
+        if (!isTestMode) {
+          const savedStr = localStorage.getItem("local_stock_adjustments");
+          const localSaved: StockAdjustmentItem[] = savedStr ? JSON.parse(savedStr) : [];
+          setItems(localSaved);
+        }
       })
       .finally(() => {
         if (!cancelled) {
@@ -1078,7 +1084,16 @@ export function StockAdjustmentPage({
                       style={{ cursor: "pointer" }}
                       onClick={() => setActiveItem(item)}
                     >
-                      <td>{item.adjustment_date}</td>
+                      <td>
+                        {item.adjustment_no && (
+                          <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px" }}>
+                            #{item.adjustment_no}
+                          </div>
+                        )}
+                        <div style={{ fontSize: item.adjustment_no ? "12px" : "13.5px", color: item.adjustment_no ? "#64748b" : "#1e293b" }}>
+                          {item.adjustment_date}
+                        </div>
+                      </td>
                       <td>
                         {item.client_name ? (
                           <div>

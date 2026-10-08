@@ -14,6 +14,7 @@ datetimes.
 
 from __future__ import annotations
 
+from typing import Any
 import uuid
 from datetime import datetime, timezone
 
@@ -57,6 +58,58 @@ class RecordStatusColumn(TypeDecorator):
         if val_upper in RecordStatus.__members__:
             return RecordStatus[val_upper]
         return RecordStatus.ACTIVE
+
+
+class CaseResilientEnum(TypeDecorator):
+    """
+    Platform-independent, case-resilient column type for string-based Enums.
+
+    Stores uppercase enum member names (e.g. 'EXISTING', 'NEW', 'YES', 'NO')
+    by default, while safely accepting and normalizing any case variation
+    (e.g., 'Existing', 'existing', 'Yes', 'yes', 'no') on both read and write,
+    preventing SQLAlchemy Enum LookupErrors from casing discrepancies.
+    """
+
+    impl = String
+    cache_ok = True
+
+    def __init__(self, enum_cls: Any, length: int = 50, *args: Any, **kwargs: Any) -> None:
+        self.enum_cls = enum_cls
+        self.impl = String(length)
+        self._lookup: dict[str, Any] = {}
+        if hasattr(enum_cls, "__members__"):
+            for member in enum_cls:
+                self._lookup[member.name.upper()] = member
+                self._lookup[member.name.lower()] = member
+                val_str = str(member.value)
+                self._lookup[val_str.upper()] = member
+                self._lookup[val_str.lower()] = member
+        super().__init__(*args, **kwargs)
+
+    def process_bind_param(self, value: Any, dialect: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, self.enum_cls):
+            return value.name
+        val_clean = str(value).strip()
+        if val_clean.upper() in self._lookup:
+            return self._lookup[val_clean.upper()].name
+        if val_clean.lower() in self._lookup:
+            return self._lookup[val_clean.lower()].name
+        return val_clean
+
+    def process_result_value(self, value: Any, dialect: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, self.enum_cls):
+            return value
+        val_clean = str(value).strip()
+        if val_clean.upper() in self._lookup:
+            return self._lookup[val_clean.upper()]
+        if val_clean.lower() in self._lookup:
+            return self._lookup[val_clean.lower()]
+        return None
+
 
 
 class GUID(TypeDecorator):

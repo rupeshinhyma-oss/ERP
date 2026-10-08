@@ -2,11 +2,13 @@
  * API client helpers for Technical Tasks Module.
  */
 
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type {
   TechnicalTask,
+  TechnicalTaskCallLog,
   TechnicalTaskCounts,
   TechnicalTaskCreatePayload,
+  SerialLookupResult,
 } from "@/types/technicalTasks";
 import type { ApiResult } from "@/types";
 
@@ -19,6 +21,7 @@ export interface TechnicalTaskListParams {
   call_type?: string;
   city?: string;
   task_allotted_to?: string;
+  serial_number?: string;
   search?: string;
   sort_by?: string;
   sort_desc?: boolean;
@@ -44,6 +47,7 @@ export async function fetchTechnicalTasks(
     query.set("task_allotted_to", params.task_allotted_to);
     query.set("technician", params.task_allotted_to);
   }
+  if (params.serial_number) query.set("serial_number", params.serial_number);
   if (params.search) query.set("search", params.search);
   if (params.sort_by) query.set("sort_by", params.sort_by);
   if (params.sort_desc !== undefined) query.set("sort_desc", String(params.sort_desc));
@@ -55,6 +59,31 @@ export async function fetchTechnicalTasks(
 
   const qs = query.toString();
   return apiGet<TechnicalTask[]>(`/technical-tasks${qs ? `?${qs}` : ""}`);
+}
+
+export async function lookupTaskSerialNumber(
+  serialNumber: string
+): Promise<SerialLookupResult> {
+  const res = await apiGet<SerialLookupResult>(
+    `/technical-tasks/serial-lookup/${encodeURIComponent(serialNumber.trim())}`
+  );
+  return res.data;
+}
+
+export async function reopenTechnicalTask(
+  id: string,
+  payload: {
+    status?: string;
+    task_allotted_to?: string;
+    scheduled_visit_date?: string;
+    remarks?: string;
+  }
+): Promise<TechnicalTask> {
+  const res = await apiPost<TechnicalTask>(
+    `/technical-tasks/${encodeURIComponent(id)}/reopen`,
+    payload
+  );
+  return res.data;
 }
 
 export async function fetchTechnicalTaskCounts(): Promise<TechnicalTaskCounts> {
@@ -78,7 +107,7 @@ export async function updateTechnicalTask(
   id: string,
   payload: Partial<TechnicalTaskCreatePayload>
 ): Promise<TechnicalTask> {
-  const res = await apiPut<TechnicalTask>(
+  const res = await apiPatch<TechnicalTask>(
     `/technical-tasks/${encodeURIComponent(id)}`,
     payload
   );
@@ -88,11 +117,20 @@ export async function updateTechnicalTask(
 export async function updateTechnicalTaskStatus(
   id: string,
   status: string,
-  remarks?: string
+  remarks?: string,
+  extra?: {
+    task_allotted_to?: string;
+    task_approved_date?: string;
+    scheduled_visit_date?: string;
+    payment_status?: string;
+    payment_mode?: string;
+    payment_screenshot?: string;
+    cancel_remarks?: string;
+  }
 ): Promise<TechnicalTask> {
   const res = await apiPatch<TechnicalTask>(
     `/technical-tasks/${encodeURIComponent(id)}/status`,
-    { status, remarks }
+    { status, remarks, ...extra }
   );
   return res.data;
 }
@@ -106,5 +144,44 @@ export async function bulkDeleteTechnicalTasks(ids: string[]): Promise<number> {
     "/technical-tasks/bulk-delete",
     { ids }
   );
-  return res.data?.deleted_count ?? 0;
+  return res.data.deleted_count;
+}
+
+export async function fetchTaskCallLogs(taskId: string): Promise<TechnicalTaskCallLog[]> {
+  const res = await apiGet<TechnicalTaskCallLog[]>(
+    `/technical-tasks/${encodeURIComponent(taskId)}/call-logs`
+  );
+  return res.data || [];
+}
+
+export async function createTaskCallLog(
+  taskId: string,
+  payload: { call_date?: string; call_type: string; remarks: string }
+): Promise<TechnicalTaskCallLog> {
+  const res = await apiPost<TechnicalTaskCallLog>(
+    `/technical-tasks/${encodeURIComponent(taskId)}/call-logs`,
+    payload
+  );
+  return res.data;
+}
+
+export async function uploadPaymentScreenshot(
+  file: File
+): Promise<{ file_url: string; file_name: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch("/api/v1/technical-tasks/upload-screenshot", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
+    },
+    body: formData,
+  });
+
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.message || "Failed to upload payment screenshot");
+  }
+  return json.data;
 }

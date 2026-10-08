@@ -61,16 +61,18 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
     expect(screen.getByText("₹ 41,670.00")).toBeTruthy();
   });
 
-  it("renders Pending and Completed tabs and switches between them", () => {
+  it("renders All, Pending, and Completed stages in top panel and switches between them", () => {
     render(
       <BrowserRouter>
         <DiscountPaymentsPage />
       </BrowserRouter>
     );
 
+    const allTab = screen.getByRole("button", { name: /^All/i });
     const pendingTab = screen.getByRole("button", { name: /Pending/i });
     const completedTab = screen.getByRole("button", { name: /Completed/i });
 
+    expect(allTab).toBeTruthy();
     expect(pendingTab).toBeTruthy();
     expect(completedTab).toBeTruthy();
 
@@ -81,6 +83,11 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
     fireEvent.click(completedTab);
     expect(screen.getByText("SHREE GANESH ENTERPRISES")).toBeTruthy();
     expect(screen.queryByText("GARUDA ENGINEERS")).toBeNull();
+
+    // Switch to All tab (shows both)
+    fireEvent.click(allTab);
+    expect(screen.getByText("GARUDA ENGINEERS")).toBeTruthy();
+    expect(screen.getByText("SHREE GANESH ENTERPRISES")).toBeTruthy();
 
     // Switch back to Pending
     fireEvent.click(pendingTab);
