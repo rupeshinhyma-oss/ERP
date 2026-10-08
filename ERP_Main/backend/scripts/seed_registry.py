@@ -45,7 +45,9 @@ Run with:
 from __future__ import annotations
 
 import asyncio
+import os
 
+from app.core.config import EnvironmentEnum, settings
 from app.database.base import Base
 from app.database.engine import dispose_engine, get_engine, get_sessionmaker
 from app.erp_registry.models import ErpStatus
@@ -72,6 +74,29 @@ _INHYMA_ONLY_MODULES: list[tuple[str, str]] = [
 ]
 
 
+def _dashboard_url(env_key: str, local_default: str) -> str:
+    """
+    Resolve an ERP frontend dashboard URL (the registry ``base_url``).
+
+    Reads ``<env_key>`` (the ERP's public FRONTEND origin, e.g.
+    ``https://yinglima-erp-frontend.onrender.com``) and appends ``/dashboard``.
+    Falls back to the localhost default ONLY in local/test environments; in
+    any other environment a missing value is a hard, readable error instead of
+    a silent localhost registration (which the SSRF validator rejects anyway).
+    """
+    origin = os.environ.get(env_key, "").strip().rstrip("/")
+    if origin:
+        if origin.endswith("/dashboard"):
+            origin = origin[: -len("/dashboard")]
+        return f"{origin}/dashboard"
+    if settings.ENVIRONMENT in (EnvironmentEnum.LOCAL, EnvironmentEnum.TEST):
+        return local_default
+    raise RuntimeError(
+        f"{env_key} is not set. Set it to the public URL of that ERP's frontend "
+        f"(e.g. https://<name>.onrender.com) in the ERP_Main service environment."
+    )
+
+
 async def _register_or_get(service: ErpRegistryService, instance_repo: ErpInstanceRepository, payload: ErpInstanceCreate):
     """Register an ERP if its key doesn't exist yet; otherwise return the existing row unchanged."""
     existing = await instance_repo.get_by_key(payload.key)
@@ -96,6 +121,9 @@ async def seed() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    yinglima_url = _dashboard_url("YINGLIMA_FRONTEND_URL", "http://localhost:5173/dashboard")
+    inhyma_url = _dashboard_url("INHYMA_FRONTEND_URL", "http://localhost:5174/dashboard")
+
     session_factory = get_sessionmaker()
     async with session_factory() as db:
         instance_repo = ErpInstanceRepository(db)
@@ -111,13 +139,13 @@ async def seed() -> None:
                 display_name="Yinglima ERP",
                 description="Production ERP for Inhyma Solutions' import/trading operations.",
                 status=ErpStatus.ACTIVE,
-                base_url="http://localhost:5173/dashboard",
+                base_url=yinglima_url,
             ),
         )
         if not yinglima_is_new:
             await service.update_metadata(
                 yinglima.id,
-                ErpInstanceUpdate(base_url="http://localhost:5173/dashboard"),
+                ErpInstanceUpdate(base_url=yinglima_url),
             )
         await _declare_modules(service, yinglima.id, _SHARED_MODULES)
 
@@ -130,10 +158,10 @@ async def seed() -> None:
                 display_name="Inhyma ERP",
                 description=(
                     "Independent ERP for Inhyma's own operations. A complete, independently-tested "
-                    "application running at http://localhost:5174/dashboard."
+                    f"application running at {inhyma_url}."
                 ),
                 status=ErpStatus.ACTIVE,
-                base_url="http://localhost:5174/dashboard",
+                base_url=inhyma_url,
             ),
         )
         if not inhyma_is_new:
@@ -142,9 +170,9 @@ async def seed() -> None:
                 ErpInstanceUpdate(
                     description=(
                         "Independent ERP for Inhyma's own operations. A complete, independently-tested "
-                        "application running at http://localhost:5174/dashboard."
+                        f"application running at {inhyma_url}."
                     ),
-                    base_url="http://localhost:5174/dashboard",
+                    base_url=inhyma_url,
                 ),
             )
             await service.change_status(inhyma.id, ErpStatus.ACTIVE)
