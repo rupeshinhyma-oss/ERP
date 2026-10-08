@@ -344,4 +344,231 @@ async def test_company_service_duplicate_checks():
 
     repo.tax_id_exists = AsyncMock(return_value=False)
     with pytest.raises(ConflictException, match="already exists"):
-        await service.create(company_name="Test Company", contact_calling_number="9876543210")
+        await service.create(company_name="Test Company", contact_calling_number="9876543210")
+
+
+@pytest.mark.asyncio
+async def test_one_way_status_lock_forbids_transition_from_existing_to_new():
+    """Verify that once a company transitions to existing, manual edit back to new is strictly forbidden."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.companies.service import CompanyService
+    from app.companies.models import Company, CompanyCurrentStatus
+    from app.core.exceptions import ConflictException
+
+    company = Company(
+        id=uuid.uuid4(),
+        company_name="Existing Corp",
+        current_status=CompanyCurrentStatus.EXISTING,
+    )
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(return_value=company)
+    repo.get_with_relations = AsyncMock(return_value=company)
+
+    service = CompanyService(
+        repository=repo,
+        contact_repository=MagicMock(),
+        country_repository=MagicMock(),
+        state_repository=MagicMock(),
+        city_repository=MagicMock(),
+        category_repository=MagicMock(),
+        sub_category_repository=MagicMock(),
+        cache_manager=MagicMock(),
+    )
+    service.get_by_id_or_raise = AsyncMock(return_value=company)
+
+    # Editing to "new" when existing must raise ConflictException
+    with pytest.raises(ConflictException, match="cannot be changed from 'Existing' back to 'New'"):
+        await service.update(company.id, current_status=CompanyCurrentStatus.NEW)
+
+    with pytest.raises(ConflictException, match="cannot be changed from 'Existing' back to 'New'"):
+        await service.update(company.id, current_status="new")
+
+
+@pytest.mark.asyncio
+async def test_delete_vs_inactive_protection_rules():
+    """
+    Verify:
+    1. If status is 'Existing', permanently block deletion.
+    2. Deletion is only permitted if status is 'New' or blank, and potential is 'No' (Not Potential).
+    3. Deletion is blocked if potential is 'Yes'.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+    from app.companies.service import CompanyService
+    from app.companies.models import Company, CompanyCurrentStatus, CompanyPotential
+    from app.core.exceptions import ConflictException
+
+    repo = MagicMock()
+    service = CompanyService(
+        repository=repo,
+        contact_repository=MagicMock(),
+        country_repository=MagicMock(),
+        state_repository=MagicMock(),
+        city_repository=MagicMock(),
+        category_repository=MagicMock(),
+        sub_category_repository=MagicMock(),
+        cache_manager=MagicMock(),
+    )
+
+    # 1. Existing status -> permanently blocked
+    comp_existing = Company(
+        id=uuid.uuid4(),
+        company_name="Existing Client Ltd",
+        current_status=CompanyCurrentStatus.EXISTING,
+        potential=CompanyPotential.NO,
+    )
+    assert service._can_delete(comp_existing) is False
+    service.get_by_id_or_raise = AsyncMock(return_value=comp_existing)
+    with pytest.raises(ConflictException, match="Current Status is 'Existing'"):
+        await service.delete(comp_existing.id)
+
+    # 2. Potential = Yes -> blocked even if status is new
+    comp_potential_yes = Company(
+        id=uuid.uuid4(),
+        company_name="Hot Prospect Ltd",
+        current_status=CompanyCurrentStatus.NEW,
+        potential=CompanyPotential.YES,
+    )
+    assert service._can_delete(comp_potential_yes) is False
+    service.get_by_id_or_raise = AsyncMock(return_value=comp_potential_yes)
+    with pytest.raises(ConflictException, match="Potential is 'No'"):
+        await service.delete(comp_potential_yes.id)
+
+    # 3. Status = New, Potential = No -> deletion allowed
+    comp_eligible = Company(
+        id=uuid.uuid4(),
+        company_name="Cold Lead Ltd",
+        current_status=CompanyCurrentStatus.NEW,
+        potential=CompanyPotential.NO,
+    )
+    assert service._can_delete(comp_eligible) is True
+    repo.delete = AsyncMock()
+    service.get_by_id_or_raise = AsyncMock(return_value=comp_eligible)
+    await service.delete(comp_eligible.id)
+    repo.delete.assert_called_once_with(comp_eligible)
+
+    # 4. Status = None/blank, Potential = None/blank -> deletion allowed
+    comp_blank = Company(
+        id=uuid.uuid4(),
+        company_name="Blank Lead Ltd",
+        current_status=None,
+        potential=None,
+    )
+    assert service._can_delete(comp_blank) is True
+
+
+@pytest.mark.asyncio
+async def test_duplicate_contact_number_lock_in_service_and_contacts():
+    """Verify that direct contact number validation checks across existing companies and contacts."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.companies.service import CompanyService
+    from app.companies.models import Company
+    from app.core.exceptions import ConflictException
+
+    existing_company = Company(
+        id=uuid.uuid4(),
+        company_name="Supreme Automation Ltd",
+        contact_calling_number="9876543210",
+    )
+
+    repo = MagicMock()
+    repo.get_company_by_calling_number = AsyncMock(return_value=existing_company)
+    repo.calling_number_exists = AsyncMock(return_value=True)
+
+    contact_repo = MagicMock()
+
+    service = CompanyService(
+        repository=repo,
+        contact_repository=contact_repo,
+        country_repository=MagicMock(),
+        state_repository=MagicMock(),
+        city_repository=MagicMock(),
+        category_repository=MagicMock(),
+        sub_category_repository=MagicMock(),
+        cache_manager=MagicMock(),
+    )
+    service.get_by_id_or_raise = AsyncMock(return_value=Company(id=uuid.uuid4(), company_name="New Co"))
+
+    # Adding contact with duplicate number must raise ConflictException citing existing company
+    with pytest.raises(ConflictException, match="already exists") as exc:
+        await service.add_contact(uuid.uuid4(), person_name="John Doe", calling_number="9876543210")
+    assert "Supreme Automation Ltd" in str(exc.value)
+
+
+def test_contact_person_age_auto_calculation():
+    """Verify age computed field accurately calculates age in whole years from DD-MM-YYYY, DD/MM/YYYY, and YYYY-MM-DD."""
+    from datetime import date
+    from app.companies.schemas import CompanyContactRead
+
+    today = date.today()
+    birth_year = today.year - 30
+    # Date before today in month/day to guarantee age is 30
+    bdate_dmy = f"01-01-{birth_year}"
+
+    contact = CompanyContactRead(
+        id=uuid.uuid4(),
+        company_id=uuid.uuid4(),
+        salutation="Mr",
+        person_name="Vijay Patel",
+        designation="Plant Head",
+        handling_territory="Gujarat",
+        country_id=None,
+        calling_number="9825000000",
+        whatsapp_number=None,
+        wechat_number=None,
+        email="vijay@example.com",
+        birth_date=bdate_dmy,
+        anniversary_date=None,
+        is_primary=True,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    assert contact.age == 30
+
+    # Also test YYYY-MM-DD
+    contact_ymd = CompanyContactRead(
+        id=uuid.uuid4(),
+        company_id=uuid.uuid4(),
+        salutation="Ms",
+        person_name="Pooja Shah",
+        designation="Sales Exec",
+        handling_territory=None,
+        country_id=None,
+        calling_number=None,
+        whatsapp_number=None,
+        wechat_number=None,
+        email=None,
+        birth_date=f"{birth_year}-01-01",
+        anniversary_date=None,
+        is_primary=False,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    assert contact_ymd.age == 30
+
+
+@pytest.mark.asyncio
+async def test_automatic_status_transition_by_company_name():
+    """Verify repository transition_to_existing_by_name flips status to EXISTING when called."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.companies.models import Company, CompanyCurrentStatus
+    from app.companies.repository import CompanyRepository
+
+    comp = Company(
+        id=uuid.uuid4(),
+        company_name="Fresh Prospect Pvt Ltd",
+        current_status=CompanyCurrentStatus.NEW,
+    )
+
+    session = MagicMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = comp
+    session.execute = AsyncMock(return_value=mock_result)
+    session.flush = AsyncMock()
+
+    repo = CompanyRepository(session)
+    updated = await repo.transition_to_existing_by_name("Fresh Prospect Pvt Ltd")
+
+    assert updated is not None
+    assert updated.current_status == CompanyCurrentStatus.EXISTING
+    session.flush.assert_called_once()
+

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -436,6 +436,29 @@ async def lookup_companies(
             "sales_person_id": str(r.sales_person_id) if r.sales_person_id else None,
         })
     return build_success_response(data=records, request_id=request.state.request_id)
+
+
+@router.get("/check-contact-number", summary="Check if a direct contact number already exists")
+async def check_contact_number(
+    request: Request,
+    phone: str = Query(..., min_length=1),
+    exclude_id: uuid.UUID | None = Query(default=None),
+    exclude_contact_id: uuid.UUID | None = Query(default=None),
+    service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.create", "supplier.view", "supplier.create")),
+) -> dict:
+    """Return whether a direct contact number already exists and which company holds it."""
+    comp = await service.repository.get_company_by_calling_number(
+        phone, exclude_id=exclude_id, exclude_contact_id=exclude_contact_id
+    )
+    return build_success_response(
+        data={
+            "exists": comp is not None,
+            "company_name": comp.company_name if comp else None,
+            "company_id": str(comp.id) if comp else None,
+        },
+        request_id=request.state.request_id,
+    )
 
 
 @router.get("/{company_id}", summary="Get a company")

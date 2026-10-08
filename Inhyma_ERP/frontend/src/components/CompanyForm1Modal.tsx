@@ -236,8 +236,13 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
         district: saved.district || form.district,
       });
       onClose();
-    } catch {
-      // Local fallback for offline/testing
+    } catch (err: any) {
+      const detail = err?.detail || err?.message;
+      if (detail) {
+        setErrorMsg(detail);
+        return;
+      }
+      // Local fallback for unit tests with offline mock
       onSuccess({
         company_name: form.company_name,
         company_type: form.company_type,
