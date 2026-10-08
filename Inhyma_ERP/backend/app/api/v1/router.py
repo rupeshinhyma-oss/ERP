@@ -66,6 +66,7 @@ from app.suppliers.routes import router as suppliers_router
 from app.notifications.routes import router as notifications_router
 from app.tasks.routes import router as tasks_router
 from app.technical_tasks.routes import router as technical_tasks_router
+from app.technician_operations.routes import router as technician_operations_router
 from app.leads.routes import router as leads_router
 from app.follow_ups.routes import router as follow_ups_router
 from app.agents.routes import router as agents_router
@@ -188,6 +189,7 @@ api_router.include_router(public_quotes_router)
 # Standalone Task Management & In-App Notifications
 api_router.include_router(tasks_router)
 api_router.include_router(technical_tasks_router)
+api_router.include_router(technician_operations_router)
 api_router.include_router(leads_router, prefix="/leads")
 api_router.include_router(leads_router, prefix="/lead")
 api_router.include_router(follow_ups_router, prefix="/follow-ups")

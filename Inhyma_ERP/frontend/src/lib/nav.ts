@@ -44,6 +44,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
       { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
+      { key: "technician-operations", label: "Technician Ops & Wallet", path: "/technician-operations", icon: "truck" },
     ],
   },
   {
@@ -379,6 +380,12 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/leads": "/lead/list",
   "/lead": "/lead/list",
   "/leads/list": "/lead/list",
+  "/technicians/gatepass": "/technician-operations?tab=gatepasses",
+  "/technicians/wallet": "/technician-operations?tab=wallets",
+  "/warranty": "/technician-operations?tab=warranty",
+  "/technician-gatepass/list": "/technician-operations?tab=gatepasses",
+  "/technician-wallet/list": "/technician-operations?tab=wallets",
+  "/machine-warranty/list": "/technician-operations?tab=warranty",
 };
 
 /**

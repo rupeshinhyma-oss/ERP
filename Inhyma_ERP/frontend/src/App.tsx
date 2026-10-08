@@ -54,6 +54,7 @@ import { ImportPurchasePage } from "@/pages/purchase/ImportPurchasePage";
 import { ImportPurchasePdfPage } from "@/pages/ImportPurchasePdfPage";
 import { TasksPage } from "@/pages/tasks/TasksPage";
 import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
+import { TechnicianOperationsPage } from "@/pages/TechnicianOperationsPage";
 import { AttendancePage } from "@/pages/hrms/AttendancePage";
 import { LeavePage } from "@/pages/hrms/LeavePage";
 import { ExpensesPage } from "@/pages/hrms/ExpensesPage";
@@ -333,6 +334,13 @@ export function App() {
           <Route path="/tasks/calendar" element={<Navigate to="/tasks?tab=calendar" replace />} />
           <Route path="/technical-task/list" element={<TechnicalTasksPage />} />
           <Route path="/technical-tasks" element={<Navigate to="/technical-task/list" replace />} />
+          <Route path="/technician-operations" element={<TechnicianOperationsPage />} />
+          <Route path="/technicians/gatepass" element={<Navigate to="/technician-operations?tab=gatepasses" replace />} />
+          <Route path="/technicians/wallet" element={<Navigate to="/technician-operations?tab=wallets" replace />} />
+          <Route path="/technician-gatepass/list" element={<Navigate to="/technician-operations?tab=gatepasses" replace />} />
+          <Route path="/technician-wallet/list" element={<Navigate to="/technician-operations?tab=wallets" replace />} />
+          <Route path="/machine-warranty/list" element={<Navigate to="/technician-operations?tab=warranty" replace />} />
+          <Route path="/warranty" element={<Navigate to="/technician-operations?tab=warranty" replace />} />
           <Route path="/marketing-task/list" element={<Navigate to="/tasks" replace />} />
           <Route path="/marketing-tasks" element={<Navigate to="/tasks" replace />} />
 
