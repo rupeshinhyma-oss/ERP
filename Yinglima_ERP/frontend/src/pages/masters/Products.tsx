@@ -1146,7 +1146,7 @@ export function ProductsPage() {
       renderFields={(f, set, errors = {}) => {
         const scopedSubCategories = f.category_id
           ? subCategories.items.filter((sc) => sc.category_id === f.category_id && (sc.status === "active" || sc.id === f.sub_category_id))
-          : subCategories.items.filter((sc) => sc.status === "active" || sc.id === f.sub_category_id);
+          : [];
 
         /** Dimension change also refreshes the read-only CBM preview. */
         const setDimension = (id: "length_cm" | "width_cm" | "height_cm", value: string) => {
@@ -1203,34 +1203,25 @@ export function ProductsPage() {
                     </option>
                   ))}
               </SelectField>
-              <SelectField id="sub_category_id" label="Sub-Category *" value={f.sub_category_id} onChange={(v) => set("sub_category_id", v)} error={errors.sub_category_id}>
-                <option value="">-- Select Sub-Category --</option>
-                {f.category_id ? (
-                  scopedSubCategories.map((sc) => (
-                    <option key={sc.id} value={sc.id}>
-                      {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
-                    </option>
-                  ))
-                ) : (
-                  (() => {
-                    const catMap = new Map(categories.items.map((c) => [c.id, c.name]));
-                    const groups = new Map<string, typeof scopedSubCategories>();
-                    scopedSubCategories.forEach((sc) => {
-                      const cName = catMap.get(sc.category_id) || "Other";
-                      if (!groups.has(cName)) groups.set(cName, []);
-                      groups.get(cName)!.push(sc);
-                    });
-                    return Array.from(groups.entries()).map(([cName, list]) => (
-                      <optgroup key={cName} label={cName}>
-                        {list.map((sc) => (
-                          <option key={sc.id} value={sc.id}>
-                            {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ));
-                  })()
-                )}
+              <SelectField
+                id="sub_category_id"
+                label="Sub-Category *"
+                required
+                disabled={!f.category_id}
+                value={f.sub_category_id}
+                onChange={(v) => set("sub_category_id", v)}
+                error={errors.sub_category_id}
+              >
+                <option value="">
+                  {f.category_id ? "-- Select Sub-Category --" : "-- Please select Category first --"}
+                </option>
+                {f.category_id
+                  ? scopedSubCategories.map((sc) => (
+                      <option key={sc.id} value={sc.id}>
+                        {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
+                      </option>
+                    ))
+                  : null}
               </SelectField>
               <SelectField
                 id="supplier_id"

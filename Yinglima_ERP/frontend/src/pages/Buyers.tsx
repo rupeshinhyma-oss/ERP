@@ -2075,7 +2075,9 @@ export function BuyersPage() {
                         onChange={(newCatIds) => {
                           setCategoryIds(newCatIds);
                           // Auto-prune any subCategoryIds that no longer belong to selected categories
-                          if (newCatIds.length > 0) {
+                          if (newCatIds.length === 0) {
+                            setSubCategoryIds([]);
+                          } else {
                             setSubCategoryIds((prevSubIds) => {
                               const validCategorySubIds = subCategories.items
                                 .filter((sc) => newCatIds.includes(sc.category_id))
@@ -2094,19 +2096,21 @@ export function BuyersPage() {
                       <SearchableDropdownMultiPanel
                         values={subCategoryIds}
                         onChange={setSubCategoryIds}
-                        placeholder="-- Select Sub Categories --"
+                        disabled={categoryIds.length === 0}
+                        placeholder={categoryIds.length > 0 ? "-- Select Sub Categories --" : "-- Please select Category first --"}
                         fetchOptions={async (query) => {
+                          if (categoryIds.length === 0) {
+                            return [];
+                          }
                           const q = query.trim().toLowerCase();
                           let items = subCategories.items;
-                          if (categoryIds.length > 0) {
-                            items = items.filter((sc) => categoryIds.includes(sc.category_id));
-                            items = [...items].sort((a, b) => {
-                              const idxA = categoryIds.indexOf(a.category_id);
-                              const idxB = categoryIds.indexOf(b.category_id);
-                              if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
-                              return a.name.localeCompare(b.name);
-                            });
-                          }
+                          items = items.filter((sc) => categoryIds.includes(sc.category_id));
+                          items = [...items].sort((a, b) => {
+                            const idxA = categoryIds.indexOf(a.category_id);
+                            const idxB = categoryIds.indexOf(b.category_id);
+                            if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                            return a.name.localeCompare(b.name);
+                          });
                           if (q) {
                             items = items.filter(
                               (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))

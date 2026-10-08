@@ -974,6 +974,7 @@ export interface SearchableDropdownMultiPanelProps extends SharedProps {
   onChange: (values: string[]) => void;
   placeholder?: string;
   chipsPlacement?: "inside" | "below";
+  disabled?: boolean;
 }
 
 export function SearchableDropdownMultiPanel({
@@ -983,6 +984,7 @@ export function SearchableDropdownMultiPanel({
   chipsPlacement = "inside",
   fetchOptions,
   fetchLabelForValue,
+  disabled = false,
 }: SearchableDropdownMultiPanelProps) {
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -1103,6 +1105,7 @@ export function SearchableDropdownMultiPanel({
   }, [open, searchTerm, fetchOptions]);
 
   function toggleOpen() {
+    if (disabled) return;
     const next = !open;
     setOpen(next);
     if (next) {
@@ -1112,6 +1115,7 @@ export function SearchableDropdownMultiPanel({
   }
 
   function toggleItem(opt: DropdownOption) {
+    if (disabled) return;
     const isSelected = selected.some((s) => s.value === opt.value);
     let next: DropdownOption[];
     if (isSelected) {
@@ -1124,6 +1128,7 @@ export function SearchableDropdownMultiPanel({
   }
 
   function removeItem(val: string) {
+    if (disabled) return;
     const next = selected.filter((s) => s.value !== val);
     setSelected(next);
     onChange(next.map((s) => s.value));
@@ -1137,17 +1142,21 @@ export function SearchableDropdownMultiPanel({
     <div ref={containerRef} style={{ position: "relative" }}>
       {/* Trigger button */}
       <div
-        tabIndex={0}
-        onClick={toggleOpen}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(); } }}
+        tabIndex={disabled ? -1 : 0}
+        onClick={disabled ? undefined : toggleOpen}
+        onKeyDown={(e) => {
+          if (disabled) return;
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(); }
+        }}
         style={{
-          border: "1px solid var(--color-border-strong, #cbd5e1)",
+          border: disabled ? "1px solid #e2e8f0" : "1px solid var(--color-border-strong, #cbd5e1)",
           borderRadius: "var(--radius-sm, 6px)",
           padding: "7px 32px 7px 11px",
           minHeight: "40px",
           maxHeight: "40px",
-          background: "#ffffff",
-          cursor: "pointer",
+          background: disabled ? "#f8fafc" : "#ffffff",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.75 : 1,
           fontSize: "13.5px",
           color: selected.length === 0 ? "#94a3b8" : "#1e293b",
           display: "flex",
