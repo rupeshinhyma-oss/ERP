@@ -13,10 +13,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import delete, or_, select
+
 from app.cache.manager import CacheManager
 from app.common.list_query import ListQueryParams
 from app.core.constants import RecordStatus
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.inventory.models import ProductStock
 from app.masters.brands.repository import BrandRepository
 from app.masters.import_export import (
     ImportSummary,
@@ -29,8 +32,9 @@ from app.masters.import_export import (
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
 from app.masters.products.constants import DROPDOWN_CACHE_NAME, EXPORT_HEADERS
-from app.masters.products.models import Product, ProductDimensionRow
+from app.masters.products.models import Product, ProductDimensionRow, ProductMachineSpare
 from app.masters.products.repository import ProductRepository
+from app.masters.products.schemas import compute_client_cbm
 from app.masters.products.validators import validate_product_row
 from app.masters.taxes.repository import TaxRepository
 from app.masters.uom.repository import UomRepository
@@ -141,18 +145,45 @@ class ProductService:
             w = row.get("width")
             h = row.get("height")
             cbm = row.get("cbm")
-            if (cbm is None or float(cbm) <= 0) and l is not None and w is not None and h is not None and float(l) > 0 and float(w) > 0 and float(h) > 0:
-                cbm = round((float(l) * float(w) * float(h)) / 1_000_000.0, 6)
+            if (cbm is None or float(cbm or 0) <= 0) and l is not None and w is not None and h is not None and float(l) > 0 and float(w) > 0 and float(h) > 0:
+                cbm = compute_client_cbm(l, w, h)
+            elif cbm is not None:
+                try:
+                    cbm = float(cbm)
+                except (ValueError, TypeError):
+                    cbm = 0.0
+
             product.dimension_rows.append(
                 ProductDimensionRow(
+                    package_name=row.get("package_name"),
                     title=row.get("title"),
                     length=l,
                     width=w,
                     height=h,
                     cbm=cbm,
+                    net_weight=row.get("net_weight"),
+                    gross_weight=row.get("gross_weight"),
                     sort_order=index,
                 )
             )
+
+    async def _sync_spare_machines(self, spare_part_id: uuid.UUID, machine_ids: list[uuid.UUID | str] | None) -> None:
+        """Synchronize product_machine_spares mapping table for a spare part."""
+        if machine_ids is None:
+            return
+        del_stmt = delete(ProductMachineSpare).where(ProductMachineSpare.spare_part_id == spare_part_id)
+        await self.repository.session.execute(del_stmt)
+        for m_id in machine_ids:
+            try:
+                m_uuid = uuid.UUID(str(m_id))
+                self.repository.session.add(
+                    ProductMachineSpare(
+                        machine_id=m_uuid,
+                        spare_part_id=spare_part_id,
+                    )
+                )
+            except (ValueError, TypeError):
+                continue
 
     async def create(self, **field_values: Any) -> Product:
         """Create a new product, validating code uniqueness if provided, and foreign-key references."""
@@ -190,14 +221,14 @@ class ProductService:
         if field_values.get("weight") is None:
             field_values["weight"] = gross_wt
 
-        # Auto-compute CBM if dimensions present, or validate explicit CBM
+        # Auto-compute CBM if dimensions present, or validate explicit CBM using client rounding rule
         l = field_values.get("length_cm") or field_values.get("length")
         w = field_values.get("width_cm") or field_values.get("width")
         h = field_values.get("height_cm") or field_values.get("height")
         if (field_values.get("packaging_unit_cbm") is None or float(field_values.get("packaging_unit_cbm", 0) or 0) <= 0) and (
             l is not None and w is not None and h is not None and float(l) > 0 and float(w) > 0 and float(h) > 0
         ):
-            field_values["packaging_unit_cbm"] = round((float(l) * float(w) * float(h)) / 1000000.0, 6)
+            field_values["packaging_unit_cbm"] = compute_client_cbm(l, w, h)
 
         cbm = field_values.get("packaging_unit_cbm")
         if cbm is None or float(cbm) <= 0:
@@ -209,10 +240,19 @@ class ProductService:
         if "organization_ids" in field_values and field_values["organization_ids"] is not None:
             field_values["organization_ids"] = [str(x) for x in field_values["organization_ids"]]
 
+        applicable_machines = field_values.get("applicable_machine_ids")
+        if applicable_machines is not None:
+            field_values["applicable_machine_ids"] = [str(x) for x in applicable_machines]
+
         product = await self.repository.create(**field_values)
         if dimension_rows_payload is not None:
             await self._replace_dimension_rows(product, dimension_rows_payload)
             await self.repository.session.flush()
+
+        if getattr(product, "product_type", None) == "Spare Part" and product.applicable_machine_ids:
+            await self._sync_spare_machines(product.id, product.applicable_machine_ids)
+            await self.repository.session.flush()
+
         await self._invalidate_cache()
         return product
 
@@ -243,15 +283,18 @@ class ProductService:
         }
         await self._validate_references(merged)
 
-        # Auto-compute CBM if dimensions updated
+        # Auto-compute CBM if dimensions updated using client rounding rule
         l = field_values.get("length_cm") if "length_cm" in field_values else (field_values.get("length") or product.length_cm or product.length)
         w = field_values.get("width_cm") if "width_cm" in field_values else (field_values.get("width") or product.width_cm or product.width)
         h = field_values.get("height_cm") if "height_cm" in field_values else (field_values.get("height") or product.height_cm or product.height)
         if l is not None and w is not None and h is not None:
-            field_values["packaging_unit_cbm"] = round((float(l) * float(w) * float(h)) / 1000000.0, 6)
+            field_values["packaging_unit_cbm"] = compute_client_cbm(l, w, h)
 
         if "organization_ids" in field_values and field_values["organization_ids"] is not None:
             field_values["organization_ids"] = [str(x) for x in field_values["organization_ids"]]
+
+        if "applicable_machine_ids" in field_values and field_values["applicable_machine_ids"] is not None:
+            field_values["applicable_machine_ids"] = [str(x) for x in field_values["applicable_machine_ids"]]
 
         if field_values:
             await self.repository.update(product, **field_values)
@@ -269,6 +312,11 @@ class ProductService:
         if dimension_rows_payload is not None:
             await self._replace_dimension_rows(product, dimension_rows_payload)
             await self.repository.session.flush()
+
+        if "applicable_machine_ids" in field_values:
+            await self._sync_spare_machines(product.id, field_values["applicable_machine_ids"])
+            await self.repository.session.flush()
+
         await self._invalidate_cache()
         # Best-effort, never raises: tells any already-open Shipment
         # Planning tab whose ITEM column (or any other LINKED_LOOKUP/
@@ -296,24 +344,219 @@ class ProductService:
             raise BadRequestException("Product cannot be set to Inactive when current stock is non-zero.")
         return await self.update(product_id, status=RecordStatus.INACTIVE)
 
+    async def _check_zero_stock_or_raise(self, product: Product) -> None:
+        """Strictly enforce zero-stock lock: raise 'Stock exists' if stock > 0 in any warehouse or on product."""
+        if getattr(product, "current_stock", 0) and float(product.current_stock) > 0:
+            raise BadRequestException("Stock exists")
+
+        # Check physical/transit stock across all warehouses from inventory ProductStock
+        try:
+            stmt = select(ProductStock).where(
+                or_(
+                    ProductStock.product_id == product.id,
+                    ProductStock.product_name_tally == product.product_name_tally,
+                    ProductStock.product_code == product.product_code,
+                )
+            )
+            res = await self.repository.session.execute(stmt)
+            stock_rows = res.scalars().all()
+            for s in stock_rows:
+                if (
+                    (s.total_qty or 0) > 0
+                    or (s.mumbai or 0) > 0
+                    or (s.ahmedabad or 0) > 0
+                    or (s.indore or 0) > 0
+                    or (s.mumbai_transit or 0) > 0
+                    or (s.ahmedabad_transit or 0) > 0
+                    or (s.indore_transit or 0) > 0
+                ):
+                    raise BadRequestException("Stock exists")
+        except BadRequestException:
+            raise
+        except Exception:
+            pass
+
     async def delete(self, product_id: uuid.UUID) -> None:
-        """Soft-delete a product, requiring status to be Inactive and stock = 0."""
+        """Soft-delete a product, strictly enforcing zero-stock and inactive status."""
         product = await self.get_by_id_or_raise(product_id)
         if product.status != RecordStatus.INACTIVE:
             raise BadRequestException("Product deletion is allowed only if status is Inactive.")
-        if getattr(product, "current_stock", 0) != 0:
-            raise BadRequestException("Product deletion is allowed only if stock is Zero.")
+        await self._check_zero_stock_or_raise(product)
         if await self.repository.is_referenced(product_id):
             raise ConflictException("This product cannot be deleted because it is referenced elsewhere.")
         await self.repository.delete(product)
         await self._invalidate_cache()
-        # A deleted product can still affect Planning: any AGGREGATE
-        # column filtering on status (e.g. "count of active products in
-        # category X") may need its stored count/sum to drop, and any
-        # cell still explicitly linked to this now-deleted product should
-        # reflect that it's gone rather than keep showing stale data.
         await notify_source_record_changed("product", product_id)
         await refresh_planning_cells_for_record(self.repository.session, "product", product_id)
+
+    async def bulk_delete(self, product_ids: list[uuid.UUID]) -> dict:
+        """Bulk soft-delete products with strict zero-stock enforcement across all warehouses."""
+        products_to_delete = []
+        for pid in product_ids:
+            product = await self.get_by_id_or_raise(pid)
+            await self._check_zero_stock_or_raise(product)
+            if await self.repository.is_referenced(pid):
+                raise ConflictException(f"Product '{product.product_name_tally}' cannot be deleted because it is referenced elsewhere.")
+            products_to_delete.append(product)
+
+        for p in products_to_delete:
+            await self.repository.delete(p)
+            await notify_source_record_changed("product", p.id)
+            await refresh_planning_cells_for_record(self.repository.session, "product", p.id)
+
+        await self.repository.session.flush()
+        await self._invalidate_cache()
+        return {"deleted_count": len(products_to_delete)}
+
+    async def map_machine_spare(self, machine_id: uuid.UUID, spare_part_id: uuid.UUID, remarks: str | None = None) -> ProductMachineSpare:
+        """Link a spare part to a machine."""
+        await self.get_by_id_or_raise(machine_id)
+        spare = await self.get_by_id_or_raise(spare_part_id)
+
+        stmt = select(ProductMachineSpare).where(
+            ProductMachineSpare.machine_id == machine_id,
+            ProductMachineSpare.spare_part_id == spare_part_id,
+        )
+        existing = (await self.repository.session.execute(stmt)).scalars().first()
+        if existing:
+            if remarks is not None:
+                existing.remarks = remarks
+                await self.repository.session.flush()
+            return existing
+
+        mapping = ProductMachineSpare(
+            machine_id=machine_id,
+            spare_part_id=spare_part_id,
+            remarks=remarks,
+        )
+        self.repository.session.add(mapping)
+
+        current_ids = list(spare.applicable_machine_ids or [])
+        if str(machine_id) not in [str(x) for x in current_ids]:
+            current_ids.append(str(machine_id))
+            spare.applicable_machine_ids = current_ids
+
+        await self.repository.session.flush()
+        return mapping
+
+    async def unmap_machine_spare(self, machine_id: uuid.UUID, spare_part_id: uuid.UUID) -> bool:
+        """Unlink a spare part from a machine."""
+        stmt = delete(ProductMachineSpare).where(
+            ProductMachineSpare.machine_id == machine_id,
+            ProductMachineSpare.spare_part_id == spare_part_id,
+        )
+        res = await self.repository.session.execute(stmt)
+        spare = await self.repository.get_by_id(spare_part_id)
+        if spare and spare.applicable_machine_ids:
+            spare.applicable_machine_ids = [str(x) for x in spare.applicable_machine_ids if str(x) != str(machine_id)]
+        await self.repository.session.flush()
+        return bool(res.rowcount and res.rowcount > 0)
+
+    async def get_machine_spares_universal_view(self, search: str | None = None) -> list[dict]:
+        """Universal view showing machine-wise spare parts mapping."""
+        q = select(Product).where(Product.product_type == "Machine", Product.is_deleted.is_(False))
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            q = q.where(
+                or_(
+                    Product.product_name.ilike(term),
+                    Product.product_name_tally.ilike(term),
+                    Product.product_code.ilike(term),
+                )
+            )
+        machines = (await self.repository.session.execute(q)).scalars().all()
+
+        stmt = (
+            select(ProductMachineSpare, Product)
+            .join(Product, ProductMachineSpare.spare_part_id == Product.id)
+            .where(Product.is_deleted.is_(False))
+        )
+        mappings_res = (await self.repository.session.execute(stmt)).all()
+
+        machine_spares_map: dict[str, list[dict]] = {}
+        for mapping, spare in mappings_res:
+            mid_str = str(mapping.machine_id)
+            if mid_str not in machine_spares_map:
+                machine_spares_map[mid_str] = []
+            machine_spares_map[mid_str].append({
+                "spare_part_id": spare.id,
+                "spare_part_name": spare.product_name_tally or spare.product_name,
+                "spare_part_code": spare.product_code,
+                "uom": getattr(spare, "uom_id", None) and str(spare.uom_id),
+                "standard_price": float(spare.standard_price) if spare.standard_price else 0.0,
+                "current_stock": float(spare.current_stock) if spare.current_stock else 0.0,
+                "remarks": mapping.remarks,
+            })
+
+        spare_stmt = select(Product).where(Product.product_type == "Spare Part", Product.is_deleted.is_(False))
+        all_spares = (await self.repository.session.execute(spare_stmt)).scalars().all()
+        for spare in all_spares:
+            if spare.applicable_machine_ids:
+                for mid in spare.applicable_machine_ids:
+                    mid_str = str(mid)
+                    if mid_str not in machine_spares_map:
+                        machine_spares_map[mid_str] = []
+                    if not any(str(s["spare_part_id"]) == str(spare.id) for s in machine_spares_map[mid_str]):
+                        machine_spares_map[mid_str].append({
+                            "spare_part_id": spare.id,
+                            "spare_part_name": spare.product_name_tally or spare.product_name,
+                            "spare_part_code": spare.product_code,
+                            "uom": getattr(spare, "uom_id", None) and str(spare.uom_id),
+                            "standard_price": float(spare.standard_price) if spare.standard_price else 0.0,
+                            "current_stock": float(spare.current_stock) if spare.current_stock else 0.0,
+                            "remarks": None,
+                        })
+
+        result = []
+        for m in machines:
+            result.append({
+                "machine_id": m.id,
+                "machine_name": m.product_name_tally or m.product_name,
+                "machine_code": m.product_code,
+                "current_stock": float(m.current_stock) if getattr(m, "current_stock", None) else 0.0,
+                "brand_name": getattr(m, "brand_id", None) and str(m.brand_id),
+                "category_name": getattr(m, "category_id", None) and str(m.category_id),
+                "spares": machine_spares_map.get(str(m.id), []),
+            })
+        return result
+
+    async def get_package_dimensions_report(self, search: str | None = None) -> list[dict]:
+        """Separate report for dimensions of each package across products."""
+        stmt = (
+            select(ProductDimensionRow, Product)
+            .join(Product, ProductDimensionRow.product_id == Product.id)
+            .where(Product.is_deleted.is_(False))
+            .order_by(Product.product_name_tally, ProductDimensionRow.sort_order)
+        )
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Product.product_name_tally.ilike(term),
+                    Product.product_code.ilike(term),
+                    ProductDimensionRow.package_name.ilike(term),
+                    ProductDimensionRow.title.ilike(term),
+                )
+            )
+        rows = (await self.repository.session.execute(stmt)).all()
+        result = []
+        for dim_row, prod in rows:
+            result.append({
+                "dimension_id": dim_row.id,
+                "product_id": prod.id,
+                "product_name": prod.product_name_tally or prod.product_name,
+                "product_code": prod.product_code,
+                "product_type": getattr(prod, "product_type", "Machine"),
+                "package_name": dim_row.package_name,
+                "title": dim_row.title,
+                "length": float(dim_row.length) if dim_row.length is not None else None,
+                "width": float(dim_row.width) if dim_row.width is not None else None,
+                "height": float(dim_row.height) if dim_row.height is not None else None,
+                "cbm": float(dim_row.cbm) if dim_row.cbm is not None else None,
+                "net_weight": float(dim_row.net_weight) if dim_row.net_weight is not None else None,
+                "gross_weight": float(dim_row.gross_weight) if dim_row.gross_weight is not None else None,
+            })
+        return result
 
     # ------------------------------------------------------------------
     # Import / Export

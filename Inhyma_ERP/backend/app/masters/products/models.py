@@ -42,6 +42,8 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     barcode: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
     # --- Classification (foreign keys into the other Master Data tables) ----------
+    product_type: Mapped[str] = mapped_column(String(50), default="Machine", server_default="Machine", nullable=False, index=True)  # "Machine" vs "Spare Part"
+    applicable_machine_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] of machine UUIDs for spare parts
     category_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("product_categories.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -140,7 +142,8 @@ class ProductDimensionRow(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """One row of the "Dimensions" table on the Add/Edit Product form.
 
     A product can have several packing configurations (Master Carton, Unit
-    Box, etc.), each with its own L/W/H and CBM -- distinct from the single
+    Box, etc.), each with its own package_name, net_weight, gross_weight,
+    L/W/H and CBM -- distinct from the single
     "Dimensions For CBM" (length_cm/width_cm/height_cm/packaging_unit_cbm)
     fields above, which describe the primary packaging unit only.
     """
@@ -150,15 +153,38 @@ class ProductDimensionRow(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     product_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    package_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     length: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     width: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     height: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     cbm: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)  # Auto computed: L*W*H/1,000,000
+    net_weight: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    gross_weight: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     sort_order: Mapped[int] = mapped_column(default=0, nullable=False)
 
     product: Mapped["Product"] = relationship("Product", back_populates="dimension_rows")
 
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
-        return f"<ProductDimensionRow product_id={self.product_id!r} title={self.title!r}>"
+        return f"<ProductDimensionRow product_id={self.product_id!r} package={self.package_name!r} title={self.title!r}>"
+
+
+class ProductMachineSpare(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Mapping table linking Spare Parts to specific Machines."""
+
+    __tablename__ = "product_machine_spares"
+
+    machine_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    spare_part_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    remarks: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    machine: Mapped["Product"] = relationship("Product", foreign_keys=[machine_id])
+    spare_part: Mapped["Product"] = relationship("Product", foreign_keys=[spare_part_id])
+
+    def __repr__(self) -> str:
+        return f"<ProductMachineSpare machine_id={self.machine_id!r} spare_part_id={self.spare_part_id!r}>"

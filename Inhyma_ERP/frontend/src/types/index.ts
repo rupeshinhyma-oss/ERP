@@ -295,6 +295,8 @@ export interface Product extends MasterRecord {
   product_name_tally?: string | null;
   product_name_invoice?: string | null;
   barcode?: string | null;
+  product_type?: "Machine" | "Spare Part" | string;
+  applicable_machine_ids?: string[] | null;
   category_id: string;
   sub_category_id?: string | null;
   brand_id?: string | null;
@@ -324,6 +326,7 @@ export interface Product extends MasterRecord {
   packaging_unit_cbm?: number | null;
   color?: string | null;
   material?: string | null;
+  current_stock?: number;
   minimum_order_quantity?: number | null;
   reorder_level?: number | null;
   standard_cost?: number | null;
@@ -341,11 +344,50 @@ export interface Product extends MasterRecord {
 
 export interface ProductDimensionRow {
   id?: string;
+  package_name?: string;
   title?: string;
   length?: number | string;
   width?: number | string;
   height?: number | string;
   cbm?: number | string;
+  net_weight?: number | string;
+  gross_weight?: number | string;
+}
+
+export interface MachineSpareItemRead {
+  spare_part_id: string;
+  spare_part_name: string;
+  spare_part_code?: string | null;
+  uom?: string | null;
+  standard_price?: number | null;
+  current_stock?: number | null;
+  remarks?: string | null;
+}
+
+export interface MachineWithSparesRead {
+  machine_id: string;
+  machine_name: string;
+  machine_code?: string | null;
+  current_stock?: number | null;
+  brand_name?: string | null;
+  category_name?: string | null;
+  spares: MachineSpareItemRead[];
+}
+
+export interface PackageDimensionReportRow {
+  dimension_id?: string | null;
+  product_id: string;
+  product_name: string;
+  product_code?: string | null;
+  product_type: string;
+  package_name?: string | null;
+  title?: string | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  cbm?: number | null;
+  net_weight?: number | null;
+  gross_weight?: number | null;
 }
 
 /* ------------------------------------------------------------------ */

@@ -51,7 +51,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "CONTACT",
     items: [
       { key: "companies", label: "Companies", path: "/companies", icon: "building", permission: "company.view" },
-      { key: "agents", label: "Agents", path: "/agents", icon: "user", permission: "agent.view" },
+      { key: "agents", label: "Agents", path: "/agents", icon: "idCard", permission: "agent.view" },
       { key: "industrial-zones", label: "Industrial Zones", path: "/industrial/zones/list", icon: "pin", permission: "zone.view" },
     ],
   },
@@ -61,7 +61,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "product-stock", label: "Product Stock", path: "/product-stock/list", icon: "stock", permission: "product.view" },
       { key: "stock-adjustment", label: "Stock Adjustment", path: "/stock-adjustment", icon: "sliders", permission: "product.view" },
       { key: "stock-transfer", label: "Stock Transfer", path: "/stock-transfer", icon: "transfer", permission: "product.view" },
-      { key: "price-list", label: "Price List", path: "/price-list", icon: "creditCard", permission: "product.view" },
+      { key: "price-list", label: "Price List", path: "/price-list", icon: "tag", permission: "product.view" },
       { key: "masters-products", label: "Product Master", path: "/product/list", icon: "box", permission: "product.view" },
       { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "productgallery.view" },
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "layers", permission: "category.view" },

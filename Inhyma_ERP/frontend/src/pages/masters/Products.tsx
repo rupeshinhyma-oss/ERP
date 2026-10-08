@@ -41,6 +41,8 @@ import { useLiveModule } from "@/lib/live/useLive";
 import type {
   Brand,
   ImportHeader,
+  MachineWithSparesRead,
+  PackageDimensionReportRow,
   PaginationMeta,
   Product,
   ProductCategory,
@@ -83,7 +85,12 @@ export function computeCbm(lStr?: string | number, wStr?: string | number, hStr?
   const w = typeof wStr === "number" ? wStr : parseFloat(String(wStr || "").trim());
   const h = typeof hStr === "number" ? hStr : parseFloat(String(hStr || "").trim());
   if (!isNaN(l) && !isNaN(w) && !isNaN(h) && l > 0 && w > 0 && h > 0) {
-    return ((l * w * h) / 1000000).toFixed(6);
+    const raw = (l * w * h) / 1000000;
+    const scaled = raw * 100;
+    const intPart = Math.floor(scaled);
+    const rem = scaled - intPart;
+    const cbm = (rem <= 0.500001 ? intPart : intPart + 1) / 100;
+    return cbm.toFixed(2);
   }
   return "";
 }
@@ -693,6 +700,22 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   // Drawer details
   const [drawerProduct, setDrawerProduct] = useState<Product | null>(null);
 
+  // Master Views: "catalog" | "universal-view" | "dimensions-report"
+  const [activeMasterView, setActiveMasterView] = useState<"catalog" | "universal-view" | "dimensions-report">("catalog");
+  const [universalViewData, setUniversalViewData] = useState<MachineWithSparesRead[]>([]);
+  const [universalViewLoading, setUniversalViewLoading] = useState(false);
+  const [universalViewSearch, setUniversalViewSearch] = useState("");
+  const [dimensionsReportData, setDimensionsReportData] = useState<PackageDimensionReportRow[]>([]);
+  const [dimensionsReportLoading, setDimensionsReportLoading] = useState(false);
+  const [dimensionsReportSearch, setDimensionsReportSearch] = useState("");
+
+  // Map Modal State
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false);
+  const [mapMachineId, setMapMachineId] = useState("");
+  const [mapSparePartId, setMapSparePartId] = useState("");
+  const [mapRemarks, setMapRemarks] = useState("");
+  const [mapSubmitting, setMapSubmitting] = useState(false);
+
   // Add / Edit Form State
   const [isFormOpen, setIsFormOpen] = useState(defaultAdd || (typeof window !== "undefined" && window.location.pathname.toLowerCase().includes("add")));
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -701,7 +724,17 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [errorMessageBanner, setErrorMessageBanner] = useState<string | null>(null);
   const [dimensionRows, setDimensionRows] = useState<
-    Array<{ id: string; title: string; length: string; width: string; height: string; cbm: string }>
+    Array<{
+      id: string;
+      package_name?: string;
+      title: string;
+      length: string;
+      width: string;
+      height: string;
+      cbm: string;
+      net_weight?: string;
+      gross_weight?: string;
+    }>
   >([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -710,6 +743,110 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     const matched = allSubCategories.filter((sc) => sc.category_id === formState.category_id);
     return matched.length > 0 ? matched : allSubCategories;
   }, [allSubCategories, formState.category_id]);
+
+  const machineProducts = useMemo(() => {
+    return products.filter((p) => (p.product_type || "Machine") !== "Spare Part");
+  }, [products]);
+
+  const sparePartProducts = useMemo(() => {
+    return products.filter((p) => p.product_type === "Spare Part");
+  }, [products]);
+
+  // Multi-package calculations
+  const isMultiPackage = useMemo(() => {
+    return dimensionRows.length > 1 || dimensionRows.some((r) => !!r.package_name || (parseFloat(String(r.gross_weight || 0)) > 0));
+  }, [dimensionRows]);
+
+  const packageTotals = useMemo(() => {
+    let gross = 0;
+    let net = 0;
+    let cbm = 0;
+    for (const r of dimensionRows) {
+      gross += parseFloat(String(r.gross_weight || 0)) || 0;
+      net += parseFloat(String(r.net_weight || 0)) || 0;
+      cbm += parseFloat(String(r.cbm || 0)) || 0;
+    }
+    return {
+      gross: gross > 0 ? gross.toFixed(3) : "0",
+      net: net > 0 ? net.toFixed(3) : "0",
+      cbm: cbm > 0 ? cbm.toFixed(2) : "0",
+    };
+  }, [dimensionRows]);
+
+  // Load Universal View
+  const loadUniversalView = useCallback(async (searchQuery?: string) => {
+    setUniversalViewLoading(true);
+    try {
+      const q = searchQuery !== undefined ? searchQuery : universalViewSearch;
+      const res = await apiGet<MachineWithSparesRead[]>(
+        `/masters/products/machine-spares/universal-view${q ? `?search=${encodeURIComponent(q)}` : ""}`
+      );
+      if (Array.isArray(res)) {
+        setUniversalViewData(res);
+      } else if ((res as any)?.data && Array.isArray((res as any).data)) {
+        setUniversalViewData((res as any).data);
+      }
+    } catch (err) {
+      console.warn("Error loading universal view:", err);
+    } finally {
+      setUniversalViewLoading(false);
+    }
+  }, [universalViewSearch]);
+
+  // Load Dimensions Report
+  const loadDimensionsReport = useCallback(async (searchQuery?: string) => {
+    setDimensionsReportLoading(true);
+    try {
+      const q = searchQuery !== undefined ? searchQuery : dimensionsReportSearch;
+      const res = await apiGet<PackageDimensionReportRow[]>(
+        `/masters/products/package-dimensions/report${q ? `?search=${encodeURIComponent(q)}` : ""}`
+      );
+      if (Array.isArray(res)) {
+        setDimensionsReportData(res);
+      } else if ((res as any)?.data && Array.isArray((res as any).data)) {
+        setDimensionsReportData((res as any).data);
+      }
+    } catch (err) {
+      console.warn("Error loading dimensions report:", err);
+    } finally {
+      setDimensionsReportLoading(false);
+    }
+  }, [dimensionsReportSearch]);
+
+  const handleSaveMap = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mapMachineId || !mapSparePartId) return;
+    setMapSubmitting(true);
+    try {
+      await apiPost("/masters/products/machine-spares/map", {
+        machine_id: mapMachineId,
+        spare_part_id: mapSparePartId,
+        remarks: mapRemarks || undefined,
+      });
+      setIsMapModalOpen(false);
+      setMapMachineId("");
+      setMapSparePartId("");
+      setMapRemarks("");
+      loadUniversalView();
+    } catch (err: any) {
+      alert(err.message || "Failed to link spare part.");
+    } finally {
+      setMapSubmitting(false);
+    }
+  };
+
+  const handleUnmapSpare = async (machineId: string, sparePartId: string) => {
+    if (!confirm("Are you sure you want to unlink this spare part from the machine?")) return;
+    try {
+      await apiPost("/masters/products/machine-spares/unmap", {
+        machine_id: machineId,
+        spare_part_id: sparePartId,
+      });
+      loadUniversalView();
+    } catch (err: any) {
+      alert(err.message || "Failed to unlink spare part.");
+    }
+  };
 
   // Load products from API
   const loadProducts = useCallback(async () => {
@@ -1052,6 +1189,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     setEditingProduct(null);
     const defaultTax = findTaxByHsnNumber("8422.30.00") || allTaxes[0];
     setFormState({
+      product_type: "Machine",
+      applicable_machine_ids: [],
       product_name_tally: "",
       product_name_invoice: "",
       product_code: "",
@@ -1088,6 +1227,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     const fallbackHsnNumber = PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "8422.30.00";
     const resolvedTax = findTaxById(p.hsn_id) || findTaxByHsnNumber(p.hsn_number) || findTaxByHsnNumber(fallbackHsnNumber);
     setFormState({
+      product_type: p.product_type || "Machine",
+      applicable_machine_ids: p.applicable_machine_ids || [],
       product_name_tally: p.product_name_tally || p.product_name || "",
       product_name_invoice: p.product_name_invoice || "",
       product_code: p.product_code && p.product_code !== "-" ? p.product_code : "",
@@ -1114,11 +1255,14 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       setDimensionRows(
         p.dimensions_rows.map((d, i) => ({
           id: d.id || String(i + 1),
+          package_name: d.package_name || "",
           title: d.title || "",
           length: String(d.length ?? ""),
           width: String(d.width ?? ""),
           height: String(d.height ?? ""),
           cbm: String(d.cbm ?? ""),
+          net_weight: d.net_weight != null ? String(d.net_weight) : "",
+          gross_weight: d.gross_weight != null ? String(d.gross_weight) : "",
         }))
       );
     } else {
@@ -1151,7 +1295,17 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const handleAddDimensionRow = () => {
     setDimensionRows((prev) => [
       ...prev,
-      { id: Date.now().toString(), title: "", length: "", width: "", height: "", cbm: "" },
+      {
+        id: Date.now().toString(),
+        package_name: `Box ${prev.length + 1}`,
+        title: "",
+        length: "",
+        width: "",
+        height: "",
+        cbm: "",
+        net_weight: "",
+        gross_weight: "",
+      },
     ]);
   };
 
@@ -1207,29 +1361,34 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         product_name: formState.product_name_tally.trim(),
         product_name_invoice: formState.product_name_invoice?.trim() || undefined,
         product_code: formState.product_code?.trim() || "-",
+        product_type: formState.product_type || "Machine",
+        applicable_machine_ids: formState.product_type === "Spare Part" ? formState.applicable_machine_ids || [] : undefined,
         brand_id: formState.brand_id || undefined,
         category_id: formState.category_id,
         sub_category_id: formState.sub_category_id || undefined,
         hsn_id: formState.hsn_id || undefined,
         uom_id: formState.uom_id,
         packaging_quantity: parseFloat(formState.packaging_quantity) || 1,
-        packaging_net_weight: formState.packaging_net_weight ? parseFloat(formState.packaging_net_weight) : undefined,
-        packaging_gross_weight: parseFloat(formState.packaging_gross_weight) || 0,
+        packaging_net_weight: isMultiPackage && parseFloat(packageTotals.net) > 0 ? parseFloat(packageTotals.net) : (formState.packaging_net_weight ? parseFloat(formState.packaging_net_weight) : undefined),
+        packaging_gross_weight: isMultiPackage && parseFloat(packageTotals.gross) > 0 ? parseFloat(packageTotals.gross) : (parseFloat(formState.packaging_gross_weight) || 0),
         length_cm: formState.length_cm ? parseFloat(formState.length_cm) : undefined,
         width_cm: formState.width_cm ? parseFloat(formState.width_cm) : undefined,
         height_cm: formState.height_cm ? parseFloat(formState.height_cm) : undefined,
-        packaging_unit_cbm: parseFloat(formState.packaging_unit_cbm) || 0,
+        packaging_unit_cbm: isMultiPackage && parseFloat(packageTotals.cbm) > 0 ? parseFloat(packageTotals.cbm) : (parseFloat(formState.packaging_unit_cbm) || 0),
         standard_price: parseFloat(formState.standard_price) || 0,
         specification: formState.specification || undefined,
         image_url: formState.image_url || undefined,
         images: formState.image_url ? [formState.image_url] : undefined,
         dimensions_rows: dimensionRows.map((r) => ({
           id: r.id,
-          title: r.title,
+          package_name: r.package_name || undefined,
+          title: r.title || undefined,
           length: parseFloat(r.length) || 0,
           width: parseFloat(r.width) || 0,
           height: parseFloat(r.height) || 0,
           cbm: parseFloat(r.cbm) || 0,
+          net_weight: r.net_weight ? parseFloat(r.net_weight) : undefined,
+          gross_weight: r.gross_weight ? parseFloat(r.gross_weight) : undefined,
         })),
         status: formState.status || "active",
       };
@@ -1289,12 +1448,51 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedIds.length} selected product(s)?`)) return;
-    for (const id of selectedIds) {
-      apiDelete(`/masters/products/${id}`).catch(() => { });
+    // Strict zero-stock lock: check if any selected product has current_stock > 0
+    const stockItems = products.filter((p) => selectedIds.includes(p.id) && (p.current_stock ?? 0) > 0);
+    if (stockItems.length > 0) {
+      alert("Stock exists");
+      setErrorMessageBanner("Stock exists");
+      return;
     }
-    setProducts((prev) => prev.filter((p) => !selectedIds.includes(p.id)));
-    setSelectedIds([]);
+
+    if (!confirm(`Are you sure you want to delete ${selectedIds.length} selected product(s)?`)) return;
+    try {
+      await apiPost("/masters/products/bulk-delete", { product_ids: selectedIds });
+      setProducts((prev) => prev.filter((p) => !selectedIds.includes(p.id)));
+      setSelectedIds([]);
+    } catch (err: any) {
+      const msg = err.message || "";
+      if (msg.includes("Stock exists") || (err.details && JSON.stringify(err.details).includes("Stock exists"))) {
+        alert("Stock exists");
+        setErrorMessageBanner("Stock exists");
+      } else {
+        alert(msg || "Failed to delete selected products.");
+        setErrorMessageBanner(msg);
+      }
+    }
+  };
+
+  const handleDeleteProduct = async (p: Product) => {
+    if ((p.current_stock ?? 0) > 0) {
+      alert("Stock exists");
+      setErrorMessageBanner("Stock exists");
+      return;
+    }
+    if (!confirm(`Are you sure you want to delete product "${p.product_name_tally || p.product_name}"?`)) return;
+    try {
+      await apiDelete(`/masters/products/${p.id}`);
+      setProducts((prev) => prev.filter((item) => item.id !== p.id));
+    } catch (err: any) {
+      const msg = err.message || "";
+      if (msg.includes("Stock exists") || (err.details && JSON.stringify(err.details).includes("Stock exists"))) {
+        alert("Stock exists");
+        setErrorMessageBanner("Stock exists");
+      } else {
+        alert(msg || "Failed to delete product.");
+        setErrorMessageBanner(msg);
+      }
+    }
   };
 
   // Full-page Add/Edit Form view
@@ -1334,6 +1532,91 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
           <div className="pm-form-card">
             <form onSubmit={handleSaveProduct}>
+              {/* Row 0: Product Type (Machine vs Spare Part) */}
+              <div className="pm-grid-3" style={{ marginBottom: "16px" }}>
+                <div className="pm-form-group">
+                  <label className="pm-form-label">
+                    Product Type <span className="req">*</span>
+                  </label>
+                  <select
+                    className="pm-form-input"
+                    value={formState.product_type || "Machine"}
+                    onChange={(e) => setFormState({ ...formState, product_type: e.target.value })}
+                    style={{ fontWeight: 600, color: formState.product_type === "Spare Part" ? "#d97706" : "#2563eb" }}
+                  >
+                    <option value="Machine">⚙️ Machine</option>
+                    <option value="Spare Part">🔧 Spare Part</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Applicable Machines Mapping (when Spare Part is selected) */}
+              {formState.product_type === "Spare Part" && (
+                <div
+                  style={{
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    borderRadius: "6px",
+                    padding: "14px 18px",
+                    marginBottom: "18px",
+                  }}
+                >
+                  <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "#92400e", marginBottom: "6px" }}>
+                    Applicable Machines (Map this Spare Part to Machines)
+                  </label>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "8px",
+                      maxHeight: "150px",
+                      overflowY: "auto",
+                      padding: "8px",
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    {machineProducts.length === 0 ? (
+                      <span style={{ fontSize: "12.5px", color: "#64748b" }}>No machines created yet.</span>
+                    ) : (
+                      machineProducts.map((m) => {
+                        const isChecked = (formState.applicable_machine_ids || []).includes(m.id);
+                        return (
+                          <label
+                            key={m.id}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              fontSize: "12.5px",
+                              background: isChecked ? "#fef3c7" : "#f8fafc",
+                              padding: "4px 8px",
+                              borderRadius: "4px",
+                              border: "1px solid #e2e8f0",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const current = formState.applicable_machine_ids || [];
+                                const updated = e.target.checked
+                                  ? [...current, m.id]
+                                  : current.filter((id: string) => id !== m.id);
+                                setFormState({ ...formState, applicable_machine_ids: updated });
+                              }}
+                            />
+                            <span>{m.product_name_tally || m.product_name}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Row 1: Product Name (As Per Tally) *, Product Name (As Per Invoice), Product Code */}
               <div className="pm-grid-3">
                 <div className="pm-form-group">
@@ -1510,36 +1793,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
                 <div className="pm-form-group">
                   <label className="pm-form-label">
-                    Packaging Net Weight
-                  </label>
-                  <input
-                    type="number"
-                    step="any"
-                    className="pm-form-input"
-                    value={formState.packaging_net_weight ?? ""}
-                    onChange={(e) => setFormState({ ...formState, packaging_net_weight: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              {/* Row 5: Packaging Gross Weight *, Minimum Price Without GST */}
-              <div className="pm-grid-3">
-                <div className="pm-form-group">
-                  <label className="pm-form-label">
-                    Packaging Gross Weight <span className="req">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    step="any"
-                    className="pm-form-input"
-                    required
-                    value={formState.packaging_gross_weight ?? "0"}
-                    onChange={(e) => setFormState({ ...formState, packaging_gross_weight: e.target.value })}
-                  />
-                </div>
-
-                <div className="pm-form-group">
-                  <label className="pm-form-label">
                     Minimum Price <em>Without GST</em>
                   </label>
                   <input
@@ -1550,9 +1803,60 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                     onChange={(e) => setFormState({ ...formState, standard_price: e.target.value })}
                   />
                 </div>
-
-                <div className="pm-form-group" />
               </div>
+
+              {/* Packaging Net & Gross Weight (Hidden when multi-package is configured) */}
+              {isMultiPackage ? (
+                <div
+                  style={{
+                    background: "#f0fdf4",
+                    border: "1px solid #86efac",
+                    borderRadius: "6px",
+                    padding: "14px 18px",
+                    marginBottom: "16px",
+                    fontSize: "13.5px",
+                    color: "#166534",
+                  }}
+                >
+                  <strong>📦 Multi-Package Configuration Active:</strong> Main net weight and gross weight are derived from individual package breakdown below.
+                  <div style={{ marginTop: "6px", display: "flex", gap: "24px", fontWeight: 600 }}>
+                    <span>Total Net Weight: {packageTotals.net} kg</span>
+                    <span>Total Gross Weight: {packageTotals.gross} kg</span>
+                    <span>Total Unit CBM: {packageTotals.cbm}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="pm-grid-3">
+                  <div className="pm-form-group">
+                    <label className="pm-form-label">
+                      Packaging Net Weight
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      className="pm-form-input"
+                      value={formState.packaging_net_weight ?? ""}
+                      onChange={(e) => setFormState({ ...formState, packaging_net_weight: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="pm-form-group">
+                    <label className="pm-form-label">
+                      Packaging Gross Weight <span className="req">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      className="pm-form-input"
+                      required
+                      value={formState.packaging_gross_weight ?? "0"}
+                      onChange={(e) => setFormState({ ...formState, packaging_gross_weight: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="pm-form-group" />
+                </div>
+              )}
 
               {/* Dimensions For CBM */}
               <h3 className="pm-section-heading">Dimensions For CBM</h3>
@@ -1771,19 +2075,31 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   <table className="pm-dim-table">
                     <thead>
                       <tr>
-                        <th style={{ width: "60px", textAlign: "center" }}>#</th>
+                        <th style={{ width: "40px", textAlign: "center" }}>#</th>
+                        <th style={{ width: "140px" }}>Package Name (Box)</th>
                         <th>Dimension / Description</th>
-                        <th style={{ width: "120px" }}>Length (CM)</th>
-                        <th style={{ width: "120px" }}>Width (CM)</th>
-                        <th style={{ width: "120px" }}>Height (CM)</th>
-                        <th style={{ width: "130px" }}>CBM</th>
-                        <th style={{ width: "70px", textAlign: "center" }}>Action</th>
+                        <th style={{ width: "100px" }}>Length (CM)</th>
+                        <th style={{ width: "100px" }}>Width (CM)</th>
+                        <th style={{ width: "100px" }}>Height (CM)</th>
+                        <th style={{ width: "100px" }}>CBM</th>
+                        <th style={{ width: "100px" }}>Net Wt (kg)</th>
+                        <th style={{ width: "105px" }}>Gross Wt (kg)</th>
+                        <th style={{ width: "60px", textAlign: "center" }}>Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {dimensionRows.map((row, idx) => (
                         <tr key={row.id}>
                           <td style={{ textAlign: "center", color: "#64748b", fontWeight: 500 }}>{idx + 1}</td>
+                          <td>
+                            <input
+                              type="text"
+                              className="pm-dim-input"
+                              placeholder="e.g. Box 1, Frame..."
+                              value={row.package_name || ""}
+                              onChange={(e) => handleUpdateDimensionRow(row.id, "package_name", e.target.value)}
+                            />
+                          </td>
                           <td>
                             <input
                               type="text"
@@ -1831,6 +2147,26 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                               placeholder="0.000000"
                               value={row.cbm}
                               onChange={(e) => handleUpdateDimensionRow(row.id, "cbm", e.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="any"
+                              className="pm-dim-input"
+                              placeholder="Net kg"
+                              value={row.net_weight || ""}
+                              onChange={(e) => handleUpdateDimensionRow(row.id, "net_weight", e.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="any"
+                              className="pm-dim-input"
+                              placeholder="Gross kg"
+                              value={row.gross_weight || ""}
+                              onChange={(e) => handleUpdateDimensionRow(row.id, "gross_weight", e.target.value)}
                             />
                           </td>
                           <td style={{ textAlign: "center" }}>
@@ -1881,8 +2217,85 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         {/* Breadcrumb Trail */}
         <Breadcrumb trail={["Inventory", "Product Master"]} />
 
-        {/* 1. Header with Title and Action Buttons */}
-        <div className="page-header">
+        {/* Master View Navigation Tabs */}
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            margin: "12px 0 16px 0",
+            borderBottom: "1px solid #e2e8f0",
+            paddingBottom: "8px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveMasterView("catalog")}
+            style={{
+              padding: "7px 16px",
+              fontSize: "13.5px",
+              fontWeight: activeMasterView === "catalog" ? 700 : 500,
+              color: activeMasterView === "catalog" ? "#0061f2" : "#475569",
+              background: activeMasterView === "catalog" ? "#eff6ff" : "#ffffff",
+              border: activeMasterView === "catalog" ? "1px solid #bfdbfe" : "1px solid #cbd5e1",
+              borderRadius: "6px",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <span>📦</span> Product Master
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveMasterView("universal-view");
+              loadUniversalView();
+            }}
+            style={{
+              padding: "7px 16px",
+              fontSize: "13.5px",
+              fontWeight: activeMasterView === "universal-view" ? 700 : 500,
+              color: activeMasterView === "universal-view" ? "#0061f2" : "#475569",
+              background: activeMasterView === "universal-view" ? "#eff6ff" : "#ffffff",
+              border: activeMasterView === "universal-view" ? "1px solid #bfdbfe" : "1px solid #cbd5e1",
+              borderRadius: "6px",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <span>⚙️</span> Machine-Spares Universal View
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveMasterView("dimensions-report");
+              loadDimensionsReport();
+            }}
+            style={{
+              padding: "7px 16px",
+              fontSize: "13.5px",
+              fontWeight: activeMasterView === "dimensions-report" ? 700 : 500,
+              color: activeMasterView === "dimensions-report" ? "#0061f2" : "#475569",
+              background: activeMasterView === "dimensions-report" ? "#eff6ff" : "#ffffff",
+              border: activeMasterView === "dimensions-report" ? "1px solid #bfdbfe" : "1px solid #cbd5e1",
+              borderRadius: "6px",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <span>📐</span> Package Dimensions Report
+          </button>
+        </div>
+
+        {activeMasterView === "catalog" && (
+          <>
+            {/* 1. Header with Title and Action Buttons */}
+            <div className="page-header">
           <div>
             <h1>Product Master</h1>
             <div className="page-subtitle">
@@ -2632,39 +3045,73 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                               );
                             case 12:
                               return (
-                                <td key="cell-12" className="actions" style={{ width: "70px", minWidth: "70px", textAlign: "center", ...getFreezeStyle(12, false) }}>
-                                  <button
-                                    type="button"
-                                    className="btn"
-                                    style={{
-                                      background: "#0061f2",
-                                      color: "#ffffff",
-                                      padding: "6px 9px",
-                                      borderRadius: "4px",
-                                      border: "none",
-                                      cursor: "pointer",
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                    }}
-                                    onClick={() => handleOpenEdit(p)}
-                                    title="Edit Product"
-                                    aria-label={`Edit ${name}`}
-                                  >
-                                    <svg
-                                      width="14"
-                                      height="14"
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
+                                <td key="cell-12" className="actions" style={{ width: "95px", minWidth: "95px", textAlign: "center", ...getFreezeStyle(12, false) }}>
+                                  <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      style={{
+                                        background: "#0061f2",
+                                        color: "#ffffff",
+                                        padding: "6px 8px",
+                                        borderRadius: "4px",
+                                        border: "none",
+                                        cursor: "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                      }}
+                                      onClick={() => handleOpenEdit(p)}
+                                      title="Edit Product"
+                                      aria-label={`Edit ${name}`}
                                     >
-                                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                    </svg>
-                                  </button>
+                                      <svg
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      >
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      style={{
+                                        background: "#ef4444",
+                                        color: "#ffffff",
+                                        padding: "6px 8px",
+                                        borderRadius: "4px",
+                                        border: "none",
+                                        cursor: "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                      }}
+                                      onClick={() => handleDeleteProduct(p)}
+                                      title={(p.current_stock ?? 0) > 0 ? "Stock exists - cannot delete" : "Delete Product"}
+                                      aria-label={`Delete ${name}`}
+                                    >
+                                      <svg
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      >
+                                        <polyline points="3 6 5 6 21 6" />
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                      </svg>
+                                    </button>
+                                  </div>
                                 </td>
                               );
                             default:
@@ -2692,6 +3139,594 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
             />
           </div>
         </div>
+      </>
+    )}
+
+    {/* Universal View (Machine-Spares Mapping) */}
+    {activeMasterView === "universal-view" && (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div className="page-header" style={{ marginBottom: "8px" }}>
+          <div>
+            <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
+              Machine-Spares Universal View
+            </h1>
+            <div className="page-subtitle" style={{ color: "#64748b", fontSize: "13.5px", marginTop: "4px" }}>
+              Universal machine-wise spare parts breakdown showing all linked spare parts, codes, stock levels, and actions.
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn btn-add-new"
+              onClick={() => {
+                setMapMachineId(machineProducts[0]?.id || "");
+                setMapSparePartId(sparePartProducts[0]?.id || "");
+                setMapRemarks("");
+                setIsMapModalOpen(true);
+              }}
+              style={{
+                background: "#0061f2",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "6px",
+                padding: "8px 16px",
+                fontSize: "13.5px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              + Link Spare Part to Machine
+            </button>
+          </div>
+        </div>
+
+        {/* Search Filter Bar */}
+        <div
+          style={{
+            background: "#ffffff",
+            padding: "14px 18px",
+            borderRadius: "8px",
+            border: "1px solid #e2e8f0",
+            display: "flex",
+            gap: "12px",
+            alignItems: "center",
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Search machines or spare parts..."
+            value={universalViewSearch}
+            onChange={(e) => setUniversalViewSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") loadUniversalView(universalViewSearch);
+            }}
+            style={{
+              flex: 1,
+              height: "38px",
+              borderRadius: "5px",
+              border: "1px solid #cbd5e1",
+              padding: "0 12px",
+              fontSize: "13.5px",
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => loadUniversalView(universalViewSearch)}
+            style={{
+              background: "#0061f2",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "5px",
+              padding: "0 20px",
+              height: "38px",
+              fontWeight: 600,
+              fontSize: "13.5px",
+              cursor: "pointer",
+            }}
+          >
+            Search
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setUniversalViewSearch("");
+              loadUniversalView("");
+            }}
+            style={{
+              background: "#64748b",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "5px",
+              padding: "0 16px",
+              height: "38px",
+              fontWeight: 600,
+              fontSize: "13.5px",
+              cursor: "pointer",
+            }}
+          >
+            Reset
+          </button>
+        </div>
+
+        {/* Universal View Cards */}
+        {universalViewLoading ? (
+          <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px", background: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+            Loading machine-spares universal view...
+          </div>
+        ) : universalViewData.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px", background: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+            No machines or spare part mappings found.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {universalViewData.map((m) => (
+              <div
+                key={m.machine_id}
+                style={{
+                  background: "#ffffff",
+                  borderRadius: "8px",
+                  border: "1px solid #cbd5e1",
+                  overflow: "hidden",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "12px 18px",
+                    background: "#f8fafc",
+                    borderBottom: "1px solid #e2e8f0",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{ fontSize: "16px" }}>⚙️</span>
+                    <div>
+                      <strong style={{ fontSize: "14.5px", color: "#0f172a" }}>{m.machine_name}</strong>
+                      <span style={{ marginLeft: "8px", fontSize: "12.5px", color: "#64748b" }}>
+                        Code: <strong>{m.machine_code || "—"}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span
+                      style={{
+                        background: "#e0f2fe",
+                        color: "#0369a1",
+                        padding: "3px 8px",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Machine Stock: {m.current_stock ?? 0}
+                    </span>
+                    <span
+                      style={{
+                        background: m.spares.length > 0 ? "#dcfce7" : "#f1f5f9",
+                        color: m.spares.length > 0 ? "#15803d" : "#64748b",
+                        padding: "3px 8px",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {m.spares.length} Spare Part{m.spares.length === 1 ? "" : "s"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMapMachineId(m.machine_id);
+                        setMapSparePartId(sparePartProducts[0]?.id || "");
+                        setMapRemarks("");
+                        setIsMapModalOpen(true);
+                      }}
+                      style={{
+                        background: "#0061f2",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "4px",
+                        padding: "4px 10px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      + Link Spare
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ padding: "0" }}>
+                  {m.spares.length === 0 ? (
+                    <div style={{ padding: "16px 20px", color: "#94a3b8", fontSize: "13px", fontStyle: "italic" }}>
+                      No spare parts mapped to this machine yet. Click "+ Link Spare" to link a spare part.
+                    </div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                      <thead>
+                        <tr style={{ background: "#f1f5f9", textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+                          <th style={{ padding: "8px 16px", width: "40px", color: "#475569" }}>#</th>
+                          <th style={{ padding: "8px 16px", color: "#475569" }}>Spare Part Name</th>
+                          <th style={{ padding: "8px 16px", width: "140px", color: "#475569" }}>Spare Code</th>
+                          <th style={{ padding: "8px 16px", width: "90px", color: "#475569" }}>UOM</th>
+                          <th style={{ padding: "8px 16px", width: "110px", color: "#475569" }}>Stock</th>
+                          <th style={{ padding: "8px 16px", color: "#475569" }}>Remarks</th>
+                          <th style={{ padding: "8px 16px", width: "80px", textAlign: "center", color: "#475569" }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {m.spares.map((s, sIdx) => (
+                          <tr key={s.spare_part_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ padding: "8px 16px", color: "#64748b" }}>{sIdx + 1}</td>
+                            <td style={{ padding: "8px 16px", fontWeight: 600, color: "#1e293b" }}>{s.spare_part_name}</td>
+                            <td style={{ padding: "8px 16px", color: "#475569" }}>{s.spare_part_code || "—"}</td>
+                            <td style={{ padding: "8px 16px", color: "#475569" }}>{s.uom || "NOS"}</td>
+                            <td style={{ padding: "8px 16px", color: (s.current_stock ?? 0) > 0 ? "#16a34a" : "#dc2626", fontWeight: 600 }}>
+                              {s.current_stock ?? 0}
+                            </td>
+                            <td style={{ padding: "8px 16px", color: "#64748b" }}>{s.remarks || "—"}</td>
+                            <td style={{ padding: "8px 16px", textAlign: "center" }}>
+                              <button
+                                type="button"
+                                onClick={() => handleUnmapSpare(m.machine_id, s.spare_part_id)}
+                                title="Unlink Spare Part"
+                                style={{
+                                  background: "#fee2e2",
+                                  color: "#b91c1c",
+                                  border: "1px solid #fca5a5",
+                                  borderRadius: "4px",
+                                  padding: "3px 8px",
+                                  fontSize: "11.5px",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Unlink
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+
+    {/* Package Dimensions Report */}
+    {activeMasterView === "dimensions-report" && (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div className="page-header" style={{ marginBottom: "8px" }}>
+          <div>
+            <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
+              Multi-Package Dimensions Report
+            </h1>
+            <div className="page-subtitle" style={{ color: "#64748b", fontSize: "13.5px", marginTop: "4px" }}>
+              Separate report for dimensions and weights of each package across multi-box products.
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => downloadExport("/masters/products/package-dimensions", "csv", "package_dimensions")}
+              style={{
+                background: "#059669",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "6px",
+                padding: "8px 14px",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              📥 Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadExport("/masters/products/package-dimensions", "xlsx", "package_dimensions")}
+              style={{
+                background: "#0284c7",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "6px",
+                padding: "8px 14px",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              📥 Export Excel
+            </button>
+          </div>
+        </div>
+
+        {/* Search Filter Bar */}
+        <div
+          style={{
+            background: "#ffffff",
+            padding: "14px 18px",
+            borderRadius: "8px",
+            border: "1px solid #e2e8f0",
+            display: "flex",
+            gap: "12px",
+            alignItems: "center",
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Search by product name, code, box title..."
+            value={dimensionsReportSearch}
+            onChange={(e) => setDimensionsReportSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") loadDimensionsReport(dimensionsReportSearch);
+            }}
+            style={{
+              flex: 1,
+              height: "38px",
+              borderRadius: "5px",
+              border: "1px solid #cbd5e1",
+              padding: "0 12px",
+              fontSize: "13.5px",
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => loadDimensionsReport(dimensionsReportSearch)}
+            style={{
+              background: "#0061f2",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "5px",
+              padding: "0 20px",
+              height: "38px",
+              fontWeight: 600,
+              fontSize: "13.5px",
+              cursor: "pointer",
+            }}
+          >
+            Search
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDimensionsReportSearch("");
+              loadDimensionsReport("");
+            }}
+            style={{
+              background: "#64748b",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "5px",
+              padding: "0 16px",
+              height: "38px",
+              fontWeight: 600,
+              fontSize: "13.5px",
+              cursor: "pointer",
+            }}
+          >
+            Reset
+          </button>
+        </div>
+
+        {/* Table Container */}
+        <div
+          style={{
+            background: "#ffffff",
+            borderRadius: "8px",
+            border: "1px solid #e2e8f0",
+            overflow: "hidden",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          }}
+        >
+          {dimensionsReportLoading ? (
+            <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px" }}>
+              Loading package dimensions report...
+            </div>
+          ) : dimensionsReportData.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px" }}>
+              No package dimensions configured.
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+                  <th style={{ padding: "10px 14px", width: "40px", color: "#475569" }}>#</th>
+                  <th style={{ padding: "10px 14px", color: "#475569" }}>Product Name</th>
+                  <th style={{ padding: "10px 14px", width: "120px", color: "#475569" }}>Product Code</th>
+                  <th style={{ padding: "10px 14px", width: "110px", color: "#475569" }}>Product Type</th>
+                  <th style={{ padding: "10px 14px", width: "130px", color: "#475569" }}>Package (Box)</th>
+                  <th style={{ padding: "10px 14px", color: "#475569" }}>Dimension / Description</th>
+                  <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>L (cm)</th>
+                  <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>W (cm)</th>
+                  <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>H (cm)</th>
+                  <th style={{ padding: "10px 14px", width: "90px", color: "#475569" }}>Unit CBM</th>
+                  <th style={{ padding: "10px 14px", width: "100px", color: "#475569" }}>Net Wt (kg)</th>
+                  <th style={{ padding: "10px 14px", width: "105px", color: "#475569" }}>Gross Wt (kg)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dimensionsReportData.map((row, rIdx) => (
+                  <tr key={row.dimension_id || rIdx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "10px 14px", color: "#64748b" }}>{rIdx + 1}</td>
+                    <td style={{ padding: "10px 14px", fontWeight: 600, color: "#1e293b" }}>{row.product_name}</td>
+                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.product_code || "—"}</td>
+                    <td style={{ padding: "10px 14px" }}>
+                      <span
+                        style={{
+                          background: row.product_type === "Spare Part" ? "#fef3c7" : "#e0e7ff",
+                          color: row.product_type === "Spare Part" ? "#92400e" : "#3730a3",
+                          padding: "2px 7px",
+                          borderRadius: "4px",
+                          fontSize: "11.5px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {row.product_type}
+                      </span>
+                    </td>
+                    <td style={{ padding: "10px 14px", fontWeight: 600, color: "#0061f2" }}>{row.package_name || "—"}</td>
+                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.title || "—"}</td>
+                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.length ?? "—"}</td>
+                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.width ?? "—"}</td>
+                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.height ?? "—"}</td>
+                    <td style={{ padding: "10px 14px", fontWeight: 600, color: "#0f172a" }}>{row.cbm != null ? row.cbm : "—"}</td>
+                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.net_weight != null ? row.net_weight : "—"}</td>
+                    <td style={{ padding: "10px 14px", fontWeight: 600, color: "#166534" }}>{row.gross_weight != null ? row.gross_weight : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    )}
+
+    {/* Map Spare Part Modal */}
+    {isMapModalOpen && (
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(15, 23, 42, 0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 9999,
+          padding: "16px",
+        }}
+      >
+        <div
+          style={{
+            background: "#ffffff",
+            borderRadius: "8px",
+            width: "100%",
+            maxWidth: "520px",
+            padding: "24px",
+            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+          }}
+        >
+          <h3 style={{ margin: "0 0 16px 0", fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
+            Link Spare Part to Machine
+          </h3>
+          <form onSubmit={handleSaveMap}>
+            <div style={{ marginBottom: "14px" }}>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                Select Machine <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <select
+                required
+                value={mapMachineId}
+                onChange={(e) => setMapMachineId(e.target.value)}
+                style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+              >
+                <option value="">-- Choose Machine --</option>
+                {machineProducts.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.product_name_tally || m.product_name} {m.product_code && m.product_code !== "-" ? `(${m.product_code})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: "14px" }}>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                Select Spare Part <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <select
+                required
+                value={mapSparePartId}
+                onChange={(e) => setMapSparePartId(e.target.value)}
+                style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+              >
+                <option value="">-- Choose Spare Part --</option>
+                {(sparePartProducts.length > 0 ? sparePartProducts : products).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.product_name_tally || s.product_name} {s.product_code && s.product_code !== "-" ? `(${s.product_code})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                Remarks / Compatibility Notes
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Standard 220V motor replacement"
+                value={mapRemarks}
+                onChange={(e) => setMapRemarks(e.target.value)}
+                style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMapModalOpen(false);
+                  setMapMachineId("");
+                  setMapSparePartId("");
+                  setMapRemarks("");
+                }}
+                style={{
+                  padding: "8px 16px",
+                  background: "#f1f5f9",
+                  color: "#475569",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={mapSubmitting || !mapMachineId || !mapSparePartId}
+                style={{
+                  padding: "8px 18px",
+                  background: "#0061f2",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                }}
+              >
+                {mapSubmitting ? "Linking..." : "Save Link"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
 
         {/* 6. SideDrawer for Viewing Product Details */}
         <SideDrawer
@@ -2722,6 +3757,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   <div><strong>Product Name (Tally):</strong> {drawerProduct.product_name_tally || "—"}</div>
                   <div><strong>Product Name (Invoice):</strong> {drawerProduct.product_name_invoice || "—"}</div>
                   <div><strong>Product Code:</strong> {drawerProduct.product_code || "—"}</div>
+                  <div><strong>Product Type:</strong> <span style={{ fontWeight: 600, color: drawerProduct.product_type === "Spare Part" ? "#d97706" : "#2563eb" }}>{drawerProduct.product_type || "Machine"}</span></div>
                   <div><strong>Brand:</strong> {brands.items.find((b) => b.id === drawerProduct.brand_id)?.name || "Yinglima"}</div>
                   <div><strong>Category:</strong> {categories.items.find((c) => c.id === drawerProduct.category_id)?.name || "Machines"}</div>
                   <div><strong>Sub Category:</strong> {subCategories.items.find((sc) => sc.id === drawerProduct.sub_category_id)?.name || "Miscellaneous"}</div>
@@ -2759,28 +3795,34 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
               {drawerProduct.dimensions_rows && drawerProduct.dimensions_rows.length > 0 && (
                 <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
                   <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
-                    Dynamic Dimensions
+                    Package Dimensions &amp; Weights
                   </h4>
                   <table style={{ width: "100%", fontSize: "12.5px", borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
                         <th style={{ padding: "6px 8px" }}>#</th>
+                        <th style={{ padding: "6px 8px" }}>Package (Box)</th>
                         <th style={{ padding: "6px 8px" }}>Description</th>
                         <th style={{ padding: "6px 8px" }}>L (cm)</th>
                         <th style={{ padding: "6px 8px" }}>W (cm)</th>
                         <th style={{ padding: "6px 8px" }}>H (cm)</th>
                         <th style={{ padding: "6px 8px" }}>CBM</th>
+                        <th style={{ padding: "6px 8px" }}>Net Wt (kg)</th>
+                        <th style={{ padding: "6px 8px" }}>Gross Wt (kg)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {drawerProduct.dimensions_rows.map((row, idx) => (
                         <tr key={row.id || idx} style={{ borderBottom: "1px solid #e2e8f0" }}>
                           <td style={{ padding: "6px 8px", color: "#64748b" }}>{idx + 1}</td>
+                          <td style={{ padding: "6px 8px", fontWeight: 600, color: "#0061f2" }}>{row.package_name || "—"}</td>
                           <td style={{ padding: "6px 8px" }}>{row.title || "—"}</td>
                           <td style={{ padding: "6px 8px" }}>{row.length ?? "—"}</td>
                           <td style={{ padding: "6px 8px" }}>{row.width ?? "—"}</td>
                           <td style={{ padding: "6px 8px" }}>{row.height ?? "—"}</td>
-                          <td style={{ padding: "6px 8px" }}>{row.cbm ?? "—"}</td>
+                          <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.cbm ?? "—"}</td>
+                          <td style={{ padding: "6px 8px" }}>{row.net_weight != null ? row.net_weight : "—"}</td>
+                          <td style={{ padding: "6px 8px", fontWeight: 600, color: "#166534" }}>{row.gross_weight != null ? row.gross_weight : "—"}</td>
                         </tr>
                       ))}
                     </tbody>
