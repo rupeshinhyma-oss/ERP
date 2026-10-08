@@ -75,6 +75,7 @@ import { BuyerTypesPage } from "@/pages/masters/BuyerTypes";
 import { CategoriesPage } from "@/pages/masters/Categories";
 import { SubCategoriesPage } from "@/pages/masters/SubCategories";
 import { ProductsPage } from "@/pages/masters/Products";
+import { PriceListPage } from "@/pages/PriceListPage";
 import { TaxesPage } from "@/pages/masters/Taxes";
 import { AdditionalChargesPage } from "@/pages/masters/AdditionalCharges";
 import { SocialMediaPage } from "@/pages/masters/SocialMedia";
@@ -360,6 +361,11 @@ export function App() {
           <Route path="/masters/categories" element={<CategoriesPage />} />
           <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
           <Route path="/masters/products" element={<ProductsPage />} />
+          <Route path="/masters/price-list" element={<PriceListPage />} />
+          <Route path="/price-list" element={<PriceListPage />} />
+          <Route path="/product-prices" element={<PriceListPage />} />
+          <Route path="/inventory/price-list" element={<PriceListPage />} />
+          <Route path="/inventory/product-prices" element={<PriceListPage />} />
           <Route path="/product/list" element={<ProductsPage />} />
           <Route path="/product" element={<Navigate to="/product/list" replace />} />
           <Route path="/product/addEdit" element={<ProductsPage defaultAdd={true} />} />

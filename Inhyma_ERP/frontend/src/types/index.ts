@@ -928,3 +928,77 @@ export interface Lead {
   created_at?: string | null;
   updated_at?: string | null;
 }
+
+/* ------------------------------------------------------------------ */
+/* Price List Management                                              */
+/* ------------------------------------------------------------------ */
+
+export interface SupplierQuoteItem {
+  link_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_code?: string | null;
+  calling_number?: string | null;
+  unit_price?: number | null;
+  currency: string;
+  moq?: number | null;
+  notes?: string | null;
+  updated_at?: string | null;
+}
+
+export interface PriceListItem {
+  product_id: string;
+  product_code?: string | null;
+  product_name: string;
+  product_name_tally: string;
+  product_name_invoice?: string | null;
+  barcode?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  sub_category_id?: string | null;
+  sub_category_name?: string | null;
+  brand_id?: string | null;
+  brand_name?: string | null;
+  uom_id?: string | null;
+  uom_code?: string | null;
+  hsn_id?: string | null;
+  hsn_number?: string | null;
+  gst_percent: number;
+  import_duty_percent: number;
+  current_stock: number;
+  images?: string[] | null;
+  image_url?: string | null;
+  status: string;
+  standard_price?: number | null;
+  minimum_price?: number | null;
+  standard_cost?: number | null;
+  standard_price_gst_amount?: number | null;
+  minimum_price_gst_amount?: number | null;
+  standard_cost_gst_amount?: number | null;
+  standard_price_inc_gst?: number | null;
+  minimum_price_inc_gst?: number | null;
+  standard_cost_inc_gst?: number | null;
+  margin_amount?: number | null;
+  margin_percent?: number | null;
+  has_price: boolean;
+  has_min_price: boolean;
+  supplier_count: number;
+  suppliers: SupplierQuoteItem[];
+}
+
+export interface PriceListMetrics {
+  total_products: number;
+  priced_products: number;
+  unpriced_products: number;
+  avg_standard_price_ex_gst: number;
+  avg_standard_price_inc_gst: number;
+  avg_min_price_ex_gst: number;
+  avg_min_price_inc_gst: number;
+}
+
+export interface PriceListUpdatePayload {
+  standard_price?: number | null;
+  minimum_price?: number | null;
+  standard_cost?: number | null;
+  is_inclusive?: boolean;
+}

@@ -97,6 +97,7 @@ class ProductCreate(BaseModel):
     reorder_level: float | None = Field(default=None, ge=0)
     standard_cost: float | None = Field(default=None, ge=0)
     standard_price: float | None = Field(default=None, ge=0)
+    minimum_price: float | None = Field(default=None, ge=0)
     is_purchasable: bool = True
     is_sellable: bool = True
     is_active_for_inventory: bool = True
@@ -168,6 +169,7 @@ class ProductUpdate(BaseModel):
     reorder_level: float | None = Field(default=None, ge=0)
     standard_cost: float | None = Field(default=None, ge=0)
     standard_price: float | None = Field(default=None, ge=0)
+    minimum_price: float | None = Field(default=None, ge=0)
     is_purchasable: bool | None = None
     is_sellable: bool | None = None
     is_active_for_inventory: bool | None = None
@@ -252,6 +254,7 @@ class ProductRead(BaseModel):
     reorder_level: float | None
     standard_cost: float | None
     standard_price: float | None
+    minimum_price: float | None = None
     is_purchasable: bool
     is_sellable: bool
     is_active_for_inventory: bool

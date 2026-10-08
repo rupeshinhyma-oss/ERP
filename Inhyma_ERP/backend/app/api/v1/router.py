@@ -31,6 +31,7 @@ from app.masters.districts.routes import router as districts_router
 from app.masters.product_categories.routes import router as product_categories_router
 from app.masters.product_sub_categories.routes import router as product_sub_categories_router
 from app.masters.products.routes import router as products_router
+from app.masters.price_list.routes import router as price_list_router
 from app.masters.states.routes import router as states_router
 from app.masters.buyer_types.routes import router as buyer_types_router
 from app.masters.supplier_types.routes import router as supplier_types_router
@@ -136,6 +137,9 @@ api_router.include_router(brands_router)
 api_router.include_router(product_categories_router)
 api_router.include_router(product_sub_categories_router)
 api_router.include_router(products_router)
+api_router.include_router(price_list_router)
+api_router.include_router(price_list_router, prefix="/inventory/price-list")
+api_router.include_router(price_list_router, prefix="/inventory/product-prices")
 api_router.include_router(company_list_router)
 api_router.include_router(supplier_types_router)
 api_router.include_router(buyer_types_router)

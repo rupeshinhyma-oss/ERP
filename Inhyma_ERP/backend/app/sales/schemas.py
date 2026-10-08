@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field
+from datetime import date as _date
+
+from pydantic import BaseModel, Field, model_validator
 
 
 # ==============================================================================
@@ -163,6 +165,26 @@ from datetime import date, datetime
 from pydantic import ConfigDict
 
 
+def _to_date(value: Any) -> _date | None:
+    """Dates arrive as JSON text (DD-MM-YYYY from the forms, or ISO): turn them into real dates, or fail clearly."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, _date):
+        return value
+    text = str(value).strip()
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text[:10], fmt).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text).date()
+    except ValueError as exc:
+        raise ValueError(f"'{value}' is not a valid date (use DD-MM-YYYY).") from exc
+
+
 class SaleOrderItemCreate(BaseModel):
     product_id: uuid.UUID | None = None
     product_name: str = Field(..., min_length=1, max_length=255)
@@ -175,6 +197,24 @@ class SaleOrderItemCreate(BaseModel):
     item_total: float = Field(default=0.0, ge=0)
     planning_row_id: uuid.UUID | None = None
     remarks: str | None = None
+    # what the Sales Process form sends (the server recomputes every amount; these are inputs only)
+    hsn: str | None = None
+    uom: str | None = None
+    unit_price: float | None = Field(default=None, ge=0)
+    unit_discount: float = Field(default=0.0, ge=0)
+    gst_percent: float | None = Field(default=None, ge=0)
+    is_additional_charge: bool = False
+    charge_type: str | None = None
+
+    def as_priced_input(self) -> "ProformaLineItemSchema":
+        """The shared pricing function (spec formula) works on Proforma lines; a sale-order line maps onto one 1:1."""
+        price = self.unit_price if self.unit_price is not None else self.unit_rate
+        return ProformaLineItemSchema(
+            product_name=self.product_name, product_code=self.product_code, hsn_code=self.hsn_code or self.hsn,
+            quantity=self.quantity, uom=self.uom, rate=price, unit_price=price, unit_discount=self.unit_discount,
+            gst_percent=self.gst_percent if self.gst_percent is not None else self.tax_percent,
+            is_additional_charge=self.is_additional_charge, charge_type=self.charge_type,
+        )
 
 
 class SaleOrderItemResponse(BaseModel):
@@ -196,10 +236,36 @@ class SaleOrderItemResponse(BaseModel):
     item_total: float
     planning_row_id: uuid.UUID | None = None
     remarks: str | None = None
+    is_additional_charge: bool = False
+    charge_type: str | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _normalise_order_input(data: Any, *, creating: bool) -> Any:
+    """Accept the names the Sales Process form uses and turn text dates into dates."""
+    if not isinstance(data, dict):
+        return data
+    d = dict(data)
+    company = (d.get("company_name") or "").strip()
+    if not (d.get("buyer_name") or "").strip():
+        if company:
+            d["buyer_name"] = company
+        elif creating:
+            raise ValueError("Company (buyer) is required.")
+    if not d.get("transporter_name") and d.get("transport_name"):
+        d["transporter_name"] = d["transport_name"]
+    if not d.get("delivery_date") and d.get("expected_delivery_date"):
+        d["delivery_date"] = d["expected_delivery_date"]
+    if creating:
+        d["order_date"] = _to_date(d.get("order_date")) or _date.today()
+    elif d.get("order_date") not in (None, ""):
+        d["order_date"] = _to_date(d["order_date"])
+    if "delivery_date" in d:
+        d["delivery_date"] = _to_date(d.get("delivery_date"))
+    return d
 
 
 class SaleOrderCreate(BaseModel):
@@ -225,6 +291,9 @@ class SaleOrderCreate(BaseModel):
     delivery_charge: str | None = None
     third_party_delivery: str | None = None
     third_party_invoice: str | None = None
+    terms_and_conditions: str | None = None
+    booking_remarks: str | None = None
+    # totals are computed by the server from the lines; any client value is ignored
     amount_inc_gst: float | None = None
     discount: float | None = None
 
@@ -232,10 +301,10 @@ class SaleOrderCreate(BaseModel):
     planning_sheet_id: uuid.UUID | None = None
     planning_column_id: uuid.UUID | None = None
 
-    order_date: Any
-    delivery_date: Any | None = None
+    order_date: _date
+    delivery_date: _date | None = None
     currency: str = "INR"
-    status: str = "pending"
+    status: str = "pending"  # ignored: a new order always starts at the workflow's initial status
 
     container_no: str | None = None
     bl_no: str | None = None
@@ -246,6 +315,11 @@ class SaleOrderCreate(BaseModel):
     remarks: str | None = None
 
     items: list[SaleOrderItemCreate] = Field(..., min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise(cls, data: Any) -> Any:
+        return _normalise_order_input(data, creating=True)
 
 
 class SaleOrderUpdate(BaseModel):
@@ -269,6 +343,8 @@ class SaleOrderUpdate(BaseModel):
     delivery_charge: str | None = None
     third_party_delivery: str | None = None
     third_party_invoice: str | None = None
+    terms_and_conditions: str | None = None
+    booking_remarks: str | None = None
     amount_inc_gst: float | None = None
     discount: float | None = None
 
@@ -284,10 +360,10 @@ class SaleOrderUpdate(BaseModel):
     planning_sheet_id: uuid.UUID | None = None
     planning_column_id: uuid.UUID | None = None
 
-    order_date: Any | None = None
-    delivery_date: Any | None = None
+    order_date: _date | None = None
+    delivery_date: _date | None = None
     currency: str | None = None
-    status: str | None = None
+    status: str | None = None  # ignored: use the status endpoint
 
     container_no: str | None = None
     bl_no: str | None = None
@@ -298,6 +374,11 @@ class SaleOrderUpdate(BaseModel):
     remarks: str | None = None
 
     items: list[SaleOrderItemCreate] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise(cls, data: Any) -> Any:
+        return _normalise_order_input(data, creating=False)
 
 
 class SaleOrderStatusUpdate(BaseModel):
@@ -360,6 +441,10 @@ class SaleOrderResponse(BaseModel):
     delivery_date: Any | None = None
     currency: str
     status: str
+    cancel_reason: str | None = None
+    stock_applied: bool = False
+    terms_and_conditions: str | None = None
+    booking_remarks: str | None = None
 
     total_basic: float
     total_tax: float

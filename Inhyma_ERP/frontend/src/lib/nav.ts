@@ -60,6 +60,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "product-stock", label: "Product Stock", path: "/product-stock/list", icon: "stock", permission: "product.view" },
       { key: "stock-adjustment", label: "Stock Adjustment", path: "/stock-adjustment", icon: "sliders", permission: "product.view" },
       { key: "stock-transfer", label: "Stock Transfer", path: "/stock-transfer", icon: "transfer", permission: "product.view" },
+      { key: "price-list", label: "Price List", path: "/price-list", icon: "creditCard", permission: "product.view" },
       { key: "masters-products", label: "Product Master", path: "/product/list", icon: "box", permission: "product.view" },
       { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "productgallery.view" },
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "layers", permission: "category.view" },
@@ -127,6 +128,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-countries", label: "Countries", path: "/masters/countries", permission: "country.view" },
           { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", permission: "currency.view" },
           { key: "masters-taxes", label: "Taxes", path: "/masters/taxes", permission: "tax.view" },
+          { key: "masters-price-list", label: "Price List Master", path: "/masters/price-list", permission: "product.view" },
           { key: "masters-additional-charges", label: "Additional Charges", path: "/masters/additional-charges", permission: "additionalcharge.view" },
           { key: "masters-social-media", label: "Social Media", path: "/masters/social-media", permission: "socialmedia.view" },
           { key: "masters-agent-types", label: "Agent Types", path: "/masters/agent-types", permission: "agenttype.view" },
@@ -230,6 +232,9 @@ export const PAGE_TITLES: Record<string, string> = {
 
   // Masters from screenshot
   "masters-taxes": "Taxes",
+  "masters-price-list": "Price List Management",
+  "price-list": "Price List Management",
+  "product-prices": "Price List Management",
   "masters-additional-charges": "Additional Charges",
   "masters-social-media": "Social Media",
   "masters-agent-types": "Agent Types",

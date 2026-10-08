@@ -74,10 +74,17 @@ class SaleRepository:
         consignment_code: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        warehouses: list[str] | None = None,
+        exclude_statuses: list[str] | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[SaleOrder], int]:
         conditions: list[Any] = [SaleOrder.deleted_at.is_(None)]
+        # visibility limits for accounts / warehouse staff (see SaleService.visible_filters)
+        if warehouses is not None:
+            conditions.append(SaleOrder.warehouse.in_(warehouses))
+        if exclude_statuses:
+            conditions.append(SaleOrder.status.notin_(exclude_statuses))
 
         if organization_id:
             conditions.append(SaleOrder.organization_id == organization_id)
@@ -244,4 +251,3 @@ class SaleRepository:
             order.remarks = f"{order.remarks or ''}\n[{date.today()}] Restored by {restored_by}".strip()
         await self.session.flush()
         return True
-

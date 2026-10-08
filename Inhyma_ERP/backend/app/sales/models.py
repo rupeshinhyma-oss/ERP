@@ -23,7 +23,7 @@ from typing import Any, List, Optional
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import (
@@ -225,6 +225,11 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     port_of_loading: Mapped[str | None] = mapped_column(String(100), nullable=True)
     port_of_discharge: Mapped[str | None] = mapped_column(String(100), nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    terms_and_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    booking_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # True while this order's quantities are deducted from stock (kept in step with the status rules)
+    stock_applied: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
 
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id"), nullable=True
@@ -268,6 +273,8 @@ class SaleOrderItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     tax_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     gst_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     item_total: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    is_additional_charge: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    charge_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     planning_row_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("planning_rows.id"), nullable=True

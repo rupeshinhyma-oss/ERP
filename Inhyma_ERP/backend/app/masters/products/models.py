@@ -106,6 +106,7 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     reorder_level: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     standard_cost: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     standard_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    minimum_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     is_purchasable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_sellable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_active_for_inventory: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

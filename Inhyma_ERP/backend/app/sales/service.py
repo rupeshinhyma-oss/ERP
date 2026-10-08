@@ -21,11 +21,21 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import BadRequestException, NotFoundException, ValidationException
+from app.auth.service import CurrentUser
+from app.common import workflow as wf
+from app.core.exceptions import (
+    BadRequestException,
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
+from app.inventory import stock_service
+from app.purchase.common import move_stock
 from app.masters.taxes.models import Tax
 from app.masters.products.models import Product
 from app.planning.models import PlanningCell, PlanningColumn, PlanningRow, PlanningSheet
 from app.sales.models import SaleOrder, SaleOrderItem
+from app.sales.proforma_service import price_items
 from app.sales.repository import SaleRepository
 from app.sales.schemas import (
     ExtractedConsignmentItem,
@@ -36,10 +46,101 @@ from app.sales.schemas import (
 )
 
 
+STATUS_GROUP = "sale.order.status"
+# permission that lets a user see Accounts / Warehouse queues only (see ``visibility``)
+APPROVE_PERMISSION = "saleorder.approve"
+RESTRICTED_VIEW_PERMISSIONS = {"saleorder.accounts", "saleorder.warehouse"}
+
+
+def _yes(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"yes", "y", "true", "1"}
+
+
 class SaleService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.repo = SaleRepository(session)
+
+    # -----------------------------------------------------------------------
+    # Workflow rules, stock and visibility (all rule-driven; nothing about a status is hardcoded here)
+    # -----------------------------------------------------------------------
+
+    async def load_status_rules(self) -> dict[str, dict[str, Any]]:
+        return await wf.load_status_rules(self.session, STATUS_GROUP)
+
+    @staticmethod
+    def canonical_status(rules: dict[str, dict[str, Any]], value: str) -> str:
+        """Match what the client sent ("Sales Confirmed", "sales_confirmed"...) to a configured status key."""
+        key = value.strip().lower().replace(" ", "_").replace("-", "_")
+        return next((k for k in rules if k.lower() == key), value.strip())
+
+    async def _is_physical(self, warehouse: str | None) -> bool:
+        if not warehouse:
+            return True
+        return stock_service.is_physical(await stock_service.get_warehouse(self.session, warehouse))
+
+    @staticmethod
+    def _lines(items: Any) -> list[tuple[str, float]]:
+        """The goods an order holds; additional-charge rows (freight, packing...) are not stock."""
+        return [(it.product_name, float(it.quantity)) for it in (items or []) if not getattr(it, "is_additional_charge", False)]
+
+    async def _price_and_build(self, items: list[Any]) -> tuple[list[SaleOrderItem], dict[str, float]]:
+        """Price every line on the server (spec formula, shared with Proforma) and build the order's item rows."""
+        priced = await price_items(self.session, [it.as_priced_input() for it in items])
+        entities: list[SaleOrderItem] = []
+        for src, line in zip(items, priced.lines):
+            entities.append(
+                SaleOrderItem(
+                    product_id=src.product_id, product_name=line.product_name, product_code=line.product_code,
+                    hsn_code=line.hsn_code, uom=line.uom or None, quantity=line.quantity, unit_rate=line.rate,
+                    unit_price=line.rate, unit_discount=line.unit_discount, taxable_amount=line.taxable_amount,
+                    tax_percent=line.gst_percent, tax_amount=line.gst_amount, gst_amount=line.gst_amount,
+                    item_total=line.total, planning_row_id=src.planning_row_id, remarks=src.remarks,
+                    is_additional_charge=line.is_additional_charge, charge_type=line.charge_type,
+                )
+            )
+        goods = [l for l in priced.lines if not l.is_additional_charge]
+        totals = {
+            "total_basic": round(sum(l.rate * l.quantity for l in priced.lines), 2),
+            "total_tax": priced.gst_amount,
+            "total_amount": priced.amount_inc_gst,
+            "total_quantity": round(sum(l.quantity for l in goods), 2),
+            "amount_inc_gst": priced.amount_inc_gst,
+            "discount": priced.discount,
+        }
+        return entities, totals
+
+    async def _take_stock(self, order: SaleOrder, lines: list[tuple[str, float]] | None = None) -> None:
+        """Deduct the order from its warehouse. Physical warehouses cannot go negative; transit / ordered ones can."""
+        if order.warehouse:
+            await move_stock(self.session, order.warehouse, lines if lines is not None else self._lines(order.items), -1)
+        order.stock_applied = True
+
+    async def _release_stock(self, order: SaleOrder) -> None:
+        if order.stock_applied and order.warehouse:
+            await move_stock(self.session, order.warehouse, self._lines(order.items), 1)
+        order.stock_applied = False
+
+    async def visible_filters(self, user: CurrentUser) -> dict[str, Any]:
+        """Spec: Accounts and Warehouse staff do not see orders against Transit / Ordered warehouses, nor unconfirmed ones.
+
+        Anyone who is an administrator, or who may approve orders, sees everything. Users holding only the accounts /
+        warehouse permissions are limited to confirmed orders in physical warehouses.
+        """
+        if wf.is_admin(user) or APPROVE_PERMISSION in user.permissions:
+            return {}
+        if not (RESTRICTED_VIEW_PERMISSIONS & set(user.permissions)):
+            return {}
+        from app.masters.warehouses.models import Warehouse
+
+        names = (
+            await self.session.execute(
+                select(Warehouse.name).where(Warehouse.main_warehouse_id.is_(None), Warehouse.deleted_at.is_(None))
+            )
+        ).scalars().all()
+        rules = await self.load_status_rules()
+        hidden = [k for k, r in rules.items() if r.get("initial")] + [k for k, r in rules.items() if not r.get("stock_out")]
+        return {"warehouses": list(names), "exclude_statuses": sorted(set(hidden))}
 
     # -----------------------------------------------------------------------
     # Shipment Planning Integration
@@ -343,43 +444,10 @@ class SaleService:
         payload: SaleOrderCreate,
         current_user: Any = None,
     ) -> SaleOrder:
+        rules = await self.load_status_rules()
         order_no = await self.repo.generate_order_no(payload.order_date)
 
-        total_basic = 0.0
-        total_tax = 0.0
-        total_amount = 0.0
-        total_qty = 0.0
-
-        item_entities: list[SaleOrderItem] = []
-        for it in payload.items:
-            qty = float(it.quantity)
-            rate = float(it.unit_rate)
-            tax_pct = float(it.tax_percent)
-
-            basic = round(qty * rate, 2)
-            tax = round((basic * tax_pct) / 100.0, 2)
-            item_tot = round(basic + tax, 2)
-
-            total_basic += basic
-            total_tax += tax
-            total_amount += item_tot
-            total_qty += qty
-
-            item_entities.append(
-                SaleOrderItem(
-                    product_id=it.product_id,
-                    product_name=it.product_name,
-                    product_code=it.product_code,
-                    hsn_code=it.hsn_code,
-                    quantity=qty,
-                    unit_rate=rate,
-                    tax_percent=tax_pct,
-                    tax_amount=tax,
-                    item_total=item_tot,
-                    planning_row_id=it.planning_row_id,
-                    remarks=it.remarks,
-                )
-            )
+        item_entities, totals = await self._price_and_build(payload.items)
 
         order = SaleOrder(
             order_no=order_no,
@@ -404,19 +472,21 @@ class SaleService:
             delivery_charge=payload.delivery_charge,
             third_party_delivery=payload.third_party_delivery,
             third_party_invoice=payload.third_party_invoice,
-            amount_inc_gst=payload.amount_inc_gst or round(total_amount, 2),
-            discount=payload.discount or 0.0,
+            terms_and_conditions=payload.terms_and_conditions,
+            booking_remarks=payload.booking_remarks,
+            amount_inc_gst=totals["amount_inc_gst"],
+            discount=totals["discount"],
             consignment_code=payload.consignment_code,
             planning_sheet_id=payload.planning_sheet_id,
             planning_column_id=payload.planning_column_id,
             order_date=payload.order_date,
             delivery_date=payload.delivery_date,
             currency=payload.currency or "INR",
-            status=payload.status or "pending",
-            total_basic=round(total_basic, 2),
-            total_tax=round(total_tax, 2),
-            total_amount=round(total_amount, 2),
-            total_quantity=round(total_qty, 2),
+            status=wf.initial_status(rules),  # server-controlled: a client cannot start an order half-way through the workflow
+            total_basic=totals["total_basic"],
+            total_tax=totals["total_tax"],
+            total_amount=totals["total_amount"],
+            total_quantity=totals["total_quantity"],
             container_no=payload.container_no,
             bl_no=payload.bl_no,
             lr_no=payload.lr_no,
@@ -429,16 +499,11 @@ class SaleService:
             items=item_entities,
         )
 
-        # Deduct physical warehouse stock if warehouse is physical
-        if payload.warehouse:
-            from app.purchase.common import move_stock
-            from app.inventory import stock_service
-            try:
-                wh = await stock_service.get_warehouse(self.session, payload.warehouse)
-                if stock_service.is_physical(wh):
-                    await move_stock(self.session, payload.warehouse, [(it.product_name, it.quantity) for it in payload.items], -1)
-            except BadRequestException:
-                pass
+        # Stock follows the status rules (``stock_out``): quantities are deducted from the order's warehouse.
+        # Physical warehouses cannot go negative (409); transit / ordered warehouses may. Unknown warehouses or
+        # products are refused instead of silently skipping the stock movement.
+        if rules[order.status].get("stock_out"):
+            await self._take_stock(order, self._lines(item_entities))
 
         return await self.repo.create(order)
 
@@ -446,26 +511,18 @@ class SaleService:
         self,
         order_id: uuid.UUID,
         payload: SaleOrderUpdate,
+        current_user: CurrentUser | None = None,
     ) -> SaleOrder:
         order = await self.repo.get_by_id(order_id)
         if not order:
             raise NotFoundException(f"Sale order {order_id} not found.")
-
-        # Check warehouse change to physical warehouse
-        if payload.warehouse is not None and payload.warehouse != order.warehouse:
-            from app.purchase.common import move_stock
-            from app.inventory import stock_service
-            try:
-                old_wh = await stock_service.get_warehouse(self.session, order.warehouse) if order.warehouse else None
-                new_wh = await stock_service.get_warehouse(self.session, payload.warehouse)
-                if stock_service.is_physical(new_wh):
-                    items_to_move = [(it.product_name, it.quantity) for it in (order.items or [])]
-                    if items_to_move:
-                        await move_stock(self.session, payload.warehouse, items_to_move, -1)
-                        if old_wh and stock_service.is_physical(old_wh):
-                            await move_stock(self.session, old_wh.name, items_to_move, 1)
-            except BadRequestException:
-                pass
+        rules = await self.load_status_rules()
+        if current_user is not None:
+            wf.check_editable(rules, order.status, current_user)
+        # ``payload.status`` is deliberately ignored: status changes go through the status endpoint, which applies the rules.
+        stock_relevant = (payload.items is not None) or (payload.warehouse is not None and payload.warehouse != order.warehouse)
+        if stock_relevant:
+            await self._release_stock(order)  # put the old quantities back before the new ones are taken
 
         if payload.buyer_id is not None:
             order.buyer_id = payload.buyer_id
@@ -535,8 +592,6 @@ class SaleService:
             order.delivery_date = payload.delivery_date
         if payload.currency is not None:
             order.currency = payload.currency
-        if payload.status is not None:
-            order.status = payload.status
         if payload.container_no is not None:
             order.container_no = payload.container_no
         if payload.bl_no is not None:
@@ -551,101 +606,126 @@ class SaleService:
             order.port_of_discharge = payload.port_of_discharge
         if payload.remarks is not None:
             order.remarks = payload.remarks
+        if payload.terms_and_conditions is not None:
+            order.terms_and_conditions = payload.terms_and_conditions
+        if payload.booking_remarks is not None:
+            order.booking_remarks = payload.booking_remarks
 
         if payload.items is not None:
-            # Replace line items
+            # Replace line items; the server prices them
+            new_items, totals = await self._price_and_build(payload.items)
             order.items.clear()
-            total_basic = 0.0
-            total_tax = 0.0
-            total_amount = 0.0
-            total_qty = 0.0
+            for entity in new_items:
+                entity.order_id = order.id
+                order.items.append(entity)
+            order.total_basic = totals["total_basic"]
+            order.total_tax = totals["total_tax"]
+            order.total_amount = totals["total_amount"]
+            order.total_quantity = totals["total_quantity"]
+            order.amount_inc_gst = totals["amount_inc_gst"]
+            order.discount = totals["discount"]
 
-            for it in payload.items:
-                qty = float(it.quantity)
-                rate = float(it.unit_rate)
-                tax_pct = float(it.tax_percent)
-
-                basic = round(qty * rate, 2)
-                tax = round((basic * tax_pct) / 100.0, 2)
-                item_tot = round(basic + tax, 2)
-
-                total_basic += basic
-                total_tax += tax
-                total_amount += item_tot
-                total_qty += qty
-
-                order.items.append(
-                    SaleOrderItem(
-                        order_id=order.id,
-                        product_id=it.product_id,
-                        product_name=it.product_name,
-                        product_code=it.product_code,
-                        hsn_code=it.hsn_code,
-                        quantity=qty,
-                        unit_rate=rate,
-                        tax_percent=tax_pct,
-                        tax_amount=tax,
-                        item_total=item_tot,
-                        planning_row_id=it.planning_row_id,
-                        remarks=it.remarks,
-                    )
-                )
-
-            order.total_basic = round(total_basic, 2)
-            order.total_tax = round(total_tax, 2)
-            order.total_amount = round(total_amount, 2)
-            order.total_quantity = round(total_qty, 2)
+        if stock_relevant and rules[order.status].get("stock_out"):
+            await self._take_stock(order)
 
         return await self.repo.update(order)
 
     async def update_status(
         self,
         order_id: uuid.UUID,
-        payload_or_status: Any,
-        remarks: str | None = None,
+        payload: Any,
+        current_user: CurrentUser,
     ) -> SaleOrder:
         order = await self.repo.get_by_id(order_id)
         if not order:
             raise NotFoundException(f"Sale order {order_id} not found.")
+        rules = await self.load_status_rules()
+        target = self.canonical_status(rules, payload.status)
+        reason = (payload.remarks or "").strip() or None
 
-        if hasattr(payload_or_status, "status"):
-            st = payload_or_status.status.strip().lower()
-            rmk = payload_or_status.remarks or remarks
-            if payload_or_status.invoice_no:
-                order.invoice_no = payload_or_status.invoice_no
-            if payload_or_status.invoice_date:
-                order.invoice_date = payload_or_status.invoice_date
-            if payload_or_status.third_party_invoice:
-                order.third_party_invoice = payload_or_status.third_party_invoice
-            if payload_or_status.gatepass:
-                order.gatepass = payload_or_status.gatepass
-                order.gatepass_no = payload_or_status.gatepass
-            if payload_or_status.gatepass_no:
-                order.gatepass = payload_or_status.gatepass_no
-                order.gatepass_no = payload_or_status.gatepass_no
-            if payload_or_status.gatepass_date:
-                order.gatepass_date = payload_or_status.gatepass_date
-            if payload_or_status.gatepass_handled_by:
-                order.gatepass_handled_by = payload_or_status.gatepass_handled_by
-            if payload_or_status.transporter_name:
-                order.transporter_name = payload_or_status.transporter_name
-            if payload_or_status.transport_destination:
-                order.transport_destination = payload_or_status.transport_destination
-            if payload_or_status.delivery_type:
-                order.delivery_type = payload_or_status.delivery_type
-            if payload_or_status.delivery_charge:
-                order.delivery_charge = payload_or_status.delivery_charge
-            if payload_or_status.lr_no:
-                order.lr_no = payload_or_status.lr_no
-        else:
-            st = str(payload_or_status).strip().lower()
-            rmk = remarks
+        wf.check_transition(rules, order.status, target, current_user, reason)
 
-        order.status = st
-        if rmk:
-            order.remarks = f"{order.remarks or ''}\n[{date.today()}] Status updated to {st}: {rmk}".strip()
+        # Orders in Transit / Ordered warehouses can only be cancelled (spec: status options exist for physical warehouses only)
+        if target in rules[order.status].get("physical_only_to", []) and not await self._is_physical(order.warehouse):
+            raise ConflictException(
+                f"'{order.warehouse}' is a transit / ordered warehouse: this order can only be cancelled until it is "
+                "moved to a physical warehouse."
+            )
 
+        # Mandatory information per step (Sales & PI spec)
+        invoice_no = (payload.invoice_no or order.invoice_no or "").strip()
+        if target == "acc_confirmed":
+            if not invoice_no:
+                raise BadRequestException("Invoice number is required to confirm an order at the accounts stage.")
+            if _yes(order.third_party_delivery) and not (payload.third_party_invoice or order.third_party_invoice):
+                raise BadRequestException("The third-party invoice must be attached to confirm a third-party delivery.")
+        if target == "lr" and not (payload.lr_no or order.lr_no):
+            raise BadRequestException("The LR number is required to complete the order.")
+
+        # Details supplied with this step
+        if payload.invoice_no:
+            order.invoice_no = payload.invoice_no
+        if payload.invoice_date:
+            order.invoice_date = payload.invoice_date
+        if payload.third_party_invoice:
+            order.third_party_invoice = payload.third_party_invoice
+        if payload.gatepass or payload.gatepass_no:
+            order.gatepass = order.gatepass_no = payload.gatepass_no or payload.gatepass
+        if payload.gatepass_date:
+            order.gatepass_date = payload.gatepass_date
+        if payload.gatepass_handled_by:
+            order.gatepass_handled_by = payload.gatepass_handled_by
+        if payload.transporter_name:
+            order.transporter_name = payload.transporter_name
+        if payload.transport_destination:
+            order.transport_destination = payload.transport_destination
+        if payload.delivery_type:
+            order.delivery_type = payload.delivery_type
+        if payload.delivery_charge:
+            order.delivery_charge = payload.delivery_charge
+        if payload.lr_no:
+            order.lr_no = payload.lr_no
+
+        # Stock follows the target status: cancelling returns the quantities, un-cancelling would take them again
+        wants_stock = bool(rules[target].get("stock_out"))
+        if wants_stock and not order.stock_applied:
+            await self._take_stock(order)
+        elif not wants_stock and order.stock_applied:
+            await self._release_stock(order)
+
+        previous = order.status
+        order.status = target
+        if target == "cancelled":
+            order.cancel_reason = reason
+        if reason:
+            order.remarks = (
+                f"{order.remarks or ''}\n[{date.today()}] {current_user.username}: {previous} -> {target}: {reason}".strip()
+            )
         return await self.repo.update(order)
+
+    async def delete_order(self, order_id: uuid.UUID, current_user: CurrentUser) -> None:
+        """Delete (soft) according to the stage rules; the order's stock goes back first."""
+        order = await self.repo.get_by_id(order_id)
+        if not order:
+            raise NotFoundException(f"Sale order {order_id} not found.")
+        rules = await self.load_status_rules()
+        wf.check_deletable(rules, order.status, current_user)
+        await self._release_stock(order)
+        await self.repo.soft_delete(order, deleted_by=current_user.username)
+
+    async def restore_order(self, order_id: uuid.UUID, current_user: CurrentUser) -> None:
+        """Bring a deleted order back (administrators only); its stock is taken again if its status holds stock."""
+        if not wf.is_admin(current_user):
+            from app.core.exceptions import ForbiddenException
+
+            raise ForbiddenException("Only an administrator can restore a deleted order.")
+        if not await self.repo.restore(order_id, restored_by=current_user.username):
+            raise NotFoundException(f"Sale order {order_id} not found.")
+        order = await self.repo.get_by_id(order_id)
+        rules = await self.load_status_rules()
+        if order and rules.get(order.status, {}).get("stock_out") and not order.stock_applied:
+            await self._take_stock(order)
+            await self.repo.update(order)
 
     def export_excel(self, records: list[SaleOrder]) -> io.BytesIO:
         """Export Sale Process orders to styled Excel workbook."""

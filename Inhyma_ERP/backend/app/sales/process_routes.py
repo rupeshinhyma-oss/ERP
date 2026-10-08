@@ -141,7 +141,9 @@ async def list_sale_orders(
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     offset = (page - 1) * page_size
+    visibility = await service.visible_filters(current_user)
     records, total = await service.repo.list_with_filters(
+        **visibility,
         search=search,
         organization_id=organization_id,
         buyer_id=buyer_id,
@@ -164,6 +166,7 @@ async def list_sale_orders(
             "page": page,
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size if total > 0 else 1,
+            "status_rules": await service.load_status_rules(),
         },
         request_id=req_id,
     )
@@ -199,6 +202,11 @@ async def get_sale_order(
     order = await service.repo.get_by_id(id)
     if not order:
         raise NotFoundException(f"Sale order {id} not found.")
+    visibility = await service.visible_filters(current_user)
+    if visibility and (
+        order.warehouse not in visibility["warehouses"] or order.status in visibility["exclude_statuses"]
+    ):
+        raise NotFoundException(f"Sale order {id} not found.")  # hidden from this role, as if it did not exist
     return build_success_response(
         data=SaleOrderDetailResponse.model_validate(order).model_dump(),
         request_id=req_id,
@@ -214,7 +222,7 @@ async def update_sale_order(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    order = await service.update_order(id, payload)
+    order = await service.update_order(id, payload, current_user)
     loaded = await service.repo.get_by_id(order.id)
     if not loaded:
         raise NotFoundException("Updated order could not be reloaded.")
@@ -233,7 +241,7 @@ async def update_order_status(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    order = await service.update_status(id, payload)
+    order = await service.update_status(id, payload, current_user)
     loaded = await service.repo.get_by_id(order.id)
     if not loaded:
         raise NotFoundException("Order could not be reloaded.")
@@ -243,7 +251,7 @@ async def update_order_status(
     )
 
 
-@router.delete("/orders/{id}", summary="Soft delete a sale order")
+@router.delete("/orders/{id}", summary="Delete a sale order (stage rules apply; stock is returned)")
 async def delete_sale_order(
     id: uuid.UUID,
     request: Request,
@@ -251,17 +259,14 @@ async def delete_sale_order(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    deleted_by = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
-    ok = await service.repo.soft_delete(id, deleted_by=deleted_by)
-    if not ok:
-        raise NotFoundException(f"Sale order {id} not found.")
+    await service.delete_order(id, current_user)
     return build_success_response(
         data={"id": str(id), "deleted": True},
         request_id=req_id,
     )
 
 
-@router.post("/orders/{id}/restore", summary="Restore a soft-deleted sale order")
+@router.post("/orders/{id}/restore", summary="Restore a soft-deleted sale order (administrators only)")
 async def restore_sale_order(
     id: uuid.UUID,
     request: Request,
@@ -269,10 +274,7 @@ async def restore_sale_order(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    restored_by = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
-    ok = await service.repo.restore(id, restored_by=restored_by)
-    if not ok:
-        raise NotFoundException(f"Sale order {id} not found.")
+    await service.restore_order(id, current_user)
     return build_success_response(
         data={"id": str(id), "restored": True},
         request_id=req_id,
@@ -294,6 +296,7 @@ async def export_sale_orders(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Response:
     records, _ = await service.repo.list_with_filters(
+        **(await service.visible_filters(current_user)),
         search=search,
         organization_id=organization_id,
         buyer_id=buyer_id,
