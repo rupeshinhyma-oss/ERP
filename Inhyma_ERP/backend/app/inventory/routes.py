@@ -1288,6 +1288,121 @@ async def get_product_stock_breakup(
     )
 
 
+@router.get("/inventory/goods-expected-report", summary="Goods Expected Date Report for Marketing")
+async def get_goods_expected_report(
+    request: Request,
+    machine: Optional[str] = Query(None, description="Machine lookup by product name, code, container or supplier"),
+    warehouse: Optional[str] = Query(None, description="Warehouse filter"),
+    status: Optional[str] = Query(None, description="Shipment status filter"),
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """
+    Goods Expected Date Report for Marketing:
+    Allows marketing to look up machines and check arriving containers,
+    ETD (Origin Date), ETA Port, and Expected Arrival Date.
+    """
+    items = []
+    try:
+        from app.purchase.models import ImportPurchase, ImportPurchaseItem
+
+        stmt = (
+            select(ImportPurchase, ImportPurchaseItem)
+            .join(ImportPurchaseItem, ImportPurchaseItem.purchase_id == ImportPurchase.id)
+            .where(ImportPurchase.deleted_at.is_(None))
+        )
+
+        if machine and machine.strip():
+            clean_m = machine.strip()
+            stmt = stmt.where(
+                or_(
+                    ImportPurchaseItem.product_name.ilike(f"%{clean_m}%"),
+                    ImportPurchaseItem.product_code.ilike(f"%{clean_m}%"),
+                    ImportPurchase.consignment_no.ilike(f"%{clean_m}%"),
+                    ImportPurchase.supplier_name.ilike(f"%{clean_m}%"),
+                )
+            )
+
+        if warehouse and warehouse.strip().lower() != "all":
+            stmt = stmt.where(ImportPurchase.warehouse.ilike(f"%{warehouse.strip()}%"))
+
+        if status and status.strip().lower() != "all":
+            stmt = stmt.where(ImportPurchase.status.ilike(f"%{status.strip()}%"))
+
+        stmt = stmt.order_by(
+            ImportPurchase.expected_arrival_date.asc().nullslast(),
+            ImportPurchase.eta_port_date.asc().nullslast(),
+            ImportPurchase.created_at.desc(),
+        ).limit(limit)
+
+        results = (await db.execute(stmt)).all()
+
+        for idx, (ip, ip_item) in enumerate(results, start=1):
+            status_text = (ip.status or "In Transit").replace("_", " ").title()
+            items.append({
+                "sr_no": idx,
+                "id": str(ip.id),
+                "item_id": str(ip_item.id),
+                "product_name": ip_item.product_name,
+                "product_code": ip_item.product_code or "-",
+                "container_no": ip.consignment_no,
+                "consignment_no": ip.consignment_no,
+                "supplier_name": ip.supplier_name or "-",
+                "warehouse": ip.warehouse,
+                "quantity": ip_item.quantity,
+                "uom": ip_item.uom or "NOS",
+                "ordered_date": str(ip.ordered_date) if ip.ordered_date else "-",
+                "etd_origin_date": str(ip.etd_origin_date) if ip.etd_origin_date else "-",
+                "eta_port_date": str(ip.eta_port_date) if ip.eta_port_date else "-",
+                "expected_arrival_date": str(ip.expected_arrival_date) if ip.expected_arrival_date else "-",
+                "status": status_text,
+                "remarks": ip.remarks or "",
+            })
+
+        # Fallback check on ProductStock.orders_info if results are empty and a machine search was given
+        if not items and machine and machine.strip():
+            st_stmt = select(ProductStock).where(
+                ProductStock.deleted_at.is_(None),
+                or_(
+                    ProductStock.product_name_tally.ilike(f"%{machine.strip()}%"),
+                    ProductStock.product_code.ilike(f"%{machine.strip()}%"),
+                ),
+            )
+            stocks = (await db.execute(st_stmt)).scalars().all()
+            idx = 1
+            for st in stocks:
+                if st.orders_info:
+                    for o in st.orders_info:
+                        items.append({
+                            "sr_no": idx,
+                            "id": f"po-{idx}",
+                            "item_id": f"po-item-{idx}",
+                            "product_name": st.product_name_tally,
+                            "product_code": st.product_code or "-",
+                            "container_no": o.get("po_number", f"PO-{idx}"),
+                            "consignment_no": o.get("po_number", f"PO-{idx}"),
+                            "supplier_name": o.get("supplier", "-"),
+                            "warehouse": warehouse or "Mumbai",
+                            "quantity": float(o.get("ordered_qty", 1)),
+                            "uom": st.uom or "NOS",
+                            "ordered_date": "-",
+                            "etd_origin_date": "-",
+                            "eta_port_date": "-",
+                            "expected_arrival_date": o.get("expected_date", "-"),
+                            "status": "Ordered",
+                            "remarks": "",
+                        })
+                        idx += 1
+    except Exception as exc:
+        logger.warning(f"Error fetching goods expected report: {exc}")
+
+    return build_success_response(
+        data={"items": items, "total": len(items)},
+        meta={"count": len(items)},
+        request_id=getattr(getattr(request, "state", None), "request_id", "-") if request else "-",
+    )
+
+
 @router.get("/inventory/product-stock/{stock_id}", summary="Get product stock details by ID")
 async def get_product_stock(stock_id: str, request: Request, db: AsyncSession = Depends(get_db_session)) -> dict:
     """Retrieve single product stock entry from PostgreSQL database."""
@@ -1922,7 +2037,10 @@ async def create_stock_transfer(
         )
         db.add(line)
 
-    # Inventory balances: Deduct origin physical stock and credit destination (transit or physical)
+    # Inventory balances: Deduct origin stock and credit destination (transit or physical)
+    from_wh_lower = (payload.from_warehouse or "").strip().lower()
+    is_from_physical = "transit" not in from_wh_lower and "ordered" not in from_wh_lower
+
     from_col, from_city, _ = _parse_wh_column(payload.from_warehouse, prefer_transit=False)
     # If to_warehouse is explicitly transit OR transfer status is not "Received", allocate to transit
     to_col, to_city, _ = _parse_wh_column(payload.to_warehouse, prefer_transit=(payload.status != "Received"))
@@ -1936,19 +2054,35 @@ async def create_stock_transfer(
             ProductStock.deleted_at.is_(None),
         )
         prod_match = (await db.execute(prod_stmt)).scalars().first()
-        if prod_match:
-            avail = getattr(prod_match, from_col, 0.0) or 0.0
-            if avail < item.quantity:
+        avail = getattr(prod_match, from_col, 0.0) or 0.0 if prod_match else 0.0
+
+        if is_from_physical:
+            # Physical warehouse stock cannot be driven negative
+            if avail - item.quantity < -1e-9:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Insufficient physical stock for '{item.product_name}' in {payload.from_warehouse}. Available: {avail}, Requested: {item.quantity}",
+                    detail=f"Insufficient physical stock for '{item.product_name}' in {payload.from_warehouse}. Available: {avail}, Requested: {item.quantity}. Physical warehouse stock cannot be negative.",
                 )
-            # Deduct from origin physical warehouse
-            setattr(prod_match, from_col, avail - item.quantity)
-            # Add to destination (transit or physical)
-            dest_avail = getattr(prod_match, to_col, 0.0) or 0.0
-            setattr(prod_match, to_col, dest_avail + item.quantity)
-            _recompute_total_stock(prod_match)
+
+        if not prod_match:
+            # Create a ProductStock entry on first use if missing (e.g. from transit transfer)
+            prod_match = ProductStock(
+                product_name_tally=item.product_name,
+                product_code=item.product_code or "-",
+                category=item.category or "Machines",
+                uom=item.uom or "NOS",
+                total_qty=0.0,
+            )
+            db.add(prod_match)
+            await db.flush()
+
+        # Deduct from origin (may go negative if transit or ordered warehouse)
+        curr_from = getattr(prod_match, from_col, 0.0) or 0.0
+        setattr(prod_match, from_col, curr_from - item.quantity)
+        # Add to destination (transit or physical)
+        dest_avail = getattr(prod_match, to_col, 0.0) or 0.0
+        setattr(prod_match, to_col, dest_avail + item.quantity)
+        _recompute_total_stock(prod_match)
 
     await db.flush()
     await db.refresh(new_transfer)

@@ -140,3 +140,44 @@ def test_recompute_total_stock():
     _recompute_total_stock(prod)
     assert prod.total_qty == 45.0
 
+
+def test_is_physical_warehouse_rules():
+    from app.inventory.stock_service import is_physical
+    from app.masters.warehouses.models import Warehouse
+
+    main_wh = Warehouse(name="Mumbai", address="Plot 1", billing_company="Inhyma", main_warehouse_id=None)
+    assert is_physical(main_wh) is True
+
+    transit_wh = Warehouse(name="Mumbai Transit", address="Plot 1", billing_company="Inhyma", main_warehouse_id=None)
+    assert is_physical(transit_wh) is False
+
+    ordered_wh = Warehouse(name="Ahmedabad Ordered", address="Plot 2", billing_company="Inhyma", main_warehouse_id=None)
+    assert is_physical(ordered_wh) is False
+
+    child_wh = Warehouse(name="Sub Warehouse", address="Plot 3", billing_company="Inhyma", main_warehouse_id=uuid.uuid4())
+    assert is_physical(child_wh) is False
+
+
+@pytest.mark.asyncio
+async def test_goods_expected_report_lookup():
+    from app.inventory.routes import get_goods_expected_report
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_db = AsyncMock()
+    mock_execute_result = MagicMock()
+    mock_execute_result.all.return_value = []
+    mock_execute_result.scalars.return_value.all.return_value = []
+    mock_db.execute.return_value = mock_execute_result
+
+    res = await get_goods_expected_report(
+        request=None,
+        machine="Sensor",
+        warehouse="Mumbai",
+        status="In Transit",
+        limit=50,
+        db=mock_db,
+    )
+    assert res["success"] is True
+    assert "items" in res["data"]
+    assert "total" in res["data"]
+

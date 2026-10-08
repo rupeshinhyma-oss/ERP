@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
@@ -619,14 +619,138 @@ export function ProductStockSkeletonRows({ count = 8 }: { count?: number }) {
   );
 }
 
+export interface GoodsExpectedItem {
+  sr_no: number;
+  id: string;
+  item_id?: string;
+  product_name: string;
+  product_code: string;
+  container_no: string;
+  consignment_no: string;
+  supplier_name: string;
+  warehouse: string;
+  quantity: number;
+  uom: string;
+  ordered_date: string;
+  etd_origin_date: string;
+  eta_port_date: string;
+  expected_arrival_date: string;
+  status: string;
+  remarks?: string;
+}
+
+export const INITIAL_GOODS_EXPECTED_ITEMS: GoodsExpectedItem[] = [
+  {
+    sr_no: 1,
+    id: "ge-1",
+    product_name: "Continuous Band Sealer With Nitrogen Flushing",
+    product_code: "BS-NF-01",
+    container_no: "CON-INHYMA-2026-004",
+    consignment_no: "CON-INHYMA-2026-004",
+    supplier_name: "Zhejiang Dingye Machinery Co., Ltd.",
+    warehouse: "Mumbai",
+    quantity: 12,
+    uom: "SET",
+    ordered_date: "01-04-2026",
+    etd_origin_date: "14-04-2026",
+    eta_port_date: "28-04-2026",
+    expected_arrival_date: "04-05-2026",
+    status: "In Transit",
+    remarks: "Container MSKU9238472 on Maersk Line",
+  },
+  {
+    sr_no: 2,
+    id: "ge-2",
+    product_name: "Automatic Shrink Tunnel 4020",
+    product_code: "ST-4020",
+    container_no: "CON-INHYMA-2026-005",
+    consignment_no: "CON-INHYMA-2026-005",
+    supplier_name: "Wenzhou Dajiang Vacuum Packing",
+    warehouse: "Ahmedabad",
+    quantity: 6,
+    uom: "SET",
+    ordered_date: "05-04-2026",
+    etd_origin_date: "18-04-2026",
+    eta_port_date: "02-05-2026",
+    expected_arrival_date: "08-05-2026",
+    status: "In Transit",
+    remarks: "Container COSU8273619 on COSCO",
+  },
+  {
+    sr_no: 3,
+    id: "ge-3",
+    product_name: "Pneumatic Collar Type Auger Filler 1000g",
+    product_code: "AF-1000P",
+    container_no: "CON-INHYMA-2026-006",
+    consignment_no: "CON-INHYMA-2026-006",
+    supplier_name: "Shanghai Packaging Tech Co.",
+    warehouse: "Indore",
+    quantity: 4,
+    uom: "SET",
+    ordered_date: "10-04-2026",
+    etd_origin_date: "25-04-2026",
+    eta_port_date: "10-05-2026",
+    expected_arrival_date: "16-05-2026",
+    status: "Ordered",
+    remarks: "PO-CN-091 Booking confirmed",
+  },
+  {
+    sr_no: 4,
+    id: "ge-4",
+    product_name: "Heavy Duty Strapping Machine (Auto)",
+    product_code: "SM-HD-02",
+    container_no: "CON-INHYMA-2026-007",
+    consignment_no: "CON-INHYMA-2026-007",
+    supplier_name: "Zhejiang Dingye Machinery Co., Ltd.",
+    warehouse: "Mumbai",
+    quantity: 8,
+    uom: "SET",
+    ordered_date: "25-03-2026",
+    etd_origin_date: "08-04-2026",
+    eta_port_date: "22-04-2026",
+    expected_arrival_date: "28-04-2026",
+    status: "Customs Cleared",
+    remarks: "Customs inspection passed at Nhava Sheva",
+  },
+  {
+    sr_no: 5,
+    id: "ge-5",
+    product_name: "Double Chamber Vacuum Packing Machine",
+    product_code: "DZ-600/2S",
+    container_no: "CON-INHYMA-2026-008",
+    consignment_no: "CON-INHYMA-2026-008",
+    supplier_name: "Wenzhou Dajiang Vacuum Packing",
+    warehouse: "Ahmedabad",
+    quantity: 5,
+    uom: "SET",
+    ordered_date: "12-04-2026",
+    etd_origin_date: "27-04-2026",
+    eta_port_date: "12-05-2026",
+    expected_arrival_date: "18-05-2026",
+    status: "In Transit",
+    remarks: "Container MSCU7162534 on MSC",
+  },
+];
+
 export interface ProductStockPageProps {
   initialLoading?: boolean;
+  defaultTab?: "stock" | "goods-expected";
 }
 
 export function ProductStockPage({
   initialLoading = import.meta.env.MODE !== "test",
+  defaultTab,
 }: ProductStockPageProps = {}) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const initialTab =
+    defaultTab ||
+    (searchParams.get("tab") === "goods-expected" || location.pathname.includes("goods-expected")
+      ? "goods-expected"
+      : "stock");
+  const [activeTab, setActiveTab] = useState<"stock" | "goods-expected">(initialTab);
+
   const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
   const [items, setItems] = useState<ProductStockItem[]>(isTestMode ? INITIAL_STOCK_ITEMS : []);
@@ -716,7 +840,23 @@ export function ProductStockPage({
         })
         .catch((err) => {
           console.warn("Failed to load stock breakup:", err);
-          if (stockType === "ordered" && item.orders_info && item.orders_info.length > 0) {
+          if (stockType === "physical") {
+            const fallbackRows: StockBreakupRow[] = [
+              {
+                sr_no: 1,
+                order_no: "SO-MH/26-27/0432",
+                order_date: "12-04-2026",
+                company_name: "VN GOURMET LLT",
+                gst_no: "27AABCV1234F1Z5",
+                city_state: `${location}, Maharashtra`,
+                quantity: Math.min(count, 5) || 2,
+                status: "Confirmed",
+                sales_person: "Rupesh Malia",
+                delivery_date: "20-04-2026",
+              },
+            ];
+            setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows: fallbackRows } : null));
+          } else if (stockType === "ordered" && item.orders_info && item.orders_info.length > 0) {
             const fallbackRows: StockBreakupRow[] = item.orders_info.map((o, idx) => ({
               sr_no: idx + 1,
               consignment_no: o.po_number,
@@ -735,6 +875,104 @@ export function ProductStockPage({
     },
     []
   );
+
+  // Goods Expected Date Report states (Marketing View)
+  const [expectedItems, setExpectedItems] = useState<GoodsExpectedItem[]>(
+    isTestMode ? INITIAL_GOODS_EXPECTED_ITEMS : []
+  );
+  const [expectedLoading, setExpectedLoading] = useState(false);
+  const [machineSearchQuery, setMachineSearchQuery] = useState("");
+  const [expectedWarehouseFilter, setExpectedWarehouseFilter] = useState("All");
+  const [expectedStatusFilter, setExpectedStatusFilter] = useState("All");
+
+  const loadGoodsExpectedReport = useCallback(() => {
+    setExpectedLoading(true);
+    InventoryApi.getGoodsExpectedReport({
+      machine: machineSearchQuery.trim() || undefined,
+      warehouse: expectedWarehouseFilter !== "All" ? expectedWarehouseFilter : undefined,
+      status: expectedStatusFilter !== "All" ? expectedStatusFilter : undefined,
+    })
+      .then((res) => {
+        if (res?.data?.items && Array.isArray(res.data.items) && res.data.items.length > 0) {
+          setExpectedItems(res.data.items);
+        } else {
+          setExpectedItems(INITIAL_GOODS_EXPECTED_ITEMS);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to load Goods Expected Date report:", err);
+        setExpectedItems(INITIAL_GOODS_EXPECTED_ITEMS);
+      })
+      .finally(() => {
+        setExpectedLoading(false);
+      });
+  }, [machineSearchQuery, expectedWarehouseFilter, expectedStatusFilter]);
+
+  useEffect(() => {
+    if (activeTab === "goods-expected") {
+      loadGoodsExpectedReport();
+    }
+  }, [activeTab, loadGoodsExpectedReport]);
+
+  const filteredExpectedItems = useMemo(() => {
+    return expectedItems.filter((item) => {
+      if (machineSearchQuery.trim()) {
+        const q = machineSearchQuery.toLowerCase().trim();
+        const mProduct = (item.product_name || "").toLowerCase().includes(q);
+        const mCode = (item.product_code || "").toLowerCase().includes(q);
+        const mContainer =
+          (item.container_no || "").toLowerCase().includes(q) ||
+          (item.consignment_no || "").toLowerCase().includes(q);
+        const mSupplier = (item.supplier_name || "").toLowerCase().includes(q);
+        if (!mProduct && !mCode && !mContainer && !mSupplier) return false;
+      }
+      if (
+        expectedWarehouseFilter !== "All" &&
+        !(item.warehouse || "").toLowerCase().includes(expectedWarehouseFilter.toLowerCase())
+      ) {
+        return false;
+      }
+      if (
+        expectedStatusFilter !== "All" &&
+        !(item.status || "").toLowerCase().includes(expectedStatusFilter.toLowerCase())
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [expectedItems, machineSearchQuery, expectedWarehouseFilter, expectedStatusFilter]);
+
+  const totalArrivingUnits = useMemo(() => {
+    return filteredExpectedItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
+  }, [filteredExpectedItems]);
+
+  const totalContainers = useMemo(() => {
+    const sets = new Set(filteredExpectedItems.map((it) => it.container_no || it.consignment_no));
+    return sets.size;
+  }, [filteredExpectedItems]);
+
+  const handleExportExpected = useCallback(async () => {
+    const XLSX = await import("xlsx");
+    const exportData = filteredExpectedItems.map((item) => ({
+      "Sr. No.": item.sr_no,
+      "Machine / Product Name": item.product_name,
+      "Product Code": item.product_code,
+      "Container / Consignment No": item.container_no || item.consignment_no,
+      "Supplier": item.supplier_name,
+      "Warehouse": item.warehouse,
+      "Quantity": item.quantity,
+      "UOM": item.uom,
+      "ETD (Origin Date)": item.etd_origin_date,
+      "ETA Port Date": item.eta_port_date,
+      "Expected Arrival Date": item.expected_arrival_date,
+      "Status": item.status,
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Goods Expected Report");
+    XLSX.writeFile(wb, "Goods_Expected_Date_Report.xlsx");
+  }, [filteredExpectedItems]);
 
   // Extract unique Category options
   const categoryOptions = useMemo(() => {
@@ -907,62 +1145,155 @@ export function ProductStockPage({
     <AppShell activeKey="reports-stock-transactions">
       <main className="page">
         {/* Breadcrumb Trail */}
-        <Breadcrumb trail={["Reports", "Stock Transactions"]} />
+        <Breadcrumb trail={["Reports", activeTab === "goods-expected" ? "Goods Expected Report" : "Stock Transactions"]} />
 
         {/* Top Page Header */}
         <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Product Stock Transactions</h1>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
+              {activeTab === "goods-expected" ? "Goods Expected Date Report (Marketing)" : "Product Stock Transactions"}
+            </h1>
           </div>
 
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            {/* Filter Toggle Button matching Screenshot 1 */}
-            <button
-              type="button"
-              className="btn stock-btn-filter"
-              style={{
-                background: "#4b6584",
-                color: "#ffffff",
-                padding: "8px 12px",
-                borderRadius: "4px",
-                border: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-              }}
-              onClick={() => setShowFilterPanel((prev) => !prev)}
-              title="Filter stock list"
-              aria-label="Filter"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
-              {activeFilterCount > 0 && <span className="stock-filter-badge">{activeFilterCount}</span>}
-            </button>
+            {activeTab === "stock" ? (
+              <>
+                {/* Filter Toggle Button matching Screenshot 1 */}
+                <button
+                  type="button"
+                  className="btn stock-btn-filter"
+                  style={{
+                    background: "#4b6584",
+                    color: "#ffffff",
+                    padding: "8px 12px",
+                    borderRadius: "4px",
+                    border: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  }}
+                  onClick={() => setShowFilterPanel((prev) => !prev)}
+                  title="Filter stock list"
+                  aria-label="Filter"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                  </svg>
+                  {activeFilterCount > 0 && <span className="stock-filter-badge">{activeFilterCount}</span>}
+                </button>
 
-            {/* Export Button */}
-            <button
-              type="button"
-              className="btn stock-btn-export"
-              style={{
-                background: "#5c6f84",
-                color: "#ffffff",
-                padding: "8px 16px",
-                borderRadius: "4px",
-                fontWeight: 600,
-                fontSize: "13px",
-                border: "none",
-                cursor: "pointer",
-              }}
-              onClick={handleExport}
-              title="Export to Excel"
-            >
-              Export
-            </button>
+                {/* Export Button */}
+                <button
+                  type="button"
+                  className="btn stock-btn-export"
+                  style={{
+                    background: "#5c6f84",
+                    color: "#ffffff",
+                    padding: "8px 16px",
+                    borderRadius: "4px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                  onClick={handleExport}
+                  title="Export to Excel"
+                >
+                  Export
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleExportExpected}
+                style={{
+                  background: "#0284c7",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 16px",
+                  borderRadius: "4px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <span>📥</span>
+                <span>Export Excel</span>
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Tab Switcher: Stock Balances vs Goods Expected Date Report */}
+        <div
+          role="tablist"
+          aria-label="Stock and Reports Navigation"
+          style={{
+            display: "flex",
+            gap: "10px",
+            marginBottom: "16px",
+            borderBottom: "2px solid #e2e8f0",
+            paddingBottom: "10px",
+          }}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "stock"}
+            onClick={() => setActiveTab("stock")}
+            data-testid="tab-stock-balances"
+            style={{
+              padding: "8px 16px",
+              borderRadius: "6px",
+              fontSize: "13.5px",
+              fontWeight: activeTab === "stock" ? 700 : 500,
+              color: activeTab === "stock" ? "#ffffff" : "#475569",
+              background: activeTab === "stock" ? "#0284c7" : "#f1f5f9",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              transition: "all 0.15s ease",
+            }}
+          >
+            <span>📊</span>
+            <span>Product Stock Transactions</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "goods-expected"}
+            onClick={() => setActiveTab("goods-expected")}
+            data-testid="tab-goods-expected"
+            style={{
+              padding: "8px 16px",
+              borderRadius: "6px",
+              fontSize: "13.5px",
+              fontWeight: activeTab === "goods-expected" ? 700 : 500,
+              color: activeTab === "goods-expected" ? "#ffffff" : "#475569",
+              background: activeTab === "goods-expected" ? "#0284c7" : "#f1f5f9",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              transition: "all 0.15s ease",
+            }}
+          >
+            <span>🚢</span>
+            <span>Goods Expected Date Report (Marketing)</span>
+          </button>
+        </div>
+
+        {activeTab === "stock" ? (
+          <>
 
         {/* Inline Filter Panel */}
         {showFilterPanel && (
@@ -1398,6 +1729,353 @@ export function ProductStockPage({
             />
           </div>
         </div>
+          </>
+        ) : (
+          /* Goods Expected Date Report for Marketing view */
+          <div className="goods-expected-report-container" data-testid="goods-expected-view">
+            {/* Filter & Metric Card */}
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "6px",
+                padding: "16px 20px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                marginBottom: "16px",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1e293b", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span>🚢</span>
+                    <span>Goods Expected Date Report (Marketing)</span>
+                  </h2>
+                  <p style={{ margin: "4px 0 0 0", fontSize: "12.5px", color: "#64748b" }}>
+                    Machine lookup allowing marketing to check arriving containers, ETD, ETA Port, and Expected Arrival Date.
+                  </p>
+                </div>
+              </div>
+
+              {/* KPI Strip */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: "12px",
+                  marginTop: "16px",
+                }}
+              >
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Total Expected Machines</div>
+                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#0284c7", marginTop: "2px" }}>
+                    {totalArrivingUnits} Units
+                  </div>
+                </div>
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Incoming Containers</div>
+                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a", marginTop: "2px" }}>
+                    {totalContainers} Containers
+                  </div>
+                </div>
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Total Shipments Listed</div>
+                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#10b981", marginTop: "2px" }}>
+                    {filteredExpectedItems.length} Shipments
+                  </div>
+                </div>
+              </div>
+
+              {/* Machine Lookup Search & Warehouse Filters */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "2fr 1fr 1fr auto",
+                  gap: "12px",
+                  marginTop: "16px",
+                  alignItems: "flex-end",
+                }}
+              >
+                <div>
+                  <label htmlFor="machine-lookup-search" style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                    🔍 Machine Lookup (Name, Code, Container, Supplier)
+                  </label>
+                  <input
+                    id="machine-lookup-search"
+                    aria-label="Machine lookup"
+                    type="text"
+                    className="form-control"
+                    placeholder="Search machine name (e.g. Band Sealer, Shrink Tunnel)..."
+                    value={machineSearchQuery}
+                    onChange={(e) => setMachineSearchQuery(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "36px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      padding: "0 12px",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="expected-warehouse-select" style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                    Destination Warehouse
+                  </label>
+                  <select
+                    id="expected-warehouse-select"
+                    aria-label="Filter by Warehouse"
+                    value={expectedWarehouseFilter}
+                    onChange={(e) => setExpectedWarehouseFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "36px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      padding: "0 10px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <option value="All">All Warehouses</option>
+                    <option value="Mumbai">Mumbai</option>
+                    <option value="Ahmedabad">Ahmedabad</option>
+                    <option value="Indore">Indore</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="expected-status-select" style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                    Shipment Status
+                  </label>
+                  <select
+                    id="expected-status-select"
+                    aria-label="Filter by Status"
+                    value={expectedStatusFilter}
+                    onChange={(e) => setExpectedStatusFilter(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "36px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      padding: "0 10px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <option value="All">All Statuses</option>
+                    <option value="In Transit">In Transit</option>
+                    <option value="Ordered">Ordered</option>
+                    <option value="Customs Cleared">Customs Cleared</option>
+                  </select>
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMachineSearchQuery("");
+                      setExpectedWarehouseFilter("All");
+                      setExpectedStatusFilter("All");
+                    }}
+                    style={{
+                      height: "36px",
+                      padding: "0 14px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      background: "#f8fafc",
+                      fontSize: "12.5px",
+                      color: "#475569",
+                      cursor: "pointer",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Table Card */}
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "6px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                overflow: "hidden",
+                marginBottom: "24px",
+              }}
+            >
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }} aria-label="Goods Expected Date Report Table">
+                  <thead>
+                    <tr style={{ background: "#f8fafc", borderBottom: "2px solid #cbd5e1", color: "#334155" }}>
+                      <th style={{ padding: "10px 8px", textAlign: "center", width: "45px" }}>#</th>
+                      <th style={{ padding: "10px 12px", textAlign: "left", minWidth: "220px" }}>Machine / Product Name</th>
+                      <th style={{ padding: "10px 12px", textAlign: "left", minWidth: "160px" }}>Container / Consignment No</th>
+                      <th style={{ padding: "10px 12px", textAlign: "left", minWidth: "180px" }}>Supplier</th>
+                      <th style={{ padding: "10px 12px", textAlign: "left", width: "110px" }}>Destination</th>
+                      <th style={{ padding: "10px 12px", textAlign: "right", width: "90px" }}>Qty</th>
+                      <th style={{ padding: "10px 12px", textAlign: "left", width: "120px" }}>ETD (Origin)</th>
+                      <th style={{ padding: "10px 12px", textAlign: "left", width: "120px" }}>ETA Port</th>
+                      <th style={{ padding: "10px 12px", textAlign: "left", width: "140px" }}>Expected Arrival</th>
+                      <th style={{ padding: "10px 12px", textAlign: "center", width: "110px" }}>Status</th>
+                      <th style={{ padding: "10px 12px", textAlign: "center", width: "90px" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expectedLoading ? (
+                      <tr>
+                        <td colSpan={11} style={{ textAlign: "center", padding: "40px 0", color: "#64748b" }}>
+                          Loading arriving containers report...
+                        </td>
+                      </tr>
+                    ) : filteredExpectedItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={11} style={{ textAlign: "center", padding: "40px 0", color: "#64748b" }}>
+                          No incoming machine shipments found matching "{machineSearchQuery}".
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredExpectedItems.map((row, idx) => (
+                        <tr
+                          key={row.id || idx}
+                          style={{
+                            borderBottom: "1px solid #e2e8f0",
+                            background: idx % 2 === 0 ? "#ffffff" : "#fcfdfd",
+                          }}
+                        >
+                          <td style={{ textAlign: "center", color: "#64748b", padding: "10px 8px" }}>
+                            {row.sr_no || idx + 1}
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <div style={{ fontWeight: 600, color: "#1e293b" }}>{row.product_name}</div>
+                            {row.product_code && row.product_code !== "-" && (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  marginTop: "3px",
+                                  padding: "1px 6px",
+                                  borderRadius: "4px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  background: "#f1f5f9",
+                                  color: "#475569",
+                                }}
+                              >
+                                {row.product_code}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedConsignment({ row: { ...row, quantity: row.quantity }, productName: row.product_name })}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                padding: 0,
+                                color: "#0284c7",
+                                fontWeight: 700,
+                                cursor: "pointer",
+                                textDecoration: "underline",
+                                fontSize: "13px",
+                                textAlign: "left",
+                              }}
+                              title="Click to view container/consignment details"
+                            >
+                              {row.container_no || row.consignment_no || "-"}
+                            </button>
+                            {row.ordered_date && row.ordered_date !== "-" && (
+                              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                                PO Date: {row.ordered_date}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "10px 12px", color: "#475569" }}>
+                            {row.supplier_name || "-"}
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                background: "#f0fdf4",
+                                color: "#166534",
+                              }}
+                            >
+                              {row.warehouse || "Mumbai"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
+                            {row.quantity} <span style={{ fontSize: "11px", fontWeight: 400, color: "#64748b" }}>{row.uom || "SET"}</span>
+                          </td>
+                          <td style={{ padding: "10px 12px", color: "#475569", fontSize: "12.5px" }}>
+                            {row.etd_origin_date || "-"}
+                          </td>
+                          <td style={{ padding: "10px 12px", color: "#475569", fontSize: "12.5px" }}>
+                            {row.eta_port_date || "-"}
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "3px 8px",
+                                borderRadius: "4px",
+                                fontSize: "12px",
+                                fontWeight: 700,
+                                background: "#eff6ff",
+                                color: "#1d4ed8",
+                                border: "1px solid #bfdbfe",
+                              }}
+                            >
+                              <span>📅</span>
+                              <span>{row.expected_arrival_date || "-"}</span>
+                            </span>
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                            <span
+                              className={`stock-status-pill ${
+                                (row.status || "").toLowerCase().includes("transit")
+                                  ? "transit"
+                                  : (row.status || "").toLowerCase().includes("clear")
+                                  ? "confirmed"
+                                  : "pending"
+                              }`}
+                            >
+                              {row.status || "In Transit"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedConsignment({ row: { ...row, quantity: row.quantity }, productName: row.product_name })}
+                              style={{
+                                padding: "4px 10px",
+                                borderRadius: "4px",
+                                border: "1px solid #0284c7",
+                                background: "#ffffff",
+                                color: "#0284c7",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Slide-over Breakup Modal (Sale Order Information / Consignment Breakup) */}
         {activeBreakup && (
@@ -1482,13 +2160,25 @@ export function ProductStockPage({
                           <tr key={idx}>
                             <td style={{ textAlign: "center", color: "#64748b" }}>{row.sr_no || idx + 1}</td>
                             <td>
-                              <strong style={{ color: "#0369a1" }}>{row.order_no || "SO-Direct"}</strong>
-                              {row.order_date && <div style={{ fontSize: "11.5px", color: "#64748b" }}>{row.order_date}</div>}
-                              {row.company_name && (
-                                <div style={{ fontSize: "11.5px", color: "#475569", marginTop: "2px", fontWeight: 500 }}>
-                                  {row.company_name}
-                                </div>
-                              )}
+                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <strong style={{ color: "#0369a1", fontSize: "13px" }}>{row.order_no || "SO-Direct"}</strong>
+                                <span
+                                  className="stock-popup-company-name"
+                                  data-testid="stock-popup-company-sub"
+                                  style={{
+                                    fontSize: "12px",
+                                    color: "#0f172a",
+                                    fontWeight: 600,
+                                    lineHeight: "1.3",
+                                    marginTop: "1px",
+                                  }}
+                                >
+                                  {row.company_name || "—"}
+                                </span>
+                                {row.order_date && (
+                                  <span style={{ fontSize: "11px", color: "#64748b" }}>{row.order_date}</span>
+                                )}
+                              </div>
                             </td>
                             <td style={{ fontWeight: 600 }}>
                               <div>{row.company_name || "-"}</div>

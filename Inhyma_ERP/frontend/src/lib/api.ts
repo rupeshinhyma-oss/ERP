@@ -835,6 +835,23 @@ export const InventoryApi = {
   },
 
   /**
+   * Fetch Goods Expected Date Report for marketing machine lookup.
+   */
+  async getGoodsExpectedReport(params?: {
+    machine?: string;
+    warehouse?: string;
+    status?: string;
+    limit?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.machine) qs.set("machine", params.machine);
+    if (params?.warehouse && params.warehouse !== "All") qs.set("warehouse", params.warehouse);
+    if (params?.status && params.status !== "All") qs.set("status", params.status);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    return apiGet<any>(`/inventory/goods-expected-report?${qs.toString()}`);
+  },
+
+  /**
    * Fetch product re-order list with shortfall and MOQ calculations.
    */
   async listProductReorder(params?: ProductReorderFilterParams) {

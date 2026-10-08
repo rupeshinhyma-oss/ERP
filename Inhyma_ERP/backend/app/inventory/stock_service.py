@@ -60,7 +60,12 @@ async def get_warehouse(db: AsyncSession, name: str) -> Warehouse:
 
 def is_physical(warehouse: Warehouse) -> bool:
     """Physical warehouses are the main ones; transit / ordered warehouses point at a main warehouse."""
-    return warehouse.main_warehouse_id is None
+    if warehouse.main_warehouse_id is not None:
+        return False
+    w_name = (warehouse.name or "").strip().lower()
+    if "transit" in w_name or "ordered" in w_name:
+        return False
+    return True
 
 
 async def find_product(db: AsyncSession, name: str) -> Product:

@@ -240,13 +240,18 @@ export function AddTransferOrderPage() {
       return;
     }
 
-    // Check if any product exceeds available quantity
-    const exceededItem = selectedProducts.find((p) => p.transfer_qty > p.available_qty);
-    if (exceededItem) {
-      setErrorMessage(
-        `Quantity for "${exceededItem.product_name}" exceeds available balance of ${exceededItem.available_qty} in ${fromWarehouse}.`
-      );
-      return;
+    // Negative Stock Lock in Physical Warehouses:
+    // Negative stock is allowed in Transit and Ordered warehouses,
+    // but must strictly block saving any Stock Transfer that drives a physical warehouse stock negative.
+    const isFromPhysical = !fromWarehouse.toLowerCase().includes("transit") && !fromWarehouse.toLowerCase().includes("ordered");
+    if (isFromPhysical) {
+      const exceededItem = selectedProducts.find((p) => p.transfer_qty > p.available_qty);
+      if (exceededItem) {
+        setErrorMessage(
+          `Insufficient physical stock: Quantity for "${exceededItem.product_name}" (${exceededItem.transfer_qty}) exceeds available physical balance of ${exceededItem.available_qty} in ${fromWarehouse}. Physical warehouse stock cannot be negative.`
+        );
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -278,7 +283,12 @@ export function AddTransferOrderPage() {
 
       try {
         await InventoryApi.createStockTransfer(payload);
-      } catch (err) {
+      } catch (err: any) {
+        const errorDetail = err?.response?.data?.detail?.message || err?.response?.data?.detail || err?.message;
+        if (err?.response?.status === 400 || err?.response?.status === 409) {
+          setErrorMessage(String(errorDetail || "Insufficient physical stock in warehouse."));
+          return;
+        }
         console.warn("API createStockTransfer fallback to local persistence:", err);
       }
 

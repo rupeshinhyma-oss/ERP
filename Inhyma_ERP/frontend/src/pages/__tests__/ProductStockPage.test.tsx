@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
-import { ProductStockPage, INITIAL_STOCK_ITEMS } from "../ProductStockPage";
+import { ProductStockPage, INITIAL_STOCK_ITEMS, INITIAL_GOODS_EXPECTED_ITEMS } from "../ProductStockPage";
 import { InventoryApi } from "@/lib/api";
 
 // Mock AppShell so the test focuses purely on the page content and navigation key
@@ -33,6 +33,24 @@ describe("ProductStockPage", () => {
     vi.spyOn(InventoryApi, "listProductStock").mockResolvedValue({
       data: { items: INITIAL_STOCK_ITEMS },
     } as any);
+    vi.spyOn(InventoryApi, "getGoodsExpectedReport").mockImplementation((params?: any) => {
+      let filtered = [...INITIAL_GOODS_EXPECTED_ITEMS];
+      if (params?.machine) {
+        const q = String(params.machine).toLowerCase();
+        filtered = filtered.filter(
+          (i) =>
+            i.product_name.toLowerCase().includes(q) ||
+            i.product_code.toLowerCase().includes(q) ||
+            i.container_no.toLowerCase().includes(q)
+        );
+      }
+      return Promise.resolve({
+        data: {
+          items: filtered,
+          total: filtered.length,
+        },
+      } as any);
+    });
     vi.spyOn(InventoryApi, "getProductStockBreakup").mockImplementation((({ type }: { type: string }) => {
       if (type === "physical") {
         return Promise.resolve({
@@ -344,6 +362,109 @@ describe("ProductStockPage", () => {
     // Close consignment details
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByTestId("consignment-detail-modal")).toBeNull();
+  });
+
+  it("displays company name directly beneath the SO number in stock transaction popup", async () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    // Find and click Mumbai physical stock (i) button on Sensor (Banding)
+    const mumbaiPhysicalBtn = screen.getAllByLabelText("View Mumbai Sale Order Information")[0];
+    expect(mumbaiPhysicalBtn).toBeTruthy();
+    fireEvent.click(mumbaiPhysicalBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("stock-breakup-modal")).toBeTruthy();
+    });
+
+    // Verify SO number is rendered
+    expect(screen.getByText("SO-2026-001")).toBeTruthy();
+
+    // Verify company name is rendered directly beneath SO number with testid
+    const companySub = screen.getByTestId("stock-popup-company-sub");
+    expect(companySub).toBeTruthy();
+    expect(companySub.textContent).toBe("Acme Packaging");
+  });
+
+  it("switches to Goods Expected Date Report tab and displays machine lookup report", async () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    // Click tab to switch
+    const goodsTab = screen.getByTestId("tab-goods-expected");
+    expect(goodsTab).toBeTruthy();
+    fireEvent.click(goodsTab);
+
+    // Wait for goods expected view to render
+    await waitFor(() => {
+      expect(screen.getByLabelText("Machine lookup")).toBeTruthy();
+      expect(screen.getByLabelText("Goods Expected Date Report Table")).toBeTruthy();
+    });
+
+    // Check table headers
+    expect(screen.getByText("Machine / Product Name")).toBeTruthy();
+    expect(screen.getByText("Container / Consignment No")).toBeTruthy();
+    expect(screen.getByText("ETD (Origin)")).toBeTruthy();
+    expect(screen.getByText("ETA Port")).toBeTruthy();
+    expect(screen.getByText("Expected Arrival")).toBeTruthy();
+
+    // Check that items are displayed
+    expect(screen.getByText("Continuous Band Sealer With Nitrogen Flushing")).toBeTruthy();
+    expect(screen.getByText("CON-INHYMA-2026-004")).toBeTruthy();
+    expect(screen.getByText("04-05-2026")).toBeTruthy();
+  });
+
+  it("filters goods expected report by machine name lookup", async () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    // Switch to goods expected tab
+    fireEvent.click(screen.getByTestId("tab-goods-expected"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Machine lookup")).toBeTruthy();
+    });
+
+    const searchInput = screen.getByLabelText("Machine lookup");
+    fireEvent.change(searchInput, { target: { value: "Shrink" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Automatic Shrink Tunnel 4020")).toBeTruthy();
+      expect(screen.queryByText("Continuous Band Sealer With Nitrogen Flushing")).toBeNull();
+    });
+  });
+
+  it("opens container/consignment details modal from Goods Expected Date Report", async () => {
+    render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+
+    fireEvent.click(screen.getByTestId("tab-goods-expected"));
+
+    await waitFor(() => {
+      expect(screen.getByText("CON-INHYMA-2026-004")).toBeTruthy();
+    });
+
+    // Click container button/link
+    fireEvent.click(screen.getByText("CON-INHYMA-2026-004"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("consignment-detail-modal")).toBeTruthy();
+      expect(screen.getByText(/Consignment Details: CON-INHYMA-2026-004/i)).toBeTruthy();
+      expect(screen.getByText(/ETD Origin Date:/i)).toBeTruthy();
+      expect(screen.getByText(/ETA Port Date:/i)).toBeTruthy();
+    });
   });
 });
 

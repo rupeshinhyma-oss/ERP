@@ -504,6 +504,18 @@ class SaleService:
         # products are refused instead of silently skipping the stock movement.
         if rules[order.status].get("stock_out"):
             await self._take_stock(order, self._lines(item_entities))
+        elif await self.is_physical_warehouse(order.warehouse):
+            # Strict physical warehouse negative stock lock: block saving if it drives physical stock negative
+            for name, qty in self._lines(item_entities):
+                prod = await stock_service.find_product(self.session, name)
+                stock_row = await stock_service._ensure_stock_row(self.session, prod)
+                col = stock_service.warehouse_column(order.warehouse)
+                avail = float(getattr(stock_row, col, 0.0) or 0.0)
+                if avail - qty < -1e-9:
+                    raise ConflictException(
+                        f"Not enough stock of '{prod.product_name}' in {order.warehouse} "
+                        f"(available {avail:g}, needed {qty:g}). Physical warehouses cannot go negative."
+                    )
 
         return await self.repo.create(order)
 
@@ -627,6 +639,18 @@ class SaleService:
 
         if stock_relevant and rules[order.status].get("stock_out"):
             await self._take_stock(order)
+        elif stock_relevant and await self.is_physical_warehouse(order.warehouse):
+            # Strict physical warehouse negative stock lock: block saving if it drives physical stock negative
+            for name, qty in self._lines(order.items):
+                prod = await stock_service.find_product(self.session, name)
+                stock_row = await stock_service._ensure_stock_row(self.session, prod)
+                col = stock_service.warehouse_column(order.warehouse)
+                avail = float(getattr(stock_row, col, 0.0) or 0.0)
+                if avail - qty < -1e-9:
+                    raise ConflictException(
+                        f"Not enough stock of '{prod.product_name}' in {order.warehouse} "
+                        f"(available {avail:g}, needed {qty:g}). Physical warehouses cannot go negative."
+                    )
 
         return await self.repo.update(order)
 
