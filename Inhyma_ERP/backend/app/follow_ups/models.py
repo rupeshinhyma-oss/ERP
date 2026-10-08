@@ -48,6 +48,13 @@ class FollowUp(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDele
     district: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     state: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
+    # Lead & Import Attributes
+    direct_import_from_china: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    monthly_import_volume: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    lead_status: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    reason_for_won_loss: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entry_source: Mapped[str | None] = mapped_column(String(50), nullable=True, default="Outside", index=True)
+
     # Dates
     followup_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     added_on: Mapped[date] = mapped_column(Date, nullable=False, default=date.today, index=True)

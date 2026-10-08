@@ -26,7 +26,7 @@ import {
   ClientNameAutocomplete,
   type CompanyAutocompleteItem,
 } from "@/components/ClientNameAutocomplete";
-import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { apiGet, apiPost, apiDelete } from "@/lib/api";
 import { IconFilter } from "@/components/icons";
 
 export interface FollowUpItem {
@@ -54,6 +54,11 @@ export interface FollowUpItem {
   followup_date?: string | null;
   added_on?: string | null;
   notes?: string | null;
+  direct_import_from_china?: string | null;
+  monthly_import_volume?: string | null;
+  lead_status?: string | null;
+  reason_for_won_loss?: string | null;
+  entry_source?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -71,6 +76,9 @@ interface FilterState {
   client_grade: string;
   potential_type: string;
   business_category: string;
+  call_category: string;
+  direct_import_from_china: string;
+  monthly_import_volume: string;
 }
 
 const INITIAL_FILTERS: FilterState = {
@@ -86,6 +94,9 @@ const INITIAL_FILTERS: FilterState = {
   client_grade: "",
   potential_type: "",
   business_category: "",
+  call_category: "",
+  direct_import_from_china: "",
+  monthly_import_volume: "",
 };
 
 const DEFAULT_INDIAN_STATES = [
@@ -159,6 +170,682 @@ const DEFAULT_STATUSES = [
 
 const DEFAULT_GRADES = ["Grade A", "Grade B", "Grade C", "Premium"];
 const DEFAULT_POTENTIALS = ["High", "Medium", "Low", "None"];
+
+const GST_STATE_CODE_MAP: Record<string, string> = {
+  "01": "Jammu and Kashmir",
+  "02": "Himachal Pradesh",
+  "03": "Punjab",
+  "04": "Chandigarh",
+  "05": "Uttarakhand",
+  "06": "Haryana",
+  "07": "Delhi",
+  "08": "Rajasthan",
+  "09": "Uttar Pradesh",
+  "10": "Bihar",
+  "11": "Sikkim",
+  "12": "Arunachal Pradesh",
+  "13": "Nagaland",
+  "14": "Manipur",
+  "15": "Mizoram",
+  "16": "Tripura",
+  "17": "Meghalaya",
+  "18": "Assam",
+  "19": "West Bengal",
+  "20": "Jharkhand",
+  "21": "Odisha",
+  "22": "Chhattisgarh",
+  "23": "Madhya Pradesh",
+  "24": "Gujarat",
+  "26": "Dadra and Nagar Haveli and Daman and Diu",
+  "27": "Maharashtra",
+  "29": "Karnataka",
+  "30": "Goa",
+  "31": "Lakshadweep",
+  "32": "Kerala",
+  "33": "Tamil Nadu",
+  "34": "Puducherry",
+  "35": "Andaman and Nicobar Islands",
+  "36": "Telangana",
+  "37": "Andhra Pradesh",
+  "38": "Ladakh",
+  "97": "Other Territory",
+};
+
+interface CompanyForm1ModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (company: {
+    company_name: string;
+    contact_person?: string;
+    contact_phone?: string;
+    designation?: string;
+    city?: string;
+    state?: string;
+  }) => void;
+}
+
+function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1ModalProps) {
+  const [form, setForm] = useState({
+    company_name: "",
+    company_type: "B2B",
+    tax_id_number: "",
+    area: "",
+    state_id: "",
+    state_name: "",
+    district: "",
+    city: "",
+    contact_salutation: "Mr",
+    contact_full_name: "",
+    contact_designation: "",
+    contact_calling_number: "",
+    contact_whatsapp_number: "",
+    primary_website: "",
+  });
+
+  const [statesList, setStatesList] = useState<Array<{ id: string; name: string }>>([]);
+  const [districtsList, setDistrictsList] = useState<Array<{ id: string; name: string }>>([]);
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    (async () => {
+      try {
+        const res = await apiGet<any[]>("/masters/states?page_size=100");
+        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+          setStatesList(res.data.map((s: any) => ({ id: String(s.id), name: s.name })));
+        } else {
+          setStatesList(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+        }
+      } catch {
+        setStatesList(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+      }
+    })();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!form.state_id) {
+      setDistrictsList([]);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await apiGet<any[]>(`/masters/districts?state_id=${form.state_id}&page_size=100`);
+        if (res?.data && Array.isArray(res.data)) {
+          setDistrictsList(res.data.map((d: any) => ({ id: String(d.id), name: d.name })));
+        }
+      } catch {
+        setDistrictsList([]);
+      }
+    })();
+  }, [form.state_id]);
+
+  if (!isOpen) return null;
+
+  const handleFetchGstData = () => {
+    const raw = form.tax_id_number.trim().toUpperCase();
+    if (!raw) {
+      setErrorMsg("Please enter GST No to fetch state details.");
+      return;
+    }
+    const code = raw.slice(0, 2);
+    const matchedStateName = GST_STATE_CODE_MAP[code];
+    if (matchedStateName) {
+      const match = statesList.find(
+        (s) =>
+          s.name.toLowerCase() === matchedStateName.toLowerCase() ||
+          s.name.toLowerCase().includes(matchedStateName.toLowerCase()) ||
+          matchedStateName.toLowerCase().includes(s.name.toLowerCase())
+      );
+      if (match) {
+        setForm((prev) => ({ ...prev, state_id: match.id, state_name: match.name, tax_id_number: raw }));
+        setInfoMsg(`State auto-detected from GST: ${match.name}`);
+        setErrorMsg(null);
+      } else {
+        setForm((prev) => ({ ...prev, state_name: matchedStateName, tax_id_number: raw }));
+        setInfoMsg(`State auto-detected from GST: ${matchedStateName}`);
+        setErrorMsg(null);
+      }
+    } else {
+      setInfoMsg("GST recorded. Please select State manually.");
+    }
+  };
+
+  const handleCopyPrimary = () => {
+    if (form.contact_calling_number.trim()) {
+      setForm((prev) => ({ ...prev, contact_whatsapp_number: prev.contact_calling_number.trim() }));
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.company_name.trim()) {
+      setErrorMsg("Company Name is required.");
+      return;
+    }
+    if (!form.tax_id_number.trim()) {
+      setErrorMsg("GST No Of Company is required.");
+      return;
+    }
+    if (!form.state_id && !form.state_name) {
+      setErrorMsg("State is required.");
+      return;
+    }
+
+    setSaving(true);
+    setErrorMsg(null);
+
+    const stateObj = statesList.find((s) => s.id === form.state_id);
+    const resolvedStateName = stateObj?.name || form.state_name;
+
+    const payload = {
+      company_name: form.company_name.trim(),
+      company_type: form.company_type || null,
+      tax_id_number: form.tax_id_number.trim().toUpperCase() || null,
+      area: form.area.trim() || null,
+      state_id: form.state_id || null,
+      state: resolvedStateName || null,
+      district: form.district.trim() || null,
+      city: form.city.trim() || null,
+      contact_salutation: form.contact_salutation || "Mr",
+      contact_full_name: form.contact_full_name.trim() || null,
+      contact_designation: form.contact_designation.trim() || null,
+      contact_calling_number: form.contact_calling_number.trim() || null,
+      contact_whatsapp_number: form.contact_whatsapp_number.trim() || null,
+      primary_website: form.primary_website.trim() || null,
+    };
+
+    try {
+      const res = await apiPost<any>("/companies", payload);
+      const saved = res?.data || payload;
+      onSuccess({
+        company_name: saved.company_name || form.company_name,
+        contact_person: saved.contact_full_name || form.contact_full_name,
+        contact_phone: saved.contact_calling_number || form.contact_calling_number,
+        designation: saved.contact_designation || form.contact_designation,
+        city: saved.city || form.city,
+        state: saved.state || resolvedStateName,
+      });
+      onClose();
+    } catch {
+      // Local fallback for offline/testing
+      onSuccess({
+        company_name: form.company_name,
+        contact_person: form.contact_full_name,
+        contact_phone: form.contact_calling_number,
+        designation: form.contact_designation,
+        city: form.city,
+        state: resolvedStateName,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fInputStyle: React.CSSProperties = {
+    width: "100%",
+    height: "36px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "4px",
+    padding: "0 10px",
+    fontSize: "13px",
+    boxSizing: "border-box",
+    outline: "none",
+    background: "#ffffff",
+  };
+
+  return (
+    <div
+      id="company-form1-backdrop"
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(15, 23, 42, 0.45)",
+        backdropFilter: "blur(2px)",
+        zIndex: 2000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        id="company-form1-modal"
+        style={{
+          width: "100%",
+          maxWidth: "680px",
+          maxHeight: "92vh",
+          background: "#ffffff",
+          borderRadius: "8px",
+          boxShadow: "0 20px 40px rgba(0,0,0,0.18)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "16px 20px",
+            borderBottom: "1px solid #e2e8f0",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            background: "#f8fafc",
+          }}
+        >
+          <div>
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1e293b" }}>
+              Add Company (Form 1 - Prospect Master)
+            </h3>
+            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>
+              Add new company on the fly to auto-populate call log
+            </p>
+          </div>
+          <button
+            id="btn-close-form1-modal"
+            type="button"
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              fontSize: "18px",
+              color: "#94a3b8",
+              cursor: "pointer",
+              padding: "4px",
+              lineHeight: 1,
+            }}
+            title="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Alerts */}
+        {errorMsg && (
+          <div
+            style={{
+              margin: "12px 20px 0",
+              padding: "8px 12px",
+              borderRadius: "4px",
+              fontSize: "12.5px",
+              background: "#fef2f2",
+              color: "#dc2626",
+              border: "1px solid #fecaca",
+            }}
+          >
+            {errorMsg}
+          </div>
+        )}
+        {infoMsg && (
+          <div
+            style={{
+              margin: "12px 20px 0",
+              padding: "8px 12px",
+              borderRadius: "4px",
+              fontSize: "12.5px",
+              background: "#eff6ff",
+              color: "#1d4ed8",
+              border: "1px solid #bfdbfe",
+            }}
+          >
+            {infoMsg}
+          </div>
+        )}
+
+        {/* Form Body */}
+        <form
+          id="company-form1"
+          onSubmit={handleSave}
+          style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}
+        >
+          <div
+            style={{
+              padding: "16px 20px",
+              flex: 1,
+              overflowY: "auto",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "14px",
+            }}
+          >
+            {/* 1. Company Name * (full width) */}
+            <div style={{ gridColumn: "span 2" }}>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Company Name <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <input
+                id="form1_company_name"
+                data-testid="form1-company-name"
+                type="text"
+                required
+                style={fInputStyle}
+                placeholder="Enter company name"
+                value={form.company_name}
+                onChange={(e) => setForm((p) => ({ ...p, company_name: e.target.value }))}
+              />
+            </div>
+
+            {/* 2. Business Type */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Business Type
+              </label>
+              <select
+                id="form1_company_type"
+                style={fInputStyle}
+                value={form.company_type}
+                onChange={(e) => setForm((p) => ({ ...p, company_type: e.target.value }))}
+              >
+                <option value="B2B">B2B</option>
+                <option value="B2C">B2C</option>
+                <option value="Manufacturer">Manufacturer</option>
+                <option value="Trader">Trader</option>
+                <option value="OEM">OEM</option>
+                <option value="Distributor">Distributor</option>
+              </select>
+            </div>
+
+            {/* 3. GST No Of Company * */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                GST No Of Company <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <input
+                  id="form1_tax_id_number"
+                  data-testid="form1-tax-id"
+                  type="text"
+                  required
+                  placeholder="24ABCDE1234F1Z5"
+                  style={{ ...fInputStyle, flex: 1, textTransform: "uppercase" }}
+                  value={form.tax_id_number}
+                  onChange={(e) => setForm((p) => ({ ...p, tax_id_number: e.target.value.toUpperCase() }))}
+                />
+                <button
+                  id="btn-form1-fetch-gst"
+                  data-testid="btn-form1-fetch-gst"
+                  type="button"
+                  onClick={handleFetchGstData}
+                  style={{
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "4px",
+                    padding: "0 12px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    height: "36px",
+                  }}
+                >
+                  Fetch Data
+                </button>
+              </div>
+            </div>
+
+            {/* 4. Area */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Area
+              </label>
+              <input
+                id="form1_area"
+                type="text"
+                style={fInputStyle}
+                placeholder="Industrial Area / GIDC"
+                value={form.area}
+                onChange={(e) => setForm((p) => ({ ...p, area: e.target.value }))}
+              />
+            </div>
+
+            {/* 5. State * */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                State <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <select
+                id="form1_state"
+                data-testid="form1-state"
+                required
+                style={fInputStyle}
+                value={form.state_id || form.state_name}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const matched = statesList.find((s) => s.id === val || s.name === val);
+                  if (matched) {
+                    setForm((p) => ({ ...p, state_id: matched.id, state_name: matched.name, district: "" }));
+                  } else {
+                    setForm((p) => ({ ...p, state_id: "", state_name: val, district: "" }));
+                  }
+                }}
+              >
+                <option value="">Select State</option>
+                {statesList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 6. District */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                District
+              </label>
+              {districtsList.length > 0 ? (
+                <select
+                  id="form1_district"
+                  style={fInputStyle}
+                  value={form.district}
+                  onChange={(e) => setForm((p) => ({ ...p, district: e.target.value }))}
+                >
+                  <option value="">Select District</option>
+                  {districtsList.map((d) => (
+                    <option key={d.id} value={d.name}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="form1_district"
+                  type="text"
+                  style={fInputStyle}
+                  placeholder="Enter district"
+                  value={form.district}
+                  onChange={(e) => setForm((p) => ({ ...p, district: e.target.value }))}
+                />
+              )}
+            </div>
+
+            {/* 7. City */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                City
+              </label>
+              <input
+                id="form1_city"
+                type="text"
+                style={fInputStyle}
+                placeholder="Enter city"
+                value={form.city}
+                onChange={(e) => setForm((p) => ({ ...p, city: e.target.value }))}
+              />
+            </div>
+
+            {/* 8. Full Name & Salutation */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Contact Person Full Name
+              </label>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <select
+                  style={{ ...fInputStyle, width: "70px", flexShrink: 0 }}
+                  value={form.contact_salutation}
+                  onChange={(e) => setForm((p) => ({ ...p, contact_salutation: e.target.value }))}
+                >
+                  <option value="Mr">Mr</option>
+                  <option value="Mrs">Mrs</option>
+                  <option value="Ms">Ms</option>
+                  <option value="Dr">Dr</option>
+                </select>
+                <input
+                  id="form1_contact_name"
+                  type="text"
+                  style={{ ...fInputStyle, flex: 1 }}
+                  placeholder="Full name"
+                  value={form.contact_full_name}
+                  onChange={(e) => setForm((p) => ({ ...p, contact_full_name: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {/* 9. Designation */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Designation
+              </label>
+              <input
+                id="form1_contact_designation"
+                type="text"
+                style={fInputStyle}
+                placeholder="e.g. Director / Purchase Head"
+                value={form.contact_designation}
+                onChange={(e) => setForm((p) => ({ ...p, contact_designation: e.target.value }))}
+              />
+            </div>
+
+            {/* 10. Calling Number */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Contact Calling Number
+              </label>
+              <input
+                id="form1_contact_calling_number"
+                type="text"
+                style={fInputStyle}
+                placeholder="Mobile / Office number"
+                value={form.contact_calling_number}
+                onChange={(e) => setForm((p) => ({ ...p, contact_calling_number: e.target.value }))}
+              />
+            </div>
+
+            {/* 11. WhatsApp Number */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#334155", margin: 0 }}>
+                  WhatsApp Number
+                </label>
+                <button
+                  id="btn-form1-copy-primary"
+                  type="button"
+                  onClick={handleCopyPrimary}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#0061f2",
+                    fontSize: "11.5px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: 0,
+                    textDecoration: "underline",
+                  }}
+                >
+                  Copy Primary
+                </button>
+              </div>
+              <input
+                id="form1_contact_whatsapp_number"
+                type="text"
+                style={fInputStyle}
+                placeholder="WhatsApp number"
+                value={form.contact_whatsapp_number}
+                onChange={(e) => setForm((p) => ({ ...p, contact_whatsapp_number: e.target.value }))}
+              />
+            </div>
+
+            {/* 12. Primary Website (full width) */}
+            <div style={{ gridColumn: "span 2" }}>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Primary Website / Catalog
+              </label>
+              <input
+                id="form1_primary_website"
+                type="text"
+                style={fInputStyle}
+                placeholder="https://example.com"
+                value={form.primary_website}
+                onChange={(e) => setForm((p) => ({ ...p, primary_website: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          {/* Sticky Action Footer */}
+          <div
+            style={{
+              padding: "14px 20px",
+              borderTop: "1px solid #e2e8f0",
+              background: "#f8fafc",
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: "10px",
+            }}
+          >
+            <button
+              id="btn-form1-cancel"
+              type="button"
+              onClick={onClose}
+              style={{
+                height: "36px",
+                padding: "0 16px",
+                borderRadius: "4px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#475569",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              id="btn-form1-save-company"
+              data-testid="form1-save"
+              type="submit"
+              disabled={saving}
+              style={{
+                height: "36px",
+                padding: "0 20px",
+                borderRadius: "4px",
+                border: "none",
+                background: "#0061f2",
+                color: "#ffffff",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: saving ? "not-allowed" : "pointer",
+                opacity: saving ? 0.7 : 1,
+              }}
+            >
+              {saving ? "Saving..." : "Save Company"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 // Shimmer Skeleton Rows for Follow Ups Table
 function FollowUpsTableSkeletonRows({ count = 8 }: { count?: number }) {
@@ -250,16 +937,23 @@ export default function FollowUpsPage() {
 
   // Drawers & Modals
   const [isAddDrawerOpen, setIsAddDrawerOpen] = useState<boolean>(false);
-  const [editingItem, setEditingItem] = useState<FollowUpItem | null>(null);
+  const [isCompanyForm1Open, setIsCompanyForm1Open] = useState<boolean>(false);
   const [inspectItem, setInspectItem] = useState<FollowUpItem | null>(null);
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<FollowUpItem | "bulk" | null>(null);
+  const [quickAddNotice, setQuickAddNotice] = useState<string | null>(null);
 
-  // Form State (Matching exact screenshot fields)
+  // Form State (Matching exact specs)
   const initialForm = {
     company_name: "",
     contact_person: "",
     contact_phone: "",
+    designation: "",
     call_type: "Telecall",
+    call_category: "Followup",
+    lead_status: "Ongoing",
+    reason_for_won_loss: "",
+    direct_import_from_china: "No",
+    monthly_import_volume: "",
     feedback: "",
     followup_date: "",
     current_status: "Active",
@@ -346,6 +1040,9 @@ export default function FollowUpsPage() {
           (item.state && item.state.toLowerCase().includes(q)) ||
           (item.call_type && item.call_type.toLowerCase().includes(q)) ||
           (item.call_category && item.call_category.toLowerCase().includes(q)) ||
+          (item.lead_status && item.lead_status.toLowerCase().includes(q)) ||
+          (item.reason_for_won_loss && item.reason_for_won_loss.toLowerCase().includes(q)) ||
+          (item.monthly_import_volume && item.monthly_import_volume.toLowerCase().includes(q)) ||
           (item.marketing_person && item.marketing_person.toLowerCase().includes(q)) ||
           (item.current_status && item.current_status.toLowerCase().includes(q)) ||
           (item.feedback && item.feedback.toLowerCase().includes(q));
@@ -365,6 +1062,12 @@ export default function FollowUpsPage() {
       if (appliedFilters.client_grade && item.client_grade?.toLowerCase() !== appliedFilters.client_grade.toLowerCase()) return false;
       if (appliedFilters.potential_type && item.potential_type?.toLowerCase() !== appliedFilters.potential_type.toLowerCase()) return false;
       if (appliedFilters.business_category && item.business_category?.toLowerCase() !== appliedFilters.business_category.toLowerCase()) return false;
+      if (appliedFilters.call_category && item.call_category?.toLowerCase() !== appliedFilters.call_category.toLowerCase()) return false;
+      if (appliedFilters.direct_import_from_china && item.direct_import_from_china?.toLowerCase() !== appliedFilters.direct_import_from_china.toLowerCase()) return false;
+      if (appliedFilters.monthly_import_volume && appliedFilters.monthly_import_volume.trim()) {
+        const volQ = appliedFilters.monthly_import_volume.toLowerCase().trim();
+        if (!item.monthly_import_volume || !item.monthly_import_volume.toLowerCase().includes(volQ)) return false;
+      }
 
       return true;
     });
@@ -517,22 +1220,8 @@ export default function FollowUpsPage() {
 
   // Form Handlers
   const handleOpenAddDrawer = () => {
-    setEditingItem(null);
     setFormData(initialForm);
-    setIsAddDrawerOpen(true);
-  };
-
-  const handleOpenEditDrawer = (item: FollowUpItem) => {
-    setEditingItem(item);
-    setFormData({
-      company_name: item.company_name || "",
-      contact_person: item.contact_person || "",
-      contact_phone: item.contact_phone || "",
-      call_type: item.call_type || "Telecall",
-      feedback: item.feedback || "",
-      followup_date: item.followup_date || "",
-      current_status: item.current_status || "Active",
-    });
+    setQuickAddNotice(null);
     setIsAddDrawerOpen(true);
   };
 
@@ -544,36 +1233,24 @@ export default function FollowUpsPage() {
     }
 
     try {
-      if (editingItem) {
-        // Update
-        const res = await apiPut<FollowUpItem>(`/follow-ups/${editingItem.id}`, formData);
-        const updated = (res as any)?.data || { ...editingItem, ...formData };
-        setFollowUps((prev) => prev.map((item) => (item.id === editingItem.id ? updated : item)));
-      } else {
-        // Create
-        const res = await apiPost<FollowUpItem>("/follow-ups", formData);
-        const created = (res as any)?.data || {
-          ...formData,
-          id: `fup-${Date.now()}`,
-          added_on: new Date().toISOString().slice(0, 10),
-        };
-        setFollowUps((prev) => [created, ...prev]);
-      }
+      const res = await apiPost<FollowUpItem>("/follow-ups", formData);
+      const created = (res as any)?.data || {
+        ...formData,
+        id: `fup-${Date.now()}`,
+        added_on: new Date().toISOString().slice(0, 10),
+      };
+      setFollowUps((prev) => [created, ...prev]);
       setIsAddDrawerOpen(false);
     } catch {
       // Local fallback
-      if (editingItem) {
-        setFollowUps((prev) => prev.map((item) => (item.id === editingItem.id ? { ...item, ...formData } : item)));
-      } else {
-        setFollowUps((prev) => [
-          {
-            ...formData,
-            id: `fup-${Date.now()}`,
-            added_on: new Date().toISOString().slice(0, 10),
-          },
-          ...prev,
-        ]);
-      }
+      setFollowUps((prev) => [
+        {
+          ...formData,
+          id: `fup-${Date.now()}`,
+          added_on: new Date().toISOString().slice(0, 10),
+        },
+        ...prev,
+      ]);
       setIsAddDrawerOpen(false);
     }
   };
@@ -995,6 +1672,53 @@ export default function FollowUpsPage() {
                   ))}
                 </select>
               </div>
+
+              {/* Row 5: Call Category, Direct Import from China?, Monthly Import Volume */}
+              <div>
+                <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                  Call Category
+                </label>
+                <select
+                  id="filter-call-category"
+                  style={filterSelectStyle}
+                  value={filters.call_category}
+                  onChange={(e) => setFilters({ ...filters, call_category: e.target.value })}
+                >
+                  <option value="">All</option>
+                  <option value="Followup">Followup</option>
+                  <option value="Lead">Lead</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                  Direct Import from China?
+                </label>
+                <select
+                  id="filter-direct-import"
+                  style={filterSelectStyle}
+                  value={filters.direct_import_from_china}
+                  onChange={(e) => setFilters({ ...filters, direct_import_from_china: e.target.value })}
+                >
+                  <option value="">All</option>
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                  Monthly Import Volume
+                </label>
+                <input
+                  id="filter-monthly-import-volume"
+                  type="text"
+                  style={inputStyle}
+                  placeholder="e.g. 5 Containers"
+                  value={filters.monthly_import_volume}
+                  onChange={(e) => setFilters({ ...filters, monthly_import_volume: e.target.value })}
+                />
+              </div>
             </div>
 
             {/* Bottom Action Buttons: Reset & Search */}
@@ -1327,20 +2051,77 @@ export default function FollowUpsPage() {
                         <td
                           style={{
                             padding: "12px 14px",
-                            maxWidth: "200px",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
+                            maxWidth: "220px",
                             color: "#334155",
                           }}
-                          title={item.feedback || undefined}
                         >
-                          {item.feedback || "—"}
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <button
+                              id={`btn-feedback-eye-${item.id}`}
+                              data-testid="btn-feedback-eye"
+                              type="button"
+                              onClick={() => setInspectItem(item)}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: "2px",
+                                fontSize: "14px",
+                                lineHeight: 1,
+                                color: "#0061f2",
+                                flexShrink: 0,
+                              }}
+                              title="View Discussion Notes"
+                            >
+                              👁️
+                            </button>
+                            <span
+                              style={{
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                display: "inline-block",
+                                maxWidth: "180px",
+                              }}
+                              title={item.feedback || undefined}
+                            >
+                              {item.feedback || "—"}
+                            </span>
+                          </div>
                         </td>
 
                         {/* 10. Call Category */}
                         <td style={{ padding: "12px 14px", color: "#334155" }}>
-                          {item.call_category || "—"}
+                          <div style={{ fontWeight: item.call_category === "Lead" ? 600 : 400 }}>
+                            {item.call_category || "—"}
+                          </div>
+                          {item.call_category === "Lead" && item.lead_status && (
+                            <div style={{ marginTop: "3px" }}>
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  padding: "1px 8px",
+                                  borderRadius: "10px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  background:
+                                    item.lead_status === "Won"
+                                      ? "#dcfce7"
+                                      : item.lead_status === "Loss"
+                                      ? "#fee2e2"
+                                      : "#fef3c7",
+                                  color:
+                                    item.lead_status === "Won"
+                                      ? "#166534"
+                                      : item.lead_status === "Loss"
+                                      ? "#991b1b"
+                                      : "#92400e",
+                                }}
+                              >
+                                {item.lead_status}
+                              </span>
+                            </div>
+                          )}
                         </td>
 
                         {/* 11. Followup Date */}
@@ -1353,33 +2134,38 @@ export default function FollowUpsPage() {
                           {item.added_on || "—"}
                         </td>
 
-                        {/* 13. Action */}
+                        {/* 13. Action - View & Delete Only */}
                         <td style={{ textAlign: "center", padding: "12px 14px" }}>
                           <div style={{ display: "inline-flex", gap: "6px" }}>
-                            {/* Edit */}
+                            {/* View */}
                             <button
+                              id={`btn-view-follow-up-${item.id}`}
+                              data-testid="btn-view-follow-up"
                               type="button"
-                              onClick={() => handleOpenEditDrawer(item)}
+                              onClick={() => setInspectItem(item)}
                               style={{
                                 width: "28px",
                                 height: "28px",
                                 borderRadius: "4px",
-                                border: "1px solid #bfdbfe",
-                                background: "#eff6ff",
-                                color: "#1d4ed8",
+                                border: "1px solid #cbd5e1",
+                                background: "#f8fafc",
+                                color: "#334155",
                                 cursor: "pointer",
                                 display: "inline-flex",
                                 alignItems: "center",
                                 justifyContent: "center",
                                 padding: 0,
+                                fontSize: "14px",
                               }}
-                              title="Edit Follow Up"
+                              title="View Follow Up Details"
                             >
-                              ✏️
+                              👁️
                             </button>
 
                             {/* Delete */}
                             <button
+                              id={`btn-delete-follow-up-${item.id}`}
+                              data-testid="btn-delete-follow-up"
                               type="button"
                               onClick={() => handleDeleteSingle(item)}
                               style={{
@@ -1394,6 +2180,7 @@ export default function FollowUpsPage() {
                                 alignItems: "center",
                                 justifyContent: "center",
                                 padding: 0,
+                                fontSize: "14px",
                               }}
                               title="Delete Follow Up"
                             >
@@ -1489,12 +2276,6 @@ export default function FollowUpsPage() {
             subtitle="Follow Up Interaction Profile"
             isOpen={Boolean(inspectItem)}
             onClose={() => setInspectItem(null)}
-            onEdit={() => {
-              const target = inspectItem;
-              setInspectItem(null);
-              handleOpenEditDrawer(target);
-            }}
-            editLabel="✏️ Edit Log"
           >
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
               {/* Call Summary Highlight */}
@@ -1513,6 +2294,28 @@ export default function FollowUpsPage() {
                   {inspectItem.feedback || "No feedback recorded for this interaction."}
                 </div>
               </div>
+
+              {/* Lead Details Highlight */}
+              {(inspectItem.call_category === "Lead" || inspectItem.lead_status) && (
+                <div
+                  style={{
+                    padding: "14px 16px",
+                    borderRadius: "8px",
+                    background: "#fefce8",
+                    border: "1px solid #fef08a",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#854d0e", marginBottom: "8px", textTransform: "uppercase" }}>
+                    Lead Classification Details
+                  </div>
+                  <DetailFieldGrid
+                    fields={[
+                      { label: "Lead Status", value: inspectItem.lead_status || "Ongoing" },
+                      { label: "Reason for Won / Loss", value: inspectItem.reason_for_won_loss || "—" },
+                    ]}
+                  />
+                </div>
+              )}
 
               {/* Interaction Details */}
               <div style={{ fontSize: "13px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>
@@ -1540,6 +2343,8 @@ export default function FollowUpsPage() {
                   { label: "Potential Type", value: inspectItem.potential_type || "—" },
                   { label: "Business Category", value: inspectItem.business_category || "—" },
                   { label: "Category", value: inspectItem.category || "—" },
+                  { label: "Direct Import From China", value: inspectItem.direct_import_from_china || "—" },
+                  { label: "Monthly Import Volume", value: inspectItem.monthly_import_volume || "—" },
                 ]}
               />
 
@@ -1615,7 +2420,7 @@ export default function FollowUpsPage() {
                 }}
               >
                 <h2 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1e293b" }}>
-                  {editingItem ? "Edit Call Log" : "Add Call Log"}
+                  Add Call Log
                 </h2>
                 <button
                   id="btn-close-call-log-drawer"
@@ -1635,6 +2440,23 @@ export default function FollowUpsPage() {
                   ✕
                 </button>
               </div>
+
+              {quickAddNotice && (
+                <div
+                  style={{
+                    margin: "12px 20px 0",
+                    padding: "8px 12px",
+                    borderRadius: "4px",
+                    fontSize: "12.5px",
+                    fontWeight: 500,
+                    background: "#f0fdf4",
+                    color: "#166534",
+                    border: "1px solid #bbf7d0",
+                  }}
+                >
+                  ✓ {quickAddNotice}
+                </div>
+              )}
 
               {/* Drawer Form Body */}
               <form
@@ -1675,11 +2497,35 @@ export default function FollowUpsPage() {
                     </select>
                   </div>
 
-                  {/* 2. Company Name * with Typeahead Autocomplete */}
+                  {/* 2. Company Name * with Typeahead Autocomplete & Quick + Add Company */}
                   <div>
-                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
-                      Company Name <span style={{ color: "#ef4444" }}>*</span>
-                    </label>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                      <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", margin: 0 }}>
+                        Company Name <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <button
+                        id="btn-quick-add-company"
+                        data-testid="btn-quick-add-company"
+                        type="button"
+                        onClick={() => setIsCompanyForm1Open(true)}
+                        style={{
+                          background: "#eff6ff",
+                          border: "1px solid #bfdbfe",
+                          borderRadius: "4px",
+                          color: "#0061f2",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          padding: "3px 10px",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                        title="Quick Add Company (Form 1)"
+                      >
+                        <span style={{ fontSize: "14px", lineHeight: "1" }}>+</span> Add Company
+                      </button>
+                    </div>
                     <ClientNameAutocomplete
                       id="call-log-company-name"
                       value={formData.company_name}
@@ -1711,6 +2557,21 @@ export default function FollowUpsPage() {
                     />
                   </div>
 
+                  {/* Designation */}
+                  <div>
+                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                      Designation
+                    </label>
+                    <input
+                      id="call-log-designation"
+                      type="text"
+                      style={inputStyle}
+                      placeholder="e.g. Purchase Manager"
+                      value={formData.designation}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, designation: e.target.value }))}
+                    />
+                  </div>
+
                   {/* 4. Phone Number */}
                   <div>
                     <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
@@ -1723,6 +2584,109 @@ export default function FollowUpsPage() {
                       value={formData.contact_phone}
                       onChange={(e) => setFormData((prev) => ({ ...prev, contact_phone: e.target.value }))}
                     />
+                  </div>
+
+                  {/* Call Category (Followup / Lead) */}
+                  <div>
+                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                      Call Category <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <select
+                      id="call-log-call-category"
+                      style={filterSelectStyle}
+                      value={formData.call_category}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, call_category: e.target.value }))}
+                    >
+                      <option value="Followup">Followup</option>
+                      <option value="Lead">Lead</option>
+                    </select>
+                  </div>
+
+                  {/* Conditional Lead Fields */}
+                  {formData.call_category === "Lead" && (
+                    <div
+                      style={{
+                        padding: "14px",
+                        borderRadius: "6px",
+                        background: "#fefce8",
+                        border: "1px solid #fef08a",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "12px",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#854d0e", textTransform: "uppercase" }}>
+                        Lead Classification Details
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                          Lead Status <span style={{ color: "#ef4444" }}>*</span>
+                        </label>
+                        <select
+                          id="call-log-lead-status"
+                          style={filterSelectStyle}
+                          value={formData.lead_status}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, lead_status: e.target.value }))}
+                        >
+                          <option value="Ongoing">Ongoing</option>
+                          <option value="Won">Won</option>
+                          <option value="Loss">Loss</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                          Reason for Won / Loss
+                        </label>
+                        <textarea
+                          id="call-log-won-loss-reason"
+                          rows={2}
+                          style={{
+                            ...inputStyle,
+                            height: "auto",
+                            minHeight: "55px",
+                            padding: "8px 10px",
+                            lineHeight: "1.4",
+                            resize: "vertical",
+                          }}
+                          placeholder="Reason for Won / Loss / status details"
+                          value={formData.reason_for_won_loss}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, reason_for_won_loss: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Direct Import from China & Monthly Import Volume */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                    <div>
+                      <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                        Direct Import from China?
+                      </label>
+                      <select
+                        id="call-log-direct-import"
+                        style={filterSelectStyle}
+                        value={formData.direct_import_from_china}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, direct_import_from_china: e.target.value }))}
+                      >
+                        <option value="No">No</option>
+                        <option value="Yes">Yes</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                        Monthly Import Volume
+                      </label>
+                      <input
+                        id="call-log-monthly-import-volume"
+                        type="text"
+                        style={inputStyle}
+                        placeholder="e.g. 5 Containers"
+                        value={formData.monthly_import_volume}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, monthly_import_volume: e.target.value }))}
+                      />
+                    </div>
                   </div>
 
                   {/* 5. Feedback */}
@@ -1808,6 +2772,22 @@ export default function FollowUpsPage() {
             </div>
           </div>
         )}
+
+        {/* Company Form 1 Modal for Quick Adding Prospects on the Fly */}
+        <CompanyForm1Modal
+          isOpen={isCompanyForm1Open}
+          onClose={() => setIsCompanyForm1Open(false)}
+          onSuccess={(newCompany) => {
+            setFormData((prev) => ({
+              ...prev,
+              company_name: newCompany.company_name,
+              contact_person: newCompany.contact_person || prev.contact_person,
+              contact_phone: newCompany.contact_phone || prev.contact_phone,
+              designation: newCompany.designation || prev.designation,
+            }));
+            setQuickAddNotice(`Company "${newCompany.company_name}" created & selected successfully.`);
+          }}
+        />
 
         {/* Delete Confirmation Modal */}
         {deleteConfirmTarget && (
