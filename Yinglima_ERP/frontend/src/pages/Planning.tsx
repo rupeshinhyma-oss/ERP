@@ -472,6 +472,11 @@ function ColumnFilterPopover({
         const { data } = await apiGet<{ value: string; count: number }[]>(`/planning/sheets/${sheetId}/filter-values${qs}`);
         if (!cancelled && Array.isArray(data)) {
           const list: [string, number][] = data.map((item) => [item.value, item.count]);
+          list.sort(([a], [b]) => {
+            if (a === "(Blanks)") return 1;
+            if (b === "(Blanks)") return -1;
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+          });
           setServerValues(list);
         }
       } catch {

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import and_, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -120,7 +121,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         stmt = (
             update(PlanningRow)
             .where(PlanningRow.linked_record_id == record_id, PlanningRow.deleted_at.is_(None))
-            .values(deleted_at=datetime.now(timezone.utc))
+            .values({PlanningRow.deleted_at: datetime.now(timezone.utc)})
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
@@ -135,7 +136,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         from app.masters.products.models import Product
 
         active_product_ids = select(Product.id).where(Product.deleted_at.is_(None))
-        conditions = [
+        conditions: list[Any] = [
             PlanningRow.deleted_at.is_(None),
             PlanningRow.linked_record_id.is_not(None),
             PlanningRow.linked_record_id.not_in(active_product_ids),
@@ -145,7 +146,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         stmt = (
             update(PlanningRow)
             .where(*conditions)
-            .values(deleted_at=datetime.now(timezone.utc))
+            .values({PlanningRow.deleted_at: datetime.now(timezone.utc)})
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
@@ -311,35 +312,50 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
                     stmt = stmt.where(combined)
                 continue
 
-            # Ordinary column -- matched via an EXISTS subquery against
-            # PlanningCell (row_id = outer row's id, column_id = this
-            # filter's column, value matching the same rules as above).
-            cell_conditions = [
-                PlanningCell.row_id == PlanningRow.id,
-                PlanningCell.column_id == filt.column_id,
-            ]
-            value_match_conditions = []
+            # Ordinary column -- matched via EXISTS subqueries against PlanningCell
             if text_query:
-                value_match_conditions.append(PlanningCell.value.ilike(f"%{text_query}%"))
+                stmt = stmt.where(
+                    exists(
+                        select(PlanningCell.id).where(
+                            PlanningCell.row_id == PlanningRow.id,
+                            PlanningCell.column_id == filt.column_id,
+                            PlanningCell.value.ilike(f"%{text_query}%"),
+                        )
+                    )
+                )
+
             if selected_values:
                 real_values = [v for v in selected_values if v != "(Blanks)"]
-                sub_conditions = []
+                include_blanks = "(Blanks)" in selected_values
+
+                branch_conditions = []
                 if real_values:
-                    sub_conditions.append(PlanningCell.value.in_(real_values))
-                if "(Blanks)" in selected_values:
-                    sub_conditions.append((PlanningCell.value.is_(None)) | (PlanningCell.value == ""))
-                if sub_conditions:
-                    combined_sub = sub_conditions[0]
-                    for c in sub_conditions[1:]:
-                        combined_sub = combined_sub | c
-                    value_match_conditions.append(combined_sub)
-            if not value_match_conditions:
-                continue
-            combined_value_match = value_match_conditions[0]
-            for c in value_match_conditions[1:]:
-                combined_value_match = combined_value_match & c
-            cell_conditions.append(combined_value_match)
-            stmt = stmt.where(exists(select(PlanningCell.id).where(*cell_conditions)))
+                    branch_conditions.append(
+                        exists(
+                            select(PlanningCell.id).where(
+                                PlanningCell.row_id == PlanningRow.id,
+                                PlanningCell.column_id == filt.column_id,
+                                PlanningCell.value.in_(real_values),
+                            )
+                        )
+                    )
+                if include_blanks:
+                    # Row is blank if either NO cell exists OR cell value is null/empty
+                    has_val_subq = exists(
+                        select(PlanningCell.id).where(
+                            PlanningCell.row_id == PlanningRow.id,
+                            PlanningCell.column_id == filt.column_id,
+                            PlanningCell.value.is_not(None),
+                            func.nullif(func.trim(PlanningCell.value), "").is_not(None),
+                        )
+                    )
+                    branch_conditions.append(~has_val_subq)
+
+                if branch_conditions:
+                    combined_branch = branch_conditions[0]
+                    for b in branch_conditions[1:]:
+                        combined_branch = combined_branch | b
+                    stmt = stmt.where(combined_branch)
         return stmt
 
     async def list_page_for_sheet(
@@ -483,23 +499,56 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
             return [(str(row[0]), int(row[1])) for row in result.all()]
         else:
             # Regular column (PlanningCell.value)
-            val_expr = func.coalesce(func.nullif(func.trim(PlanningCell.value), ""), "(Blanks)")
+            # Fetch distinct non-empty values
+            val_clean = func.nullif(func.trim(PlanningCell.value), "")
             stmt = (
-                select(val_expr.label("val"), func.count(PlanningCell.id).label("cnt"))
+                select(val_clean.label("val"), func.count(PlanningCell.id).label("cnt"))
                 .join(PlanningRow, PlanningCell.row_id == PlanningRow.id)
                 .where(
                     PlanningRow.sheet_id == sheet_id,
                     PlanningRow.deleted_at.is_(None),
                     PlanningCell.column_id == column_id,
+                    val_clean.is_not(None),
                 )
             )
             if matching_ids is not None:
                 stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
-            if search_term:
+            if search_term and search_term.lower() != "(blanks)":
                 stmt = stmt.where(PlanningCell.value.ilike(f"%{search_term}%"))
-            stmt = stmt.group_by(val_expr).order_by(val_expr.asc()).limit(limit)
+            stmt = stmt.group_by(val_clean).order_by(val_clean.asc()).limit(limit)
             result = await self.session.execute(stmt)
-            return [(str(row[0]), int(row[1])) for row in result.all()]
+            distinct_list = [(str(row[0]), int(row[1])) for row in result.all()]
+
+            # In sparse grid architecture, rows without values have no PlanningCell record.
+            # Accurately compute count of blank rows (total_rows - filled_rows).
+            total_rows_stmt = select(func.count(PlanningRow.id)).where(
+                PlanningRow.sheet_id == sheet_id,
+                PlanningRow.deleted_at.is_(None),
+            )
+            if matching_ids is not None:
+                total_rows_stmt = total_rows_stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
+            total_rows = (await self.session.execute(total_rows_stmt)).scalar() or 0
+
+            filled_rows_stmt = (
+                select(func.count(func.distinct(PlanningCell.row_id)))
+                .join(PlanningRow, PlanningCell.row_id == PlanningRow.id)
+                .where(
+                    PlanningRow.sheet_id == sheet_id,
+                    PlanningRow.deleted_at.is_(None),
+                    PlanningCell.column_id == column_id,
+                    val_clean.is_not(None),
+                )
+            )
+            if matching_ids is not None:
+                filled_rows_stmt = filled_rows_stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
+            filled_rows = (await self.session.execute(filled_rows_stmt)).scalar() or 0
+
+            blank_count = max(0, total_rows - filled_rows)
+            if blank_count > 0:
+                if not search_term or "blank" in search_term.lower() or "(blanks)" in search_term.lower():
+                    distinct_list.append(("(Blanks)", blank_count))
+
+            return distinct_list
 
     async def search_items_for_sheet(
         self,
@@ -522,7 +571,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         )
         count_stmt = select(func.count(PlanningRow.id)).where(*base_where)
         count_res = await self.session.execute(count_stmt)
-        count = int(count_res.scalar_one())
+        count = count_res.scalar_one()
 
         if count == 0:
             return 0, []
