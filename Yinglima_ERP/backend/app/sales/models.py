@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
@@ -138,6 +138,7 @@ class SaleOrderItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         GUID(), ForeignKey("planning_rows.id"), nullable=True
     )
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_spare: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     order: Mapped[SaleOrder] = relationship("SaleOrder", back_populates="items")
 

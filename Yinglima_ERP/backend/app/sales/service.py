@@ -28,6 +28,7 @@ from app.buyers.models import Buyer
 from app.common.currency import get_active_rates
 from app.core.exceptions import NotFoundException, ValidationException
 from app.masters.hsn.models import HsnCode
+from app.masters.product_categories.models import ProductCategory
 from app.masters.products.models import Product
 from app.masters.uom.models import UnitOfMeasurement
 from app.planning.models import PlanningCell, PlanningColumn, PlanningRow, PlanningSheet
@@ -371,6 +372,16 @@ class SaleService:
                     lp_supplier_map[pid] = (s_id, s_name, rate_with_vat)
                     lp_vat_map[pid] = vat_pct
 
+        # Check spare categories
+        cat_map: dict[uuid.UUID, ProductCategory] = {}
+        cat_ids = {p.category_id for p in prod_map.values() if p.category_id}
+        if cat_ids:
+            q_cat = await self.session.execute(
+                select(ProductCategory).where(ProductCategory.id.in_(cat_ids))
+            )
+            for c in q_cat.scalars().all():
+                cat_map[c.id] = c
+
         # 6. Build extracted items payload
         extracted_items: list[ExtractedConsignmentItem] = []
         total_quantity = 0.0
@@ -384,6 +395,12 @@ class SaleService:
             prod_code = prod.product_code if prod else None
             hsn = hsn_map.get(prod.hsn_id) if (prod and prod.hsn_id) else None
             uom_name = uom_map.get(prod.uom_id, "NOS") if (prod and prod.uom_id) else "NOS"
+
+            is_item_spare = False
+            if prod and prod.category_id:
+                c_obj = cat_map.get(prod.category_id)
+                if c_obj and "spare" in (c_obj.name or "").lower():
+                    is_item_spare = True
 
             # Supplier & RMB Unit Price with VAT STRICTLY from Confirmed Local Purchase ONLY (No Product Prices fallback)
             sup_info = lp_supplier_map.get(prod.id) if prod else None
@@ -441,6 +458,7 @@ class SaleService:
                     cbm_per_unit=cbm_unit,
                     total_cbm=total_cbm,
                     total_supplier_amount_rmb=total_sup_amt_rmb,
+                    is_spare=is_item_spare,
                 )
             )
 
@@ -543,6 +561,13 @@ class SaleService:
         fob_price_usd = round(price_with_profit_rmb / 6.70, 4) if price_with_profit_rmb > 0 else 0.0
         total_supplier_amount_rmb = round(unit_price_rmb_with_vat * quantity, 2)
 
+        # 6. Determine if item belongs to Spare Parts category
+        is_spare = False
+        if prod.category_id:
+            cat_obj = await self.session.get(ProductCategory, prod.category_id)
+            if cat_obj and "spare" in (cat_obj.name or "").lower():
+                is_spare = True
+
         return {
             "product_id": str(prod.id),
             "product_name": prod.product_name,
@@ -563,6 +588,7 @@ class SaleService:
             "total_cbm": total_cbm,
             "total_supplier_amount_rmb": total_supplier_amount_rmb,
             "is_from_local_purchase": lp_row is not None and unit_price_rmb_with_vat > 0,
+            "is_spare": is_spare,
         }
 
     # -----------------------------------------------------------------------
@@ -581,6 +607,17 @@ class SaleService:
         total_amount = 0.0
         total_qty = 0.0
 
+        # Pre-resolve spare parts categories
+        prod_ids = [it.product_id for it in payload.items if it.product_id]
+        spare_prod_ids: set[uuid.UUID] = set()
+        if prod_ids:
+            q_spares = await self.session.execute(
+                select(Product.id)
+                .join(ProductCategory, Product.category_id == ProductCategory.id)
+                .where(Product.id.in_(prod_ids), ProductCategory.name.ilike("%spare%"))
+            )
+            spare_prod_ids = set(q_spares.scalars().all())
+
         item_entities: list[SaleOrderItem] = []
         for it in payload.items:
             qty = float(it.quantity)
@@ -595,6 +632,8 @@ class SaleService:
             total_tax += tax
             total_amount += item_tot
             total_qty += qty
+
+            is_item_spare = bool(getattr(it, "is_spare", False) or (it.product_id in spare_prod_ids))
 
             item_entities.append(
                 SaleOrderItem(
@@ -620,6 +659,7 @@ class SaleService:
                     cbm_per_unit=float(it.cbm_per_unit or 0.0),
                     total_cbm=float(it.total_cbm or 0.0),
                     total_supplier_amount_rmb=float(it.total_supplier_amount_rmb or 0.0),
+                    is_spare=is_item_spare,
                 )
             )
 
@@ -726,6 +766,17 @@ class SaleService:
             total_amount = 0.0
             total_qty = 0.0
 
+            # Pre-resolve spare parts categories
+            prod_ids = [it.product_id for it in payload.items if it.product_id]
+            spare_prod_ids: set[uuid.UUID] = set()
+            if prod_ids:
+                q_spares = await self.session.execute(
+                    select(Product.id)
+                    .join(ProductCategory, Product.category_id == ProductCategory.id)
+                    .where(Product.id.in_(prod_ids), ProductCategory.name.ilike("%spare%"))
+                )
+                spare_prod_ids = set(q_spares.scalars().all())
+
             for it in payload.items:
                 qty = float(it.quantity)
                 rate = float(it.unit_rate)
@@ -739,6 +790,8 @@ class SaleService:
                 total_tax += tax
                 total_amount += item_tot
                 total_qty += qty
+
+                is_item_spare = bool(getattr(it, "is_spare", False) or (it.product_id in spare_prod_ids))
 
                 order.items.append(
                     SaleOrderItem(
@@ -765,6 +818,7 @@ class SaleService:
                         cbm_per_unit=float(it.cbm_per_unit or 0.0),
                         total_cbm=float(it.total_cbm or 0.0),
                         total_supplier_amount_rmb=float(it.total_supplier_amount_rmb or 0.0),
+                        is_spare=is_item_spare,
                     )
                 )
 
@@ -889,10 +943,11 @@ class SaleService:
         tot_gr_wt = 0.0
         tot_cbm = 0.0
 
-        # Batch pre-fetch all products & UOMs in 2 single queries instead of 2 * N sequential network roundtrips
+        # Batch pre-fetch all products, UOMs, and Categories in single queries
         product_ids = {it.product_id for it in order.items if it.product_id}
         products_by_id: dict[uuid.UUID, Product] = {}
         uoms_by_id: dict[uuid.UUID, UnitOfMeasurement] = {}
+        categories_by_id: dict[uuid.UUID, ProductCategory] = {}
 
         if product_ids:
             prod_stmt = select(Product).where(Product.id.in_(product_ids))
@@ -907,7 +962,17 @@ class SaleService:
                 for u in uom_res.scalars().all():
                     uoms_by_id[u.id] = u
 
-        for idx, item in enumerate(order.items, start=1):
+            cat_ids = {p.category_id for p in products_by_id.values() if p.category_id}
+            if cat_ids:
+                cat_stmt = select(ProductCategory).where(ProductCategory.id.in_(cat_ids))
+                cat_res = await self.session.execute(cat_stmt)
+                for c in cat_res.scalars().all():
+                    categories_by_id[c.id] = c
+
+        machines_data: list[dict[str, Any]] = []
+        spares_data: list[dict[str, Any]] = []
+
+        for item in order.items:
             product = products_by_id.get(item.product_id) if item.product_id else None
 
             uom_str = "NOS"
@@ -917,7 +982,6 @@ class SaleService:
                     uom_str = uom_obj.code
 
             qty = float(item.quantity)
-            tot_qty += qty
 
             # Currency calculation
             if order.currency.upper() in ("RMB", "CNY"):
@@ -929,29 +993,29 @@ class SaleService:
 
             amt_usd = round(unit_usd * qty, 2)
             amt_rmb = round(unit_rmb * qty, 2)
-            tot_usd += amt_usd
-            tot_rmb += amt_rmb
 
             # Packing & Weight calculation
             pack_qty = float(product.packaging_quantity or 1.0) if product and product.packaging_quantity else 1.0
             packages = max(1, math.ceil(qty / pack_qty)) if pack_qty > 0 else int(qty)
-            tot_pkg += packages
 
             unit_net = float(product.packaging_net_weight or product.weight or 0.0) if product else 0.0
             unit_gr = float(product.packaging_gross_weight or product.weight or 0.0) if product else 0.0
 
             line_net_wt = round(qty * unit_net, 2) if unit_net > 0 else 0.0
             line_gr_wt = round(qty * unit_gr, 2) if unit_gr > 0 else 0.0
-            tot_net_wt += line_net_wt
-            tot_gr_wt += line_gr_wt
 
             line_cbm = round(float(product.packaging_unit_cbm or 0.0) * packages, 4) if product and product.packaging_unit_cbm else 0.0
-            tot_cbm += line_cbm
 
             hs_code = item.hsn_code or (product.barcode if product else None) or ""
 
-            items_data.append({
-                "sr_no": idx,
+            # Check if this item is a spare part
+            is_spare_item = bool(getattr(item, "is_spare", False))
+            if not is_spare_item and product and product.category_id:
+                cat = categories_by_id.get(product.category_id)
+                if cat and "spare" in (cat.name or "").lower():
+                    is_spare_item = True
+
+            item_dict = {
                 "product_id": str(item.product_id) if item.product_id else None,
                 "description": product.product_name_invoice if (product and product.product_name_invoice) else item.product_name,
                 "product_code": item.product_code or (product.product_code if product else None),
@@ -978,7 +1042,75 @@ class SaleService:
                 "cbm_per_unit": float(item.cbm_per_unit or 0.0),
                 "total_cbm": float(item.total_cbm or line_cbm),
                 "total_supplier_amount_rmb": float(item.total_supplier_amount_rmb or (float(item.unit_price_rmb_with_vat or unit_rmb) * qty)),
-            })
+                "is_spare": is_spare_item,
+            }
+
+            if is_spare_item:
+                item_dict["sr_no"] = len(spares_data) + 1
+                spares_data.append(item_dict)
+            else:
+                item_dict["sr_no"] = len(machines_data) + 1
+                machines_data.append(item_dict)
+
+        # Build final items_data for Commercial Invoice & Packing List
+        if spares_data:
+            costing_profit_pct = float(order.profit_percent if order.profit_percent is not None else 3.0)
+            costing_usd_rate = float(order.usd_exchange_rate or 6.70)
+            spares_total_rmb_with_vat = round(sum(s["total_supplier_amount_rmb"] for s in spares_data), 2)
+            spares_total_rmb_ex_vat = round(spares_total_rmb_with_vat / 1.13, 2)
+            spares_total_profit_rmb = round(spares_total_rmb_ex_vat * (1.0 + (costing_profit_pct / 100.0)), 2)
+            spares_total_fob_usd = round(spares_total_profit_rmb / costing_usd_rate, 2)
+            spares_total_cfr_usd = spares_total_fob_usd
+            spares_net_wt = round(sum(s["net_weight"] for s in spares_data) or 30.0, 2)
+            spares_gr_wt = round(sum(s["gross_weight"] for s in spares_data) or 31.0, 2)
+
+            consolidated_spares_item = {
+                "sr_no": len(machines_data) + 1,
+                "product_id": None,
+                "description": "Spare parts for Packaging Machine",
+                "product_code": "SPARES-SET",
+                "hs_code": "8422.90.90",
+                "uom": "SET",
+                "quantity": 1.0,
+                "unit_price_usd": spares_total_cfr_usd,
+                "total_amount_usd": spares_total_cfr_usd,
+                "unit_price_rmb": spares_total_rmb_with_vat,
+                "total_amount_rmb": spares_total_rmb_with_vat,
+                "packages": 1,
+                "net_weight": spares_net_wt,
+                "gross_weight": spares_gr_wt,
+                "cbm": 0.0,
+                "supplier_id": None,
+                "supplier_name": "—",
+                "unit_price_rmb_with_vat": spares_total_rmb_with_vat,
+                "unit_price_rmb_ex_vat": spares_total_rmb_ex_vat,
+                "profit_percent": costing_profit_pct,
+                "fob_price_usd": spares_total_fob_usd,
+                "freight_unit_usd": 0.0,
+                "cfr_price_usd": spares_total_cfr_usd,
+                "cbm_per_unit": 0.0,
+                "total_cbm": 0.0,
+                "total_supplier_amount_rmb": spares_total_rmb_with_vat,
+                "is_consolidated_spare": True,
+            }
+
+            items_data = machines_data + [consolidated_spares_item]
+            tot_qty = sum(m["quantity"] for m in machines_data) + 1.0
+            tot_pkg = sum(m["packages"] for m in machines_data) + 1
+            tot_usd = round(sum(m["total_amount_usd"] for m in machines_data) + spares_total_cfr_usd, 2)
+            tot_rmb = round(sum(m["total_amount_rmb"] for m in machines_data) + spares_total_rmb_with_vat, 2)
+            tot_net_wt = round(sum(m["net_weight"] for m in machines_data) + spares_net_wt, 2)
+            tot_gr_wt = round(sum(m["gross_weight"] for m in machines_data) + spares_gr_wt, 2)
+            tot_cbm = round(sum(m["cbm"] for m in machines_data), 4)
+        else:
+            items_data = machines_data
+            tot_qty = sum(m["quantity"] for m in machines_data)
+            tot_pkg = sum(m["packages"] for m in machines_data)
+            tot_usd = round(sum(m["total_amount_usd"] for m in machines_data), 2)
+            tot_rmb = round(sum(m["total_amount_rmb"] for m in machines_data), 2)
+            tot_net_wt = round(sum(m["net_weight"] for m in machines_data), 2)
+            tot_gr_wt = round(sum(m["gross_weight"] for m in machines_data), 2)
+            tot_cbm = round(sum(m["cbm"] for m in machines_data), 4)
 
         # Recipient address resolution (No hardcoded "Maharashtra, India" dummy fallback)
         buyer_address = ""
@@ -1071,6 +1203,7 @@ class SaleService:
             },
             "declaration": "We hereby declare that above information is true and correct.",
             "items": items_data,
+            "spare_items": spares_data,
             "totals": {
                 "quantity": tot_qty,
                 "packages": tot_pkg,
@@ -1347,6 +1480,8 @@ class SaleService:
             c_qty.alignment = al_right
             c_qty.number_format = "#,##0"
 
+            is_spare_row = bool(item.get("is_consolidated_spare"))
+
             if mode == "internal":
                 # Col 6: Unit Price (USD) = M{curr_row}
                 c_rate = ws_ci.cell(curr_row, 6, f"=M{curr_row}")
@@ -1359,7 +1494,11 @@ class SaleService:
                 c_tot.number_format = "$#,##0.00"
 
                 # Col 8: Unit Price(RMB) Including VAT
-                c_rmb_vat = ws_ci.cell(curr_row, 8, item.get("unit_price_rmb_with_vat", item.get("unit_price_rmb", 0.0)))
+                if is_spare_row and data.get("spare_items"):
+                    spares_sum_row = len(data["spare_items"]) + 2
+                    c_rmb_vat = ws_ci.cell(curr_row, 8, f"=Spares!F{spares_sum_row}")
+                else:
+                    c_rmb_vat = ws_ci.cell(curr_row, 8, item.get("unit_price_rmb_with_vat", item.get("unit_price_rmb", 0.0)))
                 c_rmb_vat.alignment = al_right
                 c_rmb_vat.number_format = "#,##0.00"
 
@@ -1379,8 +1518,11 @@ class SaleService:
                 c_fob.alignment = al_right
                 c_fob.number_format = "$#,##0.000"
 
-                # Col 12: Freight, Local charges, COC = ($L$13*O{curr_row})/E{curr_row}
-                c_fr = ws_ci.cell(curr_row, 12, f"=($L$13*O{curr_row})/E{curr_row}")
+                # Col 12: Freight, Local charges, COC (spares have zero container freight)
+                if is_spare_row:
+                    c_fr = ws_ci.cell(curr_row, 12, 0.0)
+                else:
+                    c_fr = ws_ci.cell(curr_row, 12, f"=($L$13*O{curr_row})/E{curr_row}")
                 c_fr.alignment = al_right
                 c_fr.number_format = "$#,##0.000"
 
@@ -1390,11 +1532,11 @@ class SaleService:
                 c_cfr.number_format = "$#,##0.00"
 
                 # Col 14: Supplier
-                c_sup = ws_ci.cell(curr_row, 14, item.get("supplier_name", "—"))
+                c_sup = ws_ci.cell(curr_row, 14, "" if is_spare_row else item.get("supplier_name", "—"))
                 c_sup.alignment = al_center
 
                 # Col 15: Total CBM
-                c_cbm = ws_ci.cell(curr_row, 15, item.get("total_cbm", item.get("cbm", 0.0)))
+                c_cbm = ws_ci.cell(curr_row, 15, 0.0 if is_spare_row else item.get("total_cbm", item.get("cbm", 0.0)))
                 c_cbm.alignment = al_right
                 c_cbm.number_format = "#,##0.000"
 
@@ -1557,7 +1699,119 @@ class SaleService:
             ws_ci.column_dimensions["P"].width = 20
 
         # -------------------------------------------------------------
-        # SHEET 2: PACKING LIST
+        # SHEET 2: SPARES (if order contains spare items)
+        # -------------------------------------------------------------
+        if data.get("spare_items"):
+            ws_spares = wb.create_sheet("Spares")
+            ws_spares.views.sheetView[0].showGridLines = True
+
+            spares_headers = [
+                "Supplier",
+                "Description",
+                "Qty",
+                "Unit Price in USD",
+                "Unit Price in RMB including VAT",
+                "Total Price\nin RMB including VAT",
+                "Total Price\nin RMB excluding VAT",
+                f"Including Profit {int(profit_pct) if profit_pct.is_integer() else profit_pct}%",
+                f"FOB PRICE\n(USD Conversion @{usd_rate})",
+                "FOB Unit Price",
+            ]
+
+            fill_spares_head = PatternFill(start_color="FEF08A", end_color="FEF08A", fill_type="solid")
+
+            for c_idx, h in enumerate(spares_headers, start=1):
+                cell = ws_spares.cell(1, c_idx, h)
+                cell.font = f_header
+                cell.fill = fill_spares_head
+                cell.alignment = al_center
+                cell.border = b_all
+            ws_spares.row_dimensions[1].height = 28
+
+            sp_row = 2
+            start_sp_row = 2
+            profit_factor = round(1.0 + (profit_pct / 100.0), 4)
+
+            for sp in data["spare_items"]:
+                ws_spares.cell(sp_row, 1, sp.get("supplier_name", "—")).alignment = al_left
+                ws_spares.cell(sp_row, 2, sp.get("description", "")).alignment = al_left
+
+                c_sp_qty = ws_spares.cell(sp_row, 3, sp.get("quantity", 1))
+                c_sp_qty.alignment = al_right
+                c_sp_qty.number_format = "#,##0"
+
+                # Col 4: Unit Price in USD = I{sp_row}/C{sp_row}
+                c_sp_usd = ws_spares.cell(sp_row, 4, f"=I{sp_row}/C{sp_row}")
+                c_sp_usd.alignment = al_right
+                c_sp_usd.number_format = "$#,##0.00"
+
+                # Col 5: Unit Price in RMB including VAT
+                c_sp_rmb_vat = ws_spares.cell(sp_row, 5, sp.get("unit_price_rmb_with_vat", 0.0))
+                c_sp_rmb_vat.alignment = al_right
+                c_sp_rmb_vat.number_format = "#,##0.00"
+
+                # Col 6: Total Price in RMB including VAT = E{sp_row}*C{sp_row}
+                c_sp_tot_vat = ws_spares.cell(sp_row, 6, f"=E{sp_row}*C{sp_row}")
+                c_sp_tot_vat.alignment = al_right
+                c_sp_tot_vat.number_format = "#,##0.00"
+
+                # Col 7: Total Price in RMB excluding VAT = F{sp_row}/1.13
+                c_sp_tot_ex = ws_spares.cell(sp_row, 7, f"=F{sp_row}/1.13")
+                c_sp_tot_ex.alignment = al_right
+                c_sp_tot_ex.number_format = "#,##0.00"
+
+                # Col 8: Including Profit 3% = G{sp_row}*profit_factor
+                c_sp_prof = ws_spares.cell(sp_row, 8, f"=G{sp_row}*{profit_factor}")
+                c_sp_prof.alignment = al_right
+                c_sp_prof.number_format = "#,##0.00"
+
+                # Col 9: FOB PRICE (USD Conversion @6.7) = H{sp_row}/usd_rate
+                c_sp_fob = ws_spares.cell(sp_row, 9, f"=H{sp_row}/{usd_rate}")
+                c_sp_fob.alignment = al_right
+                c_sp_fob.number_format = "$#,##0.00"
+
+                # Col 10: FOB Unit Price = I{sp_row}/C{sp_row}
+                c_sp_fob_u = ws_spares.cell(sp_row, 10, f"=I{sp_row}/C{sp_row}")
+                c_sp_fob_u.alignment = al_right
+                c_sp_fob_u.number_format = "$#,##0.00"
+
+                for c in range(1, 11):
+                    ws_spares.cell(sp_row, c).font = f_regular
+                    ws_spares.cell(sp_row, c).border = b_all
+
+                ws_spares.row_dimensions[sp_row].height = 20
+                sp_row += 1
+
+            last_sp_row = sp_row - 1
+
+            # Summary row in Spares sheet
+            ws_spares.cell(sp_row, 6, f"=SUM(F{start_sp_row}:F{last_sp_row})")
+            ws_spares.cell(sp_row, 7, f"=F{sp_row}/1.13")
+            ws_spares.cell(sp_row, 8, f"=G{sp_row}*{profit_factor}")
+            ws_spares.cell(sp_row, 9, f"=SUM(I{start_sp_row}:I{last_sp_row})")
+
+            for c in range(1, 11):
+                cell_s = ws_spares.cell(sp_row, c)
+                cell_s.font = f_bold
+                cell_s.border = b_all
+                if c in (6, 7, 8, 9):
+                    cell_s.number_format = "#,##0.00"
+
+            ws_spares.row_dimensions[sp_row].height = 24
+
+            ws_spares.column_dimensions["A"].width = 24
+            ws_spares.column_dimensions["B"].width = 38
+            ws_spares.column_dimensions["C"].width = 10
+            ws_spares.column_dimensions["D"].width = 18
+            ws_spares.column_dimensions["E"].width = 24
+            ws_spares.column_dimensions["F"].width = 24
+            ws_spares.column_dimensions["G"].width = 24
+            ws_spares.column_dimensions["H"].width = 20
+            ws_spares.column_dimensions["I"].width = 22
+            ws_spares.column_dimensions["J"].width = 16
+
+        # -------------------------------------------------------------
+        # SHEET 3: PACKING LIST
         # -------------------------------------------------------------
         ws_pl = wb.create_sheet("Packing List")
         ws_pl.views.sheetView[0].showGridLines = True

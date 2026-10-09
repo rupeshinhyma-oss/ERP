@@ -30,7 +30,7 @@ export function SaleProcessDetailModal({
   const [statusRemark, setStatusRemark] = useState("");
   const [showStatusModal, setShowStatusModal] = useState<SaleOrderStatus | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [activeDocTab, setActiveDocTab] = useState<"overview" | "ci" | "pl">("overview");
+  const [activeDocTab, setActiveDocTab] = useState<"overview" | "ci" | "spares" | "pl">("overview");
   const [tradeDetails, setTradeDetails] = useState<any>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [ciViewMode, setCiViewMode] = useState<"standard" | "costing">("costing");
@@ -178,7 +178,7 @@ export function SaleProcessDetailModal({
   };
 
   const handlePrintDoc = (tab?: "ci" | "pl") => {
-    const targetTab = tab || (activeDocTab === "overview" ? "ci" : activeDocTab);
+    const targetTab = tab || (activeDocTab === "overview" || (activeDocTab as string) === "spares" ? "ci" : activeDocTab);
     const docData = effectiveDoc;
     if (!docData) {
       toast("Trade document data not ready", "error");
@@ -788,6 +788,25 @@ export function SaleProcessDetailModal({
             >
               📄 Commercial Invoice (CI)
             </button>
+            {tradeDetails?.spare_items?.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveDocTab("spares")}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: activeDocTab === "spares" ? "#ffffff" : "transparent",
+                  color: activeDocTab === "spares" ? "#b45309" : "#64748b",
+                  fontWeight: activeDocTab === "spares" ? 700 : 500,
+                  fontSize: "12.5px",
+                  cursor: "pointer",
+                  boxShadow: activeDocTab === "spares" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                }}
+              >
+                ⚙️ Spares Breakdown ({tradeDetails.spare_items.length})
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setActiveDocTab("pl")}
@@ -1993,7 +2012,98 @@ export function SaleProcessDetailModal({
                 </div>
               );
             })()}
-            {/* TAB: PACKING LIST (PL) */}
+            {/* TAB: SPARES BREAKDOWN */}
+            {activeDocTab === "spares" && tradeDetails?.spare_items && (
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "8px",
+                  padding: "24px 28px",
+                  maxWidth: "1150px",
+                  margin: "0 auto 30px auto",
+                  boxShadow: "0 4px 15px rgba(0,0,0,0.06)",
+                  color: "#0f172a",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 800, color: "#1e3a8a" }}>
+                      ⚙️ Spare Parts Breakdown & Costing ({tradeDetails.spare_items.length} items)
+                    </h3>
+                    <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#64748b" }}>
+                      All individual spare parts listed here roll up into a single consolidated row on the Commercial Invoice.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleExportExcel("internal")}
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: "12px", fontWeight: 600 }}
+                  >
+                    📥 Download 3-Tab Excel (.xlsx)
+                  </button>
+                </div>
+
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11.5px" }}>
+                    <thead>
+                      <tr style={{ background: "#fef08a", color: "#78350f" }}>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "center" }}>#</th>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "left" }}>Supplier</th>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "left" }}>Description</th>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right" }}>Qty</th>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right" }}>Unit Price (RMB with VAT)</th>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right" }}>Total RMB (with VAT)</th>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right" }}>Ex-VAT (RMB)</th>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right" }}>Incl. Profit 3%</th>
+                        <th style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right" }}>FOB Price (USD)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tradeDetails.spare_items.map((sp: any, idx: number) => {
+                        const totalRmbVat = Number(sp.total_supplier_amount_rmb || (sp.unit_price_rmb_with_vat * sp.quantity) || 0);
+                        const exVat = totalRmbVat / 1.13;
+                        const profitRmb = exVat * 1.03;
+                        const usdRate = Number(tradeDetails.totals?.costing?.usd_exchange_rate || 6.70);
+                        const fobUsd = profitRmb / usdRate;
+
+                        return (
+                          <tr key={idx} style={{ background: idx % 2 === 0 ? "#ffffff" : "#f8fafc" }}>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px", textAlign: "center" }}>{idx + 1}</td>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px", fontWeight: 600 }}>{sp.supplier_name || "—"}</td>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px" }}>{sp.description}</td>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px", textAlign: "right", fontWeight: 600 }}>{sp.quantity}</td>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px", textAlign: "right" }}>¥{Number(sp.unit_price_rmb_with_vat || 0).toFixed(2)}</td>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px", textAlign: "right", fontWeight: 700, color: "#1e3a8a" }}>¥{totalRmbVat.toFixed(2)}</td>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px", textAlign: "right" }}>¥{exVat.toFixed(2)}</td>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px", textAlign: "right" }}>¥{profitRmb.toFixed(2)}</td>
+                            <td style={{ border: "1px solid #e2e8f0", padding: "6px", textAlign: "right", fontWeight: 700, color: "#15803d" }}>${fobUsd.toFixed(2)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ background: "#fef9c3", fontWeight: 800 }}>
+                        <td colSpan={5} style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "center" }}>TOTAL SPARES SUMMARY</td>
+                        <td style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right", color: "#1e3a8a" }}>
+                          ¥{tradeDetails.spare_items.reduce((acc: number, s: any) => acc + Number(s.total_supplier_amount_rmb || (s.unit_price_rmb_with_vat * s.quantity) || 0), 0).toFixed(2)}
+                        </td>
+                        <td style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right" }}>
+                          ¥{(tradeDetails.spare_items.reduce((acc: number, s: any) => acc + Number(s.total_supplier_amount_rmb || (s.unit_price_rmb_with_vat * s.quantity) || 0), 0) / 1.13).toFixed(2)}
+                        </td>
+                        <td style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right" }}>
+                          ¥{((tradeDetails.spare_items.reduce((acc: number, s: any) => acc + Number(s.total_supplier_amount_rmb || (s.unit_price_rmb_with_vat * s.quantity) || 0), 0) / 1.13) * 1.03).toFixed(2)}
+                        </td>
+                        <td style={{ border: "1px solid #cbd5e1", padding: "8px", textAlign: "right", color: "#15803d" }}>
+                          ${(((tradeDetails.spare_items.reduce((acc: number, s: any) => acc + Number(s.total_supplier_amount_rmb || (s.unit_price_rmb_with_vat * s.quantity) || 0), 0) / 1.13) * 1.03) / Number(tradeDetails.totals?.costing?.usd_exchange_rate || 6.70)).toFixed(2)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* TAB: PACKING LIST (PL) */}
             {activeDocTab === "pl" && effectiveDoc && (

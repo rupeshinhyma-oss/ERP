@@ -39,6 +39,7 @@ export interface SaleOrderItem {
   cbm_per_unit?: number;
   total_cbm?: number;
   total_supplier_amount_rmb?: number;
+  is_spare?: boolean;
 
   created_at?: string;
   updated_at?: string;
@@ -144,6 +145,7 @@ export interface ExtractedConsignmentItem {
   fob_price_usd?: number;
   freight_unit_usd?: number;
   cfr_price_usd?: number;
+  is_spare?: boolean;
 }
 
 export interface PlanningConsignmentItemsResponse {
@@ -179,6 +181,7 @@ export interface ProductCostingInfo {
   cbm_per_unit: number;
   total_cbm: number;
   total_supplier_amount_rmb: number;
+  is_spare?: boolean;
 }
 
 export interface SaleOrderFormData {

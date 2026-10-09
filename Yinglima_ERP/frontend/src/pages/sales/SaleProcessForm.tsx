@@ -94,11 +94,30 @@ export function SaleProcessFormPage() {
       hsn_code?: string;
       standard_cost?: number;
       refund_vat_percent?: number;
+      category_name?: string;
+      uom?: string;
     }>
   >([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const searchRef = useRef<HTMLDivElement | null>(null);
+
+  // Dedicated Spares Picker Modal
+  const [showSpareModal, setShowSpareModal] = useState(false);
+  const [spareSearch, setSpareSearch] = useState("");
+  const [spareSearchResults, setSpareSearchResults] = useState<
+    Array<{
+      id: string;
+      product_name: string;
+      product_code?: string;
+      hsn_code?: string;
+      standard_cost?: number;
+      refund_vat_percent?: number;
+      category_name?: string;
+      uom?: string;
+    }>
+  >([]);
+  const [spareSearchLoading, setSpareSearchLoading] = useState(false);
 
   // Quick fill rate tool
   const [quickRate, setQuickRate] = useState<string>("");
@@ -381,6 +400,7 @@ export function SaleProcessFormPage() {
             cbm_per_unit: Number(it.cbm_per_unit) || 0.0,
             total_cbm: Number(it.total_cbm) || 0.0,
             total_supplier_amount_rmb: Number(it.total_supplier_amount_rmb) || (rmbWithVat * qty),
+            is_spare: Boolean(it.is_spare),
           };
         });
 
@@ -443,15 +463,44 @@ export function SaleProcessFormPage() {
     return () => clearTimeout(timer);
   }, [productSearch]);
 
-  const handleAddProduct = async (p: {
-    id: string;
-    product_name: string;
-    product_code?: string;
-    hsn_code?: string;
-    standard_cost?: number;
-    refund_vat_percent?: number;
-    uom?: string;
-  }) => {
+  // Autocomplete search for Spares Modal
+  useEffect(() => {
+    if (!showSpareModal) return;
+    let mounted = true;
+    const timer = setTimeout(async () => {
+      setSpareSearchLoading(true);
+      try {
+        const query = spareSearch.trim() ? `&search=${encodeURIComponent(spareSearch.trim())}` : "";
+        const res = await apiGet<any[]>(`/masters/products?page_size=50${query}`);
+        if (mounted && res.data) {
+          const list = Array.isArray(res.data) ? res.data : [];
+          setSpareSearchResults(list);
+        }
+      } catch {
+        // quiet fallback
+      } finally {
+        if (mounted) setSpareSearchLoading(false);
+      }
+    }, 200);
+
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+    };
+  }, [showSpareModal, spareSearch]);
+
+  const handleAddProduct = async (
+    p: {
+      id: string;
+      product_name: string;
+      product_code?: string;
+      hsn_code?: string;
+      standard_cost?: number;
+      refund_vat_percent?: number;
+      uom?: string;
+    },
+    extraOpts?: { isSpare?: boolean }
+  ) => {
     // Call costing info to pull supplier & RMB price from Local Purchase!
     let supplierId: string | null = null;
     let supplierName: string | null = null;
@@ -465,6 +514,7 @@ export function SaleProcessFormPage() {
     let totalSupplierRmb = 0;
     let isFromLp = false;
     let taxPct = Number(p.refund_vat_percent) || 13.0;
+    let isCostingSpare = false;
 
     try {
       const costRes = await apiGet<ProductCostingInfo>(
@@ -482,11 +532,17 @@ export function SaleProcessFormPage() {
         fobPriceUsd = cd.fob_price_usd || 0;
         cfrPriceUsd = cd.cfr_price_usd || 0;
         totalSupplierRmb = cd.total_supplier_amount_rmb || 0;
+        isCostingSpare = Boolean(cd.is_spare);
         if (cd.uom) uomName = cd.uom;
         if (cd.refund_vat_percent) taxPct = cd.refund_vat_percent;
       }
     } catch {
       // quiet fallback
+    }
+
+    const isSpareFinal = Boolean(extraOpts?.isSpare ?? isCostingSpare);
+    if (isSpareFinal && (!uomName || uomName === "NOS")) {
+      uomName = "PCS";
     }
 
     const qty = 1;
@@ -504,7 +560,7 @@ export function SaleProcessFormPage() {
       product_id: p.id,
       product_name: p.product_name,
       product_code: p.product_code || null,
-      hsn_code: p.hsn_code || null,
+      hsn_code: p.hsn_code || (isSpareFinal ? "8422.90.90" : null),
       uom: uomName,
       quantity: qty,
       unit_rate: rate,
@@ -526,12 +582,16 @@ export function SaleProcessFormPage() {
       cbm_per_unit: cbmPerUnit,
       total_cbm: totalCbm,
       total_supplier_amount_rmb: totalSupplierRmb,
+      is_spare: isSpareFinal,
     };
 
     setItems((prev) => [...prev, newItem]);
     setProductSearch("");
     setShowSearchResults(false);
-    toast(`Added ${p.product_name}${supplierName ? ` (Supplier: ${supplierName})` : " (No Confirmed LP)"}`, "success");
+    toast(
+      `Added ${isSpareFinal ? "⚙️ Spare Part: " : ""}${p.product_name}${supplierName ? ` (Supplier: ${supplierName})` : ""}`,
+      "success"
+    );
   };
 
   // Helper to recompute all line items with CI Costing & CFR rates
@@ -653,6 +713,42 @@ export function SaleProcessFormPage() {
       next[index] = target;
       return next;
     });
+  };
+
+  // Directly update USD Unit Price (Col 6)
+  const updateItemUsdPrice = (index: number, usdVal: number) => {
+    setItems((prev) => {
+      const next = [...prev];
+      const target = { ...next[index] };
+      const qty = Number(target.quantity) || 0;
+      const vatPct = Number(target.tax_percent) || 13.0;
+
+      target.cfr_price_usd = usdVal;
+
+      if (currency === "USD") {
+        target.unit_rate = usdVal;
+      } else {
+        // When currency is RMB, unit_rate is in RMB: convert from USD @ exchange rate
+        const rmbRate = Math.round(usdVal * (usdExchangeRate || 6.70) * 100) / 100;
+        target.unit_rate = rmbRate;
+      }
+
+      const basic = qty * target.unit_rate;
+      const taxAmt = (basic * vatPct) / 100.0;
+      target.tax_amount = Math.round(taxAmt * 100) / 100;
+      target.item_total = Math.round((basic + taxAmt) * 100) / 100;
+
+      next[index] = target;
+      return next;
+    });
+
+    if (usdVal > 0 && invalidRateIds.has(index)) {
+      setInvalidRateIds((prev) => {
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+      });
+    }
   };
 
   // Remove item
@@ -825,6 +921,7 @@ export function SaleProcessFormPage() {
           cbm_per_unit: it.cbm_per_unit ?? 0.0,
           total_cbm: it.total_cbm ?? 0.0,
           total_supplier_amount_rmb: it.total_supplier_amount_rmb ?? 0.0,
+          is_spare: Boolean(it.is_spare),
         })),
       };
 
@@ -1846,9 +1943,23 @@ export function SaleProcessFormPage() {
               }}
             >
               <div>
-                <span style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b" }}>
-                  📦 Planned Line Items ({items.length} Products)
-                </span>
+                {(() => {
+                  const spareCount = items.filter((it) => it.is_spare).length;
+                  const machineCount = items.length - spareCount;
+                  return (
+                    <>
+                      <span style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b" }}>
+                        📦 Planned Line Items ({items.length} Products{spareCount > 0 ? `: ${machineCount} Machines, ${spareCount} Spares` : ""})
+                      </span>
+                      {spareCount > 0 && (
+                        <div style={{ marginTop: "4px", fontSize: "11px", color: "#b45309", background: "#fef3c7", padding: "2px 8px", borderRadius: "4px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                          <span>⚙️</span>
+                          <span><strong>{spareCount} Spare Part(s) selected:</strong> will consolidate into 1 line on CI/PL, with full itemized breakdown on Sheet 2 (Spares).</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
                   Total Planned Quantity:{" "}
                   <strong style={{ color: "#0f172a" }}>{totals.qty.toLocaleString()} pcs</strong> |
@@ -1935,6 +2046,33 @@ export function SaleProcessFormPage() {
                     Apply Rate
                   </button>
                 </div>
+
+                {/* Dedicated Add Spare from Master Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSpareSearch("");
+                    setShowSpareModal(true);
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #d97706",
+                    background: "linear-gradient(135deg, #f59e0b, #d97706)",
+                    color: "#ffffff",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    boxShadow: "0 1px 3px rgba(217,119,6,0.3)",
+                  }}
+                  title="Search and add spare parts from Product Master (auto-rolls up on CI & PL)"
+                >
+                  <span>⚙️</span>
+                  <span>+ Add Spare from Master</span>
+                </button>
 
                 {/* Product Search & Add */}
                 <div ref={searchRef} style={{ position: "relative" }}>
@@ -2100,21 +2238,41 @@ export function SaleProcessFormPage() {
                         <td style={{ padding: "6px 8px", color: "#94a3b8", textAlign: "center" }}>{idx + 1}</td>
 
                         <td style={{ padding: "6px 8px" }}>
-                          <input
-                            type="text"
-                            value={item.product_name}
-                            onChange={(e) => updateItem(idx, "product_name", e.target.value)}
-                            style={{
-                              width: "100%",
-                              padding: "4px 6px",
-                              borderRadius: "4px",
-                              border: "1px solid #cbd5e1",
-                              fontSize: "12px",
-                              fontWeight: 600,
-                              boxSizing: "border-box",
-                            }}
-                            required
-                          />
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
+                            <input
+                              type="text"
+                              value={item.product_name}
+                              onChange={(e) => updateItem(idx, "product_name", e.target.value)}
+                              style={{
+                                flex: 1,
+                                padding: "4px 6px",
+                                borderRadius: "4px",
+                                border: "1px solid #cbd5e1",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                boxSizing: "border-box",
+                              }}
+                              required
+                            />
+                            <button
+                              type="button"
+                              onClick={() => updateItem(idx, "is_spare", !item.is_spare)}
+                              title={item.is_spare ? "Marked as Spare Part (rolls up on CI/PL). Click to switch to Machine." : "Marked as Machine. Click to switch to Spare Part."}
+                              style={{
+                                flexShrink: 0,
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                                fontSize: "10px",
+                                fontWeight: 700,
+                                border: item.is_spare ? "1px solid #f59e0b" : "1px solid #cbd5e1",
+                                background: item.is_spare ? "#fef3c7" : "#f1f5f9",
+                                color: item.is_spare ? "#b45309" : "#64748b",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {item.is_spare ? "⚙️ Spare" : "🚜 Machine"}
+                            </button>
+                          </div>
                           {item.product_code && (
                             <div style={{ fontSize: "10px", color: "#94a3b8", marginTop: "2px" }}>{item.product_code}</div>
                           )}
@@ -2185,11 +2343,13 @@ export function SaleProcessFormPage() {
                               const priceWithProfit = Math.round(exVat * (1 + pPct / 100) * 100) / 100;
                               const cfr = Number(item.cfr_price_usd) || 0;
                               const isUsd = currency === "USD";
-                              const unitUsd = isUsd ? (Number(item.unit_rate) || cfr) : cfr;
+                              const unitUsd = cfr > 0 
+                                ? cfr 
+                                : (isUsd ? (Number(item.unit_rate) || 0) : (Number(item.unit_rate) > 0 ? Math.round((Number(item.unit_rate) / (usdExchangeRate || 6.70)) * 100) / 100 : 0));
                               const totalUsd = Math.round(unitUsd * qtyN * 100) / 100;
                               return (
                                 <>
-                                  {/* 6. Unit Price (USD) = CFR Price/Unit (override allowed when currency is USD) */}
+                                  {/* 6. Unit Price (USD) = CFR Price/Unit or custom selling price (Always Editable!) */}
                                   <td style={{ padding: "6px 6px" }}>
                                     <input
                                       type="number"
@@ -2197,20 +2357,19 @@ export function SaleProcessFormPage() {
                                       min="0"
                                       placeholder="0.00"
                                       value={unitUsd === 0 ? "" : unitUsd}
-                                      readOnly={!isUsd}
-                                      title={isUsd ? "Auto = CFR Price/Unit. You can type a negotiated price." : "Auto = CFR Price/Unit. Set Currency to USD to override."}
+                                      title="Editable: enter your selling unit price in USD"
                                       onFocus={(e) => e.target.select()}
-                                      onChange={(e) => updateItem(idx, "unit_rate", parseFloat(e.target.value) || 0)}
+                                      onChange={(e) => updateItemUsdPrice(idx, parseFloat(e.target.value) || 0)}
                                       style={{
                                         width: "100%",
                                         padding: "4px 6px",
                                         borderRadius: "4px",
-                                        border: "1px solid #cbd5e1",
+                                        border: "1.5px solid #93c5fd",
                                         fontSize: "11.5px",
                                         textAlign: "right",
                                         fontWeight: 700,
                                         color: "#1d4ed8",
-                                        background: isUsd ? "#ffffff" : "#f8fafc",
+                                        background: "#ffffff",
                                         boxSizing: "border-box",
                                       }}
                                     />
@@ -2603,6 +2762,237 @@ export function SaleProcessFormPage() {
             </button>
           </div>
         </form>
+
+        {/* Modal: Add Spare Part from Product Master */}
+        {showSpareModal && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.6)",
+              backdropFilter: "blur(3px)",
+              zIndex: 1000,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "20px",
+            }}
+            onClick={() => setShowSpareModal(false)}
+          >
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "12px",
+                width: "680px",
+                maxWidth: "95vw",
+                maxHeight: "85vh",
+                display: "flex",
+                flexDirection: "column",
+                boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2), 0 10px 10px -5px rgba(0,0,0,0.1)",
+                overflow: "hidden",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div
+                style={{
+                  padding: "16px 20px",
+                  background: "linear-gradient(135deg, #f8fafc, #f1f5f9)",
+                  borderBottom: "1px solid #e2e8f0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      width: "36px",
+                      height: "36px",
+                      borderRadius: "8px",
+                      background: "#fef3c7",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "18px",
+                    }}
+                  >
+                    ⚙️
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+                      Add Spare Part from Product Master
+                    </h3>
+                    <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>
+                      Select spare parts registered in master catalog. Spares automatically roll up on CI & PL.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSpareModal(false)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "20px",
+                    color: "#94a3b8",
+                    cursor: "pointer",
+                    padding: "4px",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Modal Search Bar */}
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid #f1f5f9", background: "#ffffff" }}>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Type to search spare parts (e.g., roller, heater, blade, seal, sensor, cutter)..."
+                  value={spareSearch}
+                  onChange={(e) => setSpareSearch(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 14px",
+                    borderRadius: "6px",
+                    border: "1.5px solid #d97706",
+                    fontSize: "13px",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              {/* Modal Results List */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "10px 20px" }}>
+                {spareSearchLoading ? (
+                  <div style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
+                    ⏳ Searching Product Master for spares...
+                  </div>
+                ) : spareSearchResults.length === 0 ? (
+                  <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
+                    <div style={{ fontSize: "28px", marginBottom: "8px" }}>🔍</div>
+                    <div style={{ fontWeight: 600, color: "#475569" }}>No spare products found</div>
+                    <div style={{ fontSize: "12px", marginTop: "4px" }}>
+                      {spareSearch.trim() ? `No product matching "${spareSearch}" in master catalog.` : "Type a keyword above to find spares in Product Master."}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {spareSearchResults.map((p) => {
+                      const isSpareCat = (p.category_name || "").toLowerCase().includes("spare") ||
+                        (p.product_name || "").toLowerCase().includes("spare") ||
+                        (p.product_name || "").toLowerCase().includes("part") ||
+                        (p.product_name || "").toLowerCase().includes("roller") ||
+                        (p.product_name || "").toLowerCase().includes("blade") ||
+                        (p.product_name || "").toLowerCase().includes("heater");
+
+                      return (
+                        <div
+                          key={p.id}
+                          style={{
+                            padding: "10px 14px",
+                            borderRadius: "8px",
+                            border: isSpareCat ? "1.5px solid #fcd34d" : "1px solid #e2e8f0",
+                            background: isSpareCat ? "#fffbeb" : "#ffffff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                          }}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ fontWeight: 700, fontSize: "13px", color: "#0f172a" }}>
+                                {p.product_name}
+                              </span>
+                              {isSpareCat && (
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    fontWeight: 700,
+                                    background: "#fef3c7",
+                                    color: "#b45309",
+                                    padding: "1px 6px",
+                                    borderRadius: "4px",
+                                    border: "1px solid #fde68a",
+                                  }}
+                                >
+                                  ⚙️ Spare
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                              Code: <strong>{p.product_code || "—"}</strong> &nbsp;|&nbsp; HS Code: <strong>{p.hsn_code || "8422.90.90"}</strong> &nbsp;|&nbsp; UOM: <strong>{p.uom || "PCS"}</strong>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleAddProduct(p, { isSpare: true });
+                              setShowSpareModal(false);
+                            }}
+                            style={{
+                              padding: "6px 14px",
+                              borderRadius: "6px",
+                              border: "none",
+                              background: "linear-gradient(135deg, #f59e0b, #d97706)",
+                              color: "#ffffff",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              boxShadow: "0 1px 3px rgba(217,119,6,0.3)",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <span>+ Add as Spare</span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div
+                style={{
+                  padding: "12px 20px",
+                  background: "#f8fafc",
+                  borderTop: "1px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: "11px",
+                  color: "#64748b",
+                }}
+              >
+                <span>
+                  Showing {spareSearchResults.length} master products. Items added here will be saved with <strong>is_spare=true</strong>.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSpareModal(false)}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#475569",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );

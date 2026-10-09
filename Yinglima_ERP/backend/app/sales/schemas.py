@@ -40,6 +40,7 @@ class SaleOrderItemCreate(BaseModel):
     cbm_per_unit: float = 0.0
     total_cbm: float = 0.0
     total_supplier_amount_rmb: float = 0.0
+    is_spare: bool = False
 
 
 class SaleOrderItemResponse(BaseModel):
@@ -69,6 +70,7 @@ class SaleOrderItemResponse(BaseModel):
     cbm_per_unit: float = 0.0
     total_cbm: float = 0.0
     total_supplier_amount_rmb: float = 0.0
+    is_spare: bool = False
 
     created_at: datetime
     updated_at: datetime
@@ -273,6 +275,7 @@ class ExtractedConsignmentItem(BaseModel):
     cbm_per_unit: float = 0.0
     total_cbm: float = 0.0
     total_supplier_amount_rmb: float = 0.0
+    is_spare: bool = False
 
 
 class PlanningConsignmentItemsResponse(BaseModel):
