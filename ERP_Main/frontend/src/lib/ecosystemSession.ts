@@ -6,6 +6,8 @@
  * and any future attached ERP instances.
  */
 
+import { API_BASE } from "./api";
+
 export interface EcosystemSessionData {
   session_id: string;
   email: string;
@@ -22,6 +24,13 @@ export interface EcosystemSessionData {
 const COOKIE_NAME = "ihm_ecosystem_session";
 const LOCAL_STORAGE_KEY = "ihm_ecosystem_session";
 const BROADCAST_CHANNEL_NAME = "ihm_ecosystem_auth";
+
+const isLocalhost = (hostname: string) =>
+  hostname === "localhost" ||
+  hostname === "127.0.0.1" ||
+  hostname === "0.0.0.0" ||
+  hostname.endsWith(".local");
+
 const getCentralAuthApi = (): string => {
   if (import.meta.env.VITE_CENTRAL_AUTH_API) {
     return import.meta.env.VITE_CENTRAL_AUTH_API;
@@ -29,11 +38,15 @@ const getCentralAuthApi = (): string => {
   if (import.meta.env.VITE_CONTROL_PLANE_API_URL) {
     return `${import.meta.env.VITE_CONTROL_PLANE_API_URL.replace(/\/+$/, "")}/global/ecosystem-session`;
   }
-  if (typeof window !== "undefined" && window.location.hostname) {
-    const host = window.location.hostname;
+  // In ERP_Main, route directly through the configured backend API_BASE
+  if (API_BASE) {
+    return `${API_BASE}/global/ecosystem-session`;
+  }
+  const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
+  if (isLocalhost(host)) {
     return `http://${host}:8000/api/v1/global/ecosystem-session`;
   }
-  return "http://127.0.0.1:8000/api/v1/global/ecosystem-session";
+  return "";
 };
 export const CENTRAL_AUTH_API = getCentralAuthApi();
 
@@ -145,6 +158,7 @@ export async function establishCentralEcosystemSession(params: {
   source_erp: string;
   existing_session_id?: string;
 }): Promise<EcosystemSessionData | null> {
+  if (!CENTRAL_AUTH_API) return null;
   try {
     const res = await fetch(`${CENTRAL_AUTH_API}/establish`, {
       method: "POST",
@@ -173,7 +187,7 @@ export async function establishCentralEcosystemSession(params: {
 export async function verifyCentralEcosystemSession(sessionId: string): Promise<{ active: boolean; revoked?: boolean; session?: EcosystemSessionData }> {
   // Local standalone sessions (ihm-sess-*) are strictly internal to an ERP
   // and must NEVER be queried against ERP_Main or considered revoked.
-  if (!sessionId || sessionId.startsWith("ihm-sess-")) {
+  if (!sessionId || sessionId.startsWith("ihm-sess-") || !CENTRAL_AUTH_API) {
     return { active: true, revoked: false };
   }
 
@@ -218,7 +232,7 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
   // Notify all open tabs across all ports immediately (0ms perceived latency)
   broadcastEcosystemEvent({ type: "LOGOUT", session_id: idToRevoke });
 
-  if (idToRevoke && !idToRevoke.startsWith("ihm-sess-")) {
+  if (idToRevoke && !idToRevoke.startsWith("ihm-sess-") && CENTRAL_AUTH_API) {
     try {
       await fetch(`${CENTRAL_AUTH_API}/${idToRevoke}/revoke`, {
         method: "POST",

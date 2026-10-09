@@ -30,6 +30,12 @@ const SSO_VALIDITY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 const getHost = () => (typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1");
 
+const isLocalhost = (hostname: string) =>
+  hostname === "localhost" ||
+  hostname === "127.0.0.1" ||
+  hostname === "0.0.0.0" ||
+  hostname.endsWith(".local");
+
 export interface EcosystemErpEntry {
   key: string;
   id: string;
@@ -41,17 +47,25 @@ export interface EcosystemErpEntry {
 
 export const getEcosystemErps = (): EcosystemErpEntry[] => {
   const host = getHost();
-  const controlPlaneHost = import.meta.env.VITE_CONTROL_PLANE_URL || `http://${host}:5170/dashboard`;
-  const controlPlaneApi = import.meta.env.VITE_CONTROL_PLANE_API_URL || `http://${host}:8000/api/v1`;
-  const yinglimaHost = import.meta.env.VITE_YINGLIMA_URL || `http://${host}:5173/dashboard`;
-  const yinglimaApi = import.meta.env.VITE_YINGLIMA_API_URL || `http://${host}:8001/api/v1`;
+  const isLocal = isLocalhost(host);
+
+  const controlPlaneHost = import.meta.env.VITE_CONTROL_PLANE_URL || (isLocal ? `http://${host}:5170/dashboard` : "");
+  const controlPlaneApi = import.meta.env.VITE_CONTROL_PLANE_API_URL || (isLocal ? `http://${host}:8000/api/v1` : undefined);
+  const yinglimaHost = import.meta.env.VITE_YINGLIMA_URL || (isLocal ? `http://${host}:5173/dashboard` : "");
+  const yinglimaApi = import.meta.env.VITE_YINGLIMA_API_URL || (isLocal ? `http://${host}:8001/api/v1` : undefined);
   const inhymaHost =
     import.meta.env.VITE_INHYMA_URL ||
-    (typeof window !== "undefined" && window.location.origin ? `${window.location.origin}/dashboard` : `http://${host}:5174/dashboard`);
+    (typeof window !== "undefined" && window.location.origin
+      ? `${window.location.origin}/dashboard`
+      : isLocal
+      ? `http://${host}:5174/dashboard`
+      : "#");
   const inhymaApi =
     import.meta.env.VITE_API_ORIGIN
       ? `${import.meta.env.VITE_API_ORIGIN.replace(/\/+$/, "")}/api/v1`
-      : `http://${host}:8002/api/v1`;
+      : isLocal
+      ? `http://${host}:8002/api/v1`
+      : undefined;
 
   return [
     { key: "control-plane", id: "control-plane", name: "ERP Dashboard", hostUrl: controlPlaneHost, apiUrl: controlPlaneApi, badge: "Control Plane" },
@@ -89,7 +103,7 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
   try {
     const url = new URL(targetBaseUrl, window.location.origin);
     const host = getHost();
-    if (url.hostname === "localhost" && host !== "localhost") {
+    if (url.hostname === "localhost" && host !== "localhost" && isLocalhost(host)) {
       url.hostname = host;
     }
     if (targetPath) {
