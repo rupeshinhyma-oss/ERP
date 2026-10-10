@@ -78,6 +78,21 @@ flowchart TD
 - Builds high-performance read-only projections for cross-system executive search, financial metrics, and operational dashboards.
 - Features idempotency deduplication (`event_id` tracking) and Dead Letter Queue (DLQ) retry mechanisms.
 
+### 2.5 Bi-Directional Password Synchronization & Unified Identity
+- **Single Password Per Identity:** Password updates originating from either ERP_Main or any connected spoke ERP (e.g., Inhyma or Yinglima) are automatically propagated throughout the entire ecosystem.
+- **Inbound Spoke Sync (`POST /api/v1/internal/users/password`):** Spoke backends securely submit changed passwords with internal service credentials; ERP_Main persists them centrally and immediately fans out re-provisioning calls across all other active ERP memberships (`push_password_to_memberships`).
+- **Graceful Fallback:** Operations never fail if a peer spoke is temporarily unreachable; spoken logins automatically verify credentials against the live central ecosystem session.
+
+### 2.6 Durable Access Sync Recovery Engine (`access_sync_tasks`)
+- **Fault-Tolerant Deprovisioning:** When an administrator revokes, suspends, or restores user access in ERP_Main, any network error reaching a spoke triggers a durable database record in `access_sync_tasks`.
+- **Bounded Exponential Backoff & Leases:** Tasks are reclaimed and retried with distributed worker leases (`claimed_by`, `lease_expires_at`) preventing duplicate execution.
+- **Fail-Closed Verification:** Spoke login verification calls ERP_Main's live database state, ensuring that even during synchronization delays, revoked users cannot access spoke ERPs.
+
+### 2.7 High-Scale Performance Architecture & Driver Hardening
+- **Functional & Composite Indexes:** Case-insensitive email indexing (`lower(primary_email)`) and composite status indexes on `erp_memberships` guarantee zero-latency lookups across tens of thousands of global users.
+- **PgBouncer Statement Cache Auto-Disable:** Connection engine auto-detects port 6543 / PgBouncer and sets `statement_cache_size=0`, preventing `DuplicatePreparedStatementError`.
+- **Permanent Role Deletion:** Separates mandatory system roles from starter demo roles, skipping demo re-seeding on existing databases to permanently respect administrative role deletions.
+
 ---
 
 ## 3. Directory Layout & Module Decomposition

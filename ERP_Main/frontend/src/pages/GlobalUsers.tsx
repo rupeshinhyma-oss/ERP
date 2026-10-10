@@ -63,9 +63,8 @@ export function GlobalUsers() {
   const [createEmail, setCreateEmail] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [showCreatePassword, setShowCreatePassword] = useState(false);
-  const [createRole, setCreateRole] = useState("PLATFORM_ADMIN");
-  const [createGrantYinglima, setCreateGrantYinglima] = useState(false);
-  const [createGrantInhyma, setCreateGrantInhyma] = useState(false);
+  const [createRole, setCreateRole] = useState(""); // "" = no ERP_Main role (the normal case)
+  const [createGrants, setCreateGrants] = useState<Record<string, boolean>>({});
   const [creating, setCreating] = useState(false);
 
   // Edit User Modal
@@ -76,8 +75,11 @@ export function GlobalUsers() {
   const [editPassword, setEditPassword] = useState("");
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [editRole, setEditRole] = useState("PLATFORM_ADMIN");
-  const [editGrantYinglima, setEditGrantYinglima] = useState(false);
-  const [editGrantInhyma, setEditGrantInhyma] = useState(false);
+  const [editGrants, setEditGrants] = useState<Record<string, boolean>>({});
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
 
   // Drawer Password Visibility
@@ -94,22 +96,51 @@ export function GlobalUsers() {
   const [confirmDisableUser, setConfirmDisableUser] = useState<GlobalUser | null>(null);
   const [disablingUser, setDisablingUser] = useState(false);
 
+  // Search is debounced; any filter change returns to the first page.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useEffect(() => {
+    setPage(0);
+  }, [statusFilter, erpFilter]);
+
   const fetchUsers = useCallback(async (silent = false) => {
     if (!silent) {
       setLoading(true);
     }
     setError(null);
     try {
-      const [usersRes, erpsRes, memsRes, conflictsRes] = await Promise.all([
-        apiGet<GlobalUser[]>("/global/users?limit=250&offset=0"),
+      // One page at a time (+1 row to know whether a next page exists) -- stays fast with thousands of users.
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE + 1), offset: String(page * PAGE_SIZE) });
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      if (statusFilter === "ACTIVE") params.set("status", "ACTIVE");
+      else if (statusFilter !== "ALL") params.set("status", "DISABLED,SUSPENDED");
+      if (erpFilter === "NONE") params.set("no_erp", "true");
+      else if (erpFilter !== "ALL") params.set("erp_id", erpFilter);
+
+      const [usersRes, erpsRes, conflictsRes] = await Promise.all([
+        apiGet<GlobalUser[]>(`/global/users?${params.toString()}`),
         apiGet<ErpInstance[]>("/global/erps").catch(() => []),
-        apiGet<ErpMembership[]>("/global/memberships?limit=1000&offset=0").catch(() => []),
         apiGet<any[]>("/global/identity/conflicts?status=PENDING").catch(() => []),
       ]);
-      const usersList = Array.isArray(usersRes) ? usersRes : ((usersRes as any)?.data || []);
+      const usersAll = Array.isArray(usersRes) ? usersRes : ((usersRes as any)?.data || []);
+      const usersList = usersAll.slice(0, PAGE_SIZE);
       const erpsList = Array.isArray(erpsRes) ? erpsRes : ((erpsRes as any)?.data || []);
-      const memsList = Array.isArray(memsRes) ? memsRes : ((memsRes as any)?.data || []);
       const conflictsList = Array.isArray(conflictsRes) ? conflictsRes : ((conflictsRes as any)?.data || []);
+
+      // Memberships only for the users on this page (a handful of rows, not the whole platform).
+      let memsList: ErpMembership[] = [];
+      if (usersList.length > 0) {
+        const ids = usersList.map((u: GlobalUser) => u.id).join(",");
+        const memsRes = await apiGet<ErpMembership[]>(`/global/memberships?limit=1000&offset=0&user_ids=${ids}`).catch(() => []);
+        memsList = Array.isArray(memsRes) ? memsRes : ((memsRes as any)?.data || []);
+      }
+
+      setHasNext(usersAll.length > PAGE_SIZE);
       setUsers(usersList);
       setErps(erpsList.filter((e: ErpInstance) => e.status !== "DECOMMISSIONED"));
       setAllMemberships(memsList);
@@ -121,7 +152,7 @@ export function GlobalUsers() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [page, debouncedSearch, statusFilter, erpFilter]);
 
   useEffect(() => {
     fetchUsers();
@@ -173,6 +204,17 @@ export function GlobalUsers() {
       if (found) {
         setDetailUser(found);
         loadUserDetailData(found.id);
+      } else {
+        // The user may be on another page of the list: fetch them directly.
+        apiGet<GlobalUser>(`/global/users/${routeUserId}`)
+          .then((res) => {
+            const u = (res as any)?.data ?? res;
+            if (u?.id) {
+              setDetailUser(u);
+              loadUserDetailData(u.id);
+            }
+          })
+          .catch(() => undefined);
       }
     }
   }, [routeUserId, users, loadUserDetailData]);
@@ -206,6 +248,17 @@ export function GlobalUsers() {
     }
     return list;
   }, [erps, yinglimaErp, inhymaErp]);
+
+  // ERPs a user can be granted: everything in the registry except the control plane itself, so a future
+  // third ERP simply appears here (and in the edit form) with no code change.
+  const grantableErps = useMemo(
+    () =>
+      spokeErps.filter((e) => {
+        const k = (e.erp_key || e.key || "").toLowerCase();
+        return k !== "control-plane" && e.status !== "DECOMMISSIONED";
+      }),
+    [spokeErps]
+  );
 
   const getUserMembershipForErp = useCallback(
     (userId: string, erpInstance?: ErpInstance | null) => {
@@ -436,8 +489,8 @@ export function GlobalUsers() {
         statusFilter === "ALL"
           ? true
           : statusFilter === "ACTIVE"
-          ? u.status === "ACTIVE"
-          : u.status === "DISABLED" || u.status === "SUSPENDED";
+            ? u.status === "ACTIVE"
+            : u.status === "DISABLED" || u.status === "SUSPENDED";
       const query = search.trim().toLowerCase();
       const email = (u.primary_email || u.email || "").toLowerCase();
       const name = (u.display_name || "").toLowerCase();
@@ -520,20 +573,14 @@ export function GlobalUsers() {
         }
       }
 
-      if (createGrantYinglima && yinglimaErp) {
+      for (const erp of grantableErps) {
+        if (!createGrants[erp.id]) continue;
+        const label = erp.name || erp.display_name || erp.erp_key || erp.key || "ERP";
         try {
-          await apiPost(`/global/users/${createdUser.id}/provision`, { erp_instance_id: yinglimaErp.id });
-          toast("Provisioned into Yinglima ERP.", "success");
+          await apiPost(`/global/users/${createdUser.id}/provision`, { erp_instance_id: erp.id });
+          toast(`Provisioned into ${label}.`, "success");
         } catch (pErr) {
-          toast(`Yinglima provisioning warning: ${pErr instanceof Error ? pErr.message : String(pErr)}`, "warning");
-        }
-      }
-      if (createGrantInhyma && inhymaErp) {
-        try {
-          await apiPost(`/global/users/${createdUser.id}/provision`, { erp_instance_id: inhymaErp.id });
-          toast("Provisioned into Inhyma ERP.", "success");
-        } catch (pErr) {
-          toast(`Inhyma provisioning warning: ${pErr instanceof Error ? pErr.message : String(pErr)}`, "warning");
+          toast(`${label} provisioning warning: ${pErr instanceof Error ? pErr.message : String(pErr)}`, "warning");
         }
       }
     }
@@ -543,9 +590,8 @@ export function GlobalUsers() {
     setCreateEmail("");
     setCreatePassword("");
     setShowCreatePassword(false);
-    setCreateRole("PLATFORM_ADMIN");
-    setCreateGrantYinglima(false);
-    setCreateGrantInhyma(false);
+    setCreateRole("");
+    setCreateGrants({});
     setCreating(false);
     await fetchUsers(true);
   };
@@ -561,15 +607,16 @@ export function GlobalUsers() {
     setShowEditPassword(false);
     setEditRole(userMeta.role || (isAdmin ? "PLATFORM_SUPER_ADMIN" : "PLATFORM_ADMIN"));
 
-    if (isAdmin) {
-      setEditGrantYinglima(true);
-      setEditGrantInhyma(true);
-    } else {
-      const yinglimaMem = getUserMembershipForErp(user.id, yinglimaErp);
-      const inhymaMem = getUserMembershipForErp(user.id, inhymaErp);
-      setEditGrantYinglima(!!yinglimaMem && yinglimaMem.status !== "REVOKED");
-      setEditGrantInhyma(!!inhymaMem && inhymaMem.status !== "REVOKED");
+    const initialGrants: Record<string, boolean> = {};
+    for (const erp of grantableErps) {
+      if (isAdmin) {
+        initialGrants[erp.id] = true;
+      } else {
+        const mem = getUserMembershipForErp(user.id, erp);
+        initialGrants[erp.id] = !!mem && mem.status !== "REVOKED";
+      }
     }
+    setEditGrants(initialGrants);
 
     setEditModalOpen(true);
   };
@@ -603,46 +650,29 @@ export function GlobalUsers() {
         }
       }
 
-      // Handle ERP Access Grants changes
+      // Handle ERP Access Grants changes (every ERP in the registry)
       if (!isRowUserAdmin(editingUser)) {
-        const yinglimaMem = getUserMembershipForErp(editingUser.id, yinglimaErp);
-        if (editGrantYinglima && (!yinglimaMem || yinglimaMem.status === "REVOKED") && yinglimaErp) {
-          try {
-            await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: yinglimaErp.id });
-          } catch (err) {
-            toast(`Yinglima provisioning warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
-          }
-        } else if (!editGrantYinglima && yinglimaMem) {
-          try {
-            await apiDelete(`/global/memberships/${yinglimaMem.id}`);
-          } catch (delErr) {
-            console.error("Failed to delete Yinglima membership:", delErr);
-            // Fallback: try revoking if delete endpoint fails
+        for (const erp of grantableErps) {
+          const wanted = !!editGrants[erp.id];
+          const mem = getUserMembershipForErp(editingUser.id, erp);
+          const label = erp.name || erp.display_name || erp.erp_key || erp.key || "ERP";
+          if (wanted && (!mem || mem.status === "REVOKED")) {
             try {
-              await apiPost(`/global/memberships/${yinglimaMem.id}/revoke`, { reason: "Access removed" });
-            } catch {
-              // Ignore fallback error
+              await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: erp.id });
+            } catch (err) {
+              toast(`${label} provisioning warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
             }
-          }
-        }
-
-        const inhymaMem = getUserMembershipForErp(editingUser.id, inhymaErp);
-        if (editGrantInhyma && (!inhymaMem || inhymaMem.status === "REVOKED") && inhymaErp) {
-          try {
-            await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: inhymaErp.id });
-          } catch (err) {
-            toast(`Inhyma provisioning warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
-          }
-        } else if (!editGrantInhyma && inhymaMem) {
-          try {
-            await apiDelete(`/global/memberships/${inhymaMem.id}`);
-          } catch (delErr) {
-            console.error("Failed to delete Inhyma membership:", delErr);
-            // Fallback: try revoking if delete endpoint fails
+          } else if (!wanted && mem) {
             try {
-              await apiPost(`/global/memberships/${inhymaMem.id}/revoke`, { reason: "Access removed" });
-            } catch {
-              // Ignore fallback error
+              await apiDelete(`/global/memberships/${mem.id}`);
+            } catch (delErr) {
+              console.error(`Failed to delete ${label} membership:`, delErr);
+              // Fallback: try revoking if delete endpoint fails
+              try {
+                await apiPost(`/global/memberships/${mem.id}/revoke`, { reason: "Access removed" });
+              } catch {
+                // Ignore fallback error
+              }
             }
           }
         }
@@ -653,8 +683,8 @@ export function GlobalUsers() {
       setEditingUser(null);
       await fetchUsers(true);
       if (detailUser && detailUser.id === editingUser.id) {
-        setDetailUser((prev) => (prev ? { 
-          ...prev, 
+        setDetailUser((prev) => (prev ? {
+          ...prev,
           display_name: editDisplayName,
           primary_email: !isRowUserAdmin(editingUser) ? editEmail.trim().toLowerCase() : prev.primary_email,
           metadata: updatedMeta,
@@ -862,7 +892,18 @@ export function GlobalUsers() {
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span style={{ fontSize: "13px", color: "var(--color-muted, #64748b)", fontWeight: 500 }}>
               Showing <strong style={{ color: "var(--color-text, #1e293b)" }}>{filteredUsers.length}</strong> {filteredUsers.length === 1 ? "user" : "users"}
+              {page > 0 || hasNext ? ` (page ${page + 1})` : ""}
             </span>
+            {(page > 0 || hasNext) && (
+              <span style={{ display: "inline-flex", gap: "6px" }}>
+                <button type="button" className="btn btn-secondary" disabled={page === 0 || loading} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                  Previous
+                </button>
+                <button type="button" className="btn btn-secondary" disabled={!hasNext || loading} onClick={() => setPage((p) => p + 1)}>
+                  Next
+                </button>
+              </span>
+            )}
           </div>
         </div>
 
@@ -909,11 +950,11 @@ export function GlobalUsers() {
                   const email = u.primary_email || u.email || "—";
                   const initials = u.display_name
                     ? u.display_name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .slice(0, 2)
-                        .join("")
-                        .toUpperCase()
+                      .split(" ")
+                      .map((n) => n[0])
+                      .slice(0, 2)
+                      .join("")
+                      .toUpperCase()
                     : "GU";
 
                   return (
@@ -962,10 +1003,10 @@ export function GlobalUsers() {
                               const roleBadgeLabel = isAdmin || userRole === "PLATFORM_SUPER_ADMIN"
                                 ? "👑 Super Admin"
                                 : userRole === "PLATFORM_ADMIN"
-                                ? "🛡️ Platform Admin"
-                                : userRole === "PLATFORM_OPERATOR"
-                                ? "⚡ Operator"
-                                : "👁️ Viewer";
+                                  ? "🛡️ Platform Admin"
+                                  : userRole === "PLATFORM_OPERATOR"
+                                    ? "⚡ Operator"
+                                    : "👁️ Viewer";
                               return (
                                 <span
                                   style={{
@@ -1015,17 +1056,17 @@ export function GlobalUsers() {
                       <td style={{ fontSize: "12px", color: "var(--color-muted)", padding: "12px 16px" }}>
                         {u.updated_at
                           ? new Date(u.updated_at).toLocaleDateString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            })
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })
                           : u.created_at
-                          ? new Date(u.created_at).toLocaleDateString("en-US", {
+                            ? new Date(u.created_at).toLocaleDateString("en-US", {
                               month: "short",
                               day: "numeric",
                               year: "numeric",
                             })
-                          : "—"}
+                            : "—"}
                       </td>
                       <td style={{ textAlign: "right", padding: "12px 16px" }}>
                         <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
@@ -1185,7 +1226,7 @@ export function GlobalUsers() {
 
             <div className="form-group">
               <label className="form-label" htmlFor="create-role">
-                Platform Role <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+                Platform Role
               </label>
               <select
                 id="create-role"
@@ -1193,13 +1234,14 @@ export function GlobalUsers() {
                 value={createRole}
                 onChange={(e) => setCreateRole(e.target.value)}
               >
+                <option value="">None (no ERP_Main permissions)</option>
                 <option value="PLATFORM_SUPER_ADMIN">👑 Platform Super Admin (Full Root System Access)</option>
                 <option value="PLATFORM_ADMIN">🛡️ Platform Admin (Manage Users & Configuration)</option>
                 <option value="PLATFORM_OPERATOR">⚡ Platform Operator (Monitor & Manage Sync/ERPs)</option>
                 <option value="PLATFORM_VIEWER">👁️ Platform Viewer (Read-only System Auditing)</option>
               </select>
               <span className="form-helper">
-                Central role governing access level across the ERP_Main control plane.
+                Optional. Leave as None for normal users; only choose a role for people who must manage ERP_Main itself.
               </span>
             </div>
 
@@ -1208,30 +1250,23 @@ export function GlobalUsers() {
                 ERP Access Grants
               </label>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    id="create-grant-yinglima"
-                    checked={createGrantYinglima}
-                    onChange={(e) => setCreateGrantYinglima(e.target.checked)}
-                    disabled={!yinglimaErp}
-                  />
-                  <span>
-                    Grant <strong>{yinglimaErp?.name || yinglimaErp?.display_name || "ERP 2"}</strong> Access {yinglimaErp ? `(${yinglimaErp.erp_key || yinglimaErp.key})` : "(Not registered)"}
-                  </span>
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    id="create-grant-inhyma"
-                    checked={createGrantInhyma}
-                    onChange={(e) => setCreateGrantInhyma(e.target.checked)}
-                    disabled={!inhymaErp}
-                  />
-                  <span>
-                    Grant <strong>{inhymaErp?.name || inhymaErp?.display_name || "ERP 1"}</strong> Access {inhymaErp ? `(${inhymaErp.erp_key || inhymaErp.key})` : "(Not registered)"}
-                  </span>
-                </label>
+                {grantableErps.length === 0 && (
+                  <span className="form-helper">No ERPs are registered yet.</span>
+                )}
+                {grantableErps.map((erp) => (
+                  <label key={erp.id} style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      id={`create-grant-${erp.id}`}
+                      checked={!!createGrants[erp.id]}
+                      onChange={(e) => setCreateGrants((prev) => ({ ...prev, [erp.id]: e.target.checked }))}
+
+                    />
+                    <span>
+                      Grant <strong>{erp.name || erp.display_name || erp.erp_key || erp.key}</strong> Access ({erp.erp_key || erp.key})
+                    </span>
+                  </label>
+                ))}
               </div>
               <span className="form-helper" style={{ marginTop: "6px" }}>
                 Select which ERP systems this user is granted access to. Unselected ERPs will not be accessible to this user.
@@ -1455,32 +1490,23 @@ export function GlobalUsers() {
                 ERP Access Grants
               </label>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: isRowUserAdmin(editingUser) ? "default" : "pointer" }}>
-                  <input
-                    type="checkbox"
-                    id="edit-grant-yinglima"
-                    checked={editGrantYinglima}
-                    onChange={(e) => setEditGrantYinglima(e.target.checked)}
-                    disabled={!yinglimaErp || isRowUserAdmin(editingUser)}
-                  />
-                  <span>
-                    Grant <strong>{yinglimaErp?.name || yinglimaErp?.display_name || "ERP 2"}</strong> Access {yinglimaErp ? `(${yinglimaErp.erp_key || yinglimaErp.key})` : "(Not registered)"}
-                    {isRowUserAdmin(editingUser) && " — Full Root Access"}
-                  </span>
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: isRowUserAdmin(editingUser) ? "default" : "pointer" }}>
-                  <input
-                    type="checkbox"
-                    id="edit-grant-inhyma"
-                    checked={editGrantInhyma}
-                    onChange={(e) => setEditGrantInhyma(e.target.checked)}
-                    disabled={!inhymaErp || isRowUserAdmin(editingUser)}
-                  />
-                  <span>
-                    Grant <strong>{inhymaErp?.name || inhymaErp?.display_name || "ERP 1"}</strong> Access {inhymaErp ? `(${inhymaErp.erp_key || inhymaErp.key})` : "(Not registered)"}
-                    {isRowUserAdmin(editingUser) && " — Full Root Access"}
-                  </span>
-                </label>
+                {grantableErps.length === 0 && (
+                  <span className="form-helper">No ERPs are registered yet.</span>
+                )}
+                {grantableErps.map((erp) => (
+                  <label key={erp.id} style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      id={`edit-grant-${erp.id}`}
+                      checked={!!editGrants[erp.id]}
+                      onChange={(e) => setEditGrants((prev) => ({ ...prev, [erp.id]: e.target.checked }))}
+                      disabled={isRowUserAdmin(editingUser)}
+                    />
+                    <span>
+                      Grant <strong>{erp.name || erp.display_name || erp.erp_key || erp.key}</strong> Access ({erp.erp_key || erp.key})
+                    </span>
+                  </label>
+                ))}
               </div>
               <span className="form-helper" style={{ marginTop: "6px" }}>
                 {isRowUserAdmin(editingUser)
@@ -1549,453 +1575,453 @@ export function GlobalUsers() {
               <LoadingSpinner text="Loading user details..." />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    {/* Hero Identity Card */}
+                {/* Hero Identity Card */}
+                <div
+                  style={{
+                    background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "10px",
+                    padding: "16px 20px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
                     <div
                       style={{
-                        background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "10px",
-                        padding: "16px 20px",
+                        width: "48px",
+                        height: "48px",
+                        borderRadius: "50%",
+                        background: isDetailUserAdmin
+                          ? "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)"
+                          : "linear-gradient(135deg, #0284c7 0%, #2563eb 100%)",
+                        color: "#ffffff",
                         display: "flex",
                         alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "16px",
+                        justifyContent: "center",
+                        fontWeight: 700,
+                        fontSize: "16px",
+                        boxShadow: "0 2px 6px rgba(0, 97, 242, 0.2)",
+                        flexShrink: 0,
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                        <div
+                      {detailUser.display_name
+                        ? detailUser.display_name
+                          .trim()
+                          .split(/\s+/)
+                          .map((n) => n[0])
+                          .slice(0, 2)
+                          .join("")
+                          .toUpperCase()
+                        : "GU"}
+                    </div>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                        <h4 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+                          {detailUser.display_name}
+                        </h4>
+                        <StatusBadge status={detailUser.status} />
+                        {isDetailUserAdmin && (
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              padding: "2px 8px",
+                              borderRadius: "4px",
+                              backgroundColor: "#ede9fe",
+                              color: "#5b21b6",
+                              border: "1px solid #ddd6fe",
+                            }}
+                          >
+                            👑 System Admin
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                        <span style={{ fontSize: "13px", color: "#475569", fontWeight: 500 }}>
+                          {detailUser.primary_email || detailUser.email || "—"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const emailToCopy = detailUser.primary_email || detailUser.email || "";
+                            if (emailToCopy) {
+                              navigator.clipboard.writeText(emailToCopy);
+                              toast("Email copied to clipboard.", "info");
+                            }
+                          }}
                           style={{
-                            width: "48px",
-                            height: "48px",
-                            borderRadius: "50%",
-                            background: isDetailUserAdmin
-                              ? "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)"
-                              : "linear-gradient(135deg, #0284c7 0%, #2563eb 100%)",
-                            color: "#ffffff",
-                            display: "flex",
+                            background: "transparent",
+                            border: "none",
+                            color: "#94a3b8",
+                            cursor: "pointer",
+                            padding: "2px",
+                            display: "inline-flex",
                             alignItems: "center",
-                            justifyContent: "center",
-                            fontWeight: 700,
-                            fontSize: "16px",
-                            boxShadow: "0 2px 6px rgba(0, 97, 242, 0.2)",
-                            flexShrink: 0,
+                          }}
+                          title="Copy email to clipboard"
+                        >
+                          <ICONS.copy width={12} height={12} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleOpenEdit(detailUser)}
+                    style={{
+                      fontSize: "12px",
+                      padding: "6px 14px",
+                      borderRadius: "6px",
+                      fontWeight: 600,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      backgroundColor: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <ICONS.edit width={13} height={13} />
+                    Edit Profile
+                  </button>
+                </div>
+
+                {/* Security & Identity Card */}
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "10px",
+                    padding: "16px 20px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "14px",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "10px" }}>
+                    <ICONS.shield width={15} height={15} color="#0061f2" />
+                    <strong style={{ fontSize: "12.5px", color: "#334155", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      Platform Identity & Security
+                    </strong>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 20px" }}>
+                    <div>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        Platform User ID
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
+                        <code
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: "11.5px",
+                            background: "#f8fafc",
+                            padding: "3px 8px",
+                            borderRadius: "4px",
+                            border: "1px solid #e2e8f0",
+                            color: "#334155",
+                            wordBreak: "break-all",
                           }}
                         >
-                          {detailUser.display_name
-                            ? detailUser.display_name
-                                .trim()
-                                .split(/\s+/)
-                                .map((n) => n[0])
-                                .slice(0, 2)
-                                .join("")
-                                .toUpperCase()
-                            : "GU"}
-                        </div>
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <h4 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
-                              {detailUser.display_name}
-                            </h4>
-                            <StatusBadge status={detailUser.status} />
-                            {isDetailUserAdmin && (
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  padding: "2px 8px",
-                                  borderRadius: "4px",
-                                  backgroundColor: "#ede9fe",
-                                  color: "#5b21b6",
-                                  border: "1px solid #ddd6fe",
-                                }}
-                              >
-                                👑 System Admin
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
-                            <span style={{ fontSize: "13px", color: "#475569", fontWeight: 500 }}>
-                              {detailUser.primary_email || detailUser.email || "—"}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const emailToCopy = detailUser.primary_email || detailUser.email || "";
-                                if (emailToCopy) {
-                                  navigator.clipboard.writeText(emailToCopy);
-                                  toast("Email copied to clipboard.", "info");
-                                }
-                              }}
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "#94a3b8",
-                                cursor: "pointer",
-                                padding: "2px",
-                                display: "inline-flex",
-                                alignItems: "center",
-                              }}
-                              title="Copy email to clipboard"
-                            >
-                              <ICONS.copy width={12} height={12} />
-                            </button>
-                          </div>
-                        </div>
+                          {detailUser.id}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(detailUser.id);
+                            toast("Platform User ID copied.", "info");
+                          }}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#94a3b8",
+                            cursor: "pointer",
+                            padding: "2px",
+                            display: "inline-flex",
+                          }}
+                          title="Copy Platform User ID"
+                        >
+                          <ICONS.copy width={12} height={12} />
+                        </button>
                       </div>
-
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handleOpenEdit(detailUser)}
-                        style={{
-                          fontSize: "12px",
-                          padding: "6px 14px",
-                          borderRadius: "6px",
-                          fontWeight: 600,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          backgroundColor: "#ffffff",
-                          border: "1px solid #cbd5e1",
-                          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-                          cursor: "pointer",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <ICONS.edit width={13} height={13} />
-                        Edit Profile
-                      </button>
                     </div>
 
-                    {/* Security & Identity Card */}
-                    <div
-                      style={{
-                        background: "#ffffff",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "10px",
-                        padding: "16px 20px",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "14px",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "10px" }}>
-                        <ICONS.shield width={15} height={15} color="#0061f2" />
-                        <strong style={{ fontSize: "12.5px", color: "#334155", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                          Platform Identity & Security
-                        </strong>
+                    <div>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        Password
+                      </span>
+                      <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontFamily: "monospace", fontSize: "13px", letterSpacing: showDrawerPassword ? "0.02em" : "0.15em", color: "#334155" }}>
+                          {showDrawerPassword
+                            ? ((detailUser as any)?.metadata?.default_password || (isRowUserAdmin(detailUser) ? "ChangeMe!12345" : "—"))
+                            : "••••••••••••"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowDrawerPassword(!showDrawerPassword)}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#64748b",
+                            cursor: "pointer",
+                            padding: "2px 4px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            borderRadius: "4px",
+                          }}
+                          title={showDrawerPassword ? "Hide password" : "Show password"}
+                        >
+                          {showDrawerPassword ? <ICONS.eyeOff width={13} height={13} /> : <ICONS.eye width={13} height={13} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const pwd = (detailUser as any)?.metadata?.default_password || (isRowUserAdmin(detailUser) ? "ChangeMe!12345" : "");
+                            if (pwd) {
+                              navigator.clipboard.writeText(pwd);
+                              toast("Password copied to clipboard.", "info");
+                            } else {
+                              toast("No password configured for this user.", "warning");
+                            }
+                          }}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#64748b",
+                            cursor: "pointer",
+                            padding: "2px 4px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            borderRadius: "4px",
+                          }}
+                          title="Copy password"
+                        >
+                          <ICONS.copy width={12} height={12} />
+                        </button>
                       </div>
+                    </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 20px" }}>
-                        <div>
-                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                            Platform User ID
+                    <div>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        Platform Role
+                      </span>
+                      <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
+                        {isDetailUserAdmin ? (
+                          <span style={{ color: "#4f46e5", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            👑 Super Admin
                           </span>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
-                            <code
-                              style={{
-                                fontFamily: "monospace",
-                                fontSize: "11.5px",
-                                background: "#f8fafc",
-                                padding: "3px 8px",
-                                borderRadius: "4px",
-                                border: "1px solid #e2e8f0",
-                                color: "#334155",
-                                wordBreak: "break-all",
-                              }}
-                            >
-                              {detailUser.id}
-                            </code>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(detailUser.id);
-                                toast("Platform User ID copied.", "info");
-                              }}
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "#94a3b8",
-                                cursor: "pointer",
-                                padding: "2px",
-                                display: "inline-flex",
-                              }}
-                              title="Copy Platform User ID"
-                            >
-                              <ICONS.copy width={12} height={12} />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                            Password
-                          </span>
-                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px" }}>
-                            <span style={{ fontFamily: "monospace", fontSize: "13px", letterSpacing: showDrawerPassword ? "0.02em" : "0.15em", color: "#334155" }}>
-                              {showDrawerPassword
-                                ? ((detailUser as any)?.metadata?.default_password || (isRowUserAdmin(detailUser) ? "ChangeMe!12345" : "—"))
-                                : "••••••••••••"}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setShowDrawerPassword(!showDrawerPassword)}
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "#64748b",
-                                cursor: "pointer",
-                                padding: "2px 4px",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                borderRadius: "4px",
-                              }}
-                              title={showDrawerPassword ? "Hide password" : "Show password"}
-                            >
-                              {showDrawerPassword ? <ICONS.eyeOff width={13} height={13} /> : <ICONS.eye width={13} height={13} />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const pwd = (detailUser as any)?.metadata?.default_password || (isRowUserAdmin(detailUser) ? "ChangeMe!12345" : "");
-                                if (pwd) {
-                                  navigator.clipboard.writeText(pwd);
-                                  toast("Password copied to clipboard.", "info");
-                                } else {
-                                  toast("No password configured for this user.", "warning");
-                                }
-                              }}
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "#64748b",
-                                cursor: "pointer",
-                                padding: "2px 4px",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                borderRadius: "4px",
-                              }}
-                              title="Copy password"
-                            >
-                              <ICONS.copy width={12} height={12} />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                            Platform Role
-                          </span>
-                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
-                            {isDetailUserAdmin ? (
-                              <span style={{ color: "#4f46e5", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                                👑 Super Admin
-                              </span>
-                            ) : (
-                              <span style={{ color: "#0369a1", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                                🛡️ {((detailUser as any)?.metadata?.role || "PLATFORM_ADMIN").replace("PLATFORM_", "")}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div>
-                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                            Created At
-                          </span>
-                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#334155" }}>
-                            {detailUser.created_at ? new Date(detailUser.created_at).toLocaleString() : "—"}
-                          </div>
-                        </div>
-
-                        <div>
-                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                            Updated At
-                          </span>
-                          <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#334155" }}>
-                            {detailUser.updated_at ? new Date(detailUser.updated_at).toLocaleString() : "—"}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Status Governance Footer */}
-                      <div
-                        style={{
-                          marginTop: "2px",
-                          paddingTop: "12px",
-                          borderTop: "1px solid #f1f5f9",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          flexWrap: "wrap",
-                          gap: "10px",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                            Account Status:
-                          </span>
-                          <StatusBadge status={detailUser.status} />
-                        </div>
-
-                        {!isDetailUserAdmin ? (
-                          detailUser.status === "DISABLED" || detailUser.status === "SUSPENDED" ? (
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => handleEnableUser(detailUser)}
-                              style={{
-                                fontSize: "12px",
-                                padding: "4px 12px",
-                                borderRadius: "5px",
-                                fontWeight: 600,
-                                color: "#059669",
-                                borderColor: "#a7f3d0",
-                                backgroundColor: "#ecfdf5",
-                                cursor: "pointer",
-                              }}
-                            >
-                              Enable Account
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => setConfirmDisableUser(detailUser)}
-                              style={{
-                                fontSize: "12px",
-                                padding: "4px 12px",
-                                borderRadius: "5px",
-                                fontWeight: 600,
-                                color: "#dc2626",
-                                borderColor: "#fecaca",
-                                backgroundColor: "#fef2f2",
-                                cursor: "pointer",
-                              }}
-                            >
-                              Disable Account
-                            </button>
-                          )
                         ) : (
-                          <span style={{ fontSize: "12px", color: "#059669", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
-                            Protected Platform Administrator
+                          <span style={{ color: "#0369a1", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            🛡️ {((detailUser as any)?.metadata?.role || "PLATFORM_ADMIN").replace("PLATFORM_", "")}
                           </span>
                         )}
                       </div>
                     </div>
 
-                    {/* Ecosystem Footprint Card */}
-                    <div
-                      style={{
-                        background: "#ffffff",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "10px",
-                        padding: "16px 20px",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "12px",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <ICONS.globe width={15} height={15} color="#0061f2" />
-                          <strong style={{ fontSize: "12.5px", color: "#334155", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                            Ecosystem Footprint
-                          </strong>
-                        </div>
-                        <span style={{ fontSize: "12px", color: "#64748b" }}>
-                          {userMemberships.length} linked environment{userMemberships.length === 1 ? "" : "s"}
-                        </span>
+                    <div>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        Created At
+                      </span>
+                      <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#334155" }}>
+                        {detailUser.created_at ? new Date(detailUser.created_at).toLocaleString() : "—"}
                       </div>
+                    </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                        {/* ERP Memberships summary */}
-                        <div
-                          style={{
-                            padding: "12px 14px",
-                            background: "#f8fafc",
-                            borderRadius: "8px",
-                            border: "1px solid #e2e8f0",
-                          }}
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>
-                              Linked ERPs ({userMemberships.length})
-                            </span>
-                          </div>
-                          {userMemberships.length === 0 ? (
-                            <div style={{ fontSize: "12px", color: "#94a3b8" }}>No ERP memberships linked yet.</div>
-                          ) : (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                              {userMemberships.map((m) => {
-                                const erp = erps.find((e) => e.id === m.erp_instance_id);
-                                return (
-                                  <span
-                                    key={m.id}
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "3px 8px",
-                                      borderRadius: "4px",
-                                      backgroundColor: "#ffffff",
-                                      border: "1px solid #cbd5e1",
-                                      color: "#334155",
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: "4px",
-                                    }}
-                                  >
-                                    <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: m.status === "ACTIVE" ? "#10b981" : "#f59e0b" }} />
-                                    {erp?.name || m.erp_name || "Business ERP"}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Platform Roles summary */}
-                        <div
-                          style={{
-                            padding: "12px 14px",
-                            background: "#f8fafc",
-                            borderRadius: "8px",
-                            border: "1px solid #e2e8f0",
-                          }}
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                            <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>
-                              Platform Roles ({userRoles.filter((r) => r.is_active).length})
-                            </span>
-                          </div>
-                          {userRoles.filter((r) => r.is_active).length === 0 ? (
-                            <div style={{ fontSize: "12px", color: "#94a3b8" }}>Standard baseline permissions.</div>
-                          ) : (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                              {userRoles.filter((r) => r.is_active).map((r) => (
-                                <span
-                                  key={r.id}
-                                  style={{
-                                    fontSize: "11px",
-                                    padding: "3px 8px",
-                                    borderRadius: "4px",
-                                    backgroundColor: r.scope === "GLOBAL" ? "#ede9fe" : "#fef3c7",
-                                    color: r.scope === "GLOBAL" ? "#5b21b6" : "#92400e",
-                                    border: `1px solid ${r.scope === "GLOBAL" ? "#ddd6fe" : "#fde68a"}`,
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  {r.role_key}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                    <div>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        Updated At
+                      </span>
+                      <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#334155" }}>
+                        {detailUser.updated_at ? new Date(detailUser.updated_at).toLocaleString() : "—"}
                       </div>
                     </div>
                   </div>
+
+                  {/* Status Governance Footer */}
+                  <div
+                    style={{
+                      marginTop: "2px",
+                      paddingTop: "12px",
+                      borderTop: "1px solid #f1f5f9",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "10px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        Account Status:
+                      </span>
+                      <StatusBadge status={detailUser.status} />
+                    </div>
+
+                    {!isDetailUserAdmin ? (
+                      detailUser.status === "DISABLED" || detailUser.status === "SUSPENDED" ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleEnableUser(detailUser)}
+                          style={{
+                            fontSize: "12px",
+                            padding: "4px 12px",
+                            borderRadius: "5px",
+                            fontWeight: 600,
+                            color: "#059669",
+                            borderColor: "#a7f3d0",
+                            backgroundColor: "#ecfdf5",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Enable Account
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setConfirmDisableUser(detailUser)}
+                          style={{
+                            fontSize: "12px",
+                            padding: "4px 12px",
+                            borderRadius: "5px",
+                            fontWeight: 600,
+                            color: "#dc2626",
+                            borderColor: "#fecaca",
+                            backgroundColor: "#fef2f2",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Disable Account
+                        </button>
+                      )
+                    ) : (
+                      <span style={{ fontSize: "12px", color: "#059669", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
+                        Protected Platform Administrator
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Ecosystem Footprint Card */}
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "10px",
+                    padding: "16px 20px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <ICONS.globe width={15} height={15} color="#0061f2" />
+                      <strong style={{ fontSize: "12.5px", color: "#334155", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Ecosystem Footprint
+                      </strong>
+                    </div>
+                    <span style={{ fontSize: "12px", color: "#64748b" }}>
+                      {userMemberships.length} linked environment{userMemberships.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                    {/* ERP Memberships summary */}
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        background: "#f8fafc",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>
+                          Linked ERPs ({userMemberships.length})
+                        </span>
+                      </div>
+                      {userMemberships.length === 0 ? (
+                        <div style={{ fontSize: "12px", color: "#94a3b8" }}>No ERP memberships linked yet.</div>
+                      ) : (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                          {userMemberships.map((m) => {
+                            const erp = erps.find((e) => e.id === m.erp_instance_id);
+                            return (
+                              <span
+                                key={m.id}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "3px 8px",
+                                  borderRadius: "4px",
+                                  backgroundColor: "#ffffff",
+                                  border: "1px solid #cbd5e1",
+                                  color: "#334155",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                              >
+                                <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: m.status === "ACTIVE" ? "#10b981" : "#f59e0b" }} />
+                                {erp?.name || m.erp_name || "Business ERP"}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Platform Roles summary */}
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        background: "#f8fafc",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: 600, color: "#334155" }}>
+                          Platform Roles ({userRoles.filter((r) => r.is_active).length})
+                        </span>
+                      </div>
+                      {userRoles.filter((r) => r.is_active).length === 0 ? (
+                        <div style={{ fontSize: "12px", color: "#94a3b8" }}>Standard baseline permissions.</div>
+                      ) : (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                          {userRoles.filter((r) => r.is_active).map((r) => (
+                            <span
+                              key={r.id}
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 8px",
+                                borderRadius: "4px",
+                                backgroundColor: r.scope === "GLOBAL" ? "#ede9fe" : "#fef3c7",
+                                color: r.scope === "GLOBAL" ? "#5b21b6" : "#92400e",
+                                border: `1px solid ${r.scope === "GLOBAL" ? "#ddd6fe" : "#fde68a"}`,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {r.role_key}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </Modal>

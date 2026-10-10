@@ -57,3 +57,17 @@
 | Method | Endpoint URI | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/v1/internal/users/{id}/deprovision` | Invalidate sessions and soft-delete user record upon control plane deprovisioning | Internal Service Key |
+
+---
+
+## 6. Authentication, SSO Handover & Identity Federation (`/auth`, `/users`, `/organizations`)
+
+| Method | Endpoint URI | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/auth/login` | Local credential authentication returning token pair & profile | Public |
+| `POST` | `/api/v1/auth/sso-handover` | Authenticate incoming SSO handover token with mandatory live central session verification against ERP_Main | Public / Handover Token |
+| `POST` | `/api/v1/auth/change-password` | Update current user's password and asynchronously push to ERP_Main | Authenticated |
+| `POST` | `/api/v1/users/{id}/reset-password` | Administrative password reset and automatic fanout push to ERP_Main | `user.manage` |
+| `PATCH` | `/api/v1/users/{id}` | Update user attributes; email is locked to central control plane | `user.update` |
+| `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and logo | Public |
+

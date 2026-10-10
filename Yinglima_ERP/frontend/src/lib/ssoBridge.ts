@@ -117,6 +117,66 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
   }
 }
 
+/** The parts of a central (ERP_Main) session that routing needs. */
+export interface CentralSessionLike {
+  session_id?: string;
+  email?: string;
+  display_name?: string;
+  role?: string;
+  allowed_erps?: string[];
+}
+
+/**
+ * Builds an SSO handover link from an explicit central session (used at sign-in time, before this
+ * app has its own local session).  The receiving app verifies the session with ERP_Main itself.
+ */
+export function createSsoHandoverUrlFromSession(targetBaseUrl: string, s: CentralSessionLike): string {
+  if (!targetBaseUrl || !s.session_id) return "#";
+  const payload = {
+    role: s.role || "global_user",
+    user: s.display_name || s.email || "",
+    email: s.email || "",
+    session_id: s.session_id,
+    allowed_erps: s.allowed_erps || [],
+    ts: Date.now(),
+    sig: SSO_SIGNATURE,
+  };
+  const url = new URL(targetBaseUrl, window.location.origin);
+  const host = getHost();
+  if (url.hostname === "localhost" && host !== "localhost" && isLocalhost(host)) {
+    url.hostname = host;
+  }
+  url.searchParams.set("sso_handover", btoa(JSON.stringify(payload)));
+  return url.toString();
+}
+
+export type CentralRoute =
+  | { kind: "stay" } // this ERP is one the person may use
+  | { kind: "redirect"; url: string } // send them to the ERP they have, or to the dashboard if they have several
+  | { kind: "none" }; // no ERP access at all
+
+/**
+ * Where should someone who has just proven their identity centrally go from THIS ERP's login page?
+ *  - Super admin (`*`) or this ERP granted        -> stay here.
+ *  - Exactly one other ERP granted                -> straight to that ERP.
+ *  - Two or more ERPs granted (not this one)      -> the ERP Dashboard, where the switcher lets them choose.
+ *  - Nothing granted                              -> no access.
+ */
+export function routeForCentralSession(thisErpKey: string, s: CentralSessionLike): CentralRoute {
+  const allowed = (s.allowed_erps || []).map((k) => String(k).toLowerCase());
+  if (allowed.includes("*") || allowed.includes(thisErpKey.toLowerCase())) return { kind: "stay" };
+  const erps = getEcosystemErps();
+  const real = allowed.filter((k) => k !== "control-plane");
+  const target =
+    real.length === 1
+      ? erps.find((e) => e.key === real[0])
+      : real.length >= 2
+      ? erps.find((e) => e.key === "control-plane")
+      : undefined;
+  if (!target || !target.hostUrl || target.hostUrl === "#") return { kind: "none" };
+  return { kind: "redirect", url: createSsoHandoverUrlFromSession(target.hostUrl, s) };
+}
+
 /**
  * Consumes an incoming SSO handover ticket or shared ecosystem session cookie.
  * Automatically logs in as local Admin/User with the matching session_id.

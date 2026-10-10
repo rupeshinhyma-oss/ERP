@@ -17,10 +17,10 @@ import uuid
 from datetime import date
 from typing import Any
 
-from openpyxl import Workbook
-from openpyxl.drawing.image import Image as XLImage
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl import Workbook  # type: ignore
+from openpyxl.drawing.image import Image as XLImage  # type: ignore
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side  # type: ignore
+from openpyxl.utils import get_column_letter  # type: ignore
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

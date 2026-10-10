@@ -7,7 +7,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { setBrandName } from "@/lib/brand";
-import { processIncomingSsoHandover } from "@/lib/ssoBridge";
+import { createSsoHandoverUrlFromSession, processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
 import { ErrorBanner } from "@/components/ui";
 import type { Profile, TokenPair } from "@/types";
 
@@ -126,28 +126,53 @@ export function LoginPage() {
     setError(null);
     setSubmitting(true);
 
-    try {
-      // 1. Single-roundtrip authentication: /auth/login returns both tokens and user profile
-      const { data: tokens } = await apiPost<TokenPair>("/auth/login", {
-        identifier: identifier.trim(),
-        password,
-      });
+    const ERP_KEY = "inhyma";
+    const typed = identifier.trim();
+    const email = typed.includes("@") ? typed : `${typed}@example.com`;
 
-      // 2. Establish / sync unified Ecosystem Session
-      const email = identifier.trim().includes("@") ? identifier.trim() : `${identifier.trim()}@example.com`;
+    try {
+      // 1. Local sign-in on THIS ERP (works for anyone provisioned here).
+      let tokens: TokenPair | null = null;
+      let localError: unknown = null;
+      try {
+        const { data } = await apiPost<TokenPair>("/auth/login", { identifier: typed, password });
+        tokens = data;
+      } catch (e) {
+        localError = e;
+      }
+
+      // 2. Ask ERP_Main who this person is and which ERPs they may use.
       const existingSessionId = getEcosystemCookie()?.session_id;
-      const ecosystemSession = await establishCentralEcosystemSession({
+      const central = await establishCentralEcosystemSession({
         email,
         password,
-        source_erp: "inhyma",
+        source_erp: ERP_KEY,
         existing_session_id: existingSessionId && !existingSessionId.startsWith("ihm-sess-") ? existingSessionId : undefined,
       });
-      const sessionId = ecosystemSession?.session_id || `ihm-sess-${Date.now()}`;
 
+      if (central) {
+        const route = routeForCentralSession(ERP_KEY, central);
+        if (route.kind === "redirect") {
+          // Not an ERP they were granted (or they have several): send them where they belong.
+          window.location.href = route.url;
+          return;
+        }
+        if (route.kind === "none") {
+          throw new Error("Your account has not been granted access to any ERP yet. Please contact your administrator.");
+        }
+        // This ERP is allowed.  If the local password did not match (for example a password change that has
+        // not reached this ERP yet) the verified central session is enough: sign in through the handover.
+        if (!tokens) {
+          window.location.href = createSsoHandoverUrlFromSession(`${window.location.origin}/dashboard`, central);
+          return;
+        }
+      }
+      if (!tokens) throw localError ?? new Error("Invalid credentials.");
+
+      const sessionId = central?.session_id || `ihm-sess-${Date.now()}`;
       if (tokens.user) {
         Auth.setSession(tokens, tokens.user, sessionId);
       } else {
-        // Fallback for legacy responses missing user profile
         Auth.setSession(tokens, undefined, sessionId);
         try {
           const { data: profile } = await apiGet<Profile>("/auth/profile");

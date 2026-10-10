@@ -322,7 +322,7 @@ export function initEcosystemSessionWatcher(
         onSessionRevoked();
       }
     }
-  }, 15000);
+  }, 60000); // one check a minute per open tab keeps thousands of users cheap
 
   const cleanup = () => {
     if (ch) {

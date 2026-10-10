@@ -22,9 +22,11 @@ Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distr
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of all functional updates, migrations, and bug fixes.
+  - Release October 10, 2026: Production HTTPS mixed content elimination (`isLocalhost()`), Supabase PgBouncer statement cache auto-disable (`_statement_cache_must_be_disabled`), bi-directional password sync federation (`push_password_to_erp_main`), fail-closed SSO central session verification, and central identity locks.
   - Release October 6, 2026: Local & Import Purchase modules, costing engines, Proforma Invoices commercial terms, database workflow rules engine, company advanced specs, supplier mandatory calling number, and Alembic sync fix.
   - Release September 29, 2026: Extended company profile intelligence, cascading address resolution, autocomplete suppression, and wheel lockout.
   - Release September 26, 2026: Internal spoke deprovisioning, soft-delete filtering, and session synchronization.
+
 
 - 📘 **[Complete Living Technical Manual](SYSTEM_DOCUMENTATION.md)**:
   - Exhaustive 15-section technical manual covering all modules, database schemas, frontend tokens, and developer guidelines.

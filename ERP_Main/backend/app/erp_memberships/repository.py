@@ -74,9 +74,12 @@ class ErpMembershipRepository:
         offset: int = 0,
         erp_instance_id: uuid.UUID | None = None,
         status: ErpMembershipStatus | None = None,
+        global_user_ids: list[uuid.UUID] | None = None,
     ) -> list[ErpMembership]:
-        """List memberships across all or specific ERP instances, with optional status filter."""
+        """List memberships across all or specific ERP instances, with optional status / user-set filters."""
         stmt = select(ErpMembership)
+        if global_user_ids is not None:
+            stmt = stmt.where(ErpMembership.global_user_id.in_(global_user_ids))
         if erp_instance_id is not None:
             stmt = stmt.where(ErpMembership.erp_instance_id == erp_instance_id)
         if status is not None:
@@ -96,4 +99,3 @@ class ErpMembershipRepository:
         """Delete a membership row from the database."""
         await self.db.delete(membership)
         await self.db.flush()
-

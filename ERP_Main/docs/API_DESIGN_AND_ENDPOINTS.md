@@ -15,6 +15,9 @@
 | `POST` | `/api/v1/auth/logout` | Revoke session and blacklist tokens | Authenticated |
 | `GET` | `/api/v1/auth/me` | Fetch active user profile and effective platform roles | Authenticated |
 | `POST` | `/api/v1/global/ecosystem-session/establish` | Establishes cross-subdomain ecosystem session cookie (`ihm_ecosystem_session`) | Authenticated |
+| `GET` | `/api/v1/global/ecosystem-session/{session_id}` | Live DB verification of central ecosystem session & allowed ERPs | Public / Spoke |
+| `POST` | `/api/v1/global/ecosystem-session/exchange` | Exchange verified central session for authenticated user token | Session ID + Email |
+| `POST` | `/api/v1/global/ecosystem-session/{session_id}/revoke` | Revoke central ecosystem session across all ERPs | Authenticated |
 
 ---
 
@@ -77,3 +80,13 @@
 | `GET` | `/api/v1/projections/search` | Federated full-text search across all ERP projections | `search.read` |
 | `POST` | `/api/v1/exports/create` | Queue background asynchronous CSV/XLSX export job | `exports.create` |
 | `GET` | `/api/v1/exports/status/{id}` | Inspect status and download signed artifact URL | `exports.read` |
+
+---
+
+## 7. Internal Spoke Federation & Password Synchronization (`/internal`)
+
+| Method | Endpoint URI | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/internal/users/password` | Ingest password changed on a spoke ERP, update central credentials, and fan out to active spoke memberships | Internal Service Bearer + `X-ERP-Key` |
+| `GET` | `/api/v1/internal/memberships/by-local-user/{local_user_id}` | Query central membership metadata linked to a local spoke user record | Internal Service Bearer + `X-ERP-Key` |
+

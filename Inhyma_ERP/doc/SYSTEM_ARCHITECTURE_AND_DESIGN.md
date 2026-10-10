@@ -108,6 +108,12 @@ flowchart TD
 - Universal status transition framework replacing hardcoded status graphs.
 - Enforces role-based permissions (`purchase.local.status`, `purchase.import.status`, `proforma.status`) before permitting entity state mutations.
 
+### 2.9 Federated Authentication, Central Verification & Password Synchronization
+- **Central Session Routing & Graceful Login:** Spoke login authenticates locally and simultaneously establishes an ecosystem session with `ERP_Main`. If a user is not authorized for Inhyma, they are redirected automatically to their assigned spoke or to the Central Control Plane. If a recent password change hasn't synced locally, the verified central session completes authentication via SSO handover.
+- **Bi-Directional Password Synchronization:** Local password changes (`/auth/change-password` and `/users/{id}/reset-password`) are securely transmitted to `ERP_Main` via `POST /internal/users/password` using internal service credentials, fanning out updates across the ecosystem.
+- **Fail-Closed Central Session Verification:** Inbound SSO handover logins verify the central session against ERP_Main's live database via `verify_ecosystem_session()`. Revoked or suspended accounts cannot bypass security checks.
+- **Central Identity Protection:** User email addresses are locked to the central control plane (`enforce_central_identity`), preventing local edits from breaking global SSO mappings.
+
 ---
 
 ## 3. Frontend Architecture & Platform Hardening
@@ -171,3 +177,13 @@ To achieve complete decoupling between infrastructure routing and organizational
 3. **Dynamic Single Source of Truth (`ERP Settings -> Company Name`):**
    - The human-facing brand name is never hardcoded in source files.
    - All frontend components, document templates, and PDF renderers query `getCachedBrandName()`, which stays synchronized with the active record in the `organizations` database table.
+
+---
+
+## 6. Database Connection Resilience & Production Security
+
+1. **PgBouncer / Supabase Transaction Pooler Statement Cache Auto-Disable:**
+   - In [`app/database/engine.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/database/engine.py), `_statement_cache_must_be_disabled()` automatically detects port 6543 / PgBouncer and sets `statement_cache_size=0` on asyncpg, preventing PostgreSQL `DuplicatePreparedStatementError`.
+2. **Production HTTPS Origin Protection & Mixed Content Elimination:**
+   - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts), `isLocalhost()` guards prevent fallback to insecure `http://localhost:*` URLs when served on HTTPS domains (Render, custom domains).
+

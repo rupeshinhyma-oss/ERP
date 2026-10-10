@@ -152,10 +152,11 @@ class ErpMembershipService:
         offset: int = 0,
         erp_instance_id: uuid.UUID | None = None,
         status: ErpMembershipStatus | None = None,
+        global_user_ids: list[uuid.UUID] | None = None,
     ) -> list[ErpMembership]:
         """List memberships across all or specific ERP instances, paged."""
         return await self.membership_repository.list_all(
-            limit=limit, offset=offset, erp_instance_id=erp_instance_id, status=status
+            limit=limit, offset=offset, erp_instance_id=erp_instance_id, status=status, global_user_ids=global_user_ids
         )
 
     async def get_for_user_and_erp(self, global_user_id: uuid.UUID, erp_instance_id: uuid.UUID) -> ErpMembership:
@@ -290,7 +291,24 @@ class ErpMembershipService:
                         await adapter.deprovision_local_user(erp, updated.local_user_id, reason=reason)
                     except Exception:
                         pass
-                sync_outcome = "synced" if result is not None else "unreachable_or_skipped"
+                # Durable recovery: a failed sync is NEVER just dropped.  Record a retry task so
+                # the background sweep keeps trying until the ERP confirms (or admins are alerted).
+                from app.identity_linking.access_sync_service import AccessSyncService
+
+                access_sync = AccessSyncService(
+                    db=self.membership_repository.db, audit=self.audit, adapter_registry=self.adapter_registry
+                )
+                if result is not None:
+                    await access_sync.clear(updated.id)
+                    sync_outcome = "synced"
+                else:
+                    await access_sync.schedule(
+                        updated,
+                        requested_allow_login=bool(sync_local_access),
+                        reason=reason,
+                        error="Target ERP did not confirm the access change (unreachable or rejected).",
+                    )
+                    sync_outcome = "unreachable_retry_scheduled"
             else:
                 sync_outcome = "erp_not_found"
 
@@ -334,4 +352,4 @@ class ErpMembershipService:
                 "local_user_id": membership.local_user_id,
                 "reason": reason,
             },
-        )
+        )

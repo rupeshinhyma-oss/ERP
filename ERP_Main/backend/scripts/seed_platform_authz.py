@@ -107,7 +107,7 @@ _VIEWER_PERMISSIONS: list[str] = [
     "platform.user.read",
 ]
 
-_ROLES: list[tuple[str, str, str]] = [
+_MANDATORY_SYSTEM_ROLES: list[tuple[str, str, str]] = [
     ("PLATFORM_SUPER_ADMIN", "Platform Super Admin", "Unrestricted platform-wide access to every operation."),
     (
         "PLATFORM_ADMIN",
@@ -115,6 +115,9 @@ _ROLES: list[tuple[str, str, str]] = [
         "Broad platform administration, excluding the most destructive/irreversible actions and "
         "role/permission administration itself.",
     ),
+]
+
+_STARTER_ROLES: list[tuple[str, str, str]] = [
     (
         "PLATFORM_OPERATOR",
         "Platform Operator",
@@ -122,6 +125,8 @@ _ROLES: list[tuple[str, str, str]] = [
     ),
     ("PLATFORM_VIEWER", "Platform Viewer", "Read-only visibility across every platform domain."),
 ]
+
+_ROLES: list[tuple[str, str, str]] = _MANDATORY_SYSTEM_ROLES + _STARTER_ROLES
 
 
 async def _ensure_permission(service: PlatformAuthzService, permission_key: str, description: str) -> None:
@@ -160,7 +165,7 @@ async def _ensure_role(
 
 
 async def seed() -> None:
-    """Create tables if needed (local/dev only), then seed the permission catalog and four starter roles."""
+    """Create tables if needed (local/dev only), then seed the permission catalog and starter roles."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -188,8 +193,21 @@ async def seed() -> None:
             "PLATFORM_VIEWER": _VIEWER_PERMISSIONS,
         }
 
-        for role_key, display_name, description in _ROLES:
+        # Check if the database has already been bootstrapped with the root system role
+        existing_super_admin = await service.role_repository.get_by_key("PLATFORM_SUPER_ADMIN")
+        is_initial_bootstrap = existing_super_admin is None
+
+        # Always ensure mandatory fixed system roles exist and hold their permissions
+        for role_key, display_name, description in _MANDATORY_SYSTEM_ROLES:
             await _ensure_role(service, role_key, display_name, description, role_grants[role_key])
+
+        # Only seed starter demonstration roles on initial bootstrap.
+        # If the platform was already initialized, preserve user deletions so removed roles never resurrect.
+        if is_initial_bootstrap:
+            for role_key, display_name, description in _STARTER_ROLES:
+                await _ensure_role(service, role_key, display_name, description, role_grants[role_key])
+        else:
+            print("Platform already initialized: skipping starter demo roles to preserve custom role state.")
 
         await db.commit()
 

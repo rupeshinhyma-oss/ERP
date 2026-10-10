@@ -279,6 +279,15 @@ class Settings(BaseSettings):
     # Feature Flags (Phase 4 Step 67) -- centralized here, not scattered.
     # -------------------------------------------------------------------
     GLOBAL_AUTH_ENABLED: bool = True
+    # Central user ownership: only ERP_Main administrators create users.  Public
+    # self-registration lets anyone pre-register an email address (blocking the
+    # admin from creating that person later) so it is OFF unless explicitly enabled.
+    GLOBAL_SELF_REGISTRATION_ENABLED: bool = False
+    # Scale: with thousands of users, every open tab polls its central session.  A validated session is
+    # trusted for this many seconds before the database is consulted again (0 = always re-check).
+    ECOSYSTEM_SESSION_REVALIDATE_TTL_SECONDS: float = 10.0
+    # Upper bound on cached central sessions held in memory (expired/revoked ones are pruned first).
+    ECOSYSTEM_SESSION_STORE_MAX: int = 20000
     FEDERATION_ENABLED: bool = True
     YINGLIMA_SSO_ENABLED: bool = True
     INHYMA_SSO_ENABLED: bool = True
@@ -430,4 +439,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-

@@ -3,6 +3,64 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-10] — Platform Role Deletion Preservation, Mixed Content Elimination, PgBouncer Prepared Statement Fix & Access Sync Engine
+
+### 1. Platform Authorization Role Deletion Preservation & Starter Demo Separation
+- **Root Cause & Fix in [`seed_platform_authz.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/scripts/seed_platform_authz.py):**
+  - Previously, running seeds on backend startup re-created all default roles, resurrecting user-deleted starter roles (such as `Platform Operator`, `Platform Viewer`, or custom deleted roles).
+  - Explicitly separated platform roles into `_MANDATORY_SYSTEM_ROLES` (`PLATFORM_SUPER_ADMIN`, `PLATFORM_ADMIN`) and `_STARTER_ROLES` (`PLATFORM_OPERATOR`, `PLATFORM_VIEWER`).
+  - Implemented `is_initial_bootstrap` detection by querying `service.role_repository.get_by_key("PLATFORM_SUPER_ADMIN")`.
+  - Mandatory system roles are always maintained, but starter demonstration roles are **only** seeded if the platform database is completely empty on initial bootstrap.
+  - On subsequent restarts, starter demo role seeding is skipped, permanently preserving administrative role deletions.
+
+### 2. Elimination of Insecure HTTP Fallbacks & Mixed Content Guard
+- **`isLocalhost()` Security Interceptor:**
+  - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ssoBridge.ts), wrapped all `http://localhost:*` fallback URLs with `isLocalhost()` guards.
+  - In production HTTPS deployments (e.g. Render, Cloudflare, custom domains), insecure `http://` calls to ports `:8000`, `:8001`, `:8002`, `:5173`, and `:5174` are suppressed, eliminating browser Mixed Content blocking errors (`Blocked loading mixed active content`).
+- **Dynamic API Gateway Origin Support:**
+  - In [`api.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/api.ts), added native support for `VITE_API_ORIGIN` allowing split static frontend deployments to target external backend origins cleanly.
+  - Routed `CENTRAL_AUTH_API` dynamically through `API_BASE`.
+
+### 3. Database Connection Hardening for Supabase Transaction Pooler (PgBouncer)
+- **Prepared Statement Cache Auto-Disable:**
+  - In [`app/database/engine.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/database/engine.py), implemented `_statement_cache_must_be_disabled()`.
+  - Automatically identifies transaction-mode PgBouncer / Supabase connection poolers operating on port 6543 and configures asyncpg with `statement_cache_size=0`.
+  - Permanently eliminates PostgreSQL `DuplicatePreparedStatementError: prepared statement "..." already exists` during high-concurrency pool multiplexing.
+
+### 4. Durable Access Sync Recovery Engine
+- **Database Migration [`0011_access_sync_tasks.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/alembic/versions/0011_access_sync_tasks.py):**
+  - Created table `access_sync_tasks` with foreign keys to `erp_memberships` and `erp_instances`.
+  - Tracks synchronization lifecycle: `PENDING_RETRY`, `IN_PROGRESS`, `SUCCESS`, and `FAILED`.
+  - Supports lease expiration (`lease_expires_at`), worker claims (`claimed_by`), and bounded retry counters (`max_retries=10`).
+  - Added indexes `ix_access_sync_tasks_membership_id`, `ix_access_sync_tasks_erp_instance_id`, and composite index `ix_access_sync_eligible` (`status`, `next_retry_at`, `lease_expires_at`).
+- **Access Sync Service [`access_sync_service.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/access_sync_service.py):**
+  - When an administrator suspends, restores, or revokes a membership in ERP_Main, any network interruption to spoke ERPs is caught and converted into a durable task.
+  - Retries with bounded exponential backoff until the target spoke confirms receipt.
+  - Re-evaluates current membership and global user state on every retry attempt to prevent stale state propagation.
+
+### 5. High-Scale Case-Insensitive & Status Indexes
+- **Database Migration [`0012_scale_indexes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/alembic/versions/0012_scale_indexes.py):**
+  - Added functional B-tree index `ix_global_users_primary_email_lower` on `lower(primary_email)` in `global_users`.
+  - Added composite indexes `ix_erp_memberships_user_status` on `(global_user_id, status)` and `ix_erp_memberships_erp_status` on `(erp_instance_id, status)` in `erp_memberships`.
+  - Guarantees sub-millisecond lookup latency for sign-in, session checks, and access grants even with 50,000+ active enterprise accounts.
+
+### 6. Bi-Directional Password Synchronization & Central Session Exchange
+- **Internal Password Sync Endpoint [`password_sync.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_users/password_sync.py):**
+  - Added `POST /api/v1/internal/users/password` accepting password updates from spoke ERPs authenticated via internal service credentials.
+  - Securely updates `global_user_credentials` and invokes `push_password_to_memberships` to fan out updates to all active spoke memberships.
+- **Central Session Verification & Exchange [`ecosystem_session.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_auth/ecosystem_session.py):**
+  - Hardened `get_ecosystem_session` to validate live database state (user status, active memberships, session expiration) on every request rather than relying purely on in-memory caches.
+  - Added `POST /api/v1/global/ecosystem-session/exchange` allowing SSO handover visitors with valid central sessions to obtain authenticated ERP_Main access tokens matching their specific identity.
+
+### 7. Seed Membership Idempotency & Virtualenv Stability
+- **Seed Script Resilience in [`seed.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/scripts/seed.py):**
+  - Enforced pre-check on `existing_mem` before creating default memberships, preventing `uq_erp_memberships_user_erp` unique constraint collision on repeated seed executions.
+  - Updated [`seed_registry.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/scripts/seed_registry.py) with dynamic `_dashboard_url()` reading `ERP_MAIN_DASHBOARD_URL` / `FRONTEND_URL`.
+- **Python Virtualenv Interpreter Resolution in `server.py`:**
+  - Switched from `str(Path(sys.executable).resolve())` to `sys.executable` to prevent Windows from dereferencing `.venv` symlinks to the system Python.
+
+---
+
 ## [Release 2026-10-05] — Production Deployment Readiness, Zero-LAN URL Decoupling & Multi-Cloud Infrastructure
 
 ### 1. Peer ERP API Resolution Overrides

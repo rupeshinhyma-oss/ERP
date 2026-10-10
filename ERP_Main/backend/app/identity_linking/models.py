@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -197,3 +197,48 @@ class ProvisioningReconciliationTask(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             f"status={self.status.value} retry_count={self.retry_count}>"
         )
 
+
+class AccessSyncStatus(str, Enum):
+    """Lifecycle of a durable local-access synchronization task."""
+
+    PENDING_RETRY = "PENDING_RETRY"
+    PROCESSING = "PROCESSING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
+class AccessSyncTask(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Durable record that a membership's LOCAL access flag in a target ERP may be out of sync.
+
+    Created when ERP_Main suspends / restores / revokes access but the target ERP could
+    not be told (offline, asleep, rejected).  A background sweep keeps retrying until the
+    ERP confirms.  The state pushed is ALWAYS recomputed from the membership's and the
+    global user's CURRENT status -- never replayed from a stale intent -- so a retry can
+    never restore access for someone who has since been disabled or revoked.
+    """
+
+    __tablename__ = "access_sync_tasks"
+    __table_args__ = (Index("ix_access_sync_eligible", "status", "next_retry_at", "lease_expires_at"),)
+
+    membership_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("erp_memberships.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    erp_instance_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("erp_instances.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    local_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    requested_allow_login: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    status: Mapped[AccessSyncStatus] = mapped_column(
+        SAEnum(AccessSyncStatus, name="access_sync_status", native_enum=False, length=20),
+        nullable=False,
+        default=AccessSyncStatus.PENDING_RETRY,
+    )
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    next_retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)

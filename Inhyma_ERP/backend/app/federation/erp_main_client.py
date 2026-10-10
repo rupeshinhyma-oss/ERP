@@ -84,3 +84,61 @@ async def lookup_membership_by_local_user(local_user_id: str | uuid.UUID) -> dic
     if not data:
         raise MembershipLookupError("ERP_Main returned no membership data for local user.")
     return data
+
+
+class EcosystemSessionError(Exception):
+    """Raised when ERP_Main cannot confirm a central ecosystem session (unreachable, error, or malformed reply)."""
+
+
+async def verify_ecosystem_session(session_id: str) -> dict[str, Any]:
+    """
+    Ask ERP_Main whether a central ecosystem session is currently valid.
+
+    ERP_Main re-checks the user's status and ERP memberships on every call, so
+    the answer reflects access changes made centrally a moment ago.  Fails
+    CLOSED: any network problem, non-200, or malformed reply raises
+    `EcosystemSessionError` -- callers must deny access, never assume active.
+    """
+    from urllib.parse import quote
+
+    url = f"{settings.ERP_MAIN_API_BASE_URL.rstrip('/')}/global/ecosystem-session/{quote(session_id, safe='')}"
+    try:
+        async with httpx.AsyncClient(timeout=settings.SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS) as http_client:
+            response = await http_client.get(url)
+    except httpx.HTTPError as exc:
+        raise EcosystemSessionError(f"Could not reach ERP_Main to verify the session: {exc}") from exc
+
+    if response.status_code != 200:
+        raise EcosystemSessionError(f"ERP_Main session verification failed with status {response.status_code}.")
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise EcosystemSessionError("ERP_Main returned a non-JSON session verification reply.") from exc
+    data = body.get("data", body) if isinstance(body, dict) else None
+    if not isinstance(data, dict):
+        raise EcosystemSessionError("ERP_Main returned an unexpected session verification reply.")
+    return data
+
+
+async def push_password_to_erp_main(email: str, new_password: str) -> bool:
+    """
+    Tell ERP_Main that this person's password changed in THIS ERP, so the whole ecosystem shares one password.
+
+    ERP_Main stores it centrally and pushes it to the person's other ERPs.  Best effort: returns False
+    (never raises) if ERP_Main is unreachable, has no matching user, or no service credential is configured --
+    the local change already succeeded, and sign-in falls back to a central check on every ERP.
+    """
+    try:
+        creds = settings.get_expected_erp_main_credentials()
+        if not creds or not email or not new_password:
+            return False
+        url = f"{settings.ERP_MAIN_API_BASE_URL.rstrip('/')}/internal/users/password"
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.post(
+                url,
+                json={"email": email, "new_password": new_password},
+                headers={"Authorization": f"Bearer {creds[0]}", "X-ERP-Key": settings.ERP_KEY},
+            )
+        return response.status_code == 200
+    except Exception:  # never break a successful local password change
+        return False

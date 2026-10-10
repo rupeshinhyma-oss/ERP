@@ -131,6 +131,22 @@ class ProvisioningReconciliationWorker:
             except Exception as exc:
                 logger.exception("Error in ProvisioningReconciliationWorker sweep: %s", exc)
 
+            # Second, independent sweep: retry access removals/restorations the ERP has not confirmed yet.
+            try:
+                async with session_factory() as session:
+                    from app.global_audit.repository import GlobalAuditRepository
+                    from app.global_audit.service import GlobalAuditService
+                    from app.identity_linking.access_sync_service import AccessSyncService
+                    from app.identity_linking.adapters.registry import get_adapter_registry
+
+                    await AccessSyncService(
+                        session, GlobalAuditService(GlobalAuditRepository(session)), get_adapter_registry()
+                    ).run_batch(self.worker_id)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.exception("Error in access-sync sweep: %s", exc)
+
             # Sleep until interval expires or an external trigger/stop event occurs
             interval = settings.PROVISIONING_RECONCILIATION_INTERVAL_SECONDS
             self._trigger_event.clear()

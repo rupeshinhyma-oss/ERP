@@ -13,6 +13,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Request, status
 
+from app.core.config import settings
 from app.core.exceptions import ForbiddenException
 from app.core.responses import build_success_response
 from app.global_auth.dependencies import get_client_ip, get_global_auth_service, require_global_user
@@ -53,6 +54,10 @@ async def register(
 ) -> dict:
     """Create a new Global User with a global password credential."""
     _require_feature_enabled()
+    if not settings.GLOBAL_SELF_REGISTRATION_ENABLED:
+        raise ForbiddenException(
+            "Self-registration is disabled. Users are created by an ERP_Main administrator."
+        )
     user = await service.register(payload)
     return build_success_response(
         GlobalUserProfile.model_validate(user).model_dump(mode="json"),

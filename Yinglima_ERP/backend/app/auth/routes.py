@@ -41,6 +41,7 @@ from app.auth.security import InvalidTokenError, TokenType, decode_token
 from app.auth.service import AuthService, CurrentUser, LoginContext
 from app.core.config import settings
 from app.core.exceptions import UnauthorizedException
+from app.federation.erp_main_client import EcosystemSessionError, push_password_to_erp_main, verify_ecosystem_session
 from app.core.responses import build_success_response
 from app.rbac.dependencies import get_rbac_service
 from app.rbac.service import RBACService
@@ -189,6 +190,8 @@ async def change_password(
     await auth_service.change_password(
         user, current_password=payload.current_password, new_password=payload.new_password
     )
+    # One password per person across ERP_Main and every ERP (best effort; never fails the change).
+    await push_password_to_erp_main(user.email, payload.new_password)
     await audit_service.record(
         action=AuditAction.PASSWORD_CHANGE,
         module="auth",
@@ -321,6 +324,26 @@ async def sso_handover_login(
     allowed_erps = [str(k).lower() for k in (token_data.get("allowed_erps") or ["*"])]
     if "*" not in allowed_erps and erp_key not in allowed_erps:
         raise ForbiddenException(f"User '{req_email}' is not authorized to access this ERP.")
+
+    # Central verification: the handover token is built in the browser, so it proves nothing by itself.
+    # ERP_Main (the authority on who may use which ERP) must confirm the central session.
+    if settings.SSO_HANDOVER_REQUIRE_CENTRAL_VERIFICATION:
+        session_id = str(token_data.get("session_id") or "")
+        if not session_id or session_id.startswith("ihm-sess-"):
+            raise UnauthorizedException("SSO handover requires an active central session. Please sign in again.")
+        try:
+            central = await verify_ecosystem_session(session_id)
+        except EcosystemSessionError as exc:
+            raise UnauthorizedException(
+                "Could not confirm your session with ERP_Main. Please try again in a moment."
+            ) from exc
+        if not central.get("active") or central.get("revoked"):
+            raise UnauthorizedException("Your central session is no longer active. Please sign in again.")
+        if (central.get("email") or "").strip().lower() != req_email:
+            raise UnauthorizedException("Identity mismatch in SSO session.")
+        central_allowed = [str(k).lower() for k in (central.get("allowed_erps") or [])]
+        if "*" not in central_allowed and erp_key not in central_allowed:
+            raise ForbiddenException(f"User '{req_email}' is not authorized to access this ERP.")
 
     # Resolve local user
     stmt = select(User).where(func.lower(User.email) == req_email, User.deleted_at.is_(None))

@@ -128,10 +128,19 @@ async def list_all_memberships(
     offset: int = Query(default=0, ge=0),
     erp_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
+    user_ids: str | None = Query(default=None, description="Comma-separated Global User ids to restrict to."),
     _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.read")),
     service: ErpMembershipService = Depends(get_erp_membership_service),
 ) -> dict:
-    """List ERP memberships with optional ERP and status filtering, paged."""
+    """List ERP memberships with optional ERP, status and user-set filtering, paged."""
+    parsed_user_ids = None
+    if user_ids:
+        parsed_user_ids = []
+        for part in user_ids.split(","):
+            try:
+                parsed_user_ids.append(uuid.UUID(part.strip()))
+            except ValueError:
+                continue
     from app.erp_memberships.models import ErpMembershipStatus
     parsed_status = None
     if status:
@@ -140,7 +149,7 @@ async def list_all_memberships(
         except ValueError:
             parsed_status = None
     memberships = await service.list_all(
-        limit=limit, offset=offset, erp_instance_id=erp_id, status=parsed_status
+        limit=limit, offset=offset, erp_instance_id=erp_id, status=parsed_status, global_user_ids=parsed_user_ids
     )
     data = [ErpMembershipRead.model_validate(m).model_dump(mode="json") for m in memberships]
     return build_success_response(data, request_id=_request_id(request))

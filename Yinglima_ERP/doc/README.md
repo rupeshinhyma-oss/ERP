@@ -20,8 +20,11 @@ Welcome to the dedicated documentation directory for **Yinglima_ERP** (China Pro
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of functional updates, migrations, and bug fixes.
+  - Release October 10, 2026: Production HTTPS mixed content elimination (`isLocalhost()`), Supabase PgBouncer statement cache auto-disable (`_statement_cache_must_be_disabled`), cascading category enforcement (Products, Suppliers, Buyers), bi-directional password sync federation, fail-closed SSO central session verification, and central identity locks.
+  - Release October 5, 2026: Commercial Invoice (CI) 16-column costing engine, confirmed Local Purchase supplier sourcing, dynamic HSN refund VAT sync, and Excel export.
   - Release September 29, 2026: Autocomplete blocker implementation, wheel scroll protection.
   - Release September 26, 2026: Internal spoke deprovisioning, soft-delete filtering, and SSO identity preservation.
+
 
 - 📘 **[Complete Living Technical Manual](SYSTEM_DOCUMENTATION.md)**:
   - Exhaustive 15-section technical manual covering all procurement workflows, database schemas, frontend components, and background workers.

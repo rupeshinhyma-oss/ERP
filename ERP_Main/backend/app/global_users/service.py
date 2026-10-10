@@ -110,15 +110,27 @@ class GlobalUserService:
             raise NotFoundException(f"No Global User found with id {user_id}.")
         return user
 
-    async def list_all(self, *, limit: int = 100, offset: int = 0) -> list[GlobalUser]:
-        """List Global Users, paged."""
-        return await self.repository.list_all(limit=limit, offset=offset)
+    async def list_all(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
+        status: str | None = None,
+        erp_id: uuid.UUID | None = None,
+        no_erp: bool = False,
+    ) -> list[GlobalUser]:
+        """List Global Users, paged, with optional search, status and ERP filters."""
+        return await self.repository.list_all(
+            limit=limit, offset=offset, search=search, status=status, erp_id=erp_id, no_erp=no_erp
+        )
 
     async def update(self, user_id: uuid.UUID, payload: GlobalUserUpdate, *, actor: PlatformAdmin) -> GlobalUser:
         """Update Global User metadata. Cannot change `status` -- use the dedicated transition methods."""
         user = await self.get(user_id)
         updates = payload.model_dump(exclude_unset=True, by_alias=False)
         old_email = user.primary_email
+        old_password = (user.metadata_json or {}).get("default_password") or (user.metadata_json or {}).get("password")
         if "metadata" in updates:
             updates["metadata_json"] = updates.pop("metadata")
         if "primary_email" in updates and updates["primary_email"] != user.primary_email:
@@ -156,6 +168,11 @@ class GlobalUserService:
                 admin.email = user.primary_email
                 admin.password_hash = pwd
             await self.repository.db.flush()
+            if pwd != old_password:
+                # Password edited in ERP_Main: keep every ERP the person can use on the SAME password.
+                from app.global_users.password_sync import push_password_to_memberships
+
+                await push_password_to_memberships(self.repository.db, user, pwd)
 
         await self.audit.record(
             event_type=AuditEventType.GLOBAL_USER_UPDATED,

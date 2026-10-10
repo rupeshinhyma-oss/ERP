@@ -67,6 +67,16 @@ flowchart TD
 ### 2.4 Transactional Outbox Engine
 - Guaranteed event delivery to `ERP_Main` for global reporting and projections without two-phase commit overhead.
 
+### 2.5 Commercial Invoice (CI) 16-Column Costing Engine & Local Purchase Sourcing
+- **Confirmed Local Purchase Source of Truth:** Sourcing and purchase pricing for Sale Process orders automatically pull from the latest confirmed Local Purchase order for that product.
+- **Dynamic VAT Exclusion & Export Costing:** Uses HSN Refund VAT rates (standard 13%) to dynamically compute `Unit Price Excl. VAT = Unit Price Incl. VAT / (1 + Refund VAT%)`, FOB Price (USD), container freight allocation per CBM, CFR unit prices, and supplier payables matching the official 16-column Excel export model.
+
+### 2.6 Federated Authentication, Central Verification & Password Synchronization
+- **Central Session Routing & Graceful Login:** Spoke login authenticates locally and simultaneously establishes an ecosystem session with `ERP_Main`. If a user is not authorized for Yinglima, they are redirected automatically to their assigned spoke or to the Central Control Plane. If a recent password change hasn't synced locally, the verified central session completes authentication via SSO handover.
+- **Bi-Directional Password Synchronization:** Local password changes (`/auth/change-password` and `/users/{id}/reset-password`) are securely transmitted to `ERP_Main` via `POST /internal/users/password` using internal service credentials, fanning out updates across the ecosystem.
+- **Fail-Closed Central Session Verification:** Inbound SSO handover logins verify the central session against ERP_Main's live database via `verify_ecosystem_session()`. Revoked or suspended accounts cannot bypass security checks.
+- **Central Identity Protection:** User email addresses are locked to the central control plane (`enforce_central_identity`), preventing local edits from breaking global SSO mappings.
+
 ---
 
 ## 3. Frontend Architecture & Platform Hardening
@@ -81,6 +91,9 @@ flowchart TD
 
 ### 3.3 SSO Handover & Identity Preservation
 - `ssoBridge.ts` passes the active authenticated user's email and first name during ERP switching, preventing unintended admin fallback.
+
+### 3.4 Cascading Category Hierarchy Enforcement
+- In `Products.tsx`, `Suppliers.tsx`, `Buyers.tsx`, and `SearchableDropdown.tsx`, subcategory options are strictly locked until a primary category is selected. Changing or clearing a category automatically resets linked subcategories.
 
 ---
 
@@ -127,3 +140,13 @@ To achieve complete decoupling between infrastructure routing and organizational
 3. **Dynamic Single Source of Truth (`ERP Settings -> Company Name`):**
    - The human-facing brand name is never hardcoded in source files.
    - All frontend components, public supplier quotation pages, and sales order forms query `getCachedBrandName()`, which stays synchronized with the active record in the `organizations` database table.
+
+---
+
+## 6. Database Connection Resilience & Production Security
+
+1. **PgBouncer / Supabase Transaction Pooler Statement Cache Auto-Disable:**
+   - In [`app/database/engine.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/database/engine.py), `_statement_cache_must_be_disabled()` automatically detects port 6543 / PgBouncer and sets `statement_cache_size=0` on asyncpg, preventing PostgreSQL `DuplicatePreparedStatementError`.
+2. **Production HTTPS Origin Protection & Mixed Content Elimination:**
+   - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/ssoBridge.ts), `isLocalhost()` guards prevent fallback to insecure `http://localhost:*` URLs when served on HTTPS domains (Render, custom domains).
+

@@ -22,6 +22,7 @@ from app.auth.schemas import SessionRead
 from app.auth.service import AuthService, CurrentUser
 from app.common.pagination import PageMeta, PageParams
 from app.core.exceptions import BadRequestException, ForbiddenException
+from app.federation.erp_main_client import push_password_to_erp_main
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.integration.jobs import enqueue_dispatch
@@ -362,6 +363,23 @@ async def get_user(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+async def enforce_central_identity(user_service, user_id: uuid.UUID, payload) -> None:
+    """
+    A user's email is their central identity (it is how ERP_Main and SSO match accounts), so it is
+    managed in the ERP_Main Control Panel.  Re-sending the CURRENT email (e.g. a form that posts every
+    field) is harmless; CHANGING it here is refused.  Names, phone, manager, position, etc. stay local.
+    """
+    if "email" not in payload.model_fields_set or payload.email is None:
+        return
+    current = await user_service.user_repository.get_by_id(user_id)
+    if current is None:
+        return
+    if (current.email or "").strip().lower() != str(payload.email).strip().lower():
+        raise ForbiddenException(
+            "A user's email is managed centrally. Please change it from the ERP_Main Control Panel."
+        )
+
+
 @router.patch("/{user_id}", summary="Update a user's profile")
 async def update_user(
     user_id: uuid.UUID,
@@ -376,6 +394,8 @@ async def update_user(
     if current_user.id != user_id and "user.action" not in current_user.permissions and not current_user.is_super_admin:
         from app.core.exceptions import ForbiddenException
         raise ForbiddenException("You do not have permission to modify this user account.")
+
+    await enforce_central_identity(user_service, user_id, payload)
 
     position_id_specified = "position_id" in payload.model_fields_set
     target_position_id = payload.position_id if position_id_specified else None
@@ -457,6 +477,10 @@ async def reset_password(
     password_set = await user_service.admin_reset_password(
         user_id, custom_password=custom_pwd, must_change_password=must_change, reset_by=current_user.id
     )
+    # One password per person across ERP_Main and every ERP (best effort; never fails the reset).
+    target = await user_service.user_repository.get_by_id(user_id)
+    if target is not None and password_set:
+        await push_password_to_erp_main(target.email, password_set)
     await _record_user_action(
         audit_service=audit_service,
         request=request,

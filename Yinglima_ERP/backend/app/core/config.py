@@ -309,6 +309,17 @@ class Settings(BaseSettings):
         default="http://127.0.0.1:8000/api/v1",
         description="Base URL for calling ERP_Main's own API (e.g. the internal membership lookup).",
     )
+    SSO_HANDOVER_REQUIRE_CENTRAL_VERIFICATION: bool = Field(
+        default=True,
+        description="When True (default), POST /auth/sso-handover only signs a user in after ERP_Main itself "
+        "confirms the caller's central ecosystem session is active, belongs to the same email, and grants access "
+        "to THIS ERP. The handover token is created in the browser, so it can never be trusted on its own. "
+        "Set False only as a temporary emergency rollback.",
+    )
+    SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS: float = Field(
+        default=20.0,
+        description="How long to wait for ERP_Main when verifying a handover (it may be waking from sleep).",
+    )
     FEDERATION_CLIENT_ID: str = Field(
         default="",
         description="This ERP's own OIDC client_id, as issued by ERP_Main at federation-client registration "
