@@ -90,7 +90,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "reports-re-order", label: "Re-Order", path: "/reports/re-order", icon: "reorder", permission: "report.view" },
       { key: "reports-stock-transactions", label: "Stock Transactions", path: "/reports/stock-transactions", icon: "refresh", permission: "report.view" },
-      { key: "reports-goods-expected", label: "Goods Expected Report", path: "/reports/goods-expected", icon: "ship", permission: "report.view" },
+      { key: "reports-goods-expected", label: "Goods Expected Report", path: "/reports/goods-expected", icon: "anchor", permission: "report.view" },
       { key: "reports-deleted-orders", label: "Deleted Orders", path: "/reports/deleted-orders", icon: "fileX", permission: "report.view" },
       { key: "reports-general", label: "General Reports", path: "/reports/general", icon: "pieChart", permission: "report.view" },
     ],
