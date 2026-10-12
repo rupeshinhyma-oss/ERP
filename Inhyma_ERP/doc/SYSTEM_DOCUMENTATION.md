@@ -270,6 +270,19 @@ In accordance with system security standards, soft-deleted user accounts (`delet
 - **Property Guard**: `User.can_login` evaluates strictly to `False` if `deleted_at` is set.
 - **Restoration**: If an administrator restores the user from the Recycle Bin (clearing `deleted_at`), normal authentication capabilities are restored.
 
+### 6.5. Multi-ERP Identity Federation & Sign-Out Everywhere
+- **Inbound Central Token Revocation (`POST /api/v1/auth/internal/revoke-user-tokens`):**
+  - Receives global revocation signals dispatched by `ERP_Main` when a user executes "Sign Out Everywhere" or when an administrator revokes access centrally.
+  - Authenticated via shared microservice key (`X-Service-Key`).
+  - **Multi-Identifier Matching:** Resolves the local target user by inspecting all provided attributes: local primary key `id`, external `user_id` / `global_user_id`, normalized `email`, or `username`.
+  - Atomically revokes all matching records in `refresh_tokens`, updates user revocation cache, and pushes a real-time WebSocket `FORCE_LOGOUT` (`code: 4001`) event to terminate connected browser sessions instantly.
+- **Bi-Directional Password Synchronization:**
+  - **Outbound Sync (`erp_main_client.py`):** Whenever an authenticated user or administrator changes a password locally in Inhyma (`POST /users/{id}/reset-password` or `/auth/change-password`), the backend asynchronously pushes the new hash to `ERP_Main` (`POST /api/v1/auth/internal/sync-password`). If ERP_Main is temporarily unreachable, the call fails silently without rolling back the local transaction, and the Durable Access Sync Engine catches up queued updates.
+  - **Inbound Central Push:** When ERP_Main resets a password centrally, it updates the user's password hash in Inhyma via internal synchronization RPC.
+- **SSO Ecosystem Bridge & Switcher:**
+  - Supports incoming SSO handover tickets from `ERP_Main` (`POST /auth/sso/handover`) allowing authorized cross-ERP navigation without credential re-entry.
+  - Clears local session cache if an incoming ticket targets an identity differing from the currently active local user.
+
 ---
 
 ## 7. RBAC Engine, Departments & Effective Permissions
@@ -323,6 +336,12 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Collective Multi-Select & Bulk Deactivation:** The Users directory supports selecting multiple accounts via row/header checkboxes to execute bulk deactivation with built-in safety guardrails (protecting the administrator's own account, super-admin accounts, and already inactive accounts).
   - **Unified Edit User Profile & HR Details Drawer (Integrated Department Management):** The previous separate "Manage Departments" row action is now consolidated directly into the "Edit Profile" drawer. Administrators can manage basic identity, contact info, HR attributes, reporting manager, positions, and add/remove **Department & Role Assignments** (with assignment types and primary flags) in one unified interface without switching modals.
   - **Immediate Real-Time Force Logout:** "Force Logout" (`POST /users/{id}/force-logout`) provides guaranteed real-time session termination. It revokes device sessions in the database, caches a revocation timestamp (`auth_force_logout:{user_id}`) to instantly reject any in-flight access tokens on subsequent API calls, and pushes a real-time WebSocket disconnect event (`FORCE_LOGOUT`, code `4001`) that immediately clears client storage and redirects the active user to the login screen.
+  - **Central Identity Provider Integration (`ERP_Main`):**
+    - Inhyma acts as a distributed spoke node under the central `ERP_Main` control plane.
+    - User accounts provisioned centrally in `ERP_Main` (`/access/users`) are automatically synchronized to Inhyma's local `users` directory via `POST /api/v1/internal/users/sync`.
+    - Revoking access or deprovisioning from `ERP_Main` soft-deletes the local user record (`is_active=False`, `deleted_at=now()`) and revokes all active session tokens.
+    - Password updates performed locally or centrally are propagated across the ecosystem via `erp_main_client.py` and `POST /api/v1/auth/internal/sync-password`.
+    - Central "Sign Out Everywhere" signals received at `POST /api/v1/auth/internal/revoke-user-tokens` cleanly match users across `id`, `user_id`, `email`, or `username` to invalidate local credentials and push WebSocket disconnection events.
 
 ### 8.3. Departments & Permissions (RBAC & Org Structure)
 - **Endpoints:** `GET /rbac/roles`, `POST /rbac/roles`, `PATCH /rbac/roles/{id}`, `DELETE /rbac/roles/{id}`, `POST /rbac/roles/{id}/delete-with-reassignment`, `PUT /rbac/users/{id}/permissions/bulk`, `GET /rbac/roles/{id}/hierarchy`, `POST /rbac/roles/{id}/parents`, `DELETE /rbac/roles/{id}/parents/{parent_id}`, `POST /rbac/roles/{id}/children`, `DELETE /rbac/roles/{id}/children/{child_id}`.

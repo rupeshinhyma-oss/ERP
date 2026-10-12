@@ -71,7 +71,59 @@ Located in **[`Yinglima_ERP/doc/`](Yinglima_ERP/doc/)**:
 
 ---
 
-## 4. Quick Start & Operational Commands
+## 4. Federated Identity & Enterprise User Management Architecture
+
+The platform implements an enterprise-grade, distributed user management and identity federation system spanning `ERP_Main` (Central Control Plane) and autonomous spoke instances (`Inhyma_ERP` and `Yinglima_ERP`):
+
+```mermaid
+flowchart TD
+    subgraph ControlPlane["Central Control Plane (ERP_Main)"]
+        GU["Global Users Directory<br/>(/access/users)"]
+        PA["Platform Admins<br/>(admin_tokens_revoked_before)"]
+        SOE["Global Sign-Out Everywhere<br/>(/auth/sign-out-everywhere)"]
+        PWS["Central Password Federation<br/>(/auth/internal/sync-password)"]
+    end
+
+    subgraph Spoke1["Inhyma_ERP (India Spoke)"]
+        INH_U["Local Users & HR Profiles"]
+        INH_REV["Inbound Token Revocation<br/>(/auth/internal/revoke-user-tokens)"]
+        INH_PW["Outbound Password Sync"]
+    end
+
+    subgraph Spoke2["Yinglima_ERP (China Spoke)"]
+        YNG_U["Local Users & HR Profiles"]
+        YNG_REV["Inbound Token Revocation<br/>(/auth/internal/revoke-user-tokens)"]
+        YNG_PW["Outbound Password Sync"]
+    end
+
+    GU -- "Dynamic Provisioning & Deprovisioning" --> INH_U
+    GU -- "Dynamic Provisioning & Deprovisioning" --> YNG_U
+    SOE -- "Fanout Token Revocation (X-Service-Key)" --> INH_REV
+    SOE -- "Fanout Token Revocation (X-Service-Key)" --> YNG_REV
+    INH_PW -- "Inbound Sync" --> PWS
+    YNG_PW -- "Inbound Sync" --> PWS
+    PWS -- "Fanout Password" --> INH_U
+    PWS -- "Fanout Password" --> YNG_U
+```
+
+### Key User Management Pillars
+1. **Triple-Tier Identity Model:**
+   - **Platform Admins (`platform_admins`):** Central control-plane operators with instant token invalidation boundaries via `admin_tokens_revoked_before`.
+   - **Global Users (`global_users`):** Authoritative enterprise-wide identity directory with unified Argon2id password hashing, lowercase email index, and active state tracking.
+   - **ERP Memberships (`erp_memberships`):** Granular access grants linking global identities to spoke ERP instances with tenant-specific roles.
+   - **Autonomous Spoke Users (`users`):** Local tenant directories preserving departmental hierarchies, employee profiles, and operational permissions.
+2. **Bi-Directional Password Synchronization:**
+   - Passwords changed centrally or locally on any spoke automatically propagate across all active ecosystem accounts without credential drift.
+3. **Global Sign-Out Everywhere Fanout:**
+   - Single-click session termination: invalidates central sessions, clears ecosystem cookies, and fans out concurrent token revocation signals (`POST /api/v1/auth/internal/revoke-user-tokens`) to all spoke ERPs, pushing instant WebSocket `FORCE_LOGOUT` events.
+4. **Multi-Identifier Spoke Resolution:**
+   - Spoke synchronization and revocation endpoints resolve users safely across `id`, `user_id`, `email`, or `username`, eliminating distributed primary key collision issues.
+5. **Platform Role Preservation:**
+   - Spoke provisioning operations preserve platform administrative privileges, maintaining strict least-privilege separation between central control-plane and tenant-level roles.
+
+---
+
+## 5. Quick Start & Operational Commands
 
 ### A. Run Automated Backend Test Suites (675 Tests Total)
 ```bash

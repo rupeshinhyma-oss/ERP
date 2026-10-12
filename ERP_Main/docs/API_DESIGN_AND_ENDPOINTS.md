@@ -12,12 +12,69 @@
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/v1/auth/login` | Authenticate credentials and issue central JWT token pair | Public |
 | `POST` | `/api/v1/auth/refresh` | Rotate single-use refresh token | Refresh Token |
-| `POST` | `/api/v1/auth/logout` | Revoke session and blacklist tokens | Authenticated |
+| `POST` | `/api/v1/auth/logout` | Revoke local session and blacklist tokens | Authenticated |
+| `POST` | `/api/v1/auth/sign-out-everywhere` | Global session invalidation: revokes tokens centrally & fans out token revocation across all spokes | Authenticated |
+| `POST` | `/api/v1/auth/internal/sync-password` | Inbound service endpoint for spoke ERPs to synchronize password changes centrally into `global_users` and fan out to other spokes | Service Key (`X-Service-Key`) |
 | `GET` | `/api/v1/auth/me` | Fetch active user profile and effective platform roles | Authenticated |
 | `POST` | `/api/v1/global/ecosystem-session/establish` | Establishes cross-subdomain ecosystem session cookie (`ihm_ecosystem_session`) | Authenticated |
 | `GET` | `/api/v1/global/ecosystem-session/{session_id}` | Live DB verification of central ecosystem session & allowed ERPs | Public / Spoke |
 | `POST` | `/api/v1/global/ecosystem-session/exchange` | Exchange verified central session for authenticated user token | Session ID + Email |
 | `POST` | `/api/v1/global/ecosystem-session/{session_id}/revoke` | Revoke central ecosystem session across all ERPs | Authenticated |
+
+### 1.1 Global Sign-Out Everywhere Specification (`POST /api/v1/auth/sign-out-everywhere`)
+- **Trigger:** Initiated by user clicking "Sign out everywhere" or by administrator from `/access/users`.
+- **Central Action:**
+  - Deletes all database records matching the user's ID in `global_sessions`.
+  - Clears `ihm_ecosystem_session` cookie; sets `ihm_ecosystem_logged_out=<session_id>`.
+  - If user is a `PlatformAdmin`, advances `platform_admins.admin_tokens_revoked_before = datetime.now(timezone.utc)`.
+- **Spoke Fanout (`fanout_signout_to_spokes`):**
+  - Issues concurrent HTTP requests to all registered spoke nodes:
+    `POST {spoke_url}/api/v1/auth/internal/revoke-user-tokens`
+  - Payload: `{ "user_id": "<uuid>", "email": "user@example.com", "username": "username" }`
+  - Header: `X-Service-Key: <internal_service_key>`
+- **Response (`HTTP 200`):**
+  ```json
+  {
+    "success": true,
+    "message": "Signed out from all devices and spoke ERP instances.",
+    "revoked_spokes": ["inhyma", "yinglima"]
+  }
+  ```
+
+### 1.2 Inbound Spoke Password Sync Specification (`POST /api/v1/auth/internal/sync-password`)
+- **Trigger:** Dispatched by a spoke ERP backend whenever a user updates or resets their password locally.
+- **Payload:**
+  ```json
+  {
+    "origin_erp": "inhyma",
+    "email": "user@example.com",
+    "username": "user123",
+    "new_password_hash": "$argon2id$v=19$m=65536,t=3,p=4$..."
+  }
+  ```
+- **Central Processing:**
+  - Authenticates caller using `X-Service-Key` or spoke bearer credential.
+  - Updates `global_users.password_hash` where `lower(primary_email) = lower(:email)` or `username = :username`.
+  - Identifies all active `erp_memberships` for this user excluding `origin_erp`.
+  - Asynchronously fans out the updated password to each other active spoke node via `push_password_to_spoke`.
+- **Response (`HTTP 200`):**
+  ```json
+  {
+    "success": true,
+    "message": "Password synchronized centrally and propagated to peer spokes.",
+    "fanned_out_to": ["yinglima"]
+  }
+  ```
+
+### 1.3 Spoke Token Revocation Contract (`POST /api/v1/auth/internal/revoke-user-tokens`)
+- **Endpoint Location:** Hosted by spoke backends (`Inhyma_ERP`, `Yinglima_ERP`).
+- **Authentication:** `X-Service-Key` (internal microservice secret).
+- **Multi-Identifier Matching:**
+  - Resolves target user by matching any provided identifier: `id`, `user_id`, `email`, or `username`.
+- **Action:**
+  - Revokes all active refresh tokens in spoke `refresh_tokens` table.
+  - Sets user-level token invalidation timestamp (`tokens_revoked_before = now()`).
+  - Broadcasts WebSocket event `FORCE_LOGOUT` (`code: 4001`) to connected user browser sessions.
 
 ### Ecosystem Session Verification Contract (`GET /api/v1/global/ecosystem-session/{session_id}`)
 

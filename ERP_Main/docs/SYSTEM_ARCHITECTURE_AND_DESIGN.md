@@ -62,10 +62,15 @@ flowchart TD
 - **SSO Handover:** Generates high-entropy, short-lived (60s) single-use authorization tokens allowing seamless user transition between ERP applications without credential re-entry.
 - **Identity Preservation:** SSO handover preserves the authenticated user's local name and email (`first_name`, `email`), permanently preventing unauthorized fallback to administrative accounts.
 
-### 2.2 Global ERP Access Governance & Single-Point Grants
-- **Consolidated User Directory:** Global users are centrally managed at `/access/users`.
+### 2.2 Global Identity, Federated User Management & Access Governance
+- **Consolidated User Directory:** Global users and workforce personnel are centrally governed at `/access/users` (`GlobalUsers.tsx`).
+- **Triple-Tier Identity Model:**
+  - **Platform Administrators (`platform_admins` table):** Central control-plane operators (Super Admin, Platform Admin, Auditor, Support). Features cryptographic password hashing, strict RBAC permissions (`platform_authz`), and the `admin_tokens_revoked_before` epoch timestamp ensuring instantaneous revocation of all active JWTs upon permission revocation, suspension, or credential reset.
+  - **Global Users (`global_users` table):** Master identity directory representing every human in the enterprise. Stores authoritative `primary_email` (with functional lowercase B-tree index `ix_global_users_primary_email_lower`), `username`, `display_name`, `phone`, `password_hash` (Argon2id), status (`ACTIVE`, `INACTIVE`, `SUSPENDED`, `LOCKED`), and timestamps.
+  - **ERP Spoke Memberships (`erp_memberships` table):** Granular access links binding a Global User to specific autonomous spoke instances (`erp-01` / `inhyma`, `erp-02` / `yinglima`). Tracks `spoke_user_id`, assigned tenant role (`ADMIN`, `USER`, `MANAGER`, `VIEWER`), direct permissions, and activation status.
+  - **Spoke Local Users (`users` table in Inhyma & Yinglima):** Autonomous tenant records containing spoke-specific departmental hierarchy, operational roles, branch assignments, and employee links.
 - **Direct Access Grants:** Replaced decoupled membership assignment with inline checkboxes (`ERP Access Grants`) in the User Create and Edit modals.
-- **Dynamic Deprovisioning:** Unchecking an ERP access grant invokes the spoke's internal API (`POST /api/v1/internal/users/{id}/deprovision`), soft-deleting the user record on the spoke and invalidating all active sessions.
+- **Dynamic Provisioning & Deprovisioning:** Granting access automatically provisions a synchronized spoke user; unchecking an ERP access grant invokes the spoke's internal API (`POST /api/v1/internal/users/{id}/deprovision`), soft-deleting the user record on the spoke and invalidating all active sessions.
 - **Status Normalization:** Revoked or unassigned spoke access renders cleanly as `None` badges (`Inhyma: • None`).
 
 ### 2.3 Conditional Routing Engine (Single-ERP vs Multi-ERP vs Zero-Grant)
@@ -83,17 +88,48 @@ flowchart TD
 - Builds high-performance read-only projections for cross-system executive search, financial metrics, and operational dashboards.
 - Features idempotency deduplication (`event_id` tracking) and Dead Letter Queue (DLQ) retry mechanisms.
 
-### 2.5 Bi-Directional Password Synchronization & Unified Identity
-- **Single Password Per Identity:** Password updates originating from either ERP_Main or any connected spoke ERP (e.g., Inhyma or Yinglima) are automatically propagated throughout the entire ecosystem.
-- **Inbound Spoke Sync (`POST /api/v1/internal/users/password`):** Spoke backends securely submit changed passwords with internal service credentials; ERP_Main persists them centrally and immediately fans out re-provisioning calls across all other active ERP memberships (`push_password_to_memberships`).
-- **Graceful Fallback:** Operations never fail if a peer spoke is temporarily unreachable; spoken logins automatically verify credentials against the live central ecosystem session.
+### 2.5 Bi-Directional Password Synchronization Protocol
+- **Single Password Per Identity:** Password updates originating from either ERP_Main or any connected spoke ERP (e.g., Inhyma or Yinglima) are automatically propagated throughout the entire ecosystem without credential drift.
+- **Central-to-Spoke Push:** When an administrator or user resets their password in `ERP_Main` (`POST /api/v1/global-users/{id}/reset-password`), the central engine persists the new Argon2id hash in `global_users` and immediately fans out background update calls across all active spoke memberships (`push_password_to_memberships`).
+- **Spoke-to-Central Inbound Sync (`POST /api/v1/auth/internal/sync-password`):**
+  - When a user changes their password on a spoke (Inhyma or Yinglima), the spoke backend securely notifies ERP_Main via an asynchronous background hook using internal service credentials (`X-Service-Key` / `service_credential_erp_key`).
+  - ERP_Main updates `global_users.password_hash` and instantly fans out the new password to all *other* spokes where the user has active memberships (`push_password_to_spoke`), excluding the origin node to prevent sync loops.
+- **Graceful Network Fallback:** Password operations never block or fail if a peer spoke is temporarily unreachable; spoken logins automatically verify credentials against the live central ecosystem session, and the Durable Access Sync Engine catches up queued updates.
 
 ### 2.6 Durable Access Sync Recovery Engine (`access_sync_tasks`)
 - **Fault-Tolerant Deprovisioning:** When an administrator revokes, suspends, or restores user access in ERP_Main, any network error reaching a spoke triggers a durable database record in `access_sync_tasks`.
 - **Bounded Exponential Backoff & Leases:** Tasks are reclaimed and retried with distributed worker leases (`claimed_by`, `lease_expires_at`) preventing duplicate execution.
 - **Fail-Closed Verification:** Spoke login verification calls ERP_Main's live database state, ensuring that even during synchronization delays, revoked users cannot access spoke ERPs.
 
-### 2.8 Ecosystem Session Lifecycle, Disambiguated Revocation & Switch Reliability
+### 2.7 Global Sign-Out Everywhere Fanout & Administrative Token Revocation
+- **Global Session Invalidation (`POST /api/v1/auth/sign-out-everywhere`):**
+  - Allows users and security administrators to instantly terminate all active sessions across all connected ERP platforms in a single operation.
+  - Revokes central ecosystem cookies (`ihm_ecosystem_session` cleared; `ihm_ecosystem_logged_out=<session_id>` set).
+  - Deletes all database session records in `global_sessions` for the target identity.
+- **Cross-Spoke Fanout Protocol (`fanout_signout_to_spokes`):**
+  - Asynchronously dispatches internal HTTP calls to every registered spoke ERP's token revocation endpoint (`POST /api/v1/auth/internal/revoke-user-tokens`).
+  - Authenticated via secure service keys (`X-Service-Key`).
+  - Spokes immediately blacklist existing JWT tokens, increment local token revocation epochs, and push WebSocket force-logout events (`FORCE_LOGOUT`, code `4001`) to all connected client browsers.
+- **Administrative Token Revocation Boundary (`admin_tokens_revoked_before`):**
+  - Prevents stale JWT access when a platform admin's permissions are altered or revoked.
+  - Modifying admin roles or revoking access updates `platform_admins.admin_tokens_revoked_before = datetime.now(timezone.utc)`.
+  - The security dependency in `platform_auth/dependencies.py` and `platform_authz/dependencies.py` evaluates token issue timestamp (`iat`): if `iat < admin_tokens_revoked_before`, the request fails immediately with HTTP `401 Unauthorized: Admin tokens have been revoked. Please sign in again.`.
+
+### 2.8 Spoke Multi-Identifier Resolution & Safe Identity Linking
+- **Distributed Identity Disambiguation:** In distributed ERP environments, spoke user tables may have independent internal primary keys, legacy integer IDs, or separate UUID sequences.
+- **Flexible Identifier Lookup:** Internal spoke endpoints (`/api/v1/auth/internal/revoke-user-tokens`, `/api/v1/internal/users/sync`) accept and resolve any available identifier:
+  1. Spoke primary key `id`
+  2. Linked `user_id` / `global_user_id`
+  3. Authoritative `email`
+  4. Unique `username`
+- This multi-factor lookup prevents lookup failures when central and spoke primary keys differ, guaranteeing that token revocation and password sync always resolve to the correct local database record.
+
+### 2.9 Platform Role Preservation & Cross-Tenant RBAC Isolation
+- **Role Boundary Integrity:** Platform administration privileges in `ERP_Main` and operational roles in spoke ERPs are strictly partitioned.
+- **Preservation on Spoke Provisioning:** When provisioning or syncing user accounts to spoke instances, the provisioning engine guarantees that platform administrative privileges (`is_platform_admin`, platform role assignments) are preserved and never overwritten by tenant-level roles.
+- **Least Privilege Enforcement:** Spoke ERP administrative roles (e.g. Branch Admin in Inhyma) grant operational power only within that spoke's domain and never escalate to central control-plane authority.
+
+### 2.10 Ecosystem Session Lifecycle, Disambiguated Revocation & Switch Reliability
 - **Session-ID Keyed Revocation:** Single sign-out marks `ihm_ecosystem_logged_out=<session_id>` with the exact revoked session ID rather than a generic boolean flag. Other tabs or fresh sessions established via SSO switch or re-login are never falsely diagnosed as revoked.
 - **Universal Cookie Cleansing (`clearCookieEverywhere` / `setCookieEverywhere`):** Operates across host-only, `localhost`, `127.0.0.1`, current hostname, and `VITE_COOKIE_DOMAIN`, preventing stale host-level cookies from causing unintended logouts.
 - **Watcher Polling Loop Stabilization:** Removed redundant invocation of `clearEcosystemCookie()` inside periodic session verification, stopping perpetual 60-second expiration renewal loops.
