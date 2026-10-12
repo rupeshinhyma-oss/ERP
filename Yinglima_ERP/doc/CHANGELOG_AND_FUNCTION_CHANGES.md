@@ -3,6 +3,26 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-12] — Local Purchase Supplier Type-Ahead, Bill Document Cloud Storage & RBAC Master Documentation
+
+### 1. Local Purchase Supplier Searchable Combobox & Extraction Auto-Fill
+- **Type-Ahead Autocomplete in [`LocalPurchaseForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseForm.tsx):**
+  - Replaced the static HTML `<select>` dropdown with the application's reusable [`SearchableDropdown`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/SearchableDropdown.tsx).
+  - Users can now type characters (e.g. "San", "LT", "Young") to filter suppliers in real time with keyboard navigation (Arrow Up/Down + Enter) and a quick-clear (`✕`) button.
+  - Selecting a supplier automatically syncs with quotation line-item pricing and planning sheet imports.
+- **Bill Document Cloud Storage in Supabase & Download Action:**
+  - Extended local purchase backend schemas and services ([`schemas.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/schemas.py), [`service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/service.py), [`storage.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/common/storage.py)) to upload and persist invoice files (PDFs, images, Excel) to Supabase Storage.
+  - Added direct invoice document download actions on both [`LocalPurchaseForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseForm.tsx) and [`LocalPurchaseDetailModal.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseDetailModal.tsx).
+  - When **⚡ Extract Bill Data** runs, any detected supplier name or ID automatically resolves against the supplier database and pre-fills the type-ahead search bar.
+
+### 2. Comprehensive RBAC & Permissions Master Guide
+- **Master Documentation in [`ROLES_AND_PERMISSIONS_MASTER_GUIDE.md`](file:///d:/Om%20work1/ERP/Yinglima_ERP/doc/ROLES_AND_PERMISSIONS_MASTER_GUIDE.md):**
+  - Created a full architectural and operational guide covering Yinglima ERP's Role-Based Access Control (RBAC) engine.
+  - Documented the Department-Role convergence, the 3-tier precedence hierarchy (Super Admin > Department Defaults > User Overrides), and the mathematical effective permission formula.
+  - Included a complete matrix of all 25 modules and their fine-grained permission codes (`module.action`), backend dependencies (`require_permission`), frontend UI guards (`<Can>`, `hasPermission`), and real-time Redis/memory cache invalidation lifecycles.
+
+---
+
 ## [Release 2026-10-10] — Cross-Ecosystem Single Sign-Out (SLO), M2M Force Logout API & WebSocket Disconnect
 
 ### 1. Internal Machine-to-Machine Force-Logout API

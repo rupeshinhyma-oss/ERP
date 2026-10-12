@@ -4,6 +4,51 @@ Welcome to the dedicated documentation directory for **Yinglima_ERP** (China Pro
 
 ---
 
+## Module Guides & Safety Manuals (What Changed, How to Test, What NOT to Break)
+
+- 🛒 **[Local Purchase Module Guide](MODULE_LOCAL_PURCHASE.md)**:
+  - Architecture, database models, and recent updates (Supplier type-ahead search & Supabase invoice storage).
+  - Step-by-step verification checklist and edge cases.
+  - Critical rules: what to keep, what NOT to break (unmatched costing $0.00 rule, dual-state sync).
+
+- 📦 **[Sales Process & 16-Column CI Engine Guide](MODULE_SALE_PROCESS.md)**:
+  - Confirmed orders, Commercial Invoice 16-column costing sheet, China export VAT refund calculations, and Excel export.
+  - Testing checklist (Test 1 / Mumbai Sheet calculation validation).
+  - Critical constraints: zero-fallback pricing, exchange rate locking, precision rules.
+
+- 🚢 **[Shipment Planning & Master Planning Sheet Guide](MODULE_SHIPMENT_PLANNING.md)**:
+  - Master Planning Sheet China to India, container CBM utilization, inline cell edits, column permissions (`TEST(Y/N)`, `APPROVAL DATE`), and status colors.
+  - Testing checklist and formula validation.
+
+- 📝 **[Inquiries, RFQs & Quotations Guide](MODULE_INQUIRIES.md)**:
+  - Buyer RFQs, multi-vendor quote comparison, AI quotation extractor, manager approval workflows, and quotation dispatch.
+
+- 🏭 **[Suppliers & Vendor Directory Guide](MODULE_SUPPLIERS.md)**:
+  - Chinese factory profiles, WeChat IDs, RMB bank accounts, quality ratings, factory visit media, and downstream integration.
+
+- 🤝 **[Agents & Buyers Directory Guide](MODULE_BUYERS.md)**:
+  - Overseas clients, consignee delivery ports, client grades (VIP A/B/C), potential ratings, and inquiry histories.
+
+- 🏷️ **[Product Master & Catalog Guide](MODULE_PRODUCT_MASTER.md)**:
+  - Products, packaging ratios, carton CBM math, private prices, and photo galleries.
+
+- 👥 **[User Management, Positions & RBAC Guide](MODULE_USER_MANAGEMENT.md)**:
+  - User accounts, employee positions, department-role assignments, 3-tier hierarchy, and user permission overrides.
+
+- ⚙️ **[Settings Masters & 12 Reference Lookups Guide](MODULE_SETTINGS_MASTERS.md)**:
+  - Consolidated single guide for all 12 lookup masters: Cities, Provinces, Countries, Currencies, UOM, HSN Codes, Categories, Subcategories, Brands, Supplier Types, Buyer Types, and Organization List.
+
+- 🛡️ **[System Settings, Audit Logs & Trash Recovery Guide](MODULE_SYSTEM_SETTINGS_AUDIT_TRASH.md)**:
+  - Corporate profile, immutable audit trails, and central 1-click trash restore/purge.
+
+- 🔐 **[Roles, Permissions & Access Control Master Guide](ROLES_AND_PERMISSIONS_MASTER_GUIDE.md)**:
+  - Mathematical effective permission formula, 25-module permission code matrix (`module.action`), backend `require_permission` dependencies, frontend `<Can>` guards, and Redis/memory cache invalidation.
+
+- 📐 **[All KPIs & Formulas Master Guide](ERP_ALL_KPIS_AND_FORMULAS_MASTER_GUIDE.md)**:
+  - Complete mathematical definitions for CBM, Gross Weight, Net Weight, Packages, Quotation Margins, and Costing.
+
+---
+
 ## Technical Specifications & Guides
 
 - 🏛️ **[System Architecture & Design](SYSTEM_ARCHITECTURE_AND_DESIGN.md)**:

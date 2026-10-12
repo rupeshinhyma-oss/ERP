@@ -74,9 +74,6 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("position.create", "position", "positions", "create", "ALL", "Create positions/designations."),
     ("position.update", "position", "positions", "update", "ALL", "Edit positions, and manage employee position assignments."),
     ("position.delete", "position", "positions", "delete", "ALL", "Delete positions/designations."),
-    # Reporting Structure / Org Chart (Organization/Employee/IAM upgrade).
-    ("reporting.view", "reporting", "org-chart", "view", "ALL", "View reporting relationships and the organization chart."),
-    ("reporting.manage", "reporting", "org-chart", "manage", "ALL", "Create, change, or remove employee reporting relationships."),
     # Organization Settings (Super Admin system-level)
     ("organization.manage", "organization", "organization", "manage", "ALL", "View and manage system organization profile."),
     # Organization List (Configurations > Organization List; distinct page from
@@ -248,7 +245,6 @@ USER_ROLE_NAME = "user"
 USER_ROLE_PERMISSION_CODES: list[str] = [
     "user.view",
     "position.view",
-    "reporting.view",
     "country.view",
     "state.view",
     "city.view",
