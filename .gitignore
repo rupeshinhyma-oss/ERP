@@ -15,6 +15,7 @@ federation_keys/
 *.crt
 !**/certifi/cacert.pem
 *.zip
+*.tgz
 app/reporting/exports/
 **/reporting/exports/*
 

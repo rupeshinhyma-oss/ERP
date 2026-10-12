@@ -166,3 +166,4 @@ class BillExtractionResponse(BaseModel):
     items: list[BillExtractionItem] = Field(default_factory=list)
     confidence: float = 1.0
     notes: str | None = None
+    bill_file_url: str | None = None

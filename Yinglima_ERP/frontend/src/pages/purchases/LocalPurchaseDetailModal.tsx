@@ -169,23 +169,49 @@ export function LocalPurchaseDetailModal({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close modal"
-            style={{
-              background: "none",
-              border: "none",
-              fontSize: "18px",
-              cursor: "pointer",
-              color: "#64748b",
-              lineHeight: 1,
-              padding: "4px 8px",
-              borderRadius: "4px",
-            }}
-          >
-            ✕
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {detail?.bill_file_url && (
+              <a
+                href={detail.bill_file_url}
+                target="_blank"
+                rel="noreferrer"
+                download
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  color: "#059669",
+                  background: "#ecfdf5",
+                  border: "1px solid #a7f3d0",
+                  borderRadius: "6px",
+                  padding: "5px 12px",
+                  textDecoration: "none",
+                }}
+                title="Download original invoice bill from Supabase"
+              >
+                📥 Download Bill
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close modal"
+              style={{
+                background: "none",
+                border: "none",
+                fontSize: "18px",
+                cursor: "pointer",
+                color: "#64748b",
+                lineHeight: 1,
+                padding: "4px 8px",
+                borderRadius: "4px",
+              }}
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Modal Body (Scrollable vertically if needed, zero horizontal scroll) */}

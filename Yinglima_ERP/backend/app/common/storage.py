@@ -50,6 +50,8 @@ PUBLIC_BUCKETS: set[str] = {
     "supplier-media",
     "public-assets",
     "quotations",
+    "purchase-bills",
+    "yinglima-purchase-bills",
     "yinglima-product-images",
     "yinglima-supplier-media",
     "yinglima-quotations",
@@ -61,7 +63,7 @@ def is_bucket_public(bucket: str) -> bool:
     b = bucket.lower()
     if b in PUBLIC_BUCKETS:
         return True
-    return any(keyword in b for keyword in ("product", "supplier", "media", "asset", "public"))
+    return any(keyword in b for keyword in ("product", "supplier", "media", "asset", "public", "bill", "purchase"))
 
 
 def validate_file_upload(

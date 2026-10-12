@@ -719,7 +719,13 @@ function ColumnFilterPopover({
 }
 function isSystemColumn(name: string): boolean {
   const cleaned = (name || "").trim().toLowerCase();
-  return cleaned === "item" || cleaned === "test(y/n)" || cleaned.includes("test (y/n)") || cleaned === "approval date";
+  return (
+    cleaned === "item" ||
+    cleaned.startsWith("test") ||
+    cleaned.startsWith("tally") ||
+    cleaned === "approval date" ||
+    cleaned === "approval_date"
+  );
 }
 
 function isPureMumColumn(name: string, label?: string): boolean {
@@ -2349,7 +2355,7 @@ export function PlanningPage() {
 
   function isTestColumn(colName: string): boolean {
     const name = colName.trim().toLowerCase();
-    return name.startsWith("test");
+    return name.startsWith("test") || name.startsWith("tally");
   }
 
 
