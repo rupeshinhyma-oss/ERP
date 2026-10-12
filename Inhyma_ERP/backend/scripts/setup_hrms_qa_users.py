@@ -9,6 +9,10 @@ Ensures the canonical test accounts exist:
 5. OTHER DEPT EMPLOYEE: username=ops_employee, role=employee, department=Operations
 """
 
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import asyncio
 from datetime import datetime, timezone
 import app.users.models

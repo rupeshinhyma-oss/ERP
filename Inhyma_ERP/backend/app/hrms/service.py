@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
@@ -25,8 +25,12 @@ from app.hrms.models import (
     HrmsExpenseSettings,
     HrmsLeaveType,
     HrmsLocation,
+    HrmsTrackingSettings,
 )
 from app.hrms.schemas import (
+    DetailedTrackingEmployeeItem,
+    DetailedTrackingEmployeeUpdate,
+    EmployeeTrackingSettingsResponse,
     ExpenseCategoryCreate,
     ExpenseCategoryUpdate,
     ExpenseSettingsUpdate,
@@ -35,7 +39,13 @@ from app.hrms.schemas import (
     LocationCreate,
     LocationRead,
     LocationUpdate,
+    ReturnTimerEmployeeItem,
+    ReturnTimerEmployeeUpdate,
+    TrackingSettingsOverviewResponse,
+    TrackingSettingsRead,
+    TrackingSettingsUpdate,
 )
+from app.users.models import User
 
 
 def _utcnow() -> datetime:
@@ -613,3 +623,489 @@ class HrmsSetupService:
         await self.db.commit()
         await self.db.refresh(settings)
         return settings
+
+    # -----------------------------------------------------------------------
+    # Tracking Settings (Org Defaults & Per-Employee Overrides)
+    # -----------------------------------------------------------------------
+    async def get_or_create_org_tracking_settings(self) -> HrmsTrackingSettings:
+        """Fetch or create organization default tracking settings."""
+        stmt = select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id.is_(None)).limit(1)
+        res = await self.db.execute(stmt)
+        setting = res.scalar_one_or_none()
+        if not setting:
+            setting = HrmsTrackingSettings(
+                employee_id=None,
+                is_active=True,
+                is_detailed_tracking_enabled=False,
+                detailed_interval_minutes=5,
+                detailed_stop_threshold_minutes=5.0,
+                stop_detection_radius_meters=50.0,
+                max_gps_accuracy_meters=50.0,
+                return_timer_seconds=30,
+                is_unlimited_return=False,
+            )
+            self.db.add(setting)
+            await self.db.commit()
+            await self.db.refresh(setting)
+        return setting
+
+    def _to_tracking_settings_read(self, s: HrmsTrackingSettings) -> TrackingSettingsRead:
+        emp_name = None
+        emp_code = None
+        dept = None
+        if s.employee:
+            first = s.employee.first_name or ""
+            last = s.employee.last_name or ""
+            emp_name = f"{first} {last}".strip() or s.employee.username
+            emp_code = getattr(s.employee, "employee_code", None)
+            dept = getattr(s.employee, "department", None)
+
+        updater_name = None
+        if s.updater:
+            first = s.updater.first_name or ""
+            last = s.updater.last_name or ""
+            updater_name = f"{first} {last}".strip() or s.updater.username
+
+        return TrackingSettingsRead(
+            id=s.id,
+            employee_id=s.employee_id,
+            employee_name=emp_name,
+            employee_code=emp_code,
+            department=dept,
+            is_active=s.is_active,
+            is_detailed_tracking_enabled=getattr(s, "is_detailed_tracking_enabled", False),
+            detailed_interval_minutes=getattr(s, "detailed_interval_minutes", 5),
+            detailed_stop_threshold_minutes=s.detailed_stop_threshold_minutes,
+            stop_detection_radius_meters=s.stop_detection_radius_meters,
+            max_gps_accuracy_meters=s.max_gps_accuracy_meters,
+            return_timer_seconds=s.return_timer_seconds,
+            is_unlimited_return=s.is_unlimited_return,
+            updated_by=s.updated_by,
+            updated_by_name=updater_name,
+            updated_at=s.updated_at,
+            version=s.version,
+        )
+
+    async def update_org_tracking_settings(
+        self,
+        payload: TrackingSettingsUpdate,
+        user_id: uuid.UUID,
+    ) -> TrackingSettingsRead:
+        """Update organization default tracking settings."""
+        setting = await self.get_or_create_org_tracking_settings()
+        setting.is_active = payload.is_active
+        setting.detailed_stop_threshold_minutes = payload.detailed_stop_threshold_minutes
+        setting.stop_detection_radius_meters = payload.stop_detection_radius_meters
+        setting.max_gps_accuracy_meters = payload.max_gps_accuracy_meters
+        setting.return_timer_seconds = payload.return_timer_seconds
+        setting.is_unlimited_return = payload.is_unlimited_return
+        setting.updated_by = user_id
+        setting.updated_at = _utcnow()
+        setting.version += 1
+
+        await self.db.commit()
+        await self.db.refresh(setting)
+        return self._to_tracking_settings_read(setting)
+
+    async def get_employee_tracking_settings(
+        self,
+        employee_id: uuid.UUID,
+    ) -> EmployeeTrackingSettingsResponse:
+        """Fetch tracking settings for a specific employee, including override and effective settings."""
+        org_def = await self.get_or_create_org_tracking_settings()
+        org_read = self._to_tracking_settings_read(org_def)
+
+        # Check for employee-specific override
+        stmt = select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id == employee_id).limit(1)
+        res = await self.db.execute(stmt)
+        emp_setting = res.scalar_one_or_none()
+
+        if emp_setting:
+            emp_read = self._to_tracking_settings_read(emp_setting)
+            return EmployeeTrackingSettingsResponse(
+                org_default=org_read,
+                override=emp_read,
+                effective=emp_read,
+                has_override=True,
+            )
+        else:
+            return EmployeeTrackingSettingsResponse(
+                org_default=org_read,
+                override=None,
+                effective=org_read,
+                has_override=False,
+            )
+
+    async def update_employee_tracking_settings(
+        self,
+        employee_id: uuid.UUID,
+        payload: TrackingSettingsUpdate,
+        user_id: uuid.UUID,
+    ) -> EmployeeTrackingSettingsResponse:
+        """Set employee-specific override for tracking settings."""
+        org_def = await self.get_or_create_org_tracking_settings()
+        org_read = self._to_tracking_settings_read(org_def)
+
+        stmt = select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id == employee_id).limit(1)
+        res = await self.db.execute(stmt)
+        emp_setting = res.scalar_one_or_none()
+
+        if not emp_setting:
+            emp_setting = HrmsTrackingSettings(
+                employee_id=employee_id,
+                is_active=payload.is_active,
+                detailed_stop_threshold_minutes=payload.detailed_stop_threshold_minutes,
+                stop_detection_radius_meters=payload.stop_detection_radius_meters,
+                max_gps_accuracy_meters=payload.max_gps_accuracy_meters,
+                return_timer_seconds=payload.return_timer_seconds,
+                is_unlimited_return=payload.is_unlimited_return,
+                updated_by=user_id,
+            )
+            self.db.add(emp_setting)
+        else:
+            emp_setting.is_active = payload.is_active
+            emp_setting.detailed_stop_threshold_minutes = payload.detailed_stop_threshold_minutes
+            emp_setting.stop_detection_radius_meters = payload.stop_detection_radius_meters
+            emp_setting.max_gps_accuracy_meters = payload.max_gps_accuracy_meters
+            emp_setting.return_timer_seconds = payload.return_timer_seconds
+            emp_setting.is_unlimited_return = payload.is_unlimited_return
+            emp_setting.updated_by = user_id
+            emp_setting.updated_at = _utcnow()
+            emp_setting.version += 1
+
+        await self.db.commit()
+        await self.db.refresh(emp_setting)
+        emp_read = self._to_tracking_settings_read(emp_setting)
+
+        return EmployeeTrackingSettingsResponse(
+            org_default=org_read,
+            override=emp_read,
+            effective=emp_read,
+            has_override=True,
+        )
+
+    async def delete_employee_tracking_settings(
+        self,
+        employee_id: uuid.UUID,
+    ) -> EmployeeTrackingSettingsResponse:
+        """Clear employee override so that the employee inherits organization defaults again."""
+        stmt = select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id == employee_id).limit(1)
+        res = await self.db.execute(stmt)
+        emp_setting = res.scalar_one_or_none()
+        if emp_setting:
+            await self.db.delete(emp_setting)
+            await self.db.commit()
+
+        org_def = await self.get_or_create_org_tracking_settings()
+        org_read = self._to_tracking_settings_read(org_def)
+
+        return EmployeeTrackingSettingsResponse(
+            org_default=org_read,
+            override=None,
+            effective=org_read,
+            has_override=False,
+        )
+
+    async def get_effective_tracking_settings(self, employee_id: uuid.UUID) -> HrmsTrackingSettings:
+        """Fetch effective tracking settings model instance for internal business logic."""
+        stmt = select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id == employee_id).limit(1)
+        res = await self.db.execute(stmt)
+        emp_setting = res.scalar_one_or_none()
+        if emp_setting:
+            return emp_setting
+        return await self.get_or_create_org_tracking_settings()
+
+    async def list_all_tracking_settings(self) -> TrackingSettingsOverviewResponse:
+        """List organization default tracking settings and all employee overrides."""
+        org_def = await self.get_or_create_org_tracking_settings()
+        org_read = self._to_tracking_settings_read(org_def)
+
+        stmt = (
+            select(HrmsTrackingSettings)
+            .where(HrmsTrackingSettings.employee_id.is_not(None))
+            .order_by(HrmsTrackingSettings.updated_at.desc())
+        )
+        res = await self.db.execute(stmt)
+        overrides = [self._to_tracking_settings_read(s) for s in res.scalars().all()]
+
+        return TrackingSettingsOverviewResponse(
+            org_default=org_read,
+            employee_overrides=overrides,
+        )
+
+    async def list_detailed_tracking_employees(
+        self,
+        search: Optional[str] = None,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+    ) -> list[DetailedTrackingEmployeeItem]:
+        """List employees with their individual Detailed Tracking ON/OFF status and interval."""
+        query = select(User).where(User.deleted_at.is_(None))
+        if allowed_employee_ids is not None:
+            query = query.where(User.id.in_(allowed_employee_ids))
+        if search and search.strip():
+            s_term = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    User.first_name.ilike(s_term),
+                    User.last_name.ilike(s_term),
+                    User.username.ilike(s_term),
+                    User.email.ilike(s_term),
+                    User.employee_code.ilike(s_term),
+                )
+            )
+        query = query.order_by(User.first_name.asc(), User.username.asc())
+        users = (await self.db.execute(query)).scalars().all()
+
+        emp_ids = [u.id for u in users]
+        dept_map: dict[uuid.UUID, str] = {}
+        settings_map: dict[uuid.UUID, HrmsTrackingSettings] = {}
+        if emp_ids:
+            try:
+                from app.rbac.models import UserRole, Role
+                r_stmt = (
+                    select(UserRole.user_id, Role.name)
+                    .join(Role, Role.id == UserRole.role_id)
+                    .where(UserRole.user_id.in_(emp_ids))
+                )
+                roles_res = (await self.db.execute(r_stmt)).all()
+                for uid, rname in roles_res:
+                    if rname.lower() not in ("user", "employee", "super_admin", "admin") and uid not in dept_map:
+                        dept_map[uid] = rname
+            except Exception:
+                pass
+
+            st_res = await self.db.execute(
+                select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id.in_(emp_ids))
+            )
+            for st in st_res.scalars().all():
+                if st.employee_id:
+                    settings_map[st.employee_id] = st
+
+        items: list[DetailedTrackingEmployeeItem] = []
+        for u in users:
+            first = u.first_name or ""
+            last = u.last_name or ""
+            emp_name = f"{first} {last}".strip() or u.username
+            dept = dept_map.get(u.id) or "General"
+            st = settings_map.get(u.id)
+            items.append(
+                DetailedTrackingEmployeeItem(
+                    employee_id=u.id,
+                    employee_name=emp_name,
+                    employee_code=getattr(u, "employee_code", None),
+                    department=dept,
+                    is_detailed_tracking_enabled=st.is_detailed_tracking_enabled if st else False,
+                    detailed_interval_minutes=st.detailed_interval_minutes if st else 5,
+                    detailed_stop_threshold_minutes=st.detailed_stop_threshold_minutes if st else 5.0,
+                    updated_at=st.updated_at if st else None,
+                )
+            )
+        return items
+
+    async def update_employee_detailed_tracking(
+        self,
+        employee_id: uuid.UUID,
+        payload: DetailedTrackingEmployeeUpdate,
+        user_id: uuid.UUID,
+    ) -> DetailedTrackingEmployeeItem:
+        """Update individual employee's detailed tracking toggle and interval."""
+        emp = await self.db.get(User, employee_id)
+        if not emp or emp.deleted_at:
+            raise NotFoundException("Employee not found.")
+
+        stmt = select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id == employee_id).limit(1)
+        res = await self.db.execute(stmt)
+        st = res.scalar_one_or_none()
+        if not st:
+            org = await self.get_or_create_org_tracking_settings()
+            st = HrmsTrackingSettings(
+                employee_id=employee_id,
+                is_active=True,
+                is_detailed_tracking_enabled=payload.is_detailed_tracking_enabled,
+                detailed_interval_minutes=payload.detailed_interval_minutes,
+                detailed_stop_threshold_minutes=payload.detailed_stop_threshold_minutes,
+                stop_detection_radius_meters=org.stop_detection_radius_meters,
+                max_gps_accuracy_meters=org.max_gps_accuracy_meters,
+                return_timer_seconds=org.return_timer_seconds,
+                is_unlimited_return=org.is_unlimited_return,
+                updated_by=user_id,
+            )
+            self.db.add(st)
+        else:
+            st.is_detailed_tracking_enabled = payload.is_detailed_tracking_enabled
+            st.detailed_interval_minutes = payload.detailed_interval_minutes
+            st.detailed_stop_threshold_minutes = payload.detailed_stop_threshold_minutes
+            st.updated_by = user_id
+            st.updated_at = _utcnow()
+            st.version += 1
+
+        await self.db.commit()
+        await self.db.refresh(st)
+
+        first = emp.first_name or ""
+        last = emp.last_name or ""
+        emp_name = f"{first} {last}".strip() or emp.username
+        return DetailedTrackingEmployeeItem(
+            employee_id=emp.id,
+            employee_name=emp_name,
+            employee_code=getattr(emp, "employee_code", None),
+            department=getattr(emp, "department", None),
+            is_detailed_tracking_enabled=st.is_detailed_tracking_enabled,
+            detailed_interval_minutes=st.detailed_interval_minutes,
+            detailed_stop_threshold_minutes=st.detailed_stop_threshold_minutes,
+            updated_at=st.updated_at,
+        )
+
+    async def list_return_timer_employees(
+        self,
+        search: Optional[str] = None,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+    ) -> list[ReturnTimerEmployeeItem]:
+        """List employees with their individual Return Timer overrides and effective durations."""
+        org = await self.get_or_create_org_tracking_settings()
+        org_secs = org.return_timer_seconds if not org.is_unlimited_return else None
+
+        query = select(User).where(User.deleted_at.is_(None))
+        if allowed_employee_ids is not None:
+            query = query.where(User.id.in_(allowed_employee_ids))
+        if search and search.strip():
+            s_term = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    User.first_name.ilike(s_term),
+                    User.last_name.ilike(s_term),
+                    User.username.ilike(s_term),
+                    User.email.ilike(s_term),
+                    User.employee_code.ilike(s_term),
+                )
+            )
+        query = query.order_by(User.first_name.asc(), User.username.asc())
+        users = (await self.db.execute(query)).scalars().all()
+
+        emp_ids = [u.id for u in users]
+        dept_map: dict[uuid.UUID, str] = {}
+        settings_map: dict[uuid.UUID, HrmsTrackingSettings] = {}
+        if emp_ids:
+            try:
+                from app.rbac.models import UserRole, Role
+                r_stmt = (
+                    select(UserRole.user_id, Role.name)
+                    .join(Role, Role.id == UserRole.role_id)
+                    .where(UserRole.user_id.in_(emp_ids))
+                )
+                roles_res = (await self.db.execute(r_stmt)).all()
+                for uid, rname in roles_res:
+                    if rname.lower() not in ("user", "employee", "super_admin", "admin") and uid not in dept_map:
+                        dept_map[uid] = rname
+            except Exception:
+                pass
+
+            st_res = await self.db.execute(
+                select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id.in_(emp_ids))
+            )
+            for st in st_res.scalars().all():
+                if st.employee_id:
+                    settings_map[st.employee_id] = st
+
+        items: list[ReturnTimerEmployeeItem] = []
+        for u in users:
+            first = u.first_name or ""
+            last = u.last_name or ""
+            emp_name = f"{first} {last}".strip() or u.username
+            dept = dept_map.get(u.id) or "General"
+            st = settings_map.get(u.id)
+
+            has_override = (st is not None)
+            is_unlim = st.is_unlimited_return if st else org.is_unlimited_return
+            secs = st.return_timer_seconds if st else org_secs
+            eff_secs = None if is_unlim else (st.return_timer_seconds if st else org_secs)
+
+            items.append(
+                ReturnTimerEmployeeItem(
+                    employee_id=u.id,
+                    employee_name=emp_name,
+                    employee_code=getattr(u, "employee_code", None),
+                    department=dept,
+                    use_org_default=not has_override,
+                    return_timer_seconds=secs,
+                    is_unlimited=is_unlim,
+                    effective_seconds=eff_secs,
+                    updated_at=st.updated_at if st else None,
+                )
+            )
+        return items
+
+    async def update_employee_return_timer(
+        self,
+        employee_id: uuid.UUID,
+        payload: ReturnTimerEmployeeUpdate,
+        user_id: uuid.UUID,
+    ) -> ReturnTimerEmployeeItem:
+        """Update individual return timer override (or restore org default)."""
+        emp = await self.db.get(User, employee_id)
+        if not emp or emp.deleted_at:
+            raise NotFoundException("Employee not found.")
+
+        org = await self.get_or_create_org_tracking_settings()
+        stmt = select(HrmsTrackingSettings).where(HrmsTrackingSettings.employee_id == employee_id).limit(1)
+        res = await self.db.execute(stmt)
+        st = res.scalar_one_or_none()
+
+        if payload.use_org_default:
+            if st:
+                if not st.is_detailed_tracking_enabled:
+                    await self.db.delete(st)
+                    st = None
+                else:
+                    st.return_timer_seconds = org.return_timer_seconds
+                    st.is_unlimited_return = org.is_unlimited_return
+                    st.updated_by = user_id
+                    st.updated_at = _utcnow()
+                    st.version += 1
+            await self.db.commit()
+        else:
+            if not st:
+                st = HrmsTrackingSettings(
+                    employee_id=employee_id,
+                    is_active=True,
+                    is_detailed_tracking_enabled=False,
+                    detailed_interval_minutes=5,
+                    detailed_stop_threshold_minutes=org.detailed_stop_threshold_minutes,
+                    stop_detection_radius_meters=org.stop_detection_radius_meters,
+                    max_gps_accuracy_meters=org.max_gps_accuracy_meters,
+                    return_timer_seconds=None if payload.is_unlimited else payload.return_timer_seconds,
+                    is_unlimited_return=payload.is_unlimited,
+                    updated_by=user_id,
+                )
+                self.db.add(st)
+            else:
+                st.return_timer_seconds = None if payload.is_unlimited else payload.return_timer_seconds
+                st.is_unlimited_return = payload.is_unlimited
+                st.updated_by = user_id
+                st.updated_at = _utcnow()
+                st.version += 1
+            await self.db.commit()
+            if st:
+                await self.db.refresh(st)
+
+        first = emp.first_name or ""
+        last = emp.last_name or ""
+        emp_name = f"{first} {last}".strip() or emp.username
+
+        has_override = (st is not None and not payload.use_org_default)
+        is_unlim = st.is_unlimited_return if (st and has_override) else org.is_unlimited_return
+        secs = st.return_timer_seconds if (st and has_override) else org.return_timer_seconds
+        eff_secs = None if is_unlim else secs
+
+        return ReturnTimerEmployeeItem(
+            employee_id=emp.id,
+            employee_name=emp_name,
+            employee_code=getattr(emp, "employee_code", None),
+            department=getattr(emp, "department", None),
+            use_org_default=not has_override,
+            return_timer_seconds=secs,
+            is_unlimited=is_unlim,
+            effective_seconds=eff_secs,
+            updated_at=st.updated_at if st else None,
+        )
+

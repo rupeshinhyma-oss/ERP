@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
-from app.hrms.models import HrmsAttendanceRegularization
+from app.hrms.models import HrmsAttendanceRegularization, HrmsLiveTrackingSession
 from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
 from app.hrms.schemas import (
     RegularizationEvidenceRead,
@@ -220,8 +220,10 @@ async def get_active_tracking(
 ):
     ctx.require_module_access("site_visits")
     session = await service.get_active_tracking_session(employee_id=ctx.user_id)
-    data = service.to_tracking_session_read(session).model_dump(mode="json") if session else None
-    return build_success_response(data=data, message="Active tracking session retrieved.")
+    if not session:
+        return build_success_response(data=None, message="No active tracking session.")
+    dto = await service.to_tracking_session_dto_async(session)
+    return build_success_response(data=dto.model_dump(mode="json"), message="Active tracking session retrieved.")
 
 
 @router.post("/hrms/tracking/start", status_code=status.HTTP_201_CREATED, summary="Start live tracking")
@@ -232,7 +234,7 @@ async def start_tracking(
 ):
     ctx.require_module_access("site_visits")
     session = await service.start_tracking(employee_id=ctx.user_id, payload=payload)
-    dto = service.to_tracking_session_read(session)
+    dto = await service.to_tracking_session_dto_async(session)
     return build_success_response(data=dto.model_dump(mode="json"), message="Live tracking started successfully.")
 
 
@@ -265,7 +267,7 @@ async def stop_tracking(
         is_admin=ctx.is_admin,
         payload=payload,
     )
-    dto = service.to_tracking_session_read(session)
+    dto = await service.to_tracking_session_dto_async(session)
     return build_success_response(data=dto.model_dump(mode="json"), message="Live tracking stopped and summary saved.")
 
 
@@ -287,8 +289,28 @@ async def list_tracking_sessions(
         employee_id=target_id if (ctx.is_admin or ctx.is_hr or target_id != ctx.user_id) else None,
         tracking_date=date,
     )
-    data = [service.to_tracking_session_read(s).model_dump(mode="json") for s in sessions]
+    dtos = await service.to_tracking_sessions_dto_batch(sessions)
+    data = [d.model_dump(mode="json") for d in dtos]
     return build_success_response(data=data, message="Tracking sessions retrieved.")
+
+
+@router.get("/hrms/tracking/{session_id}/stops", summary="Get stationary stops for a tracking session")
+async def get_tracking_session_stops(
+    session_id: uuid.UUID,
+    service: HrmsSiteVisitService = Depends(get_site_visit_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+):
+    """Retrieve all detected stationary stops for a live tracking session."""
+    ctx.require_module_access("site_visits")
+    session = await service.db.get(HrmsLiveTrackingSession, session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracking session not found.")
+    ctx.require_employee_access(session.employee_id)
+
+    stops = await service.get_stops_for_session(session_id)
+    data = [service.to_tracking_stop_read(st).model_dump(mode="json") for st in stops]
+    return build_success_response(data=data, message="Tracking session stops retrieved successfully.")
+
 
 
 # ===========================================================================

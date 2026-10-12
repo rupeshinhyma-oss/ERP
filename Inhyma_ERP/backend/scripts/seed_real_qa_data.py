@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import asyncio
 import uuid
 from datetime import date, datetime, timezone, timedelta
@@ -339,8 +343,8 @@ async def seed_data():
 
         # 7. ASSETS
         # Clean existing asset assignments for clean state
-        await session.execute(text("DELETE FROM hrms_asset_assignments WHERE employee_id IN (:j, :o);"), {'j': users['john'].id, 'o': users['ops_employee'].id})
-        await session.execute(text("DELETE FROM hrms_assets WHERE assigned_to_user_id IN (:j, :o);"), {'j': users['john'].id, 'o': users['ops_employee'].id})
+        await session.execute(text("DELETE FROM hrms_asset_assignments WHERE employee_id IN (:j, :o) OR asset_id IN (SELECT id FROM hrms_assets WHERE asset_code IN ('AST-DEV-001', 'AST-OPS-001'));"), {'j': users['john'].id, 'o': users['ops_employee'].id})
+        await session.execute(text("DELETE FROM hrms_assets WHERE asset_code IN ('AST-DEV-001', 'AST-OPS-001') OR assigned_to_user_id IN (:j, :o);"), {'j': users['john'].id, 'o': users['ops_employee'].id})
         await session.commit()
 
         asset_j = HrmsAsset(

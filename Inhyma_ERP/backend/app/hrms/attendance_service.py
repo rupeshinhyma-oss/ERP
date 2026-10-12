@@ -16,6 +16,7 @@ Core business logic for Employee Attendance:
 from __future__ import annotations
 
 import calendar
+import io
 import math
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
@@ -30,6 +31,7 @@ from app.hrms.models import (
     HrmsAttendancePolicy,
     HrmsAttendanceRegularization,
     HrmsEmployeeLocation,
+    HrmsGeofenceViolation,
     HrmsHoliday,
     HrmsLeaveRequest,
     HrmsLeaveType,
@@ -41,6 +43,7 @@ from app.hrms.schemas import (
     AttendancePolicyUpdate,
     AttendanceRecordRead,
     CalendarDayRead,
+    GeofenceCheckResponse,
     PunchInRequest,
     PunchOutRequest,
     RegularizationApprovalAction,
@@ -50,7 +53,7 @@ from app.hrms.schemas import (
     RegularizationRequest,
     TodayAttendanceRead,
 )
-from app.users.models import User
+from app.users.models import User, UserStatus
 
 # Indian Standard Time (Asia/Kolkata) used organization-wide (single timezone source, no hardcoded offsets)
 try:
@@ -445,6 +448,7 @@ class HrmsAttendanceService:
             )
 
         return TodayAttendanceRead(
+            employee_id=user_id,
             attendance_date=today.isoformat(),
             punched_in=False,
             punched_out=False,
@@ -1441,3 +1445,578 @@ class HrmsAttendanceService:
         if rec.early_exit_minutes > 0 or rec.late_minutes > 0:
             return True
         return False
+
+    # -----------------------------------------------------------------------
+    # Geofence Exit & Return Timer Verification
+    # -----------------------------------------------------------------------
+    async def check_geofence_status(
+        self,
+        employee_id: uuid.UUID,
+        latitude: float,
+        longitude: float,
+        accuracy: float = 10.0,
+    ) -> GeofenceCheckResponse:
+        """
+        Evaluate employee's current GPS position against their assigned office geofence.
+        Manages the return timer upon exit and persists geofence violation events upon timer expiry.
+        Cancels the active exit timer if the employee returns inside the perimeter before expiry.
+        """
+        from app.hrms.service import HrmsSetupService
+        setup_svc = HrmsSetupService(self.db)
+        settings = await setup_svc.get_effective_tracking_settings(employee_id)
+
+        office = await self.get_assigned_office(employee_id)
+        allowed_radius = float(office.radius_meters or 150.0)
+
+        # Haversine distance
+        distance = haversine_distance(latitude, longitude, office.latitude, office.longitude)
+
+        max_acc = float(settings.max_gps_accuracy_meters or 50.0)
+        # If accuracy is unreliable, do not trigger new exit or return
+        if accuracy is not None and accuracy > max_acc:
+            stmt = (
+                select(HrmsGeofenceViolation)
+                .where(
+                    HrmsGeofenceViolation.employee_id == employee_id,
+                    HrmsGeofenceViolation.status.in_(["ACTIVE_EXIT", "EXPIRED"]),
+                    HrmsGeofenceViolation.return_time.is_(None),
+                )
+                .order_by(HrmsGeofenceViolation.exit_time.desc())
+                .limit(1)
+            )
+            incident = (await self.db.execute(stmt)).scalar_one_or_none()
+            if incident:
+                now = datetime.now(timezone.utc)
+                rem_secs = None
+                if incident.expiry_time and incident.expiry_time > now:
+                    rem_secs = max(0, int((incident.expiry_time - now).total_seconds()))
+                return GeofenceCheckResponse(
+                    is_inside=False,
+                    status="EXPIRED" if incident.status == "EXPIRED" else "OUTSIDE_PENDING",
+                    distance_meters=round(distance, 1),
+                    boundary_radius_meters=allowed_radius,
+                    office_name=office.name,
+                    active_exit=True,
+                    is_expired=(incident.status == "EXPIRED"),
+                    remaining_seconds=rem_secs,
+                    is_unlimited=settings.is_unlimited_return,
+                    incident_id=incident.id,
+                )
+            return GeofenceCheckResponse(
+                is_inside=True,
+                status="INSIDE",
+                distance_meters=round(distance, 1),
+                boundary_radius_meters=allowed_radius,
+                office_name=office.name,
+                active_exit=False,
+                is_expired=False,
+                remaining_seconds=None,
+                is_unlimited=settings.is_unlimited_return,
+                incident_id=None,
+            )
+
+        now = datetime.now(timezone.utc)
+
+        # Fetch active exit incident
+        stmt = (
+            select(HrmsGeofenceViolation)
+            .where(
+                HrmsGeofenceViolation.employee_id == employee_id,
+                HrmsGeofenceViolation.status.in_(["ACTIVE_EXIT", "EXPIRED"]),
+                HrmsGeofenceViolation.return_time.is_(None),
+            )
+            .order_by(HrmsGeofenceViolation.exit_time.desc())
+            .limit(1)
+        )
+        incident = (await self.db.execute(stmt)).scalar_one_or_none()
+
+        if distance > allowed_radius:
+            # OUTSIDE GEOFENCE
+            timer_secs = settings.return_timer_seconds
+            is_unlimited = settings.is_unlimited_return
+
+            if not incident:
+                # Start new exit event
+                if is_unlimited:
+                    exp_time = None
+                    init_status = "ACTIVE_EXIT"
+                elif timer_secs == 0:
+                    # Immediate timeout expiry -> Persist violation event directly
+                    exp_time = now
+                    init_status = "EXPIRED"
+                else:
+                    exp_time = now + timedelta(seconds=timer_secs or 300)
+                    init_status = "ACTIVE_EXIT"
+
+                incident = HrmsGeofenceViolation(
+                    employee_id=employee_id,
+                    location_id=office.id,
+                    exit_time=now,
+                    expiry_time=exp_time,
+                    status=init_status,
+                    distance_meters=round(distance, 1),
+                    boundary_radius_meters=allowed_radius,
+                    last_latitude=latitude,
+                    last_longitude=longitude,
+                    notes=f"Exited {office.name} boundary by {round(distance - allowed_radius, 1)}m",
+                )
+                self.db.add(incident)
+                await self.db.commit()
+                await self.db.refresh(incident)
+            else:
+                # Update existing incident without creating duplicates
+                incident.last_latitude = latitude
+                incident.last_longitude = longitude
+                incident.distance_meters = round(distance, 1)
+
+                # Check if timer expired
+                if incident.status == "ACTIVE_EXIT" and incident.expiry_time and now >= incident.expiry_time:
+                    incident.status = "EXPIRED"
+
+                await self.db.commit()
+                await self.db.refresh(incident)
+
+            rem_secs = None
+            if incident.expiry_time and incident.expiry_time > now:
+                rem_secs = max(0, int((incident.expiry_time - now).total_seconds()))
+            elif incident.status == "EXPIRED":
+                rem_secs = 0
+
+            return GeofenceCheckResponse(
+                is_inside=False,
+                status="EXPIRED" if (incident.status == "EXPIRED") else "OUTSIDE_PENDING",
+                distance_meters=round(distance, 1),
+                boundary_radius_meters=allowed_radius,
+                office_name=office.name,
+                active_exit=True,
+                is_expired=(incident.status == "EXPIRED"),
+                remaining_seconds=rem_secs,
+                is_unlimited=is_unlimited,
+                incident_id=incident.id,
+            )
+        else:
+            # INSIDE GEOFENCE
+            was_exit = False
+            if incident:
+                was_exit = True
+                if incident.status == "ACTIVE_EXIT":
+                    # Returned before expiry: cancel timer and resolve
+                    incident.status = "RESOLVED_RETURNED"
+                    incident.return_time = now
+                elif incident.status == "EXPIRED":
+                    incident.return_time = now
+                await self.db.commit()
+
+            return GeofenceCheckResponse(
+                is_inside=True,
+                status="RESOLVED" if was_exit else "INSIDE",
+                distance_meters=round(distance, 1),
+                boundary_radius_meters=allowed_radius,
+                office_name=office.name,
+                active_exit=False,
+                is_expired=False,
+                remaining_seconds=None,
+                is_unlimited=settings.is_unlimited_return,
+                incident_id=None,
+            )
+
+    # -----------------------------------------------------------------------
+    # Authoritative Attendance Excel (.xlsx) Export
+    # -----------------------------------------------------------------------
+    async def export_attendance_excel(
+        self,
+        start_date: date,
+        end_date: date,
+        employee_id: Optional[uuid.UUID] = None,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+        is_admin: bool = False,
+        calendar_month_name: Optional[str] = None,
+    ) -> tuple[io.BytesIO, int, int]:
+        """
+        Export authoritative attendance records directly from PostgreSQL to a styled Excel (.xlsx) workbook.
+        Builds the Monthly Attendance Matrix, Monthly Summary, and Daily Punch Register.
+        Returns (BytesIO buffer, total_employees_count, total_attendance_records_count).
+        """
+        from app.hrms.attendance_export_builder import build_monthly_attendance_excel
+        return await build_monthly_attendance_excel(
+            db=self.db,
+            start_date=start_date,
+            end_date=end_date,
+            employee_id=employee_id,
+            allowed_employee_ids=allowed_employee_ids,
+            is_admin=is_admin,
+            calendar_month_name=calendar_month_name,
+        )
+
+    # -----------------------------------------------------------------------
+    # All-Employee Attendance Calendar Matrix & Summary
+    # -----------------------------------------------------------------------
+    async def get_all_employees_calendar(
+        self,
+        year: int,
+        month: int,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+        department: Optional[str] = None,
+        branch: Optional[str] = None,
+        employee_id: Optional[uuid.UUID] = None,
+        search: Optional[str] = None,
+    ) -> dict:
+        """
+        Retrieves monthly attendance calendar matrix for all authorized employees.
+        Uses actual PostgreSQL attendance records, leaves, holidays and policies.
+        Enforces strict RBAC scoping, holiday applicability, and attendance calculations.
+        """
+        _, num_days = calendar.monthrange(year, month)
+        today = datetime.now(IST).date()
+        start_date = date(year, month, 1)
+        end_date = date(year, month, num_days)
+        date_list = [date(year, month, d) for d in range(1, num_days + 1)]
+        day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        month_name = start_date.strftime("%B %Y")
+
+        # 1. Fetch policy for shifts & weekly offs
+        policy = await self.get_policy()
+        shift_name = policy.shift_name or "General Shift"
+        shift_start = policy.shift_start_time or "10:30"
+        shift_end = policy.shift_end_time or "19:00"
+        weekly_off_raw = (policy.weekly_off or "Sunday").strip()
+        weekly_off_days = {d.strip().capitalize() for d in weekly_off_raw.split(",") if d.strip()}
+        if not weekly_off_days:
+            weekly_off_days = {"Sunday"}
+
+        # 2. Query authorized employees
+        user_stmt = (
+            select(User)
+            .where(
+                User.deleted_at.is_(None),
+                User.is_active.is_(True),
+                User.status == UserStatus.ACTIVE,
+            )
+            .order_by(User.first_name.asc(), User.last_name.asc(), User.username.asc())
+        )
+        if employee_id:
+            user_stmt = user_stmt.where(User.id == employee_id)
+        elif allowed_employee_ids is not None:
+            user_stmt = user_stmt.where(User.id.in_(allowed_employee_ids))
+
+        users = list((await self.db.execute(user_stmt)).scalars().all())
+        all_uids = [u.id for u in users]
+
+        # 3. Batch resolve departments and branches
+        dept_map: dict[uuid.UUID, str] = {}
+        branch_map: dict[uuid.UUID, str] = {}
+
+        if all_uids:
+            try:
+                from app.rbac.models import UserRole, Role
+                r_stmt = (
+                    select(UserRole.user_id, Role.name)
+                    .join(Role, Role.id == UserRole.role_id)
+                    .where(UserRole.user_id.in_(all_uids), Role.deleted_at.is_(None))
+                )
+                for uid, rname in (await self.db.execute(r_stmt)).all():
+                    if rname.lower() not in ("user", "employee", "department_manager", "super_admin", "admin") and uid not in dept_map:
+                        dept_map[uid] = rname
+            except Exception:
+                pass
+
+            try:
+                loc_stmt = (
+                    select(HrmsEmployeeLocation.user_id, HrmsLocation.name)
+                    .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
+                    .where(HrmsEmployeeLocation.user_id.in_(all_uids), HrmsLocation.deleted_at.is_(None))
+                    .order_by(HrmsEmployeeLocation.is_primary.desc())
+                )
+                for uid, lname in (await self.db.execute(loc_stmt)).all():
+                    if uid not in branch_map:
+                        branch_map[uid] = lname
+            except Exception:
+                pass
+
+        # Collect all distinct departments and branches before filtering for frontend dropdowns
+        all_departments = sorted(list({dept_map.get(u.id) or getattr(u, "department", None) or "General" for u in users}))
+        all_branches = sorted(list({branch_map.get(u.id) or "Thane" for u in users}))
+
+        # Apply department & branch filters if requested
+        if department and department.strip() and department.strip().lower() != "all":
+            d_filter = department.strip().lower()
+            users = [u for u in users if (dept_map.get(u.id) or getattr(u, "department", None) or "General").lower() == d_filter]
+
+        if branch and branch.strip() and branch.strip().lower() != "all":
+            b_filter = branch.strip().lower()
+            users = [u for u in users if (branch_map.get(u.id) or "Thane").lower() == b_filter]
+
+        if search and search.strip():
+            s_term = search.strip().lower()
+            users = [
+                u for u in users
+                if s_term in f"{u.first_name or ''} {u.last_name or ''} {u.username or ''} {u.employee_code or ''}".lower()
+            ]
+
+        filtered_uids = [u.id for u in users]
+
+        # 4. Batch query holidays in month
+        hol_stmt = select(HrmsHoliday).where(
+            HrmsHoliday.deleted_at.is_(None),
+            HrmsHoliday.is_active.is_(True),
+            HrmsHoliday.holiday_date >= start_date,
+            HrmsHoliday.holiday_date <= end_date,
+        )
+        all_holidays = list((await self.db.execute(hol_stmt)).scalars().all())
+
+        # 5. Batch query approved leaves in month
+        emp_leave_map: dict[uuid.UUID, dict[date, tuple[HrmsLeaveRequest, HrmsLeaveType]]] = {}
+        if filtered_uids:
+            leaves_stmt = (
+                select(HrmsLeaveRequest, HrmsLeaveType)
+                .join(HrmsLeaveType, HrmsLeaveType.id == HrmsLeaveRequest.leave_type_id)
+                .where(
+                    HrmsLeaveRequest.employee_id.in_(filtered_uids),
+                    HrmsLeaveRequest.approval_status == "APPROVED",
+                    HrmsLeaveRequest.from_date <= end_date,
+                    HrmsLeaveRequest.to_date >= start_date,
+                )
+            )
+            all_leaves = list((await self.db.execute(leaves_stmt)).all())
+            for req, lt in all_leaves:
+                cur = max(req.from_date, start_date)
+                req_end = min(req.to_date, end_date)
+                if req.employee_id not in emp_leave_map:
+                    emp_leave_map[req.employee_id] = {}
+                while cur <= req_end:
+                    emp_leave_map[req.employee_id][cur] = (req, lt)
+                    cur += timedelta(days=1)
+
+        # 6. Batch query attendance records in month
+        emp_att_map: dict[tuple[uuid.UUID, date], HrmsAttendance] = {}
+        if filtered_uids:
+            att_stmt = select(HrmsAttendance).where(
+                HrmsAttendance.employee_id.in_(filtered_uids),
+                HrmsAttendance.attendance_date >= start_date,
+                HrmsAttendance.attendance_date <= end_date,
+            )
+            all_attendance = list((await self.db.execute(att_stmt)).scalars().all())
+            for a in all_attendance:
+                emp_att_map[(a.employee_id, a.attendance_date)] = a
+
+        # 7. Evaluate attendance and build calendar matrix for each employee
+        employees_data = []
+
+        for u in users:
+            emp_branch = branch_map.get(u.id) or "Thane"
+            emp_dept = dept_map.get(u.id) or getattr(u, "department", None) or "General"
+            emp_code = u.employee_code or getattr(u, "code", None) or f"EMP-{str(u.id)[:6].upper()}"
+            first = u.first_name or ""
+            last = u.last_name or ""
+            emp_name = f"{first} {last}".strip() or getattr(u, "display_name", None) or u.username or "Employee"
+            doj = getattr(u, "date_of_joining", None)
+
+            # Holiday resolution for this employee
+            emp_hol_map: dict[date, HrmsHoliday] = {}
+            for h in all_holidays:
+                b_app = (h.branch_applicability or "All Branches").lower()
+                d_app = (getattr(h, "department_scope", None) or "All Departments").lower()
+                if ("all" in b_app or emp_branch.lower() in b_app) and ("all" in d_app or emp_dept.lower() in d_app):
+                    emp_hol_map[h.holiday_date] = h
+
+            leaves_for_emp = emp_leave_map.get(u.id, {})
+            has_records = any((u.id, d) in emp_att_map for d in date_list) or len(leaves_for_emp) > 0
+
+            days = []
+            present_days = 0.0
+            absent_days = 0.0
+            half_days = 0.0
+            paid_leave_days = 0.0
+            unpaid_leave_days = 0.0
+            holiday_days = 0
+            weekend_days = 0
+            working_days_count = 0
+            total_working_mins = 0
+
+            for d in date_list:
+                day_num = d.day
+                weekday_idx = d.weekday()
+                day_name = day_names[weekday_idx]
+                day_full_name = d.strftime("%A")
+                is_weekend = day_full_name in weekly_off_days
+                is_holiday = d in emp_hol_map
+                holiday_obj = emp_hol_map.get(d)
+                leave_info = leaves_for_emp.get(d)
+                att_rec = emp_att_map.get((u.id, d))
+
+                if is_weekend:
+                    weekend_days += 1
+                elif is_holiday:
+                    holiday_days += 1
+                else:
+                    working_days_count += 1
+
+                # Prioritized daily status evaluation
+                status_code = "-"
+                status_label = "-"
+                punch_in_str = None
+                punch_out_str = None
+                wm: Optional[int] = None
+                late_m = 0
+                early_m = 0
+                is_irreg = False
+                reg_status = "NONE"
+                reg_reason = None
+                reg_note = None
+                h_name = None
+                l_name = None
+                is_lop = False
+                att_id = None
+
+                if att_rec:
+                    att_id = str(att_rec.id)
+                    wm = att_rec.working_minutes or 0
+                    total_working_mins += wm
+                    late_m = att_rec.late_minutes or 0
+                    early_m = att_rec.early_exit_minutes or 0
+                    is_irreg = att_rec.is_irregular
+                    reg_status = att_rec.regularization_status or "NONE"
+                    reg_reason = att_rec.regularization_reason
+                    reg_note = att_rec.regularization_note
+
+                    punch_in_str = format_time_ist(att_rec.punch_in)
+                    punch_out_str = format_time_ist(att_rec.punch_out)
+
+                    raw_st = (att_rec.status or "PRESENT").upper()
+                    if d == today and att_rec.punch_in and not att_rec.punch_out and raw_st == "PRESENT":
+                        raw_st = "IN_PROGRESS"
+
+                    if raw_st in ("PRESENT", "LATE", "IN_PROGRESS") or reg_status == "APPROVED":
+                        status_code = "PRESENT" if raw_st != "LATE" else "LATE"
+                        status_label = "Present" if raw_st != "LATE" else "Late"
+                        if raw_st == "IN_PROGRESS":
+                            status_code = "IN_PROGRESS"
+                            status_label = "In Progress"
+                        present_days += 1.0
+                    elif raw_st == "HALF_DAY":
+                        status_code = "HALF_DAY"
+                        status_label = "Half Day"
+                        present_days += 0.5
+                        half_days += 1.0
+                        is_lop = True
+                    elif raw_st == "ABSENT":
+                        status_code = "ABSENT"
+                        status_label = "Absent"
+                        absent_days += 1.0
+                        is_lop = True
+                    elif raw_st in ("MISSING_PUNCH", "OUTSIDE_GEOFENCE"):
+                        status_code = raw_st
+                        status_label = raw_st.replace("_", " ").title()
+                        present_days += 1.0
+                    else:
+                        status_code = raw_st
+                        status_label = raw_st.replace("_", " ").title()
+                        present_days += 1.0
+
+                elif is_holiday:
+                    status_code = "HOLIDAY"
+                    status_label = "Holiday"
+                    h_name = holiday_obj.name if holiday_obj else "Holiday"
+
+                elif leave_info:
+                    req_obj, lt_obj = leave_info
+                    status_code = "LEAVE"
+                    status_label = "On Leave"
+                    l_name = lt_obj.name if lt_obj else "Leave"
+                    if lt_obj and getattr(lt_obj, "is_paid", True):
+                        paid_leave_days += 1.0
+                    else:
+                        unpaid_leave_days += 1.0
+                        is_lop = True
+
+                elif is_weekend:
+                    status_code = "WEEKEND"
+                    status_label = "Weekend"
+
+                else:
+                    # Missing record
+                    if doj and d < doj:
+                        status_code = "NOT_JOINED"
+                        status_label = "Not Joined"
+                    elif d < today and has_records:
+                        status_code = "ABSENT"
+                        status_label = "Absent"
+                        absent_days += 1.0
+                        is_lop = True
+                    elif d == today:
+                        status_code = "NOT_PUNCHED"
+                        status_label = "Not Punched"
+                    else:
+                        status_code = "FUTURE"
+                        status_label = "Future"
+
+                working_hours_str = f"{wm // 60}h {wm % 60:02d}m" if wm and wm > 0 else ("0h 00m" if punch_in_str else "-")
+
+                days.append({
+                    "day": day_num,
+                    "day_number": day_num,
+                    "date": d.isoformat(),
+                    "day_name": day_name,
+                    "status": status_code,
+                    "status_label": status_label,
+                    "punch_in": punch_in_str,
+                    "punch_out": punch_out_str,
+                    "working_minutes": wm,
+                    "working_hours": working_hours_str,
+                    "late_minutes": late_m,
+                    "early_exit_minutes": early_m,
+                    "is_irregular": is_irreg,
+                    "regularization_status": reg_status,
+                    "regularization_reason": reg_reason,
+                    "regularization_note": reg_note,
+                    "holiday_name": h_name,
+                    "leave_type_name": l_name,
+                    "is_lop": is_lop,
+                    "attendance_id": att_id,
+                    "shift_name": shift_name,
+                    "shift_hours": f"{shift_start} - {shift_end}",
+                })
+
+            summary = {
+                "total_working_days": working_days_count,
+                "present_days": present_days,
+                "present": present_days,
+                "total_present": present_days,
+                "absent_days": absent_days,
+                "absent": absent_days,
+                "total_absent": absent_days,
+                "half_days": half_days,
+                "half_day": half_days,
+                "total_half_day": half_days,
+                "leave": paid_leave_days + unpaid_leave_days,
+                "total_leave": paid_leave_days + unpaid_leave_days,
+                "paid_leave_days": paid_leave_days,
+                "unpaid_leave_days": unpaid_leave_days,
+                "holiday_days": holiday_days,
+                "weekend_days": weekend_days,
+                "paid_days": present_days + paid_leave_days + holiday_days + weekend_days,
+                "total_working_minutes": total_working_mins,
+                "total_working_hours": f"{total_working_mins // 60}h {total_working_mins % 60:02d}m",
+            }
+
+            employees_data.append({
+                "employee_id": str(u.id),
+                "employee_name": emp_name,
+                "employee_code": emp_code,
+                "department": emp_dept,
+                "branch": emp_branch,
+                "days": days,
+                "summary": summary,
+            })
+
+        return {
+            "year": year,
+            "month": month,
+            "month_name": month_name,
+            "total_days": num_days,
+            "departments": all_departments,
+            "branches": all_branches,
+            "employees": employees_data,
+        }
+
+

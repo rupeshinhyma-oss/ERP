@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { IconClock, IconCalendar, IconCheckSquare, IconSettings } from "@/components/icons";
@@ -324,8 +325,37 @@ export function AttendancePage() {
     hasPermission("hrms:approval")
   );
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [employees, setEmployees] = useState<any[]>([]);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(() => {
+    return searchParams.get("employee_id") || "";
+  });
+
+  // Sync selectedEmployeeId and view mode from URL search parameters on navigation
+  useEffect(() => {
+    const empParam = searchParams.get("employee_id");
+    if (empParam !== null && empParam !== selectedEmployeeId) {
+      setSelectedEmployeeId(empParam);
+    }
+    const viewParam = searchParams.get("view");
+    if (viewParam === "all" || viewParam === "individual") {
+      setCalendarViewMode((curr) => (curr !== viewParam ? viewParam : curr));
+    }
+  }, [searchParams]);
+
+  // Handler to update selected employee both in state and URL search params
+  const handleSelectEmployee = useCallback((empId: string) => {
+    setSelectedEmployeeId(empId);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (empId) {
+        next.set("employee_id", empId);
+      } else {
+        next.delete("employee_id");
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   useEffect(() => {
     if (isPrivileged) {
@@ -343,6 +373,49 @@ export function AttendancePage() {
   const [todayRecord, setTodayRecord] = useState<AttendanceRecord | null>(null);
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
   const [regularizations, setRegularizations] = useState<RegularizationItem[]>([]);
+
+  // View mode for Attendance Calendar: "individual" | "all"
+  const [calendarViewMode, setCalendarViewMode] = useState<"individual" | "all">("individual");
+  const [allCalData, setAllCalData] = useState<{
+    year: number;
+    month: number;
+    month_name: string;
+    total_days: number;
+    departments: string[];
+    branches: string[];
+    employees: any[];
+  } | null>(null);
+  const [loadingAllCal, setLoadingAllCal] = useState<boolean>(false);
+  const [allCalError, setAllCalError] = useState<string | null>(null);
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>("");
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("");
+  const [allCalEmpFilter, setAllCalEmpFilter] = useState<string>("");
+  const [activeDayDetail, setActiveDayDetail] = useState<any | null>(null);
+
+  // Selected employee entity resolution (from dropdown list or all-calendar matrix)
+  const selectedEmployee = useMemo(() => {
+    if (!selectedEmployeeId) return null;
+    const directMatch = employees.find((e) => e.id === selectedEmployeeId || e.employee_id === selectedEmployeeId);
+    if (directMatch) return directMatch;
+    const matrixMatch = allCalData?.employees?.find((e: any) => e.employee_id === selectedEmployeeId);
+    if (matrixMatch) {
+      return {
+        id: matrixMatch.employee_id,
+        first_name: matrixMatch.employee_name?.split(" ")[0] || matrixMatch.employee_name,
+        last_name: matrixMatch.employee_name?.split(" ").slice(1).join(" ") || "",
+        employee_code: matrixMatch.employee_code,
+        department: matrixMatch.department,
+        branch: matrixMatch.branch,
+      };
+    }
+    return null;
+  }, [selectedEmployeeId, employees, allCalData]);
+
+  const isViewingOtherEmployee = useMemo(() => {
+    if (!selectedEmployeeId) return false;
+    const myId = (profile as any)?.id;
+    return Boolean(myId && selectedEmployeeId !== myId);
+  }, [selectedEmployeeId, (profile as any)?.id]);
 
   // Policy Engine State (Part 1, 2, 3)
   const [policyForm, setPolicyForm] = useState<AttendancePolicy>({
@@ -404,6 +477,20 @@ export function AttendancePage() {
   // UI States
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [alert, setAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null);
+
+  // Configurable Geofence Return Timer & Boundary Monitoring State
+  const [geofenceStatus, setGeofenceStatus] = useState<{
+    is_inside: boolean;
+    distance_meters: number;
+    boundary_radius_meters: number;
+    status: "INSIDE" | "OUTSIDE_PENDING" | "EXPIRED" | "RESOLVED";
+    remaining_seconds: number | null;
+    return_timer_seconds: number | null;
+    is_unlimited: boolean;
+    warning_message: string | null;
+    violation_id: string | null;
+  } | null>(null);
+  const [timerRemainingSeconds, setTimerRemainingSeconds] = useState<number | null>(null);
 
   // One-Day Regularization Drawer State
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
@@ -468,34 +555,11 @@ export function AttendancePage() {
     }
   }, []);
 
-  // 3. Fetch Initial Data (Policy, Assigned Office, Today's Record, Regularizations)
-  const loadInitialData = useCallback(async () => {
+  // 3. Fetch Today's Attendance Record (respecting selected employee or self)
+  const loadTodayRecord = useCallback(async (empId?: string) => {
     try {
-      const [policyRes, officeRes, todayRes] = await Promise.all([
-        apiGet<AttendancePolicy>("/hrms/attendance/policy"),
-        apiGet<AssignedOffice>("/hrms/attendance/assigned-office"),
-        apiGet<TodayAttendanceResponse | AttendanceRecord | null>("/hrms/attendance/today"),
-      ]);
-
-      if (policyRes?.data) {
-        setPolicy(policyRes.data);
-        setPolicyForm({
-          ...policyRes.data,
-          shift_start_time: convertTo24h(policyRes.data.shift_start_time || "10:30"),
-          shift_end_time: convertTo24h(policyRes.data.shift_end_time || "19:00"),
-          direct_half_day_time: convertTo24h(policyRes.data.direct_half_day_time || "11:31"),
-        });
-      }
-      if (officeRes?.data) {
-        setOffice(officeRes.data);
-        setCoords((prev) => {
-          if (!prev) {
-            setGpsStatus("connected");
-            return { lat: officeRes.data.latitude, lng: officeRes.data.longitude };
-          }
-          return prev;
-        });
-      }
+      const q = empId ? `?employee_id=${encodeURIComponent(empId)}` : "";
+      const todayRes = await apiGet<TodayAttendanceResponse | AttendanceRecord | null>(`/hrms/attendance/today${q}`);
       if (todayRes?.data) {
         const raw = todayRes.data as any;
         if (raw.assigned_office) {
@@ -528,54 +592,64 @@ export function AttendancePage() {
       } else {
         setTodayRecord(null);
       }
-      await loadRegularizations();
+    } catch (err) {
+      console.error("Failed to load today's attendance record", err);
+      setTodayRecord(null);
+    }
+  }, []);
+
+  // Sync today's attendance record whenever selected employee changes
+  useEffect(() => {
+    loadTodayRecord(selectedEmployeeId || undefined);
+  }, [selectedEmployeeId, loadTodayRecord]);
+
+  // Fetch Initial Setup Data (Policy, Assigned Office, Regularizations)
+  const loadInitialData = useCallback(async () => {
+    try {
+      const [policyRes, officeRes] = await Promise.all([
+        apiGet<AttendancePolicy>("/hrms/attendance/policy"),
+        apiGet<AssignedOffice>("/hrms/attendance/assigned-office"),
+      ]);
+
+      if (policyRes?.data) {
+        setPolicy(policyRes.data);
+        setPolicyForm({
+          ...policyRes.data,
+          shift_start_time: convertTo24h(policyRes.data.shift_start_time || "10:30"),
+          shift_end_time: convertTo24h(policyRes.data.shift_end_time || "19:00"),
+          direct_half_day_time: convertTo24h(policyRes.data.direct_half_day_time || "11:31"),
+        });
+      }
+      if (officeRes?.data) {
+        setOffice(officeRes.data);
+        if (typeof officeRes.data.latitude === "number" && typeof officeRes.data.longitude === "number") {
+          setCoords((prev) => {
+            if (!prev) {
+              setGpsStatus("connected");
+              return { lat: officeRes.data.latitude, lng: officeRes.data.longitude };
+            }
+            return prev;
+          });
+        }
+      }
+      await Promise.all([
+        loadTodayRecord(selectedEmployeeId || undefined),
+        loadRegularizations(),
+      ]);
     } catch (err: any) {
       console.error("Failed to load attendance initial data", err);
     }
-  }, [loadRegularizations]);
+  }, [selectedEmployeeId, loadTodayRecord, loadRegularizations]);
 
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
 
-  // Window Focus & Visibility Rehydration (Phase B - hydrate entirely from backend, never React memory)
+  // Window Focus & Visibility Rehydration
   useEffect(() => {
     const handleRehydrate = () => {
       if (document.visibilityState === "visible") {
-        apiGet<TodayAttendanceResponse | AttendanceRecord | null>("/hrms/attendance/today").then((res) => {
-          if (res?.data) {
-            const raw = res.data as any;
-            if (raw.assigned_office) {
-              setOffice(raw.assigned_office);
-            }
-            if (raw.punch_in || raw.punched_in) {
-              setTodayRecord({
-                id: raw.id || raw.attendance_record?.id || "today",
-                employee_id: raw.employee_id || raw.attendance_record?.employee_id || "",
-                attendance_date: raw.attendance_date,
-                punch_in: raw.punch_in,
-                punch_out: raw.punch_out,
-                status: raw.status,
-                working_minutes: raw.working_minutes || 0,
-                late_minutes: raw.late_minutes || 0,
-                early_exit_minutes: raw.early_exit_minutes || 0,
-                office_location_id: raw.office_location_id || null,
-                office_name: raw.office_name || null,
-                latitude: raw.latitude ?? raw.attendance_record?.latitude ?? null,
-                longitude: raw.longitude ?? raw.attendance_record?.longitude ?? null,
-                punch_in_distance: raw.punch_in_distance ?? raw.attendance_record?.punch_in_distance ?? null,
-                punch_out_distance: raw.punch_out_distance ?? raw.attendance_record?.punch_out_distance ?? null,
-                is_irregular: raw.is_irregular ?? false,
-                regularization_status: raw.regularization_status ?? "NONE",
-                can_regularize: raw.can_regularize ?? false,
-              });
-            } else {
-              setTodayRecord(null);
-            }
-          } else {
-            setTodayRecord(null);
-          }
-        });
+        loadTodayRecord(selectedEmployeeId || undefined);
       }
     };
     window.addEventListener("focus", handleRehydrate);
@@ -584,7 +658,7 @@ export function AttendancePage() {
       window.removeEventListener("focus", handleRehydrate);
       document.removeEventListener("visibilitychange", handleRehydrate);
     };
-  }, []);
+  }, [selectedEmployeeId, loadTodayRecord]);
 
   useEffect(() => {
     if (activeTab === "approval") {
@@ -608,6 +682,36 @@ export function AttendancePage() {
   useEffect(() => {
     loadCalendar(selectedYear, selectedMonth, selectedEmployeeId);
   }, [selectedYear, selectedMonth, selectedEmployeeId, loadCalendar]);
+
+  const loadAllCalendar = useCallback(
+    async (year: number, month: number, dept?: string, branch?: string, search?: string, empId?: string) => {
+      try {
+        setLoadingAllCal(true);
+        setAllCalError(null);
+        let q = `/hrms/attendance/all-calendar?year=${year}&month=${month}`;
+        if (empId && empId !== "all") q += `&employee_id=${encodeURIComponent(empId)}`;
+        if (search && search.trim()) q += `&search=${encodeURIComponent(search.trim())}`;
+        if (dept && dept !== "all") q += `&department=${encodeURIComponent(dept)}`;
+        if (branch && branch !== "all") q += `&branch=${encodeURIComponent(branch)}`;
+        const res = await apiGet<any>(q);
+        if (res?.data) {
+          setAllCalData(res.data);
+        }
+      } catch (err: any) {
+        console.error("Failed to fetch all employees attendance calendar", err);
+        setAllCalError(err?.message || "Failed to load all employees attendance calendar");
+      } finally {
+        setLoadingAllCal(false);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (calendarViewMode === "all" && isPrivileged) {
+      loadAllCalendar(selectedYear, selectedMonth, selectedDeptFilter, selectedBranchFilter);
+    }
+  }, [calendarViewMode, isPrivileged, selectedYear, selectedMonth, selectedDeptFilter, selectedBranchFilter, loadAllCalendar]);
 
   // 4. Geolocation Acquisition
   const requestRealGps = useCallback(() => {
@@ -679,6 +783,66 @@ export function AttendancePage() {
     return Math.max(0, Math.floor((now.getTime() - inTime) / 1000));
   }, [todayRecord, now]);
 
+  // 6.1 Return Timer Check & Boundary Monitoring
+  useEffect(() => {
+    if (!coords || !office || !todayRecord?.punch_in || todayRecord.punch_out) {
+      return;
+    }
+
+    let isCurrent = true;
+    const req = apiPost<any>("/hrms/attendance/geofence-status", {
+      latitude: coords.lat,
+      longitude: coords.lng,
+      location_id: office.id,
+    });
+    if (req && typeof req.then === "function") {
+      req
+        .then((res) => {
+          if (isCurrent && res?.data) {
+            setGeofenceStatus(res.data);
+            if (res.data.remaining_seconds !== null && res.data.remaining_seconds !== undefined) {
+              setTimerRemainingSeconds(res.data.remaining_seconds);
+            } else {
+              setTimerRemainingSeconds(null);
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn("Geofence status check failed", err);
+        });
+    }
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [coords, office, todayRecord?.punch_in, todayRecord?.punch_out]);
+
+  // 6.2 Countdown interval for active return timer
+  useEffect(() => {
+    if (timerRemainingSeconds === null || timerRemainingSeconds <= 0) return;
+    const interval = setInterval(() => {
+      setTimerRemainingSeconds((prev) => {
+        if (prev === null || prev <= 1) {
+          if (coords && office) {
+            apiPost<any>("/hrms/attendance/geofence-status", {
+              latitude: coords.lat,
+              longitude: coords.lng,
+              location_id: office.id,
+            }).then((res) => {
+              if (res?.data) {
+                setGeofenceStatus(res.data);
+                setTimerRemainingSeconds(res.data.remaining_seconds);
+              }
+            });
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timerRemainingSeconds, coords, office]);
+
   // 7. Punch In Handler
   const handlePunchIn = async () => {
     if (!coords) {
@@ -706,7 +870,7 @@ export function AttendancePage() {
           type: "success",
           message: `Punched in successfully! Status: ${res.data.status}. Working timer started.`,
         });
-        loadCalendar(selectedYear, selectedMonth);
+        loadCalendar(selectedYear, selectedMonth, selectedEmployeeId);
       }
     } catch (err: any) {
       const msg = err?.message || "Failed to punch in. Please try again.";
@@ -736,7 +900,7 @@ export function AttendancePage() {
           type: "success",
           message: `Punched out successfully! Total working time: ${res.data.working_minutes} minutes. Attendance locked for today.`,
         });
-        loadCalendar(selectedYear, selectedMonth);
+        loadCalendar(selectedYear, selectedMonth, selectedEmployeeId);
       }
     } catch (err: any) {
       const msg = err?.message || "Failed to punch out.";
@@ -812,6 +976,9 @@ export function AttendancePage() {
         total_hours: liveHours !== "—" ? liveHours : undefined,
       };
 
+      if (selectedEmployeeId) {
+        payload.employee_id = selectedEmployeeId;
+      }
       if (regRequestType && regRequestType !== "LATE_PUNCH") {
         payload.request_type = regRequestType;
       }
@@ -830,9 +997,9 @@ export function AttendancePage() {
         });
         setDrawerOpen(false);
         await Promise.all([
-          loadCalendar(selectedYear, selectedMonth),
+          loadCalendar(selectedYear, selectedMonth, selectedEmployeeId),
           loadRegularizations(),
-          apiGet<AttendanceRecord | null>("/hrms/attendance/today").then((r) => r?.data && setTodayRecord(r.data)),
+          loadTodayRecord(selectedEmployeeId || undefined),
         ]);
       }
     } catch (err: any) {
@@ -852,8 +1019,8 @@ export function AttendancePage() {
       setAlert({ type: "success", message: "Regularization request approved successfully." });
       await Promise.all([
         loadRegularizations(),
-        loadCalendar(selectedYear, selectedMonth),
-        apiGet<AttendanceRecord | null>("/hrms/attendance/today").then((r) => r?.data && setTodayRecord(r.data)),
+        loadCalendar(selectedYear, selectedMonth, selectedEmployeeId),
+        loadTodayRecord(selectedEmployeeId || undefined),
       ]);
     } catch (err: any) {
       setAlert({ type: "error", message: err?.message || "Failed to approve regularization." });
@@ -872,8 +1039,8 @@ export function AttendancePage() {
       setAlert({ type: "warning", message: "Regularization request rejected and marked LOP." });
       await Promise.all([
         loadRegularizations(),
-        loadCalendar(selectedYear, selectedMonth),
-        apiGet<AttendanceRecord | null>("/hrms/attendance/today").then((r) => r?.data && setTodayRecord(r.data)),
+        loadCalendar(selectedYear, selectedMonth, selectedEmployeeId),
+        loadTodayRecord(selectedEmployeeId || undefined),
       ]);
     } catch (err: any) {
       setAlert({ type: "error", message: err?.message || "Failed to reject regularization." });
@@ -892,8 +1059,8 @@ export function AttendancePage() {
       setAlert({ type: "success", message: "Regularization adjusted against employee leave balance." });
       await Promise.all([
         loadRegularizations(),
-        loadCalendar(selectedYear, selectedMonth),
-        apiGet<AttendanceRecord | null>("/hrms/attendance/today").then((r) => r?.data && setTodayRecord(r.data)),
+        loadCalendar(selectedYear, selectedMonth, selectedEmployeeId),
+        loadTodayRecord(selectedEmployeeId || undefined),
       ]);
     } catch (err: any) {
       setAlert({ type: "error", message: err?.message || "Failed to adjust regularization against leave." });
@@ -1248,7 +1415,7 @@ export function AttendancePage() {
                     </button>
                   </div>
                 </div>
-                {coords && (
+                {coords && typeof coords.lat === "number" && typeof coords.lng === "number" && (
                   <div className="hrms-simulator-status">
                     Coordinates: <strong>{coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}</strong> | Distance to Office:{" "}
                     <strong>{currentDistance ?? "—"} meters</strong> (Allowed: {allowedRadius}m)
@@ -1290,7 +1457,25 @@ export function AttendancePage() {
                   </div>
 
                   <div className="hrms-punch-hero">
-                    {!todayRecord?.punch_in ? (
+                    {isViewingOtherEmployee ? (
+                      <div style={{ padding: "20px 24px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #cbd5e1", textAlign: "center", width: "100%", margin: "8px 0" }}>
+                        <div style={{ fontSize: "32px", marginBottom: "8px" }}>👤</div>
+                        <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#1e293b", margin: "0 0 6px 0" }}>
+                          Viewing Attendance: {selectedEmployee ? `${selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.username || "Selected Employee"} (${selectedEmployee.employee_code || selectedEmployee.code || "EMP"})` : "Selected Employee"}
+                        </h3>
+                        <p style={{ color: "#64748b", fontSize: "12.5px", margin: "0 0 12px 0" }}>
+                          Punch In and Punch Out controls are restricted to your own personal employee session.
+                        </p>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          style={{ fontSize: "12px", padding: "5px 14px", borderRadius: "6px" }}
+                          onClick={() => handleSelectEmployee("")}
+                        >
+                          Return to My Attendance
+                        </button>
+                      </div>
+                    ) : !todayRecord?.punch_in ? (
                       // Before Punch In
                       <>
                         <button
@@ -1346,6 +1531,58 @@ export function AttendancePage() {
                             {todayRecord.punch_in_distance ?? currentDistance}m from office)
                           </span>
                         </div>
+
+                        {geofenceStatus && !geofenceStatus.is_inside && (
+                          <div
+                            style={{
+                              marginTop: "10px",
+                              padding: "10px 14px",
+                              borderRadius: "8px",
+                              background: geofenceStatus.status === "EXPIRED" ? "#fef2f2" : "#fffbeb",
+                              border: `1px solid ${geofenceStatus.status === "EXPIRED" ? "#fecaca" : "#fde68a"}`,
+                              color: geofenceStatus.status === "EXPIRED" ? "#991b1b" : "#92400e",
+                              fontSize: "12.5px",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "4px",
+                              textAlign: "left",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                <span>{geofenceStatus.status === "EXPIRED" ? "🚨" : "⚠️"}</span>
+                                <span>
+                                  {geofenceStatus.status === "EXPIRED"
+                                    ? "Boundary Return Timeout Expired"
+                                    : "Outside Office Geofence Perimeter"}
+                                </span>
+                              </strong>
+                              {geofenceStatus.status === "OUTSIDE_PENDING" && timerRemainingSeconds !== null && (
+                                <span
+                                  style={{
+                                    background: timerRemainingSeconds < 30 ? "#dc2626" : "#d97706",
+                                    color: "#ffffff",
+                                    padding: "2px 8px",
+                                    borderRadius: "12px",
+                                    fontWeight: 800,
+                                    fontSize: "11px",
+                                  }}
+                                >
+                                  ⏱️ {timerRemainingSeconds}s remaining
+                                </span>
+                              )}
+                            </div>
+                            <div>
+                              {geofenceStatus.warning_message ||
+                                `Current distance: ${geofenceStatus.distance_meters}m (Permitted radius: ${geofenceStatus.boundary_radius_meters}m).`}
+                            </div>
+                            {geofenceStatus.status === "OUTSIDE_PENDING" && timerRemainingSeconds !== null && (
+                              <div style={{ fontSize: "11px", opacity: 0.9 }}>
+                                Return inside the office boundary before timer expiry to resolve this warning and prevent an automatic violation log.
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </>
                     ) : (
                       // Completed Session
@@ -1426,6 +1663,20 @@ export function AttendancePage() {
                   ORDER 7: Today's Summary Card (Read-only)
                   ================================================================ */}
               <div className="hrms-summary-grid">
+                {selectedEmployee && (
+                  <div style={{ gridColumn: "1 / -1", padding: "8px 14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", fontSize: "12.5px", color: "#1e40af", fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>
+                      ℹ️ Displaying Today's Summary for: <strong>{selectedEmployee.first_name} {selectedEmployee.last_name}</strong> ({selectedEmployee.employee_code || selectedEmployee.code || "EMP"} • {selectedEmployee.department || "General"})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectEmployee("")}
+                      style={{ background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", textDecoration: "underline", fontSize: "12px", fontWeight: 600 }}
+                    >
+                      Return to My Attendance
+                    </button>
+                  </div>
+                )}
                 <div className="hrms-summary-item">
                   <span className="hrms-summary-label">Punch In</span>
                   <span className="hrms-summary-value">
@@ -1481,11 +1732,58 @@ export function AttendancePage() {
               <div className="hrms-calendar-card">
                 <div className="hrms-cal-header">
                   <div>
-                    <h2 className="hrms-section-title">Monthly Calendar Container</h2>
-                    <div className="hrms-section-desc">Attendance calendar will appear here.</div>
+                    <h2 className="hrms-section-title">
+                      {calendarViewMode === "all"
+                        ? "All Employees Attendance Calendar"
+                        : selectedEmployee
+                        ? `${selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.username || "Employee"} (${selectedEmployee.employee_code || selectedEmployee.code || "EMP"}) — Monthly Attendance Calendar`
+                        : "Monthly Attendance Calendar"}
+                    </h2>
+                    <div className="hrms-section-desc">
+                      {calendarViewMode === "all"
+                        ? "Monthly matrix across all authorized employees with date details and filters."
+                        : selectedEmployee
+                        ? `Viewing detailed attendance history, punches, work duration, and regularizations for ${selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.username || "Employee"} (${selectedEmployee.department || "General"}).`
+                        : "Personal and authorized employee attendance calendar view."}
+                    </div>
                   </div>
 
-                  {isPrivileged && employees.length > 0 && (
+                  {isPrivileged && (
+                    <div className="hrms-view-mode-toggle" style={{ display: "inline-flex", background: "#f1f5f9", padding: "4px", borderRadius: "8px", gap: "4px" }}>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${calendarViewMode === "individual" ? "btn-primary" : "btn-secondary"}`}
+                        style={{ padding: "4px 12px", fontSize: "12px", borderRadius: "6px" }}
+                        onClick={() => {
+                          setCalendarViewMode("individual");
+                          setSearchParams((prev) => {
+                            const next = new URLSearchParams(prev);
+                            next.set("view", "individual");
+                            return next;
+                          }, { replace: true });
+                        }}
+                      >
+                        Individual Calendar
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${calendarViewMode === "all" ? "btn-primary" : "btn-secondary"}`}
+                        style={{ padding: "4px 12px", fontSize: "12px", borderRadius: "6px" }}
+                        onClick={() => {
+                          setCalendarViewMode("all");
+                          setSearchParams((prev) => {
+                            const next = new URLSearchParams(prev);
+                            next.set("view", "all");
+                            return next;
+                          }, { replace: true });
+                        }}
+                      >
+                        All Employees Calendar
+                      </button>
+                    </div>
+                  )}
+
+                  {calendarViewMode === "individual" && isPrivileged && employees.length > 0 && (
                     <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
                       <label htmlFor="attendance-emp-select" style={{ fontSize: "12px", fontWeight: 700, color: "#475569" }}>
                         Employee:
@@ -1493,17 +1791,28 @@ export function AttendancePage() {
                       <select
                         id="attendance-emp-select"
                         value={selectedEmployeeId}
-                        onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                        onChange={(e) => handleSelectEmployee(e.target.value)}
                         className="form-control"
-                        style={{ width: "auto", minWidth: "200px", fontWeight: 600, padding: "5px 10px", fontSize: "13px" }}
+                        style={{ width: "auto", minWidth: "220px", fontWeight: 600, padding: "5px 10px", fontSize: "13px" }}
                       >
                         <option value="">My Attendance</option>
                         {employees.map((emp) => (
                           <option key={emp.id} value={emp.id}>
-                            {emp.first_name} {emp.last_name} ({emp.department || "No Dept"})
+                            {emp.first_name} {emp.last_name} ({emp.employee_code || emp.code || "EMP"} • {emp.department || "No Dept"})
                           </option>
                         ))}
                       </select>
+                      {selectedEmployeeId && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "6px" }}
+                          onClick={() => handleSelectEmployee("")}
+                          title="Switch back to My Attendance"
+                        >
+                          ✕ Back to My Attendance
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -1538,20 +1847,25 @@ export function AttendancePage() {
                     </div>
                     <div className="hrms-cal-legend-item">
                       <span className="hrms-cal-legend-dot" style={{ background: "#ef4444" }} />
-                      <span>Missing Punch</span>
+                      <span>Missing / Absent</span>
+                    </div>
+                    <div className="hrms-cal-legend-item">
+                      <span className="hrms-cal-legend-dot" style={{ background: "#d97706" }} />
+                      <span>Leave</span>
+                    </div>
+                    <div className="hrms-cal-legend-item">
+                      <span className="hrms-cal-legend-dot" style={{ background: "#8b5cf6" }} />
+                      <span>Holiday</span>
                     </div>
                     <div className="hrms-cal-legend-item">
                       <span className="hrms-cal-legend-dot" style={{ background: "#94a3b8" }} />
                       <span>Weekend</span>
                     </div>
-                    <div className="hrms-cal-legend-item">
-                      <span className="hrms-cal-legend-dot" style={{ background: "#3b82f6" }} />
-                      <span>Pending Reg</span>
-                    </div>
                   </div>
                 </div>
 
-                {/* Calendar Days Matrix */}
+                {/* Calendar Days Matrix (Individual View) */}
+                {calendarViewMode === "individual" && (
                 <div className="hrms-cal-grid">
                   {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((w) => (
                     <div key={w} className="hrms-cal-weekday">
@@ -1711,8 +2025,382 @@ export function AttendancePage() {
                     );
                   })}
                 </div>
+                )}
+
+                {/* All Employees Attendance Matrix View */}
+                {calendarViewMode === "all" && (
+                  <div className="hrms-all-cal-container" style={{ padding: "16px 20px" }}>
+                    {/* Filter bar */}
+                    <div className="hrms-all-cal-filter-bar">
+                      <div className="hrms-filter-group">
+                        <label className="hrms-filter-label">Filter Department:</label>
+                        <select
+                          className="form-control hrms-filter-select"
+                          value={selectedDeptFilter}
+                          onChange={(e) => setSelectedDeptFilter(e.target.value)}
+                        >
+                          <option value="">All Departments</option>
+                          {(allCalData?.departments || []).map((d) => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="hrms-filter-group">
+                        <label className="hrms-filter-label">Filter Branch:</label>
+                        <select
+                          className="form-control hrms-filter-select"
+                          value={selectedBranchFilter}
+                          onChange={(e) => setSelectedBranchFilter(e.target.value)}
+                        >
+                          <option value="">All Branches</option>
+                          {(allCalData?.branches || []).map((b) => (
+                            <option key={b} value={b}>{b}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="hrms-filter-group">
+                        <label className="hrms-filter-label">Search Employee:</label>
+                        <input
+                          type="text"
+                          className="form-control hrms-filter-input"
+                          placeholder="Search name or ID..."
+                          value={allCalEmpFilter}
+                          onChange={(e) => setAllCalEmpFilter(e.target.value)}
+                          style={{ minWidth: "180px" }}
+                        />
+                      </div>
+
+                      {(selectedDeptFilter || selectedBranchFilter || allCalEmpFilter) && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            setSelectedDeptFilter("");
+                            setSelectedBranchFilter("");
+                            setAllCalEmpFilter("");
+                          }}
+                        >
+                          Reset Filters
+                        </button>
+                      )}
+
+                      <div style={{ marginLeft: "auto", fontSize: "12px", color: "#64748b", fontWeight: 600 }}>
+                        Showing {allCalData?.employees?.length || 0} employee(s) • {monthNames[selectedMonth - 1]} {selectedYear}
+                      </div>
+                    </div>
+
+                    {loadingAllCal ? (
+                      <div className="hrms-empty-state" style={{ padding: "48px 16px", textAlign: "center" }}>
+                        <div className="hrms-loading-spinner" />
+                        <div style={{ marginTop: "12px", fontWeight: 600, color: "#64748b" }}>
+                          Loading all employees attendance calendar...
+                        </div>
+                      </div>
+                    ) : allCalError ? (
+                      <div className="alert alert-error" style={{ margin: "20px 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span>{allCalError}</span>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => loadAllCalendar(selectedYear, selectedMonth, selectedDeptFilter, selectedBranchFilter)}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : !allCalData?.employees || allCalData.employees.length === 0 ? (
+                      <div className="hrms-empty-state" style={{ padding: "48px 16px", textAlign: "center" }}>
+                        <div style={{ fontSize: "16px", fontWeight: 600, color: "#334155" }}>
+                          No attendance records found
+                        </div>
+                        <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                          There are no employees or attendance entries matching the selected month and filters.
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="hrms-all-cal-table-wrap">
+                        <table className="hrms-all-cal-table">
+                          <thead>
+                            <tr>
+                              <th className="th-sticky-emp" style={{ minWidth: "220px", textAlign: "left" }}>
+                                Employee Details
+                              </th>
+                              <th title="Total Present Days" style={{ minWidth: "38px", textAlign: "center", color: "#16a34a" }}>P</th>
+                              <th title="Total Absent Days" style={{ minWidth: "38px", textAlign: "center", color: "#dc2626" }}>A</th>
+                              <th title="Total Leave Days" style={{ minWidth: "38px", textAlign: "center", color: "#d97706" }}>L</th>
+                              <th title="Total Half Days" style={{ minWidth: "38px", textAlign: "center", color: "#ea580c" }}>HD</th>
+                              <th title="Total Hours Worked" style={{ minWidth: "55px", textAlign: "center" }}>Hrs</th>
+                              {Array.from({ length: allCalData.total_days }, (_, i) => i + 1).map((d) => {
+                                const dt = new Date(selectedYear, selectedMonth - 1, d);
+                                const isSun = dt.getDay() === 0;
+                                const isSat = dt.getDay() === 6;
+                                return (
+                                  <th
+                                    key={d}
+                                    style={{
+                                      minWidth: "34px",
+                                      textAlign: "center",
+                                      padding: "6px 2px",
+                                      background: isSun ? "#f1f5f9" : isSat ? "#f8fafc" : undefined,
+                                      color: isSun ? "#94a3b8" : "#475569"
+                                    }}
+                                  >
+                                    <div style={{ fontSize: "10px", fontWeight: 500, textTransform: "uppercase" }}>
+                                      {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][dt.getDay()]}
+                                    </div>
+                                    <div style={{ fontSize: "12px", fontWeight: 700 }}>{d}</div>
+                                  </th>
+                                );
+                              })}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {allCalData.employees
+                              .filter((emp: any) => {
+                                if (allCalEmpFilter.trim()) {
+                                  const term = allCalEmpFilter.toLowerCase();
+                                  const name = `${emp.employee_name || ""} ${emp.employee_id || ""}`.toLowerCase();
+                                  if (!name.includes(term)) return false;
+                                }
+                                return true;
+                              })
+                              .map((emp: any) => (
+                                <tr key={emp.employee_id}>
+                                  <td className="td-sticky-emp">
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                          {emp.employee_name}
+                                        </div>
+                                        <div style={{ fontSize: "11px", color: "#64748b", display: "flex", gap: "6px" }}>
+                                          <span style={{ fontWeight: 600, color: "#0284c7" }}>{emp.employee_code || emp.employee_id}</span>
+                                          {emp.department && <span>• {emp.department}</span>}
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        style={{ fontSize: "11px", padding: "2px 6px", whiteSpace: "nowrap", flexShrink: 0 }}
+                                        title={`Open ${emp.employee_name}'s individual calendar`}
+                                        onClick={() => {
+                                          handleSelectEmployee(emp.employee_id);
+                                          setCalendarViewMode("individual");
+                                          setSearchParams((prev) => {
+                                            const next = new URLSearchParams(prev);
+                                            next.set("employee_id", emp.employee_id);
+                                            next.set("view", "individual");
+                                            return next;
+                                          }, { replace: true });
+                                        }}
+                                      >
+                                        Open
+                                      </button>
+                                    </div>
+                                  </td>
+                                  <td style={{ textAlign: "center", fontWeight: 700, color: "#16a34a", fontSize: "12px" }}>
+                                    {emp.summary?.present || 0}
+                                  </td>
+                                  <td style={{ textAlign: "center", fontWeight: 700, color: "#dc2626", fontSize: "12px" }}>
+                                    {emp.summary?.absent || 0}
+                                  </td>
+                                  <td style={{ textAlign: "center", fontWeight: 700, color: "#d97706", fontSize: "12px" }}>
+                                    {emp.summary?.leave || 0}
+                                  </td>
+                                  <td style={{ textAlign: "center", fontWeight: 700, color: "#ea580c", fontSize: "12px" }}>
+                                    {emp.summary?.half_day || 0}
+                                  </td>
+                                  <td style={{ textAlign: "center", fontWeight: 600, color: "#475569", fontSize: "11px" }}>
+                                    {emp.summary?.total_working_hours || "0h"}
+                                  </td>
+                                  {emp.days?.map((dInfo: any) => {
+                                    let btnClass = "st-not-punched";
+                                    let label = "—";
+                                    if (dInfo.status === "PRESENT") {
+                                      btnClass = dInfo.is_late ? "st-late" : "st-present";
+                                      label = dInfo.is_late ? "L" : "P";
+                                    } else if (dInfo.status === "HALF_DAY") {
+                                      btnClass = "st-half-day";
+                                      label = "HD";
+                                    } else if (dInfo.status === "ON_LEAVE") {
+                                      btnClass = "st-leave";
+                                      label = "LV";
+                                    } else if (dInfo.status === "HOLIDAY") {
+                                      btnClass = "st-holiday";
+                                      label = "H";
+                                    } else if (dInfo.status === "WEEKEND") {
+                                      btnClass = "st-weekend";
+                                      label = "WE";
+                                    } else if (dInfo.status === "ABSENT") {
+                                      btnClass = "st-absent";
+                                      label = "A";
+                                    } else if (dInfo.status === "IN_PROGRESS") {
+                                      btnClass = "st-in-progress";
+                                      label = "IP";
+                                    }
+
+                                    return (
+                                      <td key={dInfo.day} style={{ textAlign: "center", padding: "4px 2px" }}>
+                                        <button
+                                          type="button"
+                                          className={`hrms-all-cal-cell-btn ${btnClass}`}
+                                          title={`Day ${dInfo.day} (${dInfo.date}): ${dInfo.status}${dInfo.punch_in ? ` | In: ${dInfo.punch_in}` : ""}${dInfo.punch_out ? ` | Out: ${dInfo.punch_out}` : ""} - Click for details`}
+                                          onClick={() => setActiveDayDetail({ employee: emp, day: dInfo })}
+                                        >
+                                          {label}
+                                        </button>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Attendance Day Details Modal */}
+            {activeDayDetail && (
+              <div className="hrms-modal-overlay" onClick={() => setActiveDayDetail(null)}>
+                <div className="hrms-modal-card" onClick={(e) => e.stopPropagation()}>
+                  <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: "#f8fafc" }}>
+                    <div>
+                      <div style={{ fontSize: "16px", fontWeight: 700, color: "#1e293b" }}>
+                        Attendance Day Details
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                        {activeDayDetail.day.date} ({monthNames[selectedMonth - 1]} {activeDayDetail.day.day}, {selectedYear})
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      style={{ background: "none", border: "none", fontSize: "18px", color: "#64748b", cursor: "pointer" }}
+                      onClick={() => setActiveDayDetail(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div style={{ padding: "20px" }}>
+                    <div style={{ background: "#f1f5f9", padding: "12px 14px", borderRadius: "8px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>
+                          {activeDayDetail.employee.employee_name}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#475569" }}>
+                          ID: <span style={{ fontWeight: 600, color: "#0284c7" }}>{activeDayDetail.employee.employee_id}</span>
+                          {activeDayDetail.employee.department && ` • Dept: ${activeDayDetail.employee.department}`}
+                          {activeDayDetail.employee.branch && ` • Branch: ${activeDayDetail.employee.branch}`}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <span className={`hrms-badge ${
+                          activeDayDetail.day.status === "PRESENT" ? "badge-success" :
+                          activeDayDetail.day.status === "ABSENT" ? "badge-danger" :
+                          activeDayDetail.day.status === "HALF_DAY" ? "badge-warning" :
+                          activeDayDetail.day.status === "ON_LEAVE" ? "badge-warning" : "badge-neutral"
+                        }`} style={{ fontSize: "12px", padding: "4px 8px" }}>
+                          {activeDayDetail.day.status.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+                      <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ color: "#64748b", fontSize: "11px", fontWeight: 600, textTransform: "uppercase" }}>Punch In</div>
+                        <div style={{ fontWeight: 700, color: "#0f172a", marginTop: "2px" }}>
+                          {activeDayDetail.day.punch_in || "—"}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ color: "#64748b", fontSize: "11px", fontWeight: 600, textTransform: "uppercase" }}>Punch Out</div>
+                        <div style={{ fontWeight: 700, color: "#0f172a", marginTop: "2px" }}>
+                          {activeDayDetail.day.punch_out || "—"}
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ color: "#64748b", fontSize: "11px", fontWeight: 600, textTransform: "uppercase" }}>Working Hours</div>
+                        <div style={{ fontWeight: 700, color: "#0f172a", marginTop: "2px" }}>
+                          {activeDayDetail.day.working_hours || "0h 00m"} ({activeDayDetail.day.working_minutes || 0} mins)
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ color: "#64748b", fontSize: "11px", fontWeight: 600, textTransform: "uppercase" }}>Shift Timing</div>
+                        <div style={{ fontWeight: 600, color: "#0f172a", marginTop: "2px" }}>
+                          {activeDayDetail.day.shift_name || "General Shift"} ({activeDayDetail.day.shift_start || "10:30"} - {activeDayDetail.day.shift_end || "19:00"})
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px", fontSize: "12.5px" }}>
+                      {activeDayDetail.day.is_late && (
+                        <div style={{ background: "#fef9c3", color: "#854d0e", padding: "8px 12px", borderRadius: "6px", fontWeight: 500 }}>
+                          ⚠️ Late Arrival: {activeDayDetail.day.late_minutes} minutes after grace threshold.
+                        </div>
+                      )}
+
+                      {activeDayDetail.day.holiday_name && (
+                        <div style={{ background: "#ede9fe", color: "#5b21b6", padding: "8px 12px", borderRadius: "6px", fontWeight: 500 }}>
+                          🎉 Company Holiday: {activeDayDetail.day.holiday_name}
+                        </div>
+                      )}
+
+                      {activeDayDetail.day.leave_info && (
+                        <div style={{ background: "#fef3c7", color: "#92400e", padding: "8px 12px", borderRadius: "6px", fontWeight: 500 }}>
+                          🏖️ Approved Leave: {activeDayDetail.day.leave_info.leave_type || "Leave"} ({activeDayDetail.day.leave_info.reason || "Approved"})
+                        </div>
+                      )}
+
+                      {activeDayDetail.day.regularization_status && activeDayDetail.day.regularization_status !== "NONE" && (
+                        <div style={{ background: "#e0f2fe", color: "#0369a1", padding: "8px 12px", borderRadius: "6px", fontWeight: 500 }}>
+                          📝 Regularization: {activeDayDetail.day.regularization_status} {activeDayDetail.day.regularization_reason ? `(${activeDayDetail.day.regularization_reason})` : ""}
+                        </div>
+                      )}
+
+                      {activeDayDetail.day.status === "ABSENT" && (
+                        <div style={{ background: "#fee2e2", color: "#991b1b", padding: "8px 12px", borderRadius: "6px", fontWeight: 500 }}>
+                          ⚠️ Absent: No check-in recorded. Impacted days are evaluated for LOP (Loss of Pay) deduction during monthly payroll.
+                        </div>
+                      )}
+
+                      {activeDayDetail.day.status === "WEEKEND" && (
+                        <div style={{ background: "#f1f5f9", color: "#475569", padding: "8px 12px", borderRadius: "6px" }}>
+                          📅 Scheduled Weekly Off
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: "14px 20px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", background: "#f8fafc" }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        setSelectedEmployeeId(activeDayDetail.employee.employee_id);
+                        setCalendarViewMode("individual");
+                        setActiveDayDetail(null);
+                      }}
+                    >
+                      Open {activeDayDetail.employee.employee_name}'s Full Calendar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => setActiveDayDetail(null)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ================================================================
                 One-day Regularization Drawer (Single Day Only)

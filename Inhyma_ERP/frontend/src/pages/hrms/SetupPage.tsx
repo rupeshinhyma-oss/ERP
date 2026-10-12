@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import {
   IconCalendar,
   IconCreditCard,
   IconPin,
+  IconMap,
+  IconClock,
+  IconFileText,
 } from "@/components/icons";
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from "@/lib/api";
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, API_BASE } from "@/lib/api";
+import { Auth } from "@/lib/auth";
+import { useAuth } from "@/lib/hooks";
 import {
   loadGoogleMapsSdk,
   searchGooglePlaces,
@@ -19,6 +24,50 @@ import "./hrms.css";
 // ---------------------------------------------------------------------------
 // Type Definitions
 // ---------------------------------------------------------------------------
+
+export interface DetailedTrackingEmployee {
+  employee_id: string;
+  employee_name: string;
+  employee_code?: string | null;
+  department?: string | null;
+  is_detailed_tracking_enabled: boolean;
+  detailed_interval_minutes: number;
+  detailed_stop_threshold_minutes: number;
+  updated_at?: string | null;
+}
+
+export interface ReturnTimerEmployee {
+  employee_id: string;
+  employee_name: string;
+  employee_code?: string | null;
+  department?: string | null;
+  use_org_default: boolean;
+  return_timer_seconds: number | null;
+  is_unlimited: boolean;
+  effective_seconds: number | null;
+  updated_at?: string | null;
+}
+
+export interface HrmsTrackingSettingsData {
+  id?: string;
+  employee_id?: string | null;
+  detailed_stop_threshold_minutes: number;
+  stop_detection_radius_meters: number;
+  max_gps_accuracy_meters: number;
+  return_timer_seconds: number | null;
+  is_unlimited_return: boolean;
+  applies_stop_detection: boolean;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmployeeSettingsResponse {
+  org_default: HrmsTrackingSettingsData;
+  employee_override: HrmsTrackingSettingsData | null;
+  effective: HrmsTrackingSettingsData;
+}
+
 
 interface HrmsLocation {
   id: string;
@@ -91,7 +140,9 @@ const DEFAULT_THANE_LAT = 19.199824;
 const DEFAULT_THANE_LNG = 72.956795;
 
 export function SetupPage() {
-  const [activeTab, setActiveTab] = useState<"leaveTypes" | "expenseSettings" | "geoFencing">("leaveTypes");
+  const [activeTab, setActiveTab] = useState<
+    "leaveTypes" | "expenseSettings" | "geoFencing" | "detailedTracking" | "returnTimer" | "attendanceDownload"
+  >("leaveTypes");
 
   // Notifications
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -108,6 +159,457 @@ export function SetupPage() {
     setSuccessMessage(null);
     setTimeout(() => setErrorMessage(null), 6000);
   };
+
+  const showWarning = (msg: string) => {
+    setErrorMessage(msg);
+    setSuccessMessage(null);
+    setTimeout(() => setErrorMessage(null), 7000);
+  };
+
+  // Auth context for permissions & scoping
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const isAdmin = Boolean(
+    isSuperAdmin ||
+    profile?.role === "ADMIN" ||
+    profile?.username === "admin" ||
+    hasPermission("hrms:admin")
+  );
+  const isExportPrivileged = Boolean(
+    isAdmin ||
+    String((profile as any)?.role || "").toLowerCase() === "hr" ||
+    String((profile as any)?.role || "").toLowerCase() === "department_manager" ||
+    profile?.roles?.some((r: any) =>
+      ["admin", "hr", "department_manager", "manager"].includes(String(r.name || r).toLowerCase())
+    ) ||
+    hasPermission("hrms:admin") ||
+    hasPermission("hrms") ||
+    hasPermission("hrms.manage")
+  );
+
+  // -------------------------------------------------------------------------
+  // COMMON: EMPLOYEES DIRECTORY
+  // -------------------------------------------------------------------------
+  const [employeesList, setEmployeesList] = useState<any[]>([]);
+
+  const fetchEmployeesList = async () => {
+    try {
+      const res = await apiGet<any[]>("/hrms/employees");
+      if (res?.data) {
+        setEmployeesList(res.data);
+      }
+    } catch (err: any) {
+      console.error("Failed to load employees for Setup selector", err);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // SUB-TAB 1: DETAILED TRACKING STATE & HANDLERS
+  // -------------------------------------------------------------------------
+  const [detailedEmployees, setDetailedEmployees] = useState<DetailedTrackingEmployee[]>([]);
+  const [loadingDetailedEmployees, setLoadingDetailedEmployees] = useState(false);
+  const [detailedSearchQuery, setDetailedSearchQuery] = useState("");
+  const [savingDetailedEmpId, setSavingDetailedEmpId] = useState<string | null>(null);
+  const [detailedFeedback, setDetailedFeedback] = useState<{ [id: string]: string }>({});
+
+  const fetchDetailedTrackingEmployees = async (query = detailedSearchQuery) => {
+    setLoadingDetailedEmployees(true);
+    try {
+      const params = new URLSearchParams();
+      if (query.trim()) params.append("search", query.trim());
+      const res = await apiGet<DetailedTrackingEmployee[]>(
+        `/hrms/setup/detailed-tracking/employees${params.toString() ? `?${params.toString()}` : ""}`
+      );
+      if (res?.data) {
+        setDetailedEmployees(res.data);
+      }
+    } catch (err: any) {
+      showError(err.message || "Failed to load detailed tracking employees.");
+    } finally {
+      setLoadingDetailedEmployees(false);
+    }
+  };
+
+  const handleToggleDetailedTracking = async (emp: DetailedTrackingEmployee) => {
+    const newEnabled = !emp.is_detailed_tracking_enabled;
+    setSavingDetailedEmpId(emp.employee_id);
+    setDetailedEmployees((prev) =>
+      prev.map((e) =>
+        e.employee_id === emp.employee_id
+          ? { ...e, is_detailed_tracking_enabled: newEnabled }
+          : e
+      )
+    );
+    try {
+      const res = await apiPut<DetailedTrackingEmployee>(
+        `/hrms/setup/detailed-tracking/employee/${emp.employee_id}`,
+        {
+          is_detailed_tracking_enabled: newEnabled,
+          detailed_interval_minutes: emp.detailed_interval_minutes || 5,
+          detailed_stop_threshold_minutes: emp.detailed_stop_threshold_minutes || 5.0,
+        }
+      );
+      if (res?.data) {
+        setDetailedEmployees((prev) =>
+          prev.map((e) => (e.employee_id === emp.employee_id ? res.data! : e))
+        );
+      }
+      setDetailedFeedback((prev) => ({
+        ...prev,
+        [emp.employee_id]: newEnabled ? "Detailed Active" : "Standard (OFF)",
+      }));
+      showSuccess(
+        `Detailed tracking ${newEnabled ? "enabled (ON)" : "disabled (OFF)"} for ${emp.employee_name}.`
+      );
+    } catch (err: any) {
+      setDetailedEmployees((prev) =>
+        prev.map((e) =>
+          e.employee_id === emp.employee_id
+            ? { ...e, is_detailed_tracking_enabled: emp.is_detailed_tracking_enabled }
+            : e
+        )
+      );
+      showError(err.message || "Failed to update detailed tracking status.");
+    } finally {
+      setSavingDetailedEmpId(null);
+    }
+  };
+
+  const handleChangeDetailedInterval = async (
+    emp: DetailedTrackingEmployee,
+    newInterval: number
+  ) => {
+    setSavingDetailedEmpId(emp.employee_id);
+    setDetailedEmployees((prev) =>
+      prev.map((e) =>
+        e.employee_id === emp.employee_id
+          ? { ...e, detailed_interval_minutes: newInterval }
+          : e
+      )
+    );
+    try {
+      const res = await apiPut<DetailedTrackingEmployee>(
+        `/hrms/setup/detailed-tracking/employee/${emp.employee_id}`,
+        {
+          is_detailed_tracking_enabled: emp.is_detailed_tracking_enabled,
+          detailed_interval_minutes: newInterval,
+          detailed_stop_threshold_minutes: emp.detailed_stop_threshold_minutes || 5.0,
+        }
+      );
+      if (res?.data) {
+        setDetailedEmployees((prev) =>
+          prev.map((e) => (e.employee_id === emp.employee_id ? res.data! : e))
+        );
+      }
+      setDetailedFeedback((prev) => ({
+        ...prev,
+        [emp.employee_id]: `Interval ${newInterval}m saved`,
+      }));
+      showSuccess(`Interval updated to ${newInterval} minutes for ${emp.employee_name}.`);
+    } catch (err: any) {
+      showError(err.message || "Failed to update tracking interval.");
+    } finally {
+      setSavingDetailedEmpId(null);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // SUB-TAB 2: RETURN TIMER STATE & HANDLERS
+  // -------------------------------------------------------------------------
+  const [orgReturnTimerSeconds, setOrgReturnTimerSeconds] = useState<number>(30);
+  const [orgReturnTimerUnlimited, setOrgReturnTimerUnlimited] = useState<boolean>(false);
+  const [savingOrgReturnTimer, setSavingOrgReturnTimer] = useState<boolean>(false);
+  const [returnTimerEmployees, setReturnTimerEmployees] = useState<ReturnTimerEmployee[]>([]);
+  const [loadingReturnTimerEmployees, setLoadingReturnTimerEmployees] = useState(false);
+  const [returnTimerSearchQuery, setReturnTimerSearchQuery] = useState("");
+  const [savingReturnTimerEmpId, setSavingReturnTimerEmpId] = useState<string | null>(null);
+  const [returnTimerFeedback, setReturnTimerFeedback] = useState<{ [id: string]: string }>({});
+
+  const [timerEdits, setTimerEdits] = useState<{
+    [id: string]: { use_org_default: boolean; return_timer_seconds: number; is_unlimited: boolean };
+  }>({});
+
+  const fetchReturnTimerData = async (query = returnTimerSearchQuery) => {
+    setLoadingReturnTimerEmployees(true);
+    try {
+      const orgRes = await apiGet<any>("/hrms/setup/tracking-settings");
+      if (orgRes?.data?.org_default) {
+        setOrgReturnTimerSeconds(orgRes.data.org_default.return_timer_seconds ?? 30);
+        setOrgReturnTimerUnlimited(Boolean(orgRes.data.org_default.is_unlimited_return));
+      }
+      const params = new URLSearchParams();
+      if (query.trim()) params.append("search", query.trim());
+      const res = await apiGet<ReturnTimerEmployee[]>(
+        `/hrms/setup/return-timer/employees${params.toString() ? `?${params.toString()}` : ""}`
+      );
+      if (res?.data) {
+        setReturnTimerEmployees(res.data);
+        const initialEdits: any = {};
+        res.data.forEach((emp) => {
+          initialEdits[emp.employee_id] = {
+            use_org_default: emp.use_org_default,
+            return_timer_seconds: emp.return_timer_seconds ?? 30,
+            is_unlimited: emp.is_unlimited,
+          };
+        });
+        setTimerEdits(initialEdits);
+      }
+    } catch (err: any) {
+      showError(err.message || "Failed to load return timer data.");
+    } finally {
+      setLoadingReturnTimerEmployees(false);
+    }
+  };
+
+  const handleSaveOrgReturnTimer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orgReturnTimerUnlimited && (orgReturnTimerSeconds === null || orgReturnTimerSeconds < 0)) {
+      showError("Return timer duration cannot be negative. Enter 0 for immediate expiry or check 'No limit'.");
+      return;
+    }
+    setSavingOrgReturnTimer(true);
+    try {
+      await apiPut("/hrms/setup/tracking-settings/org-default", {
+        return_timer_seconds: orgReturnTimerUnlimited ? null : Number(orgReturnTimerSeconds),
+        is_unlimited_return: Boolean(orgReturnTimerUnlimited),
+      });
+      showSuccess("Organization default return timer saved successfully.");
+      fetchReturnTimerData();
+    } catch (err: any) {
+      showError(err.message || "Failed to save organization return timer default.");
+    } finally {
+      setSavingOrgReturnTimer(false);
+    }
+  };
+
+  const handleSaveEmployeeReturnTimer = async (empId: string) => {
+    const edit = timerEdits[empId];
+    if (!edit) return;
+
+    if (!edit.use_org_default && !edit.is_unlimited && (edit.return_timer_seconds === null || edit.return_timer_seconds < 0)) {
+      showError("Duration cannot be negative. Enter 0 for immediate expiry or select 'No limit'.");
+      return;
+    }
+
+    setSavingReturnTimerEmpId(empId);
+    try {
+      const res = await apiPut<ReturnTimerEmployee>(
+        `/hrms/setup/return-timer/employee/${empId}`,
+        {
+          use_org_default: edit.use_org_default,
+          return_timer_seconds: edit.is_unlimited ? null : Number(edit.return_timer_seconds),
+          is_unlimited: edit.is_unlimited,
+        }
+      );
+      if (res?.data) {
+        setReturnTimerEmployees((prev) =>
+          prev.map((e) => (e.employee_id === empId ? res.data! : e))
+        );
+        setTimerEdits((prev) => ({
+          ...prev,
+          [empId]: {
+            use_org_default: res.data!.use_org_default,
+            return_timer_seconds: res.data!.return_timer_seconds ?? 30,
+            is_unlimited: res.data!.is_unlimited,
+          },
+        }));
+      }
+      setReturnTimerFeedback((prev) => ({
+        ...prev,
+        [empId]: edit.use_org_default ? "Default Inherited" : "Saved",
+      }));
+      showSuccess(`Return timer saved for employee.`);
+    } catch (err: any) {
+      showError(err.message || "Failed to update employee return timer.");
+    } finally {
+      setSavingReturnTimerEmpId(null);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // TAB 5: ATTENDANCE EXPORT STATE & HANDLERS
+  // -------------------------------------------------------------------------
+  // Attendance Excel Export State & Handlers
+  // Supports:
+  // 1. Calendar Month (dynamically calculates days per month & year, leap-year aware)
+  // 2. Custom Date Range (from-date to to-date)
+  // 3. Single Day (start_date = end_date)
+  // -------------------------------------------------------------------------
+  const now = new Date();
+  const currentYearNum = now.getFullYear();
+  const currentMonthNum = now.getMonth() + 1; // 1 to 12
+  const todayStr = now.toISOString().split("T")[0];
+
+  const [exportMode, setExportMode] = useState<"calendar_month" | "custom_range" | "single_day">("calendar_month");
+  const [exportYear, setExportYear] = useState<number>(currentYearNum);
+  const [exportMonth, setExportMonth] = useState<number>(currentMonthNum);
+
+  const [exportStartDate, setExportStartDate] = useState<string>(`${currentYearNum}-${String(currentMonthNum).padStart(2, "0")}-01`);
+  const [exportEndDate, setExportEndDate] = useState<string>(todayStr);
+  const [exportSingleDate, setExportSingleDate] = useState<string>(todayStr);
+
+  const [exportEmployeeId, setExportEmployeeId] = useState<string>("ALL");
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportStatusText, setExportStatusText] = useState<string | null>(null);
+  const [lastExportEmptyNotice, setLastExportEmptyNotice] = useState<string | null>(null);
+
+  const MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  // Leap-year aware day calculation using JavaScript's native Date(year, month, 0)
+  const daysInSelectedMonth = useMemo(() => {
+    return new Date(exportYear, exportMonth, 0).getDate();
+  }, [exportYear, exportMonth]);
+
+  const calendarMonthStartDate = `${exportYear}-${String(exportMonth).padStart(2, "0")}-01`;
+  const calendarMonthEndDate = `${exportYear}-${String(exportMonth).padStart(2, "0")}-${String(daysInSelectedMonth).padStart(2, "0")}`;
+  const isLeapYear = (exportYear % 4 === 0 && exportYear % 100 !== 0) || (exportYear % 400 === 0);
+
+  // Sync exportEmployeeId for non-privileged employees
+  useEffect(() => {
+    if (!isExportPrivileged && employeesList.length > 0) {
+      const selfEmp = employeesList.find((e) => e.id === profile?.id) || employeesList[0];
+      if (selfEmp && exportEmployeeId === "ALL") {
+        setExportEmployeeId(selfEmp.id);
+      }
+    }
+  }, [employeesList, isExportPrivileged, profile?.id, exportEmployeeId]);
+
+  const handleSelectQuickMonth = (preset: "thisMonth" | "lastMonth") => {
+    const today = new Date();
+    if (preset === "thisMonth") {
+      setExportYear(today.getFullYear());
+      setExportMonth(today.getMonth() + 1);
+    } else {
+      const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      setExportYear(prev.getFullYear());
+      setExportMonth(prev.getMonth() + 1);
+    }
+    setExportMode("calendar_month");
+  };
+
+  const handleExportExcel = async () => {
+    setIsExporting(true);
+    setExportStatusText("Querying PostgreSQL attendance records and generating Monthly Attendance Matrix...");
+    setLastExportEmptyNotice(null);
+
+    try {
+      const token = Auth.getAccessToken();
+      const params = new URLSearchParams();
+
+      let periodLabel = "";
+      if (exportMode === "calendar_month") {
+        params.append("year", String(exportYear));
+        params.append("month", String(exportMonth));
+        periodLabel = `${MONTH_NAMES[exportMonth - 1]} ${exportYear} (${calendarMonthStartDate} to ${calendarMonthEndDate})`;
+      } else if (exportMode === "single_day") {
+        if (!exportSingleDate) {
+          showError("Please select a date for the single day export.");
+          setIsExporting(false);
+          setExportStatusText(null);
+          return;
+        }
+        params.append("start_date", exportSingleDate);
+        params.append("end_date", exportSingleDate);
+        periodLabel = `${exportSingleDate} (Single Day)`;
+      } else {
+        if (!exportStartDate || !exportEndDate) {
+          showError("Please select both a start date and an end date.");
+          setIsExporting(false);
+          setExportStatusText(null);
+          return;
+        }
+        if (exportStartDate > exportEndDate) {
+          showError("Start date cannot be after end date.");
+          setIsExporting(false);
+          setExportStatusText(null);
+          return;
+        }
+        params.append("start_date", exportStartDate);
+        params.append("end_date", exportEndDate);
+        periodLabel = `${exportStartDate} to ${exportEndDate}`;
+      }
+
+      if (exportEmployeeId && exportEmployeeId !== "ALL") {
+        params.append("employee_id", exportEmployeeId);
+      }
+
+      params.append("_t", Date.now().toString());
+
+      const res = await fetch(`${API_BASE}/hrms/attendance/export?${params.toString()}`, {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+      });
+
+      if (!res.ok) {
+        let errorMsg = `Export failed with status HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          errorMsg = errJson.detail || errJson.message || errJson.errors?.[0]?.message || errorMsg;
+        } catch {
+          const errText = await res.text().catch(() => "");
+          if (errText) errorMsg = errText;
+        }
+        throw new Error(errorMsg);
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const json = await res.json().catch(() => ({}));
+        const msg = json.detail || json.message || json.errors?.[0]?.message || "Received a JSON response instead of an Excel file.";
+        throw new Error(msg);
+      }
+
+      const disposition = res.headers.get("Content-Disposition");
+      const countHeader = res.headers.get("X-Total-Count");
+      const recordCount = countHeader !== null ? parseInt(countHeader, 10) : 0;
+      const empCountHeader = res.headers.get("X-Employee-Count");
+      const employeeCount = empCountHeader !== null ? parseInt(empCountHeader, 10) : 0;
+
+      let filename = `attendance_export_${exportMode}.xlsx`;
+      if (disposition && disposition.includes("filename=")) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) {
+          filename = match[1];
+        }
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+
+      if (recordCount === 0) {
+        setLastExportEmptyNotice(
+          `No actual attendance punch records found in PostgreSQL for ${periodLabel}. An attendance workbook with calendar workdays and 0 punch records was downloaded.`
+        );
+        showWarning(
+          `No attendance punch records found in PostgreSQL for ${periodLabel}. The report workbook contains scheduled workdays with 0 punch records.`
+        );
+      } else {
+        setLastExportEmptyNotice(null);
+        showSuccess(
+          `Successfully exported monthly attendance report for ${periodLabel} (${employeeCount} employee${employeeCount === 1 ? "" : "s"}, ${recordCount} record${recordCount === 1 ? "" : "s"}) to ${filename}.`
+        );
+      }
+      setExportStatusText(null);
+    } catch (err: any) {
+      showError(err.message || "Failed to download attendance Excel report.");
+      setExportStatusText(null);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
 
   // -------------------------------------------------------------------------
   // TAB 1: LEAVE TYPES STATE & HANDLERS
@@ -679,6 +1181,13 @@ export function SetupPage() {
     if (activeTab === "leaveTypes") fetchLeaveTypes();
     else if (activeTab === "expenseSettings") fetchExpenseData();
     else if (activeTab === "geoFencing") fetchLocations();
+    else if (activeTab === "detailedTracking") {
+      fetchDetailedTrackingEmployees();
+    } else if (activeTab === "returnTimer") {
+      fetchReturnTimerData();
+    } else if (activeTab === "attendanceDownload") {
+      fetchEmployeesList();
+    }
   }, [activeTab]);
 
   return (
@@ -690,7 +1199,7 @@ export function SetupPage() {
           <div>
             <h1>HRMS Setup</h1>
             <div className="page-subtitle">
-              Configure HRMS global policies, leave types, expense limits, and geofencing parameters.
+              Configure HRMS global policies, leave types, expense limits, geofencing, tracking parameters, and attendance export.
             </div>
           </div>
         </div>
@@ -763,6 +1272,30 @@ export function SetupPage() {
           >
             <IconPin />
             <span>Geo Fencing</span>
+          </button>
+          <button
+            type="button"
+            className={`hrms-tab-btn ${activeTab === "detailedTracking" ? "active" : ""}`}
+            onClick={() => setActiveTab("detailedTracking")}
+          >
+            <IconMap />
+            <span>Detailed Tracking</span>
+          </button>
+          <button
+            type="button"
+            className={`hrms-tab-btn ${activeTab === "returnTimer" ? "active" : ""}`}
+            onClick={() => setActiveTab("returnTimer")}
+          >
+            <IconClock />
+            <span>Return Timer</span>
+          </button>
+          <button
+            type="button"
+            className={`hrms-tab-btn ${activeTab === "attendanceDownload" ? "active" : ""}`}
+            onClick={() => setActiveTab("attendanceDownload")}
+          >
+            <IconFileText />
+            <span>Attendance Download</span>
           </button>
         </div>
 
@@ -1344,6 +1877,789 @@ export function SetupPage() {
         )}
 
         {/* ================================================================= */}
+        {/* SUB-TAB 1: DETAILED TRACKING                                      */}
+        {/* ================================================================= */}
+        {activeTab === "detailedTracking" && (
+          <div className="hrms-tab-content">
+            {/* Header info */}
+            <div className="card" style={{ marginBottom: "20px" }}>
+              <div className="card-header" style={{ borderBottom: "1px solid var(--color-border, #e2e8f0)" }}>
+                <div>
+                  <h2 className="hrms-section-title">Detailed GPS Tracking</h2>
+                  <div className="hrms-section-desc">
+                    Select individual existing employees to receive high-frequency GPS tracking and stationary stop detection. Standard 5-minute collection and 30-minute route summaries remain unchanged when OFF.
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: "20px" }}>
+                {/* Search Bar */}
+                <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "20px", flexWrap: "wrap" }}>
+                  <div style={{ position: "relative", flex: 1, minWidth: "280px" }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Search employees by name, employee ID, or department..."
+                      value={detailedSearchQuery}
+                      onChange={(e) => {
+                        setDetailedSearchQuery(e.target.value);
+                        fetchDetailedTrackingEmployees(e.target.value);
+                      }}
+                      style={{ paddingLeft: "36px" }}
+                    />
+                    <span style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }}>
+                      🔍
+                    </span>
+                    {detailedSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailedSearchQuery("");
+                          fetchDetailedTrackingEmployees("");
+                        }}
+                        style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "14px" }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => fetchDetailedTrackingEmployees(detailedSearchQuery)}
+                    disabled={loadingDetailedEmployees}
+                    style={{ minWidth: "100px" }}
+                  >
+                    {loadingDetailedEmployees ? "Loading..." : "Refresh"}
+                  </button>
+                </div>
+
+                {/* Employees Table */}
+                {loadingDetailedEmployees ? (
+                  <div style={{ padding: "50px", textAlign: "center", color: "var(--color-muted, #64748b)" }}>
+                    <div style={{ width: "24px", height: "24px", border: "3px solid #cbd5e1", borderTopColor: "#0284c7", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px auto" }} />
+                    Loading PostgreSQL employee dataset...
+                  </div>
+                ) : detailedEmployees.length === 0 ? (
+                  <div className="hrms-placeholder-box" style={{ padding: "40px 20px" }}>
+                    <div className="hrms-placeholder-icon">
+                      <IconMap />
+                    </div>
+                    <h4 className="hrms-placeholder-title">No Employees Found</h4>
+                    <p className="hrms-placeholder-text">
+                      {detailedSearchQuery
+                        ? `No real employee records match "${detailedSearchQuery}". Try clearing search.`
+                        : "No eligible employees found in the PostgreSQL database for your authorized scope."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="hrms-table-container">
+                    <table className="hrms-table">
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Department</th>
+                          <th>Detailed Tracking</th>
+                          <th>GPS Sampling Interval</th>
+                          <th>Status / Feedback</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detailedEmployees.map((emp) => {
+                          const isBusy = savingDetailedEmpId === emp.employee_id;
+                          const feedback = detailedFeedback[emp.employee_id];
+                          return (
+                            <tr key={emp.employee_id}>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                  <div
+                                    style={{
+                                      width: "36px",
+                                      height: "36px",
+                                      borderRadius: "50%",
+                                      background: emp.is_detailed_tracking_enabled ? "#eff6ff" : "#f1f5f9",
+                                      color: emp.is_detailed_tracking_enabled ? "#1d4ed8" : "#64748b",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontWeight: 700,
+                                      fontSize: "13px",
+                                      border: `1px solid ${emp.is_detailed_tracking_enabled ? "#bfdbfe" : "#cbd5e1"}`,
+                                    }}
+                                  >
+                                    {(emp.employee_name || "E").charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 600, color: "var(--color-text, #0f172a)", fontSize: "13.5px" }}>
+                                      {emp.employee_name}
+                                    </div>
+                                    <div style={{ fontSize: "11.5px", color: "var(--color-muted, #64748b)" }}>
+                                      {emp.employee_code || `EMP-${emp.employee_id.slice(0, 6).toUpperCase()}`}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <span className="hrms-badge hrms-badge-info" style={{ fontWeight: 600 }}>
+                                  {emp.department || "General"}
+                                </span>
+                              </td>
+                              <td>
+                                <label style={{ display: "inline-flex", alignItems: "center", gap: "10px", cursor: isBusy ? "not-allowed" : "pointer" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={emp.is_detailed_tracking_enabled}
+                                    onChange={() => handleToggleDetailedTracking(emp)}
+                                    disabled={isBusy || !isAdmin}
+                                    style={{ width: "18px", height: "18px", cursor: "pointer" }}
+                                  />
+                                  <span
+                                    style={{
+                                      fontSize: "13px",
+                                      fontWeight: 700,
+                                      color: emp.is_detailed_tracking_enabled ? "#16a34a" : "#64748b",
+                                    }}
+                                  >
+                                    {emp.is_detailed_tracking_enabled ? "ON" : "OFF"}
+                                  </span>
+                                </label>
+                              </td>
+                              <td>
+                                <select
+                                  className="form-control"
+                                  value={emp.detailed_interval_minutes || 5}
+                                  onChange={(e) => handleChangeDetailedInterval(emp, Number(e.target.value))}
+                                  disabled={!emp.is_detailed_tracking_enabled || isBusy || !isAdmin}
+                                  style={{
+                                    maxWidth: "180px",
+                                    fontSize: "12.5px",
+                                    fontWeight: 600,
+                                    opacity: emp.is_detailed_tracking_enabled ? 1 : 0.55,
+                                  }}
+                                >
+                                  <option value={5}>5 Minutes (Default)</option>
+                                  <option value={10}>10 Minutes</option>
+                                  <option value={15}>15 Minutes</option>
+                                  <option value={30}>30 Minutes</option>
+                                </select>
+                              </td>
+                              <td>
+                                {isBusy ? (
+                                  <span style={{ fontSize: "12px", color: "#2563eb", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                    <div style={{ width: "12px", height: "12px", border: "2px solid #93c5fd", borderTopColor: "#2563eb", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                                    Saving...
+                                  </span>
+                                ) : feedback ? (
+                                  <span className="hrms-badge hrms-badge-success" style={{ fontWeight: 700 }}>
+                                    ✓ {feedback}
+                                  </span>
+                                ) : emp.is_detailed_tracking_enabled ? (
+                                  <span className="hrms-badge hrms-badge-success" style={{ fontWeight: 600 }}>
+                                    Detailed ({emp.detailed_interval_minutes}m)
+                                  </span>
+                                ) : (
+                                  <span className="hrms-badge hrms-badge-secondary" style={{ color: "#64748b" }}>
+                                    Standard (OFF)
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Technical Note */}
+                <div style={{ marginTop: "18px", padding: "12px 16px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "12px", color: "#475569" }}>
+                  <strong>Technical note:</strong> Detailed tracking activates stationary stop detection for stops lasting &gt;5 minutes. Settings persist in PostgreSQL and survive page refreshes, logouts, and server restarts. Standard 5-minute sampling &amp; 30-minute summary pipeline is maintained for employees with detailed tracking OFF.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================= */}
+        {/* SUB-TAB 2: RETURN TIMER                                           */}
+        {/* ================================================================= */}
+        {activeTab === "returnTimer" && (
+          <div className="hrms-tab-content">
+            {/* Card 1: Organization Default */}
+            <div className="card" style={{ marginBottom: "24px" }}>
+              <div className="card-header" style={{ borderBottom: "1px solid var(--color-border, #e2e8f0)" }}>
+                <div>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "var(--color-text, #0f172a)" }}>
+                    🏢 Organization Default Return Timer
+                  </h3>
+                  <div style={{ fontSize: "12.5px", color: "var(--color-muted, #64748b)", marginTop: "3px" }}>
+                    The default boundary exit return timer is 30 seconds for all company employees, unless individually overridden below.
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveOrgReturnTimer} style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px", maxWidth: "600px" }}>
+                <div className="hrms-form-group">
+                  <label style={{ fontWeight: 700, fontSize: "13px", color: "#1e293b", marginBottom: "8px", display: "block" }}>
+                    Default Return Timer Duration *
+                  </label>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={orgReturnTimerUnlimited}
+                        onChange={(e) => setOrgReturnTimerUnlimited(e.target.checked)}
+                        disabled={!isAdmin}
+                      />
+                      <span><strong>No limit</strong> (No automatic timeout or exit violation event)</span>
+                    </label>
+
+                    {!orgReturnTimerUnlimited && (
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
+                        <input
+                          type="number"
+                          min="0"
+                          max="86400"
+                          required
+                          className="form-control"
+                          style={{ maxWidth: "160px", fontWeight: 600 }}
+                          value={orgReturnTimerSeconds}
+                          onChange={(e) => setOrgReturnTimerSeconds(Math.max(0, Number(e.target.value) || 0))}
+                          disabled={!isAdmin}
+                        />
+                        <span style={{ fontSize: "13px", color: "#475569", fontWeight: 600 }}>seconds</span>
+                        <span style={{ fontSize: "12px", color: "#64748b" }}>
+                          ({Math.round((orgReturnTimerSeconds / 60) * 10) / 10} minutes)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ fontSize: "12px", color: "var(--color-muted, #64748b)", marginTop: "8px", lineHeight: 1.5 }}>
+                    Enter <strong>30 seconds</strong> (standard default), <strong>0 seconds</strong> for immediate expiry on confirmed exit, or a positive duration. Returning within the boundary before expiry cancels the pending violation. Expiry records exactly 1 violation event.
+                  </div>
+                </div>
+
+                {isAdmin && (
+                  <div style={{ display: "flex", justifyContent: "flex-start", marginTop: "4px" }}>
+                    <button type="submit" className="btn btn-primary" disabled={savingOrgReturnTimer}>
+                      {savingOrgReturnTimer ? "Saving Default..." : "Save Organization Default"}
+                    </button>
+                  </div>
+                )}
+              </form>
+            </div>
+
+            {/* Card 2: Per-Employee Timer Overrides */}
+            <div className="card">
+              <div className="card-header" style={{ borderBottom: "1px solid var(--color-border, #e2e8f0)" }}>
+                <div>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "var(--color-text, #0f172a)" }}>
+                    👤 Per-Employee Return Timer Configuration
+                  </h3>
+                  <div style={{ fontSize: "12.5px", color: "var(--color-muted, #64748b)", marginTop: "3px" }}>
+                    Configure custom return timer duration for specific employees or let them inherit the 30-second organization default.
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: "20px" }}>
+                {/* Search Bar */}
+                <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "20px", flexWrap: "wrap" }}>
+                  <div style={{ position: "relative", flex: 1, minWidth: "280px" }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Search employees by name, employee ID, or department..."
+                      value={returnTimerSearchQuery}
+                      onChange={(e) => {
+                        setReturnTimerSearchQuery(e.target.value);
+                        fetchReturnTimerData(e.target.value);
+                      }}
+                      style={{ paddingLeft: "36px" }}
+                    />
+                    <span style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }}>
+                      🔍
+                    </span>
+                    {returnTimerSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReturnTimerSearchQuery("");
+                          fetchReturnTimerData("");
+                        }}
+                        style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "14px" }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => fetchReturnTimerData(returnTimerSearchQuery)}
+                    disabled={loadingReturnTimerEmployees}
+                    style={{ minWidth: "100px" }}
+                  >
+                    {loadingReturnTimerEmployees ? "Loading..." : "Refresh"}
+                  </button>
+                </div>
+
+                {/* Table */}
+                {loadingReturnTimerEmployees ? (
+                  <div style={{ padding: "50px", textAlign: "center", color: "var(--color-muted, #64748b)" }}>
+                    <div style={{ width: "24px", height: "24px", border: "3px solid #cbd5e1", borderTopColor: "#0284c7", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px auto" }} />
+                    Loading return timer employee records...
+                  </div>
+                ) : returnTimerEmployees.length === 0 ? (
+                  <div className="hrms-placeholder-box" style={{ padding: "40px 20px" }}>
+                    <div className="hrms-placeholder-icon">
+                      <IconClock />
+                    </div>
+                    <h4 className="hrms-placeholder-title">No Employees Found</h4>
+                    <p className="hrms-placeholder-text">
+                      {returnTimerSearchQuery
+                        ? `No real employee records match "${returnTimerSearchQuery}".`
+                        : "No eligible employees found in PostgreSQL."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="hrms-table-container">
+                    <table className="hrms-table">
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Department</th>
+                          <th>Inheritance</th>
+                          <th>Individual Duration</th>
+                          <th>Effective Timeout</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {returnTimerEmployees.map((emp) => {
+                          const edit = timerEdits[emp.employee_id] || {
+                            use_org_default: emp.use_org_default,
+                            return_timer_seconds: emp.return_timer_seconds ?? 30,
+                            is_unlimited: emp.is_unlimited,
+                          };
+                          const isBusy = savingReturnTimerEmpId === emp.employee_id;
+                          const feedback = returnTimerFeedback[emp.employee_id];
+
+                          return (
+                            <tr key={emp.employee_id}>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                  <div
+                                    style={{
+                                      width: "36px",
+                                      height: "36px",
+                                      borderRadius: "50%",
+                                      background: "#f8fafc",
+                                      color: "#334155",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontWeight: 700,
+                                      fontSize: "13px",
+                                      border: "1px solid #cbd5e1",
+                                    }}
+                                  >
+                                    {(emp.employee_name || "E").charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 600, color: "var(--color-text, #0f172a)", fontSize: "13.5px" }}>
+                                      {emp.employee_name}
+                                    </div>
+                                    <div style={{ fontSize: "11.5px", color: "var(--color-muted, #64748b)" }}>
+                                      {emp.employee_code || `EMP-${emp.employee_id.slice(0, 6).toUpperCase()}`}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <span className="hrms-badge hrms-badge-info" style={{ fontWeight: 600 }}>
+                                  {emp.department || "General"}
+                                </span>
+                              </td>
+                              <td>
+                                <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", cursor: isBusy ? "not-allowed" : "pointer" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={edit.use_org_default}
+                                    onChange={(e) => {
+                                      setTimerEdits({
+                                        ...timerEdits,
+                                        [emp.employee_id]: {
+                                          ...edit,
+                                          use_org_default: e.target.checked,
+                                        },
+                                      });
+                                    }}
+                                    disabled={isBusy || !isAdmin}
+                                  />
+                                  <span style={{ fontSize: "12.5px", fontWeight: 600, color: edit.use_org_default ? "#065f46" : "#475569" }}>
+                                    {edit.use_org_default ? "Use Org Default" : "Custom Override"}
+                                  </span>
+                                </label>
+                              </td>
+                              <td>
+                                {!edit.use_org_default ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                    <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", cursor: "pointer" }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={edit.is_unlimited}
+                                        onChange={(e) => {
+                                          setTimerEdits({
+                                            ...timerEdits,
+                                            [emp.employee_id]: {
+                                              ...edit,
+                                              is_unlimited: e.target.checked,
+                                            },
+                                          });
+                                        }}
+                                        disabled={isBusy || !isAdmin}
+                                      />
+                                      <span>No limit</span>
+                                    </label>
+                                    {!edit.is_unlimited && (
+                                      <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="86400"
+                                          className="form-control"
+                                          style={{ width: "90px", padding: "4px 8px", fontSize: "12.5px" }}
+                                          value={edit.return_timer_seconds}
+                                          onChange={(e) => {
+                                            setTimerEdits({
+                                              ...timerEdits,
+                                              [emp.employee_id]: {
+                                                ...edit,
+                                                return_timer_seconds: Math.max(0, Number(e.target.value) || 0),
+                                              },
+                                            });
+                                          }}
+                                          disabled={isBusy || !isAdmin}
+                                        />
+                                        <span style={{ fontSize: "12px", color: "#64748b" }}>sec</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+                                    Inherits {orgReturnTimerUnlimited ? "No limit" : `${orgReturnTimerSeconds}s`}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {emp.is_unlimited ? (
+                                  <span className="hrms-badge hrms-badge-secondary">No limit</span>
+                                ) : emp.effective_seconds === 0 ? (
+                                  <span className="hrms-badge hrms-badge-warning" style={{ fontWeight: 700 }}>
+                                    Immediate (0s)
+                                  </span>
+                                ) : (
+                                  <span className="hrms-badge hrms-badge-success" style={{ fontWeight: 700 }}>
+                                    {emp.effective_seconds ?? 30}s {emp.use_org_default ? "(Default)" : "(Custom)"}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {isAdmin && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline"
+                                    style={{ fontSize: "12px", padding: "4px 12px" }}
+                                    onClick={() => handleSaveEmployeeReturnTimer(emp.employee_id)}
+                                    disabled={isBusy}
+                                  >
+                                    {isBusy ? "Saving..." : feedback || "Save"}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================= */}
+        {/* SUB-TAB 3: ATTENDANCE DOWNLOAD                                    */}
+        {/* ================================================================= */}
+        {activeTab === "attendanceDownload" && (
+          <div className="hrms-tab-content">
+            <div className="card" style={{ maxWidth: "760px", margin: "0 auto" }}>
+              <div className="card-header" style={{ borderBottom: "1px solid var(--color-border, #e2e8f0)" }}>
+                <div>
+                  <h2 className="hrms-section-title">Attendance Excel Export</h2>
+                  <div className="hrms-section-desc">
+                    Download authentic attendance records generated directly from PostgreSQL database to Excel (.xlsx).
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
+                {/* Employee Scope Selector */}
+                <div className="hrms-form-group">
+                  <label style={{ fontWeight: 700, fontSize: "13px", color: "#1e293b" }}>
+                    Select Export Scope / Employee *
+                  </label>
+                  <select
+                    className="form-control"
+                    value={exportEmployeeId}
+                    onChange={(e) => setExportEmployeeId(e.target.value)}
+                    style={{ fontWeight: 600, padding: "8px 12px" }}
+                  >
+                    {isExportPrivileged && (
+                      <option value="ALL">
+                        ★ All Employees ({employeesList.length} total across authorized scope)
+                      </option>
+                    )}
+                    {employeesList.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.first_name} {emp.last_name} ({emp.employee_code || emp.code || emp.id.slice(0, 8)}) — {emp.department || "General"}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: "11.5px", color: "var(--color-muted, #64748b)", marginTop: "4px" }}>
+                    {isExportPrivileged
+                      ? "Authorized role: Administrators export company-wide; HR and Managers export within reporting scope."
+                      : "Employee self-export: Scoped strictly to your own authenticated attendance records."}
+                  </div>
+                </div>
+
+                {/* Date Selection Mode Selector */}
+                <div>
+                  <label style={{ fontWeight: 700, fontSize: "13px", color: "#1e293b", marginBottom: "8px", display: "block" }}>
+                    Select Date Range Mode *
+                  </label>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>
+                    <button
+                      type="button"
+                      className={`btn ${exportMode === "calendar_month" ? "btn-primary" : "btn-outline"}`}
+                      style={{ fontSize: "12.5px", padding: "6px 16px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                      onClick={() => setExportMode("calendar_month")}
+                    >
+                      <span>📅 By Calendar Month</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn ${exportMode === "custom_range" ? "btn-primary" : "btn-outline"}`}
+                      style={{ fontSize: "12.5px", padding: "6px 16px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                      onClick={() => setExportMode("custom_range")}
+                    >
+                      <span>📆 Custom Date Range</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn ${exportMode === "single_day" ? "btn-primary" : "btn-outline"}`}
+                      style={{ fontSize: "12.5px", padding: "6px 16px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                      onClick={() => setExportMode("single_day")}
+                    >
+                      <span>📌 Single Day</span>
+                    </button>
+                  </div>
+
+                  {/* Mode 1: Calendar Month Controls */}
+                  {exportMode === "calendar_month" && (
+                    <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                        <div className="hrms-form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontWeight: 600, fontSize: "12.5px" }}>Calendar Month *</label>
+                          <select
+                            className="form-control"
+                            value={exportMonth}
+                            onChange={(e) => setExportMonth(parseInt(e.target.value, 10))}
+                            style={{ fontWeight: 600 }}
+                          >
+                            {MONTH_NAMES.map((mname, idx) => (
+                              <option key={idx + 1} value={idx + 1}>
+                                {mname} ({String(idx + 1).padStart(2, "0")})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="hrms-form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontWeight: 600, fontSize: "12.5px" }}>Calendar Year *</label>
+                          <select
+                            className="form-control"
+                            value={exportYear}
+                            onChange={(e) => setExportYear(parseInt(e.target.value, 10))}
+                            style={{ fontWeight: 600 }}
+                          >
+                            {[2024, 2025, 2026, 2027, 2028, 2029].map((yr) => (
+                              <option key={yr} value={yr}>
+                                {yr}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Quick Month Selectors */}
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Quick Select:</span>
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          style={{ fontSize: "11.5px", padding: "3px 10px" }}
+                          onClick={() => handleSelectQuickMonth("thisMonth")}
+                        >
+                          This Month (October 2026)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          style={{ fontSize: "11.5px", padding: "3px 10px" }}
+                          onClick={() => handleSelectQuickMonth("lastMonth")}
+                        >
+                          Last Month (September 2026)
+                        </button>
+                      </div>
+
+                      {/* Dynamic Month Range Preview Card */}
+                      <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: "6px", padding: "10px 14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "16px" }}>📅</span>
+                        <div>
+                          <div style={{ fontSize: "12.5px", fontWeight: 700, color: "#065f46" }}>
+                            Selected Period: {MONTH_NAMES[exportMonth - 1]} 1, {exportYear} to {MONTH_NAMES[exportMonth - 1]} {daysInSelectedMonth}, {exportYear} ({daysInSelectedMonth} days)
+                            {isLeapYear && exportMonth === 2 ? " • Leap Year (29 Days)" : ""}
+                          </div>
+                          <div style={{ fontSize: "11px", color: "#047857" }}>
+                            Safe calendar-month query: [{calendarMonthStartDate} through {calendarMonthEndDate} inclusive]. No rolling offsets.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mode 2: Custom Date Range Inputs */}
+                  {exportMode === "custom_range" && (
+                    <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                        <div className="hrms-form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontWeight: 600, fontSize: "12.5px" }}>From Date *</label>
+                          <input
+                            type="date"
+                            className="form-control"
+                            value={exportStartDate}
+                            onChange={(e) => setExportStartDate(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <div className="hrms-form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontWeight: 600, fontSize: "12.5px" }}>To Date *</label>
+                          <input
+                            type="date"
+                            className="form-control"
+                            value={exportEndDate}
+                            onChange={(e) => setExportEndDate(e.target.value)}
+                            required
+                          />
+                        </div>
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#475569" }}>
+                        Custom Range: <strong>{exportStartDate}</strong> to <strong>{exportEndDate}</strong>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mode 3: Single Day Input */}
+                  {exportMode === "single_day" && (
+                    <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <div className="hrms-form-group" style={{ marginBottom: 0 }}>
+                        <label style={{ fontWeight: 600, fontSize: "12.5px" }}>Select Single Date *</label>
+                        <input
+                          type="date"
+                          className="form-control"
+                          value={exportSingleDate}
+                          onChange={(e) => setExportSingleDate(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#475569" }}>
+                        Single Day Audit: <strong>{exportSingleDate}</strong> (start and end date are identical)
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Empty State Warning Alert */}
+                {lastExportEmptyNotice && (
+                  <div style={{ background: "#fffbeb", border: "1px solid #fde68a", padding: "12px 16px", borderRadius: "8px", color: "#92400e", fontSize: "13px", display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                    <span style={{ fontSize: "18px", lineHeight: "1" }}>⚠️</span>
+                    <div>
+                      <strong style={{ display: "block", marginBottom: "2px" }}>Empty Export Notice:</strong>
+                      {lastExportEmptyNotice}
+                    </div>
+                  </div>
+                )}
+
+                {/* Fields Included Preview Card */}
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#334155", marginBottom: "8px", textTransform: "uppercase" }}>
+                    📋 Unified Attendance Matrix Workbook (.xlsx)
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "12px", color: "#475569" }}>
+                    <div>
+                      <strong style={{ color: "#0f172a" }}>Worksheet: Attendance Matrix</strong> — Single consolidated worksheet combining employee identification, payroll reconciliation totals, and calendar day attendance (Day 1 to {daysInSelectedMonth}).
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "4px", marginTop: "6px", color: "#64748b" }}>
+                        <div>• Employee Code & Name (Frozen)</div>
+                        <div>• Branch & Department</div>
+                        <div>• Employment Type & DOJ</div>
+                        <div>• Total Working Days & Paid Days</div>
+                        <div>• Present & Absent Days</div>
+                        <div>• Paid & Unpaid Leave</div>
+                        <div>• Total Working & Shift Hours</div>
+                        <div>• Total Overtime & Week-Offs</div>
+                        <div>• Total Holidays & DB Punches</div>
+                        <div>• Daily Status, In/Out (IST) & Hours</div>
+                        <div>• Daily Shift, OT & Regularization</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#059669", marginTop: "10px", borderTop: "1px solid #e2e8f0", paddingTop: "8px", fontWeight: 600 }}>
+                    ✓ Exactly one worksheet. Frozen header rows & employee identification with full horizontal and vertical scrolling.
+                  </div>
+                </div>
+
+                {/* Status Message */}
+                {exportStatusText && (
+                  <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 16px", borderRadius: "8px", color: "#1d4ed8", fontSize: "13px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div style={{ width: "14px", height: "14px", border: "2px solid #93c5fd", borderTopColor: "#1d4ed8", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                    <span>{exportStatusText}</span>
+                  </div>
+                )}
+
+                {/* Download Button */}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 24px", fontSize: "14px", fontWeight: 700 }}
+                    onClick={handleExportExcel}
+                    disabled={isExporting}
+                  >
+                    <IconFileText />
+                    <span>{isExporting ? "Generating Excel..." : "Download Excel (.xlsx)"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================= */}
+
         {/* MODAL 1: ADD / EDIT LEAVE TYPE                                    */}
         {/* ================================================================= */}
         {leaveModalOpen && (

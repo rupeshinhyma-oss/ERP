@@ -719,6 +719,9 @@ class HrmsLiveTrackingSession(Base, UUIDPrimaryKeyMixin, TimestampMixin, Version
     points: Mapped[list["HrmsTrackingPoint"]] = relationship(
         "HrmsTrackingPoint", back_populates="session", cascade="all, delete-orphan", lazy="selectin"
     )
+    stops: Mapped[list["HrmsTrackingStop"]] = relationship(
+        "HrmsTrackingStop", back_populates="session", cascade="all, delete-orphan", lazy="selectin"
+    )
 
 
 class HrmsTrackingPoint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -928,6 +931,100 @@ class HrmsPayrollAdjustment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Relationships
     employee: Mapped["User"] = relationship("User", foreign_keys=[employee_id], lazy="selectin")
+
+
+class HrmsTrackingSettings(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin):
+    """
+    Organization defaults and per-employee overrides for detailed stop detection
+    and geofence return timer configuration.
+    """
+
+    __tablename__ = "hrms_tracking_settings"
+
+    employee_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_detailed_tracking_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    detailed_interval_minutes: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    detailed_stop_threshold_minutes: Mapped[float] = mapped_column(Float, default=5.0, nullable=False)
+    stop_detection_radius_meters: Mapped[float] = mapped_column(Float, default=50.0, nullable=False)
+    max_gps_accuracy_meters: Mapped[float] = mapped_column(Float, default=50.0, nullable=False)
+    return_timer_seconds: Mapped[int | None] = mapped_column(Integer, default=30, nullable=True)
+    is_unlimited_return: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Relationships
+    employee: Mapped["User | None"] = relationship("User", foreign_keys=[employee_id], lazy="selectin")
+    updater: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by], lazy="selectin")
+
+
+class HrmsTrackingStop(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin):
+    """
+    Detected stationary stop for an employee during a live tracking session.
+    """
+
+    __tablename__ = "hrms_tracking_stops"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("hrms_tracking_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    employee_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    duration_minutes: Mapped[float] = mapped_column(Float, nullable=False)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    start_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("hrms_tracking_points.id", ondelete="SET NULL"), nullable=True
+    )
+    end_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("hrms_tracking_points.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Relationships
+    session: Mapped["HrmsLiveTrackingSession"] = relationship("HrmsLiveTrackingSession", back_populates="stops")
+    employee: Mapped["User"] = relationship("User", foreign_keys=[employee_id], lazy="selectin")
+
+
+class HrmsGeofenceViolation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Geofence exit incident and expired return timer violation event log.
+    """
+
+    __tablename__ = "hrms_geofence_violations"
+
+    employee_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    location_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("hrms_locations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("hrms_tracking_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    attendance_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("hrms_attendance.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    exit_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expiry_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    return_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="ACTIVE_EXIT", nullable=False, index=True)
+    distance_meters: Mapped[float] = mapped_column(Float, nullable=False)
+    boundary_radius_meters: Mapped[float] = mapped_column(Float, nullable=False)
+    last_latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    last_longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Relationships
+    employee: Mapped["User"] = relationship("User", foreign_keys=[employee_id], lazy="selectin")
+
 
 
 

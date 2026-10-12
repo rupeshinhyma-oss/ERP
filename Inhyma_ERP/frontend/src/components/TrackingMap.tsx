@@ -7,9 +7,10 @@ export interface MapPoint {
   lat: number;
   lng: number;
   label?: string;
-  type?: "site" | "checkin" | "checkout" | "start" | "end" | "waypoint" | "simulator";
+  type?: "site" | "checkin" | "checkout" | "start" | "end" | "waypoint" | "simulator" | "stop";
   accuracy?: number;
   time?: string;
+  duration?: string;
   address?: string;
 }
 
@@ -217,6 +218,11 @@ export function TrackingMap({
           pinLabel = "•";
           typeName = "GPS Waypoint";
           break;
+        case "stop":
+          color = "#ea580c";
+          pinLabel = "P";
+          typeName = "🛑 Stationary Stop";
+          break;
       }
 
       const marker = new maps.Marker({
@@ -231,6 +237,9 @@ export function TrackingMap({
           const timeHtml = pt.time
             ? `<div style="font-size:12px;color:#475569;margin-top:2px;">Time: <strong>${pt.time}</strong></div>`
             : "";
+          const durationHtml = pt.duration
+            ? `<div style="font-size:12px;color:#c2410c;font-weight:700;margin-top:2px;">Duration: ${pt.duration}</div>`
+            : "";
           const accHtml = pt.accuracy
             ? `<div style="font-size:12px;color:#475569;">Accuracy: <strong>±${Math.round(pt.accuracy)} m</strong></div>`
             : "";
@@ -244,6 +253,7 @@ export function TrackingMap({
                 ${pt.label || typeName}
               </div>
               ${timeHtml}
+              ${durationHtml}
               ${accHtml}
               ${addrHtml}
               <div style="font-size:11px;color:#94a3b8;margin-top:4px;">GPS: ${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}</div>

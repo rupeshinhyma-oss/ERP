@@ -151,18 +151,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "trash", label: "Trash", path: "/trash", icon: "trash", permission: "trash.view" },
     ],
   },
-  {
-    label: "CALL LOG",
-    items: [
-      { key: "call-logs-follow-up", label: "Follow Up Logs", path: "/follow-up/list", icon: "phone" },
-    ],
-  },
-  {
-    label: "LEAD",
-    items: [
-      { key: "leads", label: "Leads", path: "/lead/list", icon: "clipboard" },
-    ],
-  },
 ];
 
 export const PAGE_TITLES: Record<string, string> = {

@@ -1852,3 +1852,182 @@ thead .hrms-sticky-right {
     border-radius: 0 !important;
   }
 }
+
+/* ==========================================================================
+   All-Employee Attendance Calendar Styles
+   ========================================================================== */
+
+.hrms-view-mode-toggle {
+  display: inline-flex;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  gap: 4px;
+}
+
+.hrms-view-mode-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  background: transparent;
+  color: #475569;
+}
+
+.hrms-view-mode-btn.active {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.hrms-all-cal-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 16px;
+}
+
+.hrms-all-cal-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.hrms-all-cal-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.hrms-all-cal-table th,
+.hrms-all-cal-table td {
+  padding: 8px 6px;
+  text-align: center;
+  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.hrms-all-cal-table th.sticky-col,
+.hrms-all-cal-table td.sticky-col {
+  position: sticky;
+  left: 0;
+  background: #ffffff;
+  z-index: 10;
+  text-align: left;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.04);
+}
+
+.hrms-all-cal-table th.sticky-col {
+  background: #f8fafc;
+  z-index: 20;
+}
+
+.hrms-all-cal-cell-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 11px;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+
+.hrms-all-cal-cell-btn:hover {
+  transform: scale(1.12);
+  filter: brightness(0.95);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+.hrms-all-cal-cell-btn.st-present {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.hrms-all-cal-cell-btn.st-late {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.hrms-all-cal-cell-btn.st-half-day {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.hrms-all-cal-cell-btn.st-absent {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.hrms-all-cal-cell-btn.st-leave {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.hrms-all-cal-cell-btn.st-holiday {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.hrms-all-cal-cell-btn.st-weekend {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.hrms-all-cal-cell-btn.st-in-progress {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.hrms-all-cal-cell-btn.st-not-punched {
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px dashed #cbd5e1;
+}
+
+.hrms-all-cal-cell-btn.st-future {
+  background: transparent;
+  color: #cbd5e1;
+}
+
+/* Day Detail Modal */
+.hrms-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: hrmsBackdropFadeIn 0.2s ease forwards;
+}
+
+.hrms-modal-card {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-width: 540px;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+

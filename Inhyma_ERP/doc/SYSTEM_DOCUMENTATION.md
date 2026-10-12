@@ -1123,5 +1123,37 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Passive Mouse Wheel Listener**: Document-level listener detecting `wheel` events on `input[type="number"]` and immediately executing `target.blur()`, preventing inadvertent numeric increments or decrements during page scroll.
 - **Spin-Button Styling Suppression**: Universal CSS removal of `-webkit-outer-spin-button` and `-webkit-inner-spin-button` alongside `-moz-appearance: textfield` to maintain clean visual input boundaries.
 
+### HRMS Enhancements: All-Employee Attendance Calendar & Payroll Excel Export Architecture
+
+#### 1. All-Employee Attendance Calendar (`GET /api/v1/hrms/attendance/all-calendar`)
+- **Multi-Employee Attendance Matrix**: Aggregates month-long attendance records across authorized personnel into a single matrix.
+  - Days 1 through total days in month aligned to day of week.
+  - Daily status resolution: `PRESENT`, `LATE`, `HALF_DAY`, `ON_LEAVE`, `HOLIDAY`, `WEEKEND`, `ABSENT`, `IN_PROGRESS`.
+  - Non-destructive missing punch handling: missing days are not assumed absent unless explicitly evaluated by company HR policy rules.
+- **Granular Role-Based Access Control (RBAC)**:
+  - `Admin` & `HR`: Full organizational access across all branches, departments, and employees.
+  - `Department Managers`: Scoped to direct department reports and supervised personnel (`managed_employee_ids`).
+  - `Standard Employees`: Backend enforces strict self-only scope; attempting to query other employees or company-wide returns 403 Forbidden.
+- **Filtering & Navigation**:
+  - Month and year navigation (`year`, `month` parameters).
+  - Dynamic filter dropdowns for Department, Branch, and Employee text search.
+- **Attendance Day Details Modal**:
+  - Displays punch in/out timestamps (IST), working hours/minutes, shift timings, geofencing verification, approved leave reason, holiday titles, regularization notes, and Loss of Pay (LOP) impact.
+  - Direct deep-link button enabling Admin/Manager to open an individual employee's detailed calendar.
+
+#### 2. Authoritative Payroll Excel Export Engine (`GET /api/v1/hrms/payroll/export`)
+- **Non-Destructive Export Architecture**: Exports actual pre-calculated, verified monthly payroll records from `hrms_monthly_payrolls` and `hrms_monthly_payroll_items`. Downloading the report never modifies or recalculates locked or draft payroll.
+- **Dynamic Salary Component Representation**:
+  - Dynamically builds columns for all configured earning components (e.g. Basic, HRA, Special Allowance) and deduction components (e.g. PF, ESI, Professional Tax).
+  - Avoids hardcoded salary structures; respects organizational rules defined in `hrms_payroll_components`.
+- **Export Formats & Controls**:
+  - Company-wide export: `Payroll_Export_All_Employees_YYYY_MM.xlsx` (includes summary totals row, auto-fitted columns, bold header styling, and currency formatting).
+  - Single employee export: `Payroll_Export_{Employee_Code}_{Name}_YYYY_MM.xlsx`.
+  - Empty month safeguard: Returns clean `404 Not Found` with explanatory error if payroll has not been generated for the target period.
+- **Payroll Privacy & Approval Safeguards**:
+  - Unapproved or draft payroll is restricted from standard employees.
+  - Employees can only download their own approved payslip data.
+  - Salary data and CTC structures are hidden from unauthorized roles.
+
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 29, 2026 (Extended Company Profile Intelligence, Cascading Geographic Hierarchy, Global Autocomplete Blocker, and Wheel Scroll Protection).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: October 10, 2026 (HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, RBAC Scoping, and Geofence Verification).*

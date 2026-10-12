@@ -248,3 +248,63 @@ async def get_hrms_user_context(
         permissions=perms,
         managed_employee_ids=managed_ids,
     )
+
+
+async def resolve_hrms_employee(
+    db: AsyncSession, identifier: str | uuid.UUID | None
+) -> Optional[User]:
+    """
+    Authoritatively resolve an employee identifier to a PostgreSQL User record.
+    Supports:
+    - uuid.UUID instance
+    - UUID string (e.g. 'ea2b5763-5a4d-4f21-8bff-adc3e6cb8235')
+    - Employee code (e.g. 'EMP-000', 'EMP-001')
+    - Username (e.g. 'john', 'admin')
+    Returns User if active and non-deleted, otherwise None.
+    """
+    if identifier is None:
+        return None
+
+    if isinstance(identifier, uuid.UUID):
+        stmt = select(User).where(User.id == identifier, User.deleted_at.is_(None))
+        return (await db.execute(stmt)).scalar_one_or_none()
+
+    str_val = str(identifier).strip()
+    if not str_val or str_val.upper() == "ALL":
+        return None
+
+    # 1. Try UUID parse
+    try:
+        uid = uuid.UUID(str_val)
+        stmt = select(User).where(User.id == uid, User.deleted_at.is_(None))
+        user = (await db.execute(stmt)).scalar_one_or_none()
+        if user:
+            return user
+    except (ValueError, AttributeError):
+        pass
+
+    # 2. Try employee_code or username lookup (case-insensitive)
+    stmt = (
+        select(User)
+        .where(
+            User.deleted_at.is_(None),
+            (func.lower(User.employee_code) == str_val.lower())
+            | (func.lower(User.username) == str_val.lower()),
+        )
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def resolve_hrms_employee_or_404(
+    db: AsyncSession, identifier: str | uuid.UUID | None, error_label: str = "Employee"
+) -> User:
+    """
+    Resolve identifier to User or raise HTTP 404 with a clear user-facing error message.
+    """
+    user = await resolve_hrms_employee(db, identifier)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No linked HRMS employee record found for {error_label.lower()} '{identifier}'.",
+        )
+    return user

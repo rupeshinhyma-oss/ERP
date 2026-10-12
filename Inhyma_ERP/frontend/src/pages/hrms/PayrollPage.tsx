@@ -11,7 +11,8 @@ import {
   IconFileText,
   IconRefresh,
 } from "@/components/icons";
-import { apiDelete, apiGet, apiPost, apiPut, errorMessage } from "@/lib/api";
+import { apiDelete, apiGet, apiPost, apiPut, errorMessage, API_BASE } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { generatePayslipPdf, formatInr } from "@/lib/payrollPayslipPdf";
@@ -776,6 +777,85 @@ export function PayrollPage() {
     }
   };
 
+  // Excel Download Handler
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
+  const handleDownloadPayrollExcel = async (
+    targetEmpId?: string,
+    targetEmpName?: string,
+    targetMonth?: string
+  ) => {
+    const month = targetMonth || selectedMonth || new Date().toISOString().slice(0, 7);
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      showToast("Please select a valid payroll month (YYYY-MM)", "error");
+      return;
+    }
+
+    try {
+      setDownloadingExcel(true);
+      const token = Auth.getAccessToken();
+      const params = new URLSearchParams({ payroll_month: month });
+      if (targetEmpId) {
+        params.append("employee_id", targetEmpId);
+      }
+      params.append("_t", Date.now().toString());
+
+      const res = await fetch(`${API_BASE}/hrms/payroll/export?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+      });
+
+      if (!res.ok) {
+        let errorMsg = `Export failed with status HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          errorMsg = errJson.detail || errJson.message || errJson.errors?.[0]?.message || errorMsg;
+        } catch {
+          const errText = await res.text().catch(() => "");
+          if (errText) errorMsg = errText;
+        }
+        throw new Error(errorMsg);
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const json = await res.json().catch(() => ({}));
+        const msg =
+          json.detail ||
+          json.message ||
+          json.errors?.[0]?.message ||
+          "Received a JSON response instead of an Excel file.";
+        throw new Error(msg);
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition");
+      let filename = `Payroll_Export_${targetEmpName ? targetEmpName.replace(/\s+/g, "_") : "All_Employees"}_${month.replace("-", "_")}.xlsx`;
+      if (disposition && disposition.includes("filename=")) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) {
+          filename = match[1];
+        }
+      }
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(blobUrl);
+      document.body.removeChild(a);
+
+      showToast(`Payroll report downloaded: ${filename}`, "success");
+    } catch (err: any) {
+      showToast(err?.message || "Failed to download payroll report", "error");
+    } finally {
+      setDownloadingExcel(false);
+    }
+  };
+
   // Filtered employees for Tab 2
   const filteredEmployees = useMemo(() => {
     if (!salarySearch.trim()) return employeeSalaries;
@@ -886,6 +966,15 @@ export function PayrollPage() {
                             </button>
                             <button
                               type="button"
+                              className="btn btn-sm btn-outline"
+                              onClick={() => handleDownloadPayrollExcel(ps.employee_id, ps.employee_name, ps.payroll_month)}
+                              style={{ display: "inline-flex", alignItems: "center", gap: "4px", borderColor: "#16a34a", color: "#16a34a" }}
+                              title="Download Excel payslip"
+                            >
+                              <IconFileText /> Excel
+                            </button>
+                            <button
+                              type="button"
                               className="btn btn-sm btn-primary"
                               onClick={() => handleDownloadPdf(ps)}
                               style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
@@ -945,14 +1034,25 @@ export function PayrollPage() {
                   Close
                 </button>
                 {viewingItem && (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => handleDownloadPdf(viewingItem)}
-                    style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-                  >
-                    <IconFileText /> Download PDF
-                  </button>
+                  <div style={{ display: "inline-flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => handleDownloadPayrollExcel(viewingItem.employee_id, viewingItem.employee_name, viewingItem.payroll_month)}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", borderColor: "#16a34a", color: "#16a34a" }}
+                      title="Download Excel payslip"
+                    >
+                      <IconFileText /> Excel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => handleDownloadPdf(viewingItem)}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <IconFileText /> Download PDF
+                    </button>
+                  </div>
                 )}
               </div>
             }
@@ -1654,6 +1754,25 @@ export function PayrollPage() {
                 >
                   <IconRefresh /> {calculating ? "Calculating Attendance..." : "Generate / Recalculate Payroll"}
                 </button>
+
+                <button
+                  type="button"
+                  id="btn-export-all-payroll-excel"
+                  className="btn btn-outline"
+                  disabled={downloadingExcel}
+                  onClick={() => handleDownloadPayrollExcel()}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    borderColor: "#16a34a",
+                    color: "#16a34a",
+                    fontWeight: 600,
+                  }}
+                  title="Download selected month payroll Excel spreadsheet for all authorized personnel"
+                >
+                  <IconFileText /> {downloadingExcel ? "Exporting Excel..." : "Download Excel"}
+                </button>
               </div>
 
               {/* Status and Approval controls */}
@@ -1870,6 +1989,21 @@ export function PayrollPage() {
                                 }}
                               >
                                 View Details
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline"
+                                onClick={() => handleDownloadPayrollExcel(it.employee_id, it.employee_name)}
+                                title="Download Excel for this employee"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  borderColor: "#16a34a",
+                                  color: "#16a34a",
+                                }}
+                              >
+                                Excel
                               </button>
                               {it.status === "APPROVED" && (
                                 <button

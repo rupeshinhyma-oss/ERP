@@ -1108,6 +1108,23 @@ class TrackingStopPayload(BaseModel):
     end_location: dict | None = None
 
 
+class TrackingStopRead(BaseModel):
+    id: uuid.UUID
+    session_id: uuid.UUID
+    employee_id: uuid.UUID
+    employee_name: str | None = None
+    start_time: datetime
+    end_time: datetime
+    duration_minutes: float
+    latitude: float
+    longitude: float
+    address: str | None = None
+    is_active: bool = True
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TrackingSessionRead(BaseModel):
     id: uuid.UUID
     employee_id: uuid.UUID
@@ -1132,8 +1149,11 @@ class TrackingSessionRead(BaseModel):
     start_location: dict | None = None
     end_location: dict | None = None
     route_summary: list | None = None
+    stops: list[TrackingStopRead] | None = None
     is_active: bool | None = False
     is_simulated: bool | None = False
+    is_detailed_tracking_enabled: bool | None = False
+    detailed_interval_minutes: int | None = 5
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -1145,6 +1165,118 @@ class RegularizationEvidenceRead(BaseModel):
     date: date
     site_visits: list[SiteVisitRead] = Field(default_factory=list)
     tracking_sessions: list[TrackingSessionRead] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Tracking Settings & Geofence Verification Schemas
+# ---------------------------------------------------------------------------
+
+class TrackingSettingsRead(BaseModel):
+    id: uuid.UUID | None = None
+    employee_id: uuid.UUID | None = None
+    employee_name: str | None = None
+    employee_code: str | None = None
+    department: str | None = None
+    is_active: bool = True
+    is_detailed_tracking_enabled: bool = False
+    detailed_interval_minutes: int = 5
+    detailed_stop_threshold_minutes: float = 5.0
+    stop_detection_radius_meters: float = 50.0
+    max_gps_accuracy_meters: float = 50.0
+    return_timer_seconds: int | None = 30
+    is_unlimited_return: bool = False
+    updated_by: uuid.UUID | None = None
+    updated_by_name: str | None = None
+    updated_at: datetime | None = None
+    version: int | None = 1
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TrackingSettingsUpdate(BaseModel):
+    is_active: bool = Field(default=True, description="Whether detailed stop detection applies")
+    is_detailed_tracking_enabled: bool = Field(default=False, description="Enable detailed tracking for employee")
+    detailed_interval_minutes: int = Field(default=5, ge=1, le=60, description="Tracking interval in minutes")
+    detailed_stop_threshold_minutes: float = Field(default=5.0, ge=0.0, description="Stationary stop duration threshold in minutes")
+    stop_detection_radius_meters: float = Field(default=50.0, gt=0.0, description="Stop detection cluster radius in meters")
+    max_gps_accuracy_meters: float = Field(default=50.0, gt=0.0, description="Max GPS accuracy acceptable for reliable detection")
+    return_timer_seconds: int | None = Field(default=30, ge=0, description="Return timer in seconds after geofence exit (0 = immediate, None when unlimited)")
+    is_unlimited_return: bool = Field(default=False, description="Explicit No limit flag for return timer")
+
+    @model_validator(mode="after")
+    def validate_return_timer(self) -> "TrackingSettingsUpdate":
+        if self.is_unlimited_return:
+            self.return_timer_seconds = None
+        elif self.return_timer_seconds is None:
+            self.return_timer_seconds = 30
+        return self
+
+
+class DetailedTrackingEmployeeItem(BaseModel):
+    employee_id: uuid.UUID
+    employee_name: str
+    employee_code: str | None = None
+    department: str | None = None
+    is_detailed_tracking_enabled: bool = False
+    detailed_interval_minutes: int = 5
+    detailed_stop_threshold_minutes: float = 5.0
+    updated_at: datetime | None = None
+
+
+class DetailedTrackingEmployeeUpdate(BaseModel):
+    is_detailed_tracking_enabled: bool
+    detailed_interval_minutes: int = Field(default=5, ge=1, le=60)
+    detailed_stop_threshold_minutes: float = Field(default=5.0, ge=1.0)
+
+
+class ReturnTimerEmployeeItem(BaseModel):
+    employee_id: uuid.UUID
+    employee_name: str
+    employee_code: str | None = None
+    department: str | None = None
+    use_org_default: bool = True
+    return_timer_seconds: int | None = 30
+    is_unlimited: bool = False
+    effective_seconds: int | None = 30
+    updated_at: datetime | None = None
+
+
+class ReturnTimerEmployeeUpdate(BaseModel):
+    use_org_default: bool = False
+    return_timer_seconds: int | None = Field(default=30, ge=0)
+    is_unlimited: bool = False
+
+
+class TrackingSettingsOverviewResponse(BaseModel):
+    org_default: TrackingSettingsRead
+    employee_overrides: list[TrackingSettingsRead] = Field(default_factory=list)
+
+
+class EmployeeTrackingSettingsResponse(BaseModel):
+    org_default: TrackingSettingsRead
+    override: TrackingSettingsRead | None = None
+    effective: TrackingSettingsRead
+    has_override: bool = False
+
+
+class GeofenceCheckRequest(BaseModel):
+    latitude: float
+    longitude: float
+    accuracy: float | None = 10.0
+
+
+class GeofenceCheckResponse(BaseModel):
+    is_inside: bool
+    status: str | None = None
+    distance_meters: float
+    boundary_radius_meters: float
+    office_name: str | None = None
+    active_exit: bool = False
+    is_expired: bool = False
+    remaining_seconds: int | None = None
+    is_unlimited: bool = False
+    incident_id: uuid.UUID | None = None
+
 
 
 # ---------------------------------------------------------------------------

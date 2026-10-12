@@ -543,6 +543,8 @@ class HrmsPayrollService:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
+    get_salary_history = get_employee_salary_history
+
     # ---------------------------------------------------------------------------
     # Manual Monthly Adjustments
     # ---------------------------------------------------------------------------

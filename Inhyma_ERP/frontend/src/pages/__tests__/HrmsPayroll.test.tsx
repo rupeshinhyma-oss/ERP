@@ -417,9 +417,50 @@ describe("HRMS Payroll Module — Comprehensive Frontend Tests", () => {
         gross_amount: 35000,
         total_deductions: 2300,
         net_salary: 32700,
-        status: "APPROVED",
       });
     }).not.toThrow();
+  });
+
+  it("PDF Generator: generates and reconciles approved payslip for real PostgreSQL record EMP-000", () => {
+    const doc = generatePayslipPdf({
+      company_name: "Inhyma Enterprises Pvt. Ltd.",
+      employee_name: "Admin",
+      employee_code: "EMP-000",
+      department: "Engineering",
+      designation: "Staff",
+      payroll_month: "2026-10",
+      annual_ctc: 600000.0,
+      monthly_ctc: 50000.0,
+      working_days: 27,
+      present_days: 0.0,
+      paid_leave_days: 0.0,
+      holiday_days: 0,
+      weekend_days: 4,
+      lop_days: 0.0,
+      earnings_breakdown: [
+        { code: "BASIC", name: "Basic Salary", monthly_amount: 25000.0 },
+        { code: "HRA", name: "House Rent Allowance (HRA)", monthly_amount: 10000.0 },
+        { code: "SPECIAL_ALLOWANCE", name: "Special Allowance", monthly_amount: 15000.0 },
+      ],
+      deductions_breakdown: [
+        { code: "PF", name: "Provident Fund (PF)", monthly_amount: 3000.0 },
+        { code: "PT", name: "Professional Tax", monthly_amount: 200.0 },
+      ],
+      additions_breakdown: [],
+      lop_deduction: 0.0,
+      gross_amount: 50000.0,
+      total_deductions: 3200.0,
+      net_salary: 46800.0,
+      status: "APPROVED",
+    });
+
+    expect(doc).toBeDefined();
+    // Validate PDF output buffer
+    const arrayBuf = doc.output("arraybuffer");
+    expect(arrayBuf.byteLength).toBeGreaterThan(10000);
+    // Header check: %PDF
+    const headerStr = String.fromCharCode(...new Uint8Array(arrayBuf.slice(0, 5)));
+    expect(headerStr).toBe("%PDF-");
   });
 });
 

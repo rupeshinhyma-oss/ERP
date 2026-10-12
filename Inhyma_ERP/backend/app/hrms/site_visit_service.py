@@ -26,6 +26,7 @@ from app.hrms.models import (
     HrmsSiteVisit,
     HrmsSiteVisitCheckIn,
     HrmsTrackingPoint,
+    HrmsTrackingStop,
 )
 from app.hrms.schemas import (
     RegularizationEvidenceRead,
@@ -37,6 +38,7 @@ from app.hrms.schemas import (
     TrackingSessionRead,
     TrackingStartPayload,
     TrackingStopPayload,
+    TrackingStopRead,
 )
 from app.users.models import User
 
@@ -130,7 +132,12 @@ class HrmsSiteVisitService:
             updated_at=v.updated_at,
         )
 
-    def to_tracking_session_read(self, s: HrmsLiveTrackingSession) -> TrackingSessionRead:
+    def to_tracking_session_read(
+        self,
+        s: HrmsLiveTrackingSession,
+        is_detailed: bool | None = None,
+        interval_minutes: int | None = None,
+    ) -> TrackingSessionRead:
         emp_name = None
         if s.employee:
             first = s.employee.first_name or ""
@@ -160,6 +167,10 @@ class HrmsSiteVisitService:
         end_lat = s.end_latitude or (s.end_location.get("latitude") if isinstance(s.end_location, dict) else None)
         end_lng = s.end_longitude or (s.end_location.get("longitude") if isinstance(s.end_location, dict) else None)
 
+        stops_read = []
+        if hasattr(s, "stops") and s.stops:
+            stops_read = [self.to_tracking_stop_read(st) for st in s.stops]
+
         return TrackingSessionRead(
             id=s.id,
             employee_id=s.employee_id,
@@ -183,13 +194,80 @@ class HrmsSiteVisitService:
             end_longitude=end_lng,
             start_location=s.start_location,
             route_summary=s.route_summary or [],
+            stops=stops_read,
             is_active=(s.status == "ACTIVE"),
             is_simulated=bool(
                 (isinstance(s.start_location, dict) and s.start_location.get("is_simulated"))
                 or (isinstance(s.end_location, dict) and s.end_location.get("is_simulated"))
             ),
+            is_detailed_tracking_enabled=bool(is_detailed),
+            detailed_interval_minutes=interval_minutes or 5,
             created_at=s.created_at,
         )
+
+    async def to_tracking_session_dto_async(self, s: HrmsLiveTrackingSession) -> TrackingSessionRead:
+        from app.hrms.service import HrmsSetupService
+        setup_svc = HrmsSetupService(self.db)
+        eff = await setup_svc.get_effective_tracking_settings(s.employee_id)
+        return self.to_tracking_session_read(
+            s,
+            is_detailed=eff.is_detailed_tracking_enabled,
+            interval_minutes=eff.detailed_interval_minutes or 5,
+        )
+
+    async def to_tracking_sessions_dto_batch(self, sessions: list[HrmsLiveTrackingSession]) -> list[TrackingSessionRead]:
+        if not sessions:
+            return []
+        from app.hrms.service import HrmsSetupService
+        setup_svc = HrmsSetupService(self.db)
+        emp_ids = list({s.employee_id for s in sessions})
+        settings_map = {}
+        for eid in emp_ids:
+            try:
+                eff = await setup_svc.get_effective_tracking_settings(eid)
+                settings_map[eid] = eff
+            except Exception:
+                pass
+
+        results = []
+        for s in sessions:
+            eff = settings_map.get(s.employee_id)
+            is_det = eff.is_detailed_tracking_enabled if eff else False
+            inv = (eff.detailed_interval_minutes or 5) if eff else 5
+            results.append(self.to_tracking_session_read(s, is_detailed=is_det, interval_minutes=inv))
+        return results
+
+    def to_tracking_stop_read(self, st: HrmsTrackingStop) -> TrackingStopRead:
+        emp_name = None
+        if hasattr(st, "employee") and st.employee:
+            first = st.employee.first_name or ""
+            last = st.employee.last_name or ""
+            emp_name = f"{first} {last}".strip() or st.employee.username
+
+        return TrackingStopRead(
+            id=st.id,
+            session_id=st.session_id,
+            employee_id=st.employee_id,
+            employee_name=emp_name,
+            start_time=st.start_time,
+            end_time=st.end_time,
+            duration_minutes=round(st.duration_minutes, 1),
+            latitude=st.latitude,
+            longitude=st.longitude,
+            address=st.address,
+            is_active=st.is_active,
+            created_at=st.created_at,
+        )
+
+    async def get_stops_for_session(self, session_id: uuid.UUID) -> List[HrmsTrackingStop]:
+        stmt = (
+            select(HrmsTrackingStop)
+            .options(selectinload(HrmsTrackingStop.employee))
+            .where(HrmsTrackingStop.session_id == session_id)
+            .order_by(HrmsTrackingStop.start_time.asc())
+        )
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
 
     # =======================================================================
     # 1. Site Visits (Admin Created)
@@ -442,6 +520,7 @@ class HrmsSiteVisitService:
                 selectinload(HrmsLiveTrackingSession.employee),
                 selectinload(HrmsLiveTrackingSession.site_visit),
                 selectinload(HrmsLiveTrackingSession.points),
+                selectinload(HrmsLiveTrackingSession.stops),
             )
             .where(
                 HrmsLiveTrackingSession.employee_id == employee_id,
@@ -571,6 +650,13 @@ class HrmsSiteVisitService:
         session.total_points = total_count
 
         await self.db.commit()
+
+        # Detailed stationary-stop detection using configured threshold and radius
+        try:
+            await self.process_stationary_stops(session_id, employee_id)
+        except Exception:
+            pass
+
         return len(records)
 
     async def stop_tracking(
@@ -592,6 +678,7 @@ class HrmsSiteVisitService:
                 selectinload(HrmsLiveTrackingSession.employee),
                 selectinload(HrmsLiveTrackingSession.site_visit),
                 selectinload(HrmsLiveTrackingSession.points),
+                selectinload(HrmsLiveTrackingSession.stops),
             )
             .where(HrmsLiveTrackingSession.id == session_id)
         )
@@ -675,6 +762,13 @@ class HrmsSiteVisitService:
         session.route_summary = route_summary
 
         await self.db.commit()
+
+        # Process and close stationary stops on stop_tracking
+        try:
+            await self.process_stationary_stops(session_id, employee_id)
+        except Exception:
+            pass
+
         await self.db.refresh(session)
         return session
 
@@ -688,7 +782,11 @@ class HrmsSiteVisitService:
         """List tracking sessions with RBAC scoping."""
         stmt = (
             select(HrmsLiveTrackingSession)
-            .options(selectinload(HrmsLiveTrackingSession.employee), selectinload(HrmsLiveTrackingSession.site_visit))
+            .options(
+                selectinload(HrmsLiveTrackingSession.employee),
+                selectinload(HrmsLiveTrackingSession.site_visit),
+                selectinload(HrmsLiveTrackingSession.stops),
+            )
         )
 
         if not is_admin:
@@ -759,3 +857,147 @@ class HrmsSiteVisitService:
             site_visits=visits,
             tracking_sessions=trackings,
         )
+
+    # =======================================================================
+    # 5. Detailed Stationary-Stop Detection
+    # =======================================================================
+
+    async def process_stationary_stops(
+        self,
+        session_id: uuid.UUID,
+        employee_id: uuid.UUID,
+    ) -> List[HrmsTrackingStop]:
+        """
+        Detect and update qualifying stationary stops for an active or completed tracking session.
+        Respects effective tracking settings (threshold, radius, GPS accuracy).
+        Idempotent: updates existing open stops and closes stops when movement occurs.
+        """
+        from app.hrms.service import HrmsSetupService
+        setup_svc = HrmsSetupService(self.db)
+        effective_settings = await setup_svc.get_effective_tracking_settings(employee_id)
+
+        if not effective_settings.is_active:
+            return []
+
+        threshold_mins = float(effective_settings.detailed_stop_threshold_minutes)
+        radius_m = float(effective_settings.stop_detection_radius_meters)
+        max_acc = float(effective_settings.max_gps_accuracy_meters)
+
+        # Fetch all points for this session chronologically
+        pts_stmt = (
+            select(HrmsTrackingPoint)
+            .where(HrmsTrackingPoint.session_id == session_id)
+            .order_by(HrmsTrackingPoint.recorded_at.asc())
+        )
+        pts_res = await self.db.execute(pts_stmt)
+        all_points = list(pts_res.scalars().all())
+
+        # Filter reliable points only (poor accuracy points are not assumed stationary)
+        reliable_points = [
+            p for p in all_points
+            if p.accuracy is None or p.accuracy <= max_acc
+        ]
+
+        if len(reliable_points) < 2:
+            return []
+
+        session = await self.db.get(HrmsLiveTrackingSession, session_id)
+        session_is_active = (session.status == "ACTIVE") if session else False
+
+        # Existing persisted stops for this session
+        existing_stops_stmt = (
+            select(HrmsTrackingStop)
+            .where(HrmsTrackingStop.session_id == session_id)
+            .order_by(HrmsTrackingStop.start_time.asc())
+        )
+        existing_stops = list((await self.db.execute(existing_stops_stmt)).scalars().all())
+
+        # Cluster detection
+        clusters: list[list[HrmsTrackingPoint]] = []
+        current_cluster: list[HrmsTrackingPoint] = [reliable_points[0]]
+
+        for i in range(1, len(reliable_points)):
+            prev_pt = reliable_points[i - 1]
+            curr_pt = reliable_points[i]
+
+            # If gap between consecutive samples is > 30 minutes without data, treat as uncertain interval
+            time_gap_secs = (curr_pt.recorded_at - prev_pt.recorded_at).total_seconds()
+            if time_gap_secs > 1800:
+                if len(current_cluster) >= 2:
+                    clusters.append(current_cluster)
+                current_cluster = [curr_pt]
+                continue
+
+            # Distance from cluster anchor (first point of cluster)
+            anchor = current_cluster[0]
+            dist_m = haversine_distance_km(anchor.latitude, anchor.longitude, curr_pt.latitude, curr_pt.longitude) * 1000.0
+
+            if dist_m <= radius_m:
+                current_cluster.append(curr_pt)
+            else:
+                if len(current_cluster) >= 2:
+                    clusters.append(current_cluster)
+                current_cluster = [curr_pt]
+
+        if len(current_cluster) >= 2:
+            clusters.append(current_cluster)
+
+        # Process qualifying stops (strictly greater than configured threshold)
+        qualifying_stops: list[HrmsTrackingStop] = []
+
+        for idx, cluster in enumerate(clusters):
+            start_pt = cluster[0]
+            end_pt = cluster[-1]
+            duration_secs = (end_pt.recorded_at - start_pt.recorded_at).total_seconds()
+            duration_mins = duration_secs / 60.0
+
+            if duration_mins > threshold_mins:
+                avg_lat = sum(p.latitude for p in cluster) / len(cluster)
+                avg_lng = sum(p.longitude for p in cluster) / len(cluster)
+
+                is_last_cluster = (idx == len(clusters) - 1)
+                is_ongoing = is_last_cluster and session_is_active
+
+                # Check if this stop was already recorded
+                matched_stop = None
+                for st in existing_stops:
+                    if abs((st.start_time - start_pt.recorded_at).total_seconds()) < 10.0:
+                        matched_stop = st
+                        break
+
+                if matched_stop:
+                    matched_stop.end_time = end_pt.recorded_at
+                    matched_stop.duration_minutes = round(duration_mins, 1)
+                    matched_stop.end_point_id = end_pt.id
+                    matched_stop.is_active = is_ongoing
+                    matched_stop.latitude = round(avg_lat, 6)
+                    matched_stop.longitude = round(avg_lng, 6)
+                    qualifying_stops.append(matched_stop)
+                else:
+                    new_stop = HrmsTrackingStop(
+                        session_id=session_id,
+                        employee_id=employee_id,
+                        start_time=start_pt.recorded_at,
+                        end_time=end_pt.recorded_at,
+                        duration_minutes=round(duration_mins, 1),
+                        latitude=round(avg_lat, 6),
+                        longitude=round(avg_lng, 6),
+                        address="Stationary Stop Area",
+                        is_active=is_ongoing,
+                        start_point_id=start_pt.id,
+                        end_point_id=end_pt.id,
+                    )
+                    self.db.add(new_stop)
+                    qualifying_stops.append(new_stop)
+
+        # For any previously active stop not in ongoing state, ensure is_active is closed
+        for st in existing_stops:
+            if st not in qualifying_stops and st.is_active:
+                st.is_active = False
+
+        await self.db.commit()
+        for qs in qualifying_stops:
+            await self.db.refresh(qs)
+
+        return qualifying_stops
+

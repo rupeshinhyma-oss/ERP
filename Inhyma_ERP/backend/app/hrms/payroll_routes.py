@@ -29,7 +29,7 @@ from __future__ import annotations
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,7 +38,12 @@ from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.hrms.models import HrmsMonthlyPayroll, HrmsMonthlyPayrollItem
 from app.hrms.payroll_service import HrmsPayrollService
-from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
+from app.hrms.rbac import (
+    HrmsUserContext,
+    get_hrms_user_context,
+    resolve_hrms_employee,
+    resolve_hrms_employee_or_404,
+)
 from app.hrms.schemas import (
     EmployeeSalaryAssignRequest,
     EmployeeSalaryRead,
@@ -254,15 +259,22 @@ async def assign_salary(
 
 @router.get("/salary/history/{employee_id}")
 async def get_salary_history(
-    employee_id: uuid.UUID,
+    employee_id: str,
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsPayrollService = Depends(get_payroll_service),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Admin/HR/Manager: Retrieve salary revision history for an employee."""
-    ctx.require_module_access("payroll")
-    ctx.require_employee_access(employee_id)
+    if not (ctx.is_admin or ctx.is_hr):
+        try:
+            parsed_emp_uuid = uuid.UUID(employee_id.strip())
+            ctx.require_employee_access(parsed_emp_uuid)
+        except ValueError:
+            pass
+    target_user = await resolve_hrms_employee_or_404(db, employee_id, error_label="employee")
+    ctx.require_employee_access(target_user.id)
 
-    history = await service.get_salary_history(employee_id)
+    history = await service.get_salary_history(target_user.id)
     return build_success_response(
         data=[
             {
@@ -527,9 +539,10 @@ async def list_adjustments(
 @router.get("/payslips")
 async def get_payslips(
     payroll_month: Optional[str] = Query(None),
-    employee_id: Optional[uuid.UUID] = Query(None),
+    employee_id: Optional[str] = Query(None),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsPayrollService = Depends(get_payroll_service),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """
     Retrieve payslips.
@@ -539,21 +552,43 @@ async def get_payslips(
     """
     ctx.require_module_access("payroll")
 
+    resolved_emp_id = None
+    if employee_id and employee_id.strip() and employee_id.strip().upper() != "ALL":
+        if not (ctx.is_admin or ctx.is_hr):
+            try:
+                parsed_emp_uuid = uuid.UUID(employee_id.strip())
+                if ctx.is_manager:
+                    if parsed_emp_uuid not in ctx.managed_employee_ids:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You do not have access to payslips of employees outside your department.",
+                        )
+                else:
+                    if parsed_emp_uuid != ctx.user_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You can only access your own salary slips.",
+                        )
+            except ValueError:
+                pass
+        target_user = await resolve_hrms_employee_or_404(db, employee_id, error_label="employee")
+        resolved_emp_id = target_user.id
+
     if not (ctx.is_admin or ctx.is_hr):
         if ctx.is_manager:
-            if employee_id and employee_id not in ctx.managed_employee_ids:
+            if resolved_emp_id and resolved_emp_id not in ctx.managed_employee_ids:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You do not have access to payslips of employees outside your department.",
                 )
         else:
-            if employee_id and employee_id != ctx.user_id:
+            if resolved_emp_id and resolved_emp_id != ctx.user_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You can only access your own salary slips.",
                 )
 
-    target_emp_id = employee_id if (ctx.is_admin or ctx.is_hr or (ctx.is_manager and employee_id)) else ctx.user_id
+    target_emp_id = resolved_emp_id if (ctx.is_admin or ctx.is_hr or (ctx.is_manager and resolved_emp_id)) else ctx.user_id
 
     items = await service.get_employee_payslips(
         employee_id=target_emp_id,
@@ -611,9 +646,104 @@ async def get_payslip_detail(
     )
 
 
+# ===========================================================================
+# Authoritative Payroll Excel Export
+# ===========================================================================
+
+@router.get("/export")
+async def export_payroll_excel(
+    payroll_month: str = Query(..., description="Payroll month in YYYY-MM format (e.g. 2026-09)"),
+    employee_id: Optional[str] = Query(None, description="Optional single employee UUID or employee code filter"),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    service: HrmsPayrollService = Depends(get_payroll_service),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """
+    Download authoritative monthly payroll records to an Excel (.xlsx) workbook.
+    Enforces RBAC scoping & safeguards:
+    - Admin / HR: Company-wide or specific employee.
+    - Department Manager: Scoped strictly to managed department employees. Only approved records.
+    - Employee: Strictly their own approved payslip record.
+    - Draft or unapproved records are NEVER exposed to non-admin/non-HR roles.
+    - Exports existing calculated records without modifying or recalculating payroll.
+    """
+    ctx.require_module_access("payroll")
+    cleaned_month = _validate_payroll_month(payroll_month)
+
+    is_admin = ctx.is_admin or ctx.is_hr
+    allowed_ids = None
+    target_emp_id = None
+    require_approved_only = False
+
+    if employee_id and employee_id.strip() and employee_id.strip().upper() != "ALL":
+        if not is_admin:
+            try:
+                parsed_emp_uuid = uuid.UUID(employee_id.strip())
+                if ctx.is_manager:
+                    if parsed_emp_uuid not in ctx.managed_employee_ids:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Permission denied. You can only export records for your department.",
+                        )
+                else:
+                    if parsed_emp_uuid != ctx.user_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Permission denied. You can only export your own salary statement.",
+                        )
+            except ValueError:
+                pass
+        target_user = await resolve_hrms_employee_or_404(db, employee_id, error_label="employee")
+        target_emp_id = target_user.id
+
+    if is_admin:
+        require_approved_only = False
+    elif ctx.is_manager:
+        require_approved_only = True
+        if target_emp_id:
+            ctx.require_employee_access(target_emp_id)
+        else:
+            allowed_ids = ctx.managed_employee_ids
+    else:
+        # Normal employee: can ONLY export their own approved payroll
+        require_approved_only = True
+        if target_emp_id and target_emp_id != ctx.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. You can only export your own salary statement.",
+            )
+        target_emp_id = ctx.user_id
+
+    from app.hrms.payroll_export_builder import build_monthly_payroll_excel
+
+    buf, count, filename = await build_monthly_payroll_excel(
+        db=service.db,
+        payroll_month=cleaned_month,
+        employee_id=target_emp_id,
+        allowed_employee_ids=allowed_ids,
+        is_admin=is_admin,
+        require_approved_only=require_approved_only,
+    )
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Total-Count": str(count),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Total-Count",
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Serialization Helpers
 # ---------------------------------------------------------------------------
+
 
 def _serialize_payroll_item(item: HrmsMonthlyPayrollItem, fallback_month: str | None = None) -> dict:
     emp = item.employee

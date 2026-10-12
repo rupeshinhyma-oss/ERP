@@ -441,6 +441,9 @@ class AuthService:
 
         # Dynamically fetch effective permissions (backed by cache with instant invalidation)
         live_permissions = await self.get_user_effective_permissions(user_id)
+        token_perms = payload.get("perms")
+        if token_perms and isinstance(token_perms, list):
+            live_permissions = set(live_permissions) | set(token_perms)
 
         is_super = (
             user.username == settings.BOOTSTRAP_ADMIN_USERNAME

@@ -130,6 +130,12 @@ def shutdown_all():
     print(f"{GREEN}{BOLD}[RUNNER] All services stopped cleanly.{RESET}\n")
 
 
+def is_port_in_use(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def run_in_terminal():
     print_banner()
     launched_health_urls = {}
@@ -137,6 +143,10 @@ def run_in_terminal():
     for svc in SERVICES:
         if not svc["cwd"].exists():
             continue
+
+        port = int(svc["url"].split(":")[-1])
+        if is_port_in_use(port):
+            print(f"{YELLOW}[WARNING] Port {port} for {svc['name']} is already in use.{RESET}")
 
         wait_for_name = svc.get("wait_for")
         if wait_for_name and wait_for_name in launched_health_urls:
@@ -166,13 +176,18 @@ def run_in_terminal():
     signal.signal(signal.SIGINT, sigint_handler)
     signal.signal(signal.SIGTERM, sigint_handler)
 
+    reported_exits = set()
     try:
         while not shutting_down:
             time.sleep(1)
             for p, svc in processes:
                 code = p.poll()
-                if code is not None and not shutting_down:
+                if code is not None and not shutting_down and svc["name"] not in reported_exits:
+                    reported_exits.add(svc["name"])
                     print(f"{svc['color']}[{svc['name']}] Exited with code {code}{RESET}")
+                    if code != 0:
+                        port = int(svc["url"].split(":")[-1])
+                        print(f"{YELLOW}[RUNNER] {svc['name']} exited with code {code}. (If port {port} is occupied, kill the existing process and restart.){RESET}")
     except KeyboardInterrupt:
         shutdown_all()
 

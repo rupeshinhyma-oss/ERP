@@ -62,6 +62,19 @@ export interface SiteVisitItem {
   is_simulated?: boolean;
 }
 
+export interface TrackingStopItem {
+  id: string;
+  employee_id?: string;
+  session_id?: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  latitude: number;
+  longitude: number;
+  address?: string;
+  is_active?: boolean;
+}
+
 export interface TrackingSessionItem {
   id: string;
   employee_id: string;
@@ -84,7 +97,10 @@ export interface TrackingSessionItem {
   end_latitude?: number;
   end_longitude?: number;
   route_summary?: RoutePoint[];
+  stops?: TrackingStopItem[];
   is_simulated?: boolean;
+  is_detailed_tracking_enabled?: boolean;
+  detailed_interval_minutes?: number;
 }
 
 export interface EmployeeOption {
@@ -240,6 +256,37 @@ export function SiteVisitPage() {
   const [viewDetailsVisit, setViewDetailsVisit] = useState<SiteVisitItem | null>(null);
   const [viewMapVisit, setViewMapVisit] = useState<SiteVisitItem | null>(null);
   const [viewRouteSession, setViewRouteSession] = useState<TrackingSessionItem | null>(null);
+  const [sessionStops, setSessionStops] = useState<TrackingStopItem[]>([]);
+  const [loadingSessionStops, setLoadingSessionStops] = useState(false);
+
+  useEffect(() => {
+    if (!viewRouteSession) {
+      setSessionStops([]);
+      return;
+    }
+    if (viewRouteSession.stops && viewRouteSession.stops.length > 0) {
+      setSessionStops(viewRouteSession.stops);
+      return;
+    }
+    let isCurrent = true;
+    setLoadingSessionStops(true);
+    apiGet<TrackingStopItem[]>(`/hrms/tracking/${viewRouteSession.id}/stops`)
+      .then((res) => {
+        if (isCurrent && res?.data) {
+          setSessionStops(res.data);
+        }
+      })
+      .catch(() => {
+        if (isCurrent) setSessionStops([]);
+      })
+      .finally(() => {
+        if (isCurrent) setLoadingSessionStops(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [viewRouteSession]);
 
   // Filters for Site Visits
   const [searchTerm, setSearchTerm] = useState("");
@@ -666,6 +713,48 @@ export function SiteVisitPage() {
       );
     });
   }, [simulationMode, simulatedCustomLocation]);
+
+  // Automated periodic GPS collection respecting Mode A (Standard 5m) vs Mode B (Detailed configurable)
+  useEffect(() => {
+    if (!activeSession || activeSession.status !== "ACTIVE" || simulationMode === "SIMULATED") {
+      return;
+    }
+
+    const isDetailed = Boolean(activeSession.is_detailed_tracking_enabled);
+    const intervalMinutes = isDetailed ? (activeSession.detailed_interval_minutes || 5) : 5;
+    const intervalMs = Math.max(30000, intervalMinutes * 60 * 1000);
+
+    const captureAndUploadPoint = async () => {
+      try {
+        const coords = await captureCurrentGps();
+        await apiPost("/hrms/tracking/points", {
+          session_id: activeSession.id,
+          points: [
+            {
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              accuracy: coords.accuracy,
+              recorded_at: new Date().toISOString(),
+            },
+          ],
+        });
+        await fetchActiveTracking();
+      } catch (err) {
+        console.warn("Periodic tracking point upload skipped or failed:", err);
+      }
+    };
+
+    const timer = setInterval(captureAndUploadPoint, intervalMs);
+    return () => clearInterval(timer);
+  }, [
+    activeSession?.id,
+    activeSession?.status,
+    activeSession?.is_detailed_tracking_enabled,
+    activeSession?.detailed_interval_minutes,
+    simulationMode,
+    captureCurrentGps,
+    fetchActiveTracking,
+  ]);
 
   // -------------------------------------------------------------------------
   // Handlers: Check-In & Check-Out (Section 4)
@@ -1647,7 +1736,18 @@ export function SiteVisitPage() {
                           <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#22c55e" }} />
                           ● Tracking Active
                         </div>
-                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                        <div style={{ marginTop: "4px" }}>
+                          {activeSession.is_detailed_tracking_enabled ? (
+                            <span style={{ fontSize: "11px", background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", padding: "2px 8px", borderRadius: "12px", fontWeight: 700 }}>
+                              Mode B: Detailed ({activeSession.detailed_interval_minutes || 5}m GPS • Stop Detection ON)
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: "11px", background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", padding: "2px 8px", borderRadius: "12px", fontWeight: 700 }}>
+                              Mode A: Standard (5m GPS • 30m Summaries)
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
                           Started: <strong>{formatTime(activeSession.start_time)}</strong> • GPS Points: <strong>{activeSession.points_count || activeSession.total_points || 0}</strong>
                         </div>
                       </div>
@@ -1787,6 +1887,7 @@ export function SiteVisitPage() {
                         <thead>
                           <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#475569", background: "#f8fafc" }}>
                             <th style={{ padding: "10px 12px" }}>Employee</th>
+                            <th style={{ padding: "10px 12px" }}>Tracking Mode</th>
                             <th style={{ padding: "10px 12px" }}>Started</th>
                             <th style={{ padding: "10px 12px" }}>Ended</th>
                             <th style={{ padding: "10px 12px" }}>Duration</th>
@@ -1809,6 +1910,17 @@ export function SiteVisitPage() {
                                   {s.is_simulated && (
                                     <span style={{ fontSize: "10px", background: "#fef3c7", color: "#92400e", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
                                       SIMULATED
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: "12px", verticalAlign: "middle" }}>
+                                  {s.is_detailed_tracking_enabled ? (
+                                    <span style={{ fontSize: "11px", background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", padding: "2px 7px", borderRadius: "10px", fontWeight: 700 }}>
+                                      Detailed ({s.detailed_interval_minutes || 5}m)
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: "11px", background: "#e0f2fe", color: "#0369a1", border: "1px solid #bae6fd", padding: "2px 7px", borderRadius: "10px", fontWeight: 600 }}>
+                                      Standard (5m)
                                     </span>
                                   )}
                                 </td>
@@ -2361,6 +2473,21 @@ export function SiteVisitPage() {
                     }
                   }
 
+                  // Add detected stationary stops to map points
+                  if (sessionStops && sessionStops.length > 0) {
+                    sessionStops.forEach((stop, sIdx) => {
+                      points.push({
+                        lat: stop.latitude,
+                        lng: stop.longitude,
+                        type: "stop",
+                        label: `Stop #${sIdx + 1} (${stop.duration_minutes}m)`,
+                        time: `${formatTime(stop.start_time)} – ${formatTime(stop.end_time)}`,
+                        duration: `${stop.duration_minutes} mins`,
+                        address: stop.address,
+                      });
+                    });
+                  }
+
                   return (
                     <TrackingMap
                       points={points}
@@ -2385,6 +2512,62 @@ export function SiteVisitPage() {
                       {viewRouteSession.end_latitude ? `${viewRouteSession.end_latitude.toFixed(4)}, ${viewRouteSession.end_longitude?.toFixed(4)}` : "Destination Coordinates Captured"}
                     </div>
                   </div>
+                </div>
+
+                {/* Stationary Stops Summary */}
+                <div style={{ marginTop: "14px", background: "#f8fafc", padding: "12px 14px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>🛑</span>
+                      <span>Detected Stationary Stops ({sessionStops.length})</span>
+                    </div>
+                    {loadingSessionStops && (
+                      <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>Loading stops...</span>
+                    )}
+                  </div>
+
+                  {sessionStops.length === 0 ? (
+                    <div style={{ fontSize: "12px", color: "#64748b", fontStyle: "italic", padding: "6px 0" }}>
+                      No stationary stops exceeding the configured duration threshold were detected during this tracking session.
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {sessionStops.map((stop, sIdx) => (
+                        <div
+                          key={stop.id || sIdx}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            background: "#ffffff",
+                            padding: "8px 12px",
+                            borderRadius: "6px",
+                            border: "1px solid #e2e8f0",
+                            fontSize: "12px",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ background: "#ea580c", color: "#ffffff", fontWeight: 800, fontSize: "10px", padding: "2px 6px", borderRadius: "4px" }}>
+                              P{sIdx + 1}
+                            </span>
+                            <div>
+                              <div style={{ fontWeight: 600, color: "#0f172a" }}>
+                                {formatTime(stop.start_time)} – {formatTime(stop.end_time)}
+                              </div>
+                              <div style={{ fontSize: "11px", color: "#64748b" }}>
+                                GPS: {stop.latitude.toFixed(5)}, {stop.longitude.toFixed(5)} {stop.address ? `• ${stop.address}` : ""}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <span style={{ background: "#fff7ed", color: "#c2410c", border: "1px solid #fed7aa", padding: "2px 8px", borderRadius: "12px", fontWeight: 700, fontSize: "11.5px" }}>
+                              {stop.duration_minutes} min duration
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

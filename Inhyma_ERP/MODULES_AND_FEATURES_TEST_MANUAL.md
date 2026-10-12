@@ -2168,5 +2168,66 @@ Checklist to execute:
 - [ ] Verify users without update permissions see disabled toggles with `not-allowed` cursor.
 - [ ] Verify non-master modules (Leads, Users, Inquiries, Sales, HRMS) remain completely unaffected and retain their standard status badges.
 
+
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 6, 2026 (Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, and HRMS Full Suite).*
+
+## Section 32: HRMS All-Employee Attendance Calendar & Payroll Excel Export QA Verification
+
+### Feature 1: All-Employee Attendance Calendar View (`/hrms/attendance`)
+- **Admin/HR View Toggle:**
+  - Header displays view mode toggle between **Individual Calendar** and **All Employees Calendar**.
+  - Default view for individual attendance maintains legacy functionality.
+  - Toggling to **All Employees Calendar** loads the monthly attendance matrix for all authorized company personnel.
+- **Attendance Matrix Table (`.hrms-all-cal-table`):**
+  - **Sticky Employee Details Column:** Shows Employee Name, Code (e.g. `EMP-000`), Department, and Branch. Includes an **Open** button that switches directly to that employee's individual calendar.
+  - **Summary Metrics Columns:** Total Present (`P`), Total Absent (`A`), Total Leave (`L`), Total Half Day (`HD`), and Total Working Hours (`Hrs`).
+  - **Date Columns (1..31):** Every calendar day renders with weekday indicator (`Su`, `Mo`, etc.) and colored status badge button:
+    - Green (`P`): Present
+    - Yellow (`L`): Late arrival within/beyond grace
+    - Orange (`HD`): Half Day
+    - Amber (`LV`): Approved Leave
+    - Purple (`H`): Company Holiday
+    - Slate (`WE`): Scheduled Weekend / Weekly Off
+    - Red (`A`): Unexcused Absent (subject to LOP calculation)
+    - Blue (`IP`): In Progress (today's active punch-in)
+- **Attendance Day Details Modal:**
+  - Clicking any date cell opens a modal displaying exact punch in/out timestamps (IST), working minutes/hours, shift timing details, geofence verification status, regularization notes, holiday titles, and approved leave reasons.
+- **Filters & Month Navigation:**
+  - Month/Year selector with `‹ Prev`, `Next ›`, and `Today` quick navigation buttons.
+  - Department filter dropdown.
+  - Branch filter dropdown.
+  - Employee text search filter.
+- **RBAC & Scoping Safeguards:**
+  - Admin & HR see all authorized company personnel.
+  - Managers see only direct reports and supervised department staff.
+  - Standard employees see only their own attendance; backend API returns 403 Forbidden if an employee attempts to query unauthorized personnel or company-wide data.
+
+### Feature 2: Payroll Excel Download (`/hrms/payroll`)
+- **Excel Export Engine (`GET /api/v1/hrms/payroll/export`):**
+  - Uses `openpyxl` to build `.xlsx` reports with professional formatting (dark navy header fill `#1E293B`, white text, bordered data rows, currency formatting `₹#,##0.00`, and formula totals).
+  - Preserves actual pre-calculated payroll records without modifying, recalculating, or locking records on export.
+  - Dynamic earning and deduction columns reflect active configured rules in `hrms_payroll_components` (Basic, HRA, Special Allowance, PF, PT, etc.).
+- **Toolbar & Row Download Actions:**
+  - **Toolbar Export Button (`btn-export-all-payroll-excel`):** Downloads entire authorized payroll register for the selected month as `Payroll_Export_All_Employees_YYYY_MM.xlsx`.
+  - **Table Row Export Button (`Excel`):** Downloads individual employee payroll sheet for the selected month as `Payroll_Export_{Emp_Code}_{Name}_YYYY_MM.xlsx`.
+  - **Employee Payslip Portal Export (`My Salary Slips`):** Non-admin employees can download an Excel version of their approved payslips.
+- **Payroll Safeguards & Validations:**
+  - Empty months (where payroll has not yet been generated) return a clean `404 Not Found` with explanatory message.
+  - Draft / Review unapproved payroll is hidden from regular employees.
+
+### Test Cases
+- [ ] Verify Admin can switch between Individual Calendar and All Employees Calendar on `/hrms/attendance`.
+- [ ] Verify All Employees Calendar displays all authorized personnel with correct month days and weekday offsets.
+- [ ] Verify summary metrics (Present, Absent, Leave, Half Day, Hours) agree with calculated attendance.
+- [ ] Verify clicking an attendance cell opens the Attendance Day Details modal with punch in/out times, working hours, and shift info.
+- [ ] Verify clicking 'Open' on any employee in the matrix switches to that employee's individual calendar.
+- [ ] Verify filtering by department, branch, or employee name filters the matrix table correctly.
+- [ ] Verify non-admin employees can only view their own attendance and receive 403 Forbidden on company-wide attendance queries.
+- [ ] Verify clicking 'Download Excel' on Monthly Payroll toolbar downloads `Payroll_Export_All_Employees_YYYY_MM.xlsx`.
+- [ ] Verify clicking 'Excel' on an employee's row downloads single-employee payroll spreadsheet.
+- [ ] Verify Excel spreadsheet opens properly without corruption and contains valid headers, CTC, Basic, Gross, Deductions, LOP, and Net Pay.
+- [ ] Verify exporting an empty month returns HTTP 404 with a clear message and does not crash or generate empty files.
+- [ ] Verify draft unapproved payroll cannot be exported or viewed by non-admin/non-HR employees.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 10, 2026 (HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, RBAC Scoping, and Geofence Verification).*
