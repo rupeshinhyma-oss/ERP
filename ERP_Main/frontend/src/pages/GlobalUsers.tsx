@@ -371,7 +371,7 @@ export function GlobalUsers() {
       );
     }
     if (m.status === "PENDING") {
-      const isRetryable = m.metadata_json?.is_retryable || m.metadata_json?.sync_status === "FAILED";
+      const isRetryable = m.metadata_json?.is_retryable || m.metadata_json?.sync_status === "FAILED" || true;
       return (
         <span
           className="badge"
@@ -380,8 +380,20 @@ export function GlobalUsers() {
             color: isRetryable ? "#b91c1c" : "#92400e",
             border: `1px solid ${isRetryable ? "#fecaca" : "#fde68a"}`,
             fontSize: "11px",
+            cursor: "pointer",
           }}
-          title={m.metadata_json?.sync_error ? `Sync error: ${m.metadata_json.sync_error}` : "Provisioning pending"}
+          title={m.metadata_json?.sync_error ? `Sync error: ${m.metadata_json.sync_error} (Click to retry)` : "Provisioning pending (Click to retry)"}
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              toast("Retrying provisioning...", "info");
+              await apiPost(`/global/memberships/${m.id}/retry`, {});
+              toast("Provisioning succeeded!", "success");
+              await fetchUsers(true);
+            } catch (err) {
+              toast("Retry failed: " + (err instanceof Error ? err.message : String(err)), "error");
+            }
+          }}
         >
           {isRetryable ? "Pending (Retry)" : "Pending"}
         </span>
@@ -605,7 +617,9 @@ export function GlobalUsers() {
     const isAdmin = isRowUserAdmin(user);
     setEditPassword(userMeta.default_password || userMeta.password || (isAdmin ? "ChangeMe!12345" : ""));
     setShowEditPassword(false);
-    setEditRole(userMeta.role || (isAdmin ? "PLATFORM_SUPER_ADMIN" : "PLATFORM_ADMIN"));
+    const rawRole = userMeta.role;
+    const resolvedRole = isAdmin ? "PLATFORM_SUPER_ADMIN" : (rawRole || "");
+    setEditRole(resolvedRole);
 
     const initialGrants: Record<string, boolean> = {};
     for (const erp of grantableErps) {
@@ -648,6 +662,21 @@ export function GlobalUsers() {
         } catch {
           // Non-blocking
         }
+      } else {
+        // Revoke active platform role assignments if None is selected
+        try {
+          const assignmentsRes = await apiGet<PlatformRoleAssignment[]>(`/global/authz/users/${editingUser.id}/roles`).catch(() => []);
+          const assignments = (assignmentsRes as any)?.data ?? assignmentsRes;
+          if (Array.isArray(assignments)) {
+            for (const a of assignments) {
+              if (a.is_active) {
+                await apiPost(`/global/authz/assignments/${a.id}/revoke`).catch(() => {});
+              }
+            }
+          }
+        } catch {
+          // Non-blocking
+        }
       }
 
       // Handle ERP Access Grants changes (every ERP in the registry)
@@ -656,9 +685,17 @@ export function GlobalUsers() {
           const wanted = !!editGrants[erp.id];
           const mem = getUserMembershipForErp(editingUser.id, erp);
           const label = erp.name || erp.display_name || erp.erp_key || erp.key || "ERP";
-          if (wanted && (!mem || mem.status === "REVOKED")) {
+          if (wanted && (!mem || mem.status === "REVOKED" || mem.status === "PENDING")) {
             try {
-              await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: erp.id });
+              if (mem && mem.status === "PENDING") {
+                try {
+                  await apiPost(`/global/memberships/${mem.id}/retry`, {});
+                } catch {
+                  await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: erp.id });
+                }
+              } else {
+                await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: erp.id });
+              }
             } catch (err) {
               toast(`${label} provisioning warning: ${err instanceof Error ? err.message : String(err)}`, "warning");
             }
@@ -999,21 +1036,25 @@ export function GlobalUsers() {
                             </div>
                             {(() => {
                               const isAdmin = isRowUserAdmin(u);
-                              const userRole = (u as any).metadata?.role || (isAdmin ? "PLATFORM_SUPER_ADMIN" : "PLATFORM_ADMIN");
+                              const rawRole = (u as any).metadata?.role;
+                              const userRole = isAdmin ? "PLATFORM_SUPER_ADMIN" : (rawRole || "");
+                              const isNoneRole = !userRole || userRole === "NONE" || userRole === "none";
                               const roleBadgeLabel = isAdmin || userRole === "PLATFORM_SUPER_ADMIN"
                                 ? "👑 Super Admin"
                                 : userRole === "PLATFORM_ADMIN"
                                   ? "🛡️ Platform Admin"
                                   : userRole === "PLATFORM_OPERATOR"
                                     ? "⚡ Operator"
-                                    : "👁️ Viewer";
+                                    : userRole === "PLATFORM_VIEWER"
+                                      ? "👁️ Viewer"
+                                      : "• None";
                               return (
                                 <span
                                   style={{
                                     display: "inline-block",
                                     fontSize: "11px",
                                     fontWeight: 600,
-                                    color: isAdmin ? "#4f46e5" : "#64748b",
+                                    color: isAdmin ? "#4f46e5" : isNoneRole ? "#94a3b8" : "#64748b",
                                     marginTop: "1px",
                                   }}
                                 >
@@ -1467,7 +1508,7 @@ export function GlobalUsers() {
 
             <div className="form-group">
               <label className="form-label" htmlFor="edit-role">
-                Platform Role <span style={{ color: "var(--color-danger, #ef4444)" }}>*</span>
+                Platform Role
               </label>
               <select
                 id="edit-role"
@@ -1475,13 +1516,14 @@ export function GlobalUsers() {
                 value={editRole}
                 onChange={(e) => setEditRole(e.target.value)}
               >
+                <option value="">None (no ERP_Main permissions)</option>
                 <option value="PLATFORM_SUPER_ADMIN">👑 Platform Super Admin (Full Root System Access)</option>
                 <option value="PLATFORM_ADMIN">🛡️ Platform Admin (Manage Users & Configuration)</option>
                 <option value="PLATFORM_OPERATOR">⚡ Platform Operator (Monitor & Manage Sync/ERPs)</option>
                 <option value="PLATFORM_VIEWER">👁️ Platform Viewer (Read-only System Auditing)</option>
               </select>
               <span className="form-helper">
-                Central role governing authorization level across ERP_Main control plane.
+                Central role governing authorization level across ERP_Main control plane. Leave as None for normal users.
               </span>
             </div>
 
@@ -1814,15 +1856,30 @@ export function GlobalUsers() {
                         Platform Role
                       </span>
                       <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
-                        {isDetailUserAdmin ? (
-                          <span style={{ color: "#4f46e5", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                            👑 Super Admin
-                          </span>
-                        ) : (
-                          <span style={{ color: "#0369a1", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                            🛡️ {((detailUser as any)?.metadata?.role || "PLATFORM_ADMIN").replace("PLATFORM_", "")}
-                          </span>
-                        )}
+                        {(() => {
+                          const rawRole = (detailUser as any)?.metadata?.role;
+                          const userRole = isDetailUserAdmin ? "PLATFORM_SUPER_ADMIN" : (rawRole || "");
+                          const isNoneRole = !userRole || userRole === "NONE" || userRole === "none";
+                          if (isDetailUserAdmin || userRole === "PLATFORM_SUPER_ADMIN") {
+                            return (
+                              <span style={{ color: "#4f46e5", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                👑 Super Admin
+                              </span>
+                            );
+                          }
+                          if (isNoneRole) {
+                            return (
+                              <span style={{ color: "#94a3b8", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                • None (No ERP_Main permissions)
+                              </span>
+                            );
+                          }
+                          return (
+                            <span style={{ color: "#0369a1", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                              🛡️ {userRole.replace("PLATFORM_", "")}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 

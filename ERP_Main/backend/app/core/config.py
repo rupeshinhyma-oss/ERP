@@ -321,12 +321,12 @@ class Settings(BaseSettings):
         Prefers spoke-specific configuration, falling back to FEDERATION_SERVICE_CREDENTIAL
         for backward compatibility if configured.
         """
-        key_norm = (erp_key or "").strip().lower()
-        if key_norm in ("yinglima", "yinglima_erp", "erp-02"):
+        key_norm = (erp_key or "").strip().lower().replace("-", "_")
+        if key_norm in ("yinglima", "yinglima_erp", "erp_02"):
             cred = self.ERP_MAIN_TO_YINGLIMA_SERVICE_CREDENTIAL
             if cred and "CHANGE-ME" not in cred:
                 return cred
-        elif key_norm in ("inhyma", "inhyma_erp", "erp-01"):
+        elif key_norm in ("inhyma", "inhyma_erp", "erp_01"):
             cred = self.ERP_MAIN_TO_INHYMA_SERVICE_CREDENTIAL
             if cred and "CHANGE-ME" not in cred:
                 return cred

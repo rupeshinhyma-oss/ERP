@@ -43,6 +43,9 @@ class ErpMembershipRead(BaseModel):
     metadata_json: dict | None = None
     created_at: datetime
     updated_at: datetime
+    erp_key: str | None = None
+    erp_name: str | None = None
+    erp_display_name: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -58,6 +61,7 @@ class ErpMembershipWithErpSummary(ErpMembershipRead):
 
     erp_key: str
     erp_display_name: str
+    erp_name: str | None = None
 
 
 class InternalMembershipLookupResponse(BaseModel):

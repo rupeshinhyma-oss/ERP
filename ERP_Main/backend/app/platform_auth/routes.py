@@ -48,9 +48,28 @@ async def login(
 @router.get("/me", summary="Fetch the currently authenticated platform admin")
 async def get_me(request: Request, admin: PlatformAdmin = Depends(require_platform_admin)) -> dict:
     """Return the authenticated platform admin's own profile."""
-    return build_success_response(
-        PlatformAdminRead.model_validate(admin).model_dump(mode="json"), request_id=_request_id(request)
-    )
+    data = PlatformAdminRead.model_validate(admin).model_dump(mode="json")
+    role_str = getattr(admin.role, "value", str(admin.role))
+    if role_str == "SUPER_ADMIN":
+        data["permissions"] = ["*"]
+    elif role_str == "PLATFORM_ADMIN":
+        data["permissions"] = [
+            "platform.audit.view",
+            "platform.user.read",
+            "platform.user.create",
+            "platform.user.update",
+            "platform.user.disable",
+        ]
+    elif role_str == "OPERATOR":
+        data["permissions"] = [
+            "platform.audit.view",
+            "platform.user.read",
+            "platform.user.create",
+            "platform.user.update",
+        ]
+    elif role_str == "AUDITOR":
+        data["permissions"] = ["platform.audit.view", "platform.user.read"]
+    return build_success_response(data, request_id=_request_id(request))
 
 
 @router.post("/admins", status_code=status.HTTP_201_CREATED, summary="Create a new platform admin (SUPER_ADMIN only)")

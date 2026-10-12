@@ -36,26 +36,26 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "USERS & ACCESS",
     items: [
-      { key: "users", label: "User & Access", path: "/access/users", icon: "users" },
+      { key: "users", label: "User & Access", path: "/access/users", icon: "users", permission: "platform.user.read" },
     ],
   },
   {
     label: "MONITORING & AUDIT",
     items: [
-      { key: "audit", label: "Global Audit Logs", path: "/monitoring/audit", icon: "fileText" },
+      { key: "audit", label: "Global Audit Logs", path: "/monitoring/audit", icon: "fileText", permission: "platform.audit.view" },
     ],
   },
   {
     label: "SETTINGS",
     items: [
-      { key: "settings-general", label: "ERP_Main Settings", path: "/settings", icon: "settings" },
+      { key: "settings-general", label: "ERP_Main Settings", path: "/settings", icon: "settings", permission: "platform.system.manage" },
     ],
   },
 ];
 
 export const ACCESS_SECTION_TABS: NavItem[] = [
-  { key: "users", label: "Global Users", path: "/access/users", icon: "users" },
-  { key: "roles", label: "Roles", path: "/access/roles", icon: "userCheck", superAdminOnly: true },
+  { key: "users", label: "Global Users", path: "/access/users", icon: "users", permission: "platform.user.read" },
+  { key: "roles", label: "Roles", path: "/access/roles", icon: "userCheck", permission: "platform.system.manage", superAdminOnly: true },
 ];
 
 export const NAV_ITEMS_BY_KEY: Record<string, NavItem> = {};

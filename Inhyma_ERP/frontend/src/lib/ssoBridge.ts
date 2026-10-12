@@ -10,9 +10,11 @@ import { Auth } from "./auth";
 import { apiPost } from "./api";
 import {
   getEcosystemCookie,
+  isExplicitlyLoggedOut,
   setEcosystemCookie,
   type EcosystemSessionData,
 } from "./ecosystemSession";
+
 import type { TokenPair } from "@/types";
 
 export interface SsoHandoverPayload {
@@ -170,10 +172,11 @@ export function routeForCentralSession(thisErpKey: string, s: CentralSessionLike
   const target =
     real.length === 1
       ? erps.find((e) => e.key === real[0])
-      : real.length >= 2
-      ? erps.find((e) => e.key === "control-plane")
-      : undefined;
-  if (!target || !target.hostUrl || target.hostUrl === "#") return { kind: "none" };
+      : erps.find((e) => e.key === "control-plane");
+  if (!target || !target.hostUrl || target.hostUrl === "#") {
+    const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "localhost";
+    return { kind: "redirect", url: createSsoHandoverUrlFromSession(`http://${host}:5170/dashboard`, s) };
+  }
   return { kind: "redirect", url: createSsoHandoverUrlFromSession(target.hostUrl, s) };
 }
 
@@ -195,10 +198,8 @@ export async function processIncomingSsoHandover(): Promise<
   "logged-in" | "already-logged-in" | "not-logged-in"
 > {
   if (typeof window === "undefined") return "not-logged-in";
-
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("sso_handover");
-  const isExplicitLogout = typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true";
 
   let hasValidToken = false;
   let targetSessionId: string | undefined;
@@ -208,6 +209,11 @@ export async function processIncomingSsoHandover(): Promise<
 
   // 1. Process URL Token if present
   if (token) {
+    if (typeof window !== "undefined") {
+      urlParams.delete("sso_handover");
+      const newQuery = urlParams.toString() ? `?${urlParams.toString()}` : "";
+      window.history.replaceState(null, "", `${window.location.pathname}${newQuery}${window.location.hash}`);
+    }
     try {
       const json = atob(token);
       const payload: SsoHandoverPayload = JSON.parse(json);
@@ -229,11 +235,6 @@ export async function processIncomingSsoHandover(): Promise<
         if (payload.allowed_erps) {
           allowedErps = payload.allowed_erps;
         }
-
-        // Clean query parameter from address bar
-        urlParams.delete("sso_handover");
-        const newQuery = urlParams.toString() ? `?${urlParams.toString()}` : "";
-        window.history.replaceState(null, "", `${window.location.pathname}${newQuery}${window.location.hash}`);
       }
     } catch (err) {
       console.warn("Could not parse sso_handover token:", err);
@@ -241,6 +242,7 @@ export async function processIncomingSsoHandover(): Promise<
   }
 
   // If user explicitly logged out and no new SSO token was provided in the URL, DO NOT auto-login
+  const isExplicitLogout = isExplicitlyLoggedOut(targetSessionId);
   if (isExplicitLogout && !hasValidToken) {
     return "not-logged-in";
   }
@@ -269,8 +271,16 @@ export async function processIncomingSsoHandover(): Promise<
 
   if (!hasAccess) {
     console.warn("User is not authorized for Inhyma ERP");
-    if (token) {
-      Auth.clear();
+    Auth.clear();
+    const centralSession: CentralSessionLike = {
+      session_id: targetSessionId,
+      role: targetRole,
+      email: targetEmail,
+      allowed_erps: allowedErps,
+    };
+    const route = routeForCentralSession("inhyma", centralSession);
+    if (route.kind === "redirect" && typeof window !== "undefined") {
+      window.location.replace(route.url);
     }
     return "not-logged-in";
   }
@@ -278,8 +288,8 @@ export async function processIncomingSsoHandover(): Promise<
   // 3. Establish or hydrate local session if already logged in or via valid SSO credentials
   if (Auth.isLoggedIn()) {
     const currentLocalEmail = Auth.getProfile()?.email?.toLowerCase();
-    // If incoming SSO token specifies a different user, clear existing session to enforce User Isolation
-    if (token && targetEmail && currentLocalEmail && currentLocalEmail !== targetEmail.toLowerCase()) {
+    // Clear existing session on email mismatch to enforce User Isolation
+    if (targetEmail && currentLocalEmail && currentLocalEmail !== targetEmail.toLowerCase()) {
       Auth.clear();
     } else {
       if (targetSessionId && !Auth.getSessionId()) {
@@ -317,13 +327,38 @@ export async function processIncomingSsoHandover(): Promise<
         display_name: tokens.user?.username || targetEmail.split("@")[0],
         role: targetRole,
         user_type: targetRole === "super_admin" ? "platform_admin" : "global_user",
-        allowed_erps: allowedErps,
+        allowed_erps: Array.from(new Set([...allowedErps, "inhyma"])),
       };
       setEcosystemCookie(sessionData);
       return "logged-in";
     }
-  } catch (err) {
+  } catch (err: any) {
     console.warn("Auto-login in Inhyma ERP failed:", err);
+    Auth.clear();
+    const centralCookie = getEcosystemCookie();
+    const effectiveAllowed = (centralCookie?.allowed_erps || allowedErps || []).map((k) => String(k).toLowerCase());
+    const realAllowed = effectiveAllowed.filter((k) => k !== "control-plane" && k !== "*" && k !== "inhyma");
+    const centralSession: CentralSessionLike = {
+      session_id: centralCookie?.session_id || targetSessionId,
+      role: centralCookie?.role || targetRole,
+      email: centralCookie?.email || targetEmail,
+      allowed_erps: centralCookie?.allowed_erps || allowedErps,
+    };
+    if (realAllowed.length === 1) {
+      const erps = getEcosystemErps();
+      const target = erps.find((e) => e.key === realAllowed[0]);
+      if (target && target.hostUrl && typeof window !== "undefined") {
+        const redirectUrl = createSsoHandoverUrlFromSession(target.hostUrl, centralSession);
+        window.location.replace(redirectUrl);
+        return "not-logged-in";
+      }
+    }
+    if (typeof window !== "undefined") {
+      const host = getHost();
+      const controlUrl = createSsoHandoverUrlFromSession(`http://${host}:5170/dashboard?sso_error=handover_failed`, centralSession);
+      window.location.replace(controlUrl);
+      return "not-logged-in";
+    }
   }
 
   return "not-logged-in";

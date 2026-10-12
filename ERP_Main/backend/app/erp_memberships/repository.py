@@ -6,6 +6,7 @@ import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.erp_memberships.models import ErpMembership, ErpMembershipStatus
 
@@ -45,7 +46,9 @@ class ErpMembershipRepository:
     async def list_for_user(self, global_user_id: uuid.UUID) -> list[ErpMembership]:
         """List every membership a Global User holds, across all ERPs."""
         result = await self.db.execute(
-            select(ErpMembership).where(ErpMembership.global_user_id == global_user_id)
+            select(ErpMembership)
+            .options(joinedload(ErpMembership.erp_instance))
+            .where(ErpMembership.global_user_id == global_user_id)
         )
         return list(result.scalars().all())
 

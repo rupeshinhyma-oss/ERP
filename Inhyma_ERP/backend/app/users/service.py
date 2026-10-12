@@ -14,6 +14,7 @@ import re
 import secrets
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from app.auth.security import generate_temporary_password, hash_password
 from app.auth.service import AuthService
@@ -145,7 +146,7 @@ class UserService:
         *,
         first_name: str,
         display_name: str,
-        created_by: uuid.UUID,
+        created_by: uuid.UUID | None = None,
         has_login: bool = True,
         email: str | None = None,
         phone: str | None = None,
@@ -357,10 +358,10 @@ class UserService:
 
         return user, password_to_set
 
-    async def update_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID, **fields: object) -> User:
+    async def update_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID | None = None, **fields: Any) -> User:
         """Update a user's profile fields."""
         user = await self.get_by_id_or_raise(user_id)
-        if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
+        if updated_by is not None and await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
 
         username = fields.get("username")
@@ -379,10 +380,12 @@ class UserService:
         if employee_code and isinstance(employee_code, str) and await self.user_repository.employee_code_exists(employee_code, exclude_user_id=user_id):
             raise ConflictException("An account is already linked to that employee code.")
 
-        changes = dict(fields)
+        changes: dict[str, Any] = dict(fields)
         if changes:
             changes["updated_by"] = updated_by
-            await self.user_repository.update(user, **changes)
+            expected_ver = changes.pop("expected_version", None)
+            expected_version: int | None = expected_ver if isinstance(expected_ver, int) else None
+            await self.user_repository.update(user, expected_version=expected_version, **changes)
         return user
 
     # --- Admin: Reset / Set Password ------------------------------------------------
@@ -406,24 +409,24 @@ class UserService:
         return password_to_set
 
     # --- Admin: Activate / Deactivate / Unlock ---------------------------------------
-    async def activate_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
+    async def activate_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID | None = None) -> User:
         """Activate a pending or inactive user account."""
         user = await self.get_by_id_or_raise(user_id)
-        if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
+        if updated_by is not None and await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self.user_repository.update(
             user, status=UserStatus.ACTIVE, is_active=True, updated_by=updated_by
         )
         return user
 
-    async def deactivate_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
+    async def deactivate_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID | None = None) -> User:
         """Deactivate a user account and force-logout all of their active sessions."""
         user = await self.get_by_id_or_raise(user_id)
         if self._is_bootstrap_admin_username(user.username):
             raise ForbiddenException("The system bootstrap administrator account cannot be deactivated.")
-        if user.id == updated_by:
+        if updated_by is not None and user.id == updated_by:
             raise ForbiddenException("You cannot deactivate your own account.")
-        if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
+        if updated_by is not None and await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self._ensure_not_last_super_admin(user_id)
         await self.user_repository.update(
@@ -432,10 +435,10 @@ class UserService:
         await self.auth_service.force_logout_user(user.id, reason="account_deactivated")
         return user
 
-    async def suspend_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
+    async def suspend_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID | None = None) -> User:
         """Suspend a user account and force-logout all of their active sessions."""
         user = await self.get_by_id_or_raise(user_id)
-        if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
+        if updated_by is not None and await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self._ensure_not_last_super_admin(user_id)
         await self.user_repository.update(
@@ -444,10 +447,10 @@ class UserService:
         await self.auth_service.force_logout_user(user.id, reason="account_suspended")
         return user
 
-    async def unlock_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
+    async def unlock_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID | None = None) -> User:
         """Clear a user's failed-login lockout state."""
         user = await self.get_by_id_or_raise(user_id)
-        if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
+        if updated_by is not None and await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         new_status = UserStatus.ACTIVE if user.status == UserStatus.LOCKED else user.status
         await self.user_repository.update(
@@ -461,7 +464,7 @@ class UserService:
         user_id: uuid.UUID,
         role_id: uuid.UUID,
         *,
-        assigned_by: uuid.UUID,
+        assigned_by: uuid.UUID | None = None,
         assignment_type: str = "PRIMARY",
         is_primary: bool = False,
         effective_from=None,

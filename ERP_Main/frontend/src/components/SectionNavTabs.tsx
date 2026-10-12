@@ -6,6 +6,7 @@
  */
 
 import { Link } from "react-router-dom";
+import { useAuth } from "@/lib/hooks";
 import { ICONS, type IconKey } from "./icons";
 
 export interface SectionTabItem {
@@ -14,6 +15,8 @@ export interface SectionTabItem {
   path: string;
   icon?: IconKey;
   badge?: number | string;
+  permission?: string;
+  superAdminOnly?: boolean;
 }
 
 interface SectionNavTabsProps {
@@ -22,6 +25,13 @@ interface SectionNavTabsProps {
 }
 
 export function SectionNavTabs({ items, activeKey }: SectionNavTabsProps) {
+  const { isSuperAdmin, hasPermission } = useAuth();
+  const visibleTabs = items.filter((tab) => {
+    if (tab.superAdminOnly && !isSuperAdmin) return false;
+    if (tab.permission && !hasPermission(tab.permission)) return false;
+    return true;
+  });
+
   return (
     <div
       className="section-nav-tabs"
@@ -35,7 +45,7 @@ export function SectionNavTabs({ items, activeKey }: SectionNavTabsProps) {
         paddingBottom: "1px",
       }}
     >
-      {items.map((tab) => {
+      {visibleTabs.map((tab) => {
         const isActive = tab.key === activeKey;
         const IconComponent = tab.icon ? ICONS[tab.icon] : null;
 

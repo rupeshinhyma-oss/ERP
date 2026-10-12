@@ -33,6 +33,23 @@ router = APIRouter(prefix="/internal/users", tags=["Internal User Provisioning"]
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
+async def _system_actor_id(db: AsyncSession) -> uuid.UUID | None:
+    """
+    Who to record as the actor for changes ERP_Main makes through its service credential.
+
+    users.created_by / updated_by are FOREIGN KEYS to users.id.  The old code stamped a made-up id
+    (00000000-...-0001) that never existed, which PostgreSQL rejects -- so a user could never be created
+    or suspended from ERP_Main.  Use the real bootstrap admin account when present; otherwise None
+    (the columns are nullable), which is always valid.
+    """
+    return await db.scalar(
+        select(User.id).where(
+            func.lower(User.username) == (settings.BOOTSTRAP_ADMIN_USERNAME or "admin").lower(),
+            User.deleted_at.is_(None),
+        )
+    )
+
+
 def require_internal_service_auth(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> None:
@@ -130,17 +147,18 @@ async def provision_local_user(
     """Provision a minimal local user record or return existing."""
     req_id = getattr(request.state, "request_id", "-")
     email_clean = payload.email.strip().lower()
-    stmt = select(User).where(func.lower(User.email) == email_clean, User.deleted_at.is_(None))
+    stmt = select(User).where(func.lower(User.email) == email_clean)
     existing = (await db.execute(stmt)).scalars().first()
     if existing:
+        existing.deleted_at = None
+        existing.is_active = True
+        from app.users.models import UserStatus
+        existing.status = UserStatus.ACTIVE
         if payload.password:
             from app.auth.security import hash_password
             existing.password_hash = hash_password(payload.password)
         existing.must_change_password = False
-        from app.users.models import UserStatus
-        if existing.status == UserStatus.PASSWORD_CHANGE_REQUIRED:
-            existing.status = UserStatus.ACTIVE
-        await db.flush()
+        await db.commit()
         return build_success_response(
             data={
                 "local_user_id": str(existing.id),
@@ -166,7 +184,7 @@ async def provision_local_user(
     dummy_phone = payload.phone or f"+0000{secrets.randbelow(900000) + 100000}"
     temp_pass = f"Tmp!{secrets.token_urlsafe(12)}"
 
-    system_actor_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    system_actor_id = await _system_actor_id(db)
 
     user, _temp_pass = await user_service.create_user(
         first_name=first,
@@ -179,6 +197,7 @@ async def provision_local_user(
         has_login=True,
         created_by=system_actor_id,
     )
+    await db.commit()
 
     return build_success_response(
         data={
@@ -232,7 +251,7 @@ async def set_local_user_access(
     # Same system-actor convention already used by provision_local_user
     # above for calls that originate from ERP_Main's service credential
     # rather than a logged-in local admin.
-    system_actor_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    system_actor_id = await _system_actor_id(db)
 
     # NotFoundException (unknown local_user_id) and ForbiddenException
     # (e.g. "cannot suspend the last active Super Administrator" -- a
@@ -319,4 +338,50 @@ async def deprovision_local_user(
             "status": "REMOVED",
         },
         request_id=req_id,
-    )
+    )
+
+
+class UserInternalLogoutRequest(BaseModel):
+    reason: str | None = "central_ecosystem_logout"
+
+
+@router.post("/{local_user_id}/logout", summary="Force logout user upon ecosystem logout")
+async def logout_local_user(
+    local_user_id: str,
+    request: Request,
+    payload: UserInternalLogoutRequest | None = None,
+    _auth: None = Depends(require_internal_service_auth),
+    db: AsyncSession = Depends(get_db_session),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> dict:
+    """
+    Force logout a local user account when they log out from ERP_Main or another ERP in the ecosystem.
+    Revokes all active sessions, caches revocation timestamp to immediately invalidate tokens,
+    and sends a real-time WebSocket FORCE_LOGOUT disconnect.
+    """
+    req_id = getattr(request.state, "request_id", "-")
+    ident = local_user_id.strip()
+    stmt = select(User)
+    try:
+        user_uuid = uuid.UUID(ident)
+        stmt = stmt.where(User.id == user_uuid)
+    except ValueError:
+        stmt = stmt.where((func.lower(User.email) == ident.lower()) | (func.lower(User.username) == ident.lower()))
+
+    user = (await db.execute(stmt)).scalars().first()
+    if not user:
+        return build_success_response(
+            data={"logged_out": True, "local_user_id": ident, "found": False}, request_id=req_id
+        )
+
+    reason = payload.reason if payload and payload.reason else "central_ecosystem_logout"
+    try:
+        await auth_service.force_logout_user(user.id, reason=reason)
+    except Exception:
+        pass
+
+    return build_success_response(
+        data={"logged_out": True, "local_user_id": str(user.id)},
+        request_id=req_id,
+    )
+

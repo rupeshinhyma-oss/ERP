@@ -123,24 +123,35 @@ export function Login() {
         result.activeMemberships?.length === 1
       ) {
         const singleMem = result.activeMemberships[0];
-        const assignedKey = (singleMem.erp_key || singleMem.erp_name || "yinglima").toLowerCase();
-        const cleanKey = assignedKey.includes("yinglima") ? "yinglima" : assignedKey.includes("inhyma") ? "inhyma" : assignedKey;
+        const rawKey = (
+          singleMem.erp_key ||
+          (singleMem as any).erp_display_name ||
+          singleMem.erp_name ||
+          ""
+        ).toLowerCase().trim();
+        const cleanKey = rawKey.includes("yinglima")
+          ? "yinglima"
+          : rawKey.includes("inhyma")
+          ? "inhyma"
+          : rawKey;
 
-        const prof = result.profile;
-        const profEmail = prof ? ("primary_email" in prof ? prof.primary_email : (prof as any).email) : identifier.trim();
-        const profName = prof?.display_name || identifier.trim();
-        const profRole = prof && "role" in prof ? (prof as any).role : "global_user";
+        if (cleanKey) {
+          const prof = result.profile;
+          const profEmail = prof ? ("primary_email" in prof ? prof.primary_email : (prof as any).email) : identifier.trim();
+          const profName = prof?.display_name || identifier.trim();
+          const profRole = prof && "role" in prof ? (prof as any).role : "global_user";
 
-        const directUrl = resolveSingleErpDirectUrl(singleMem, {
-          email: profEmail,
-          display_name: profName,
-          role: profRole,
-          session_id: Auth.getSessionId() || undefined,
-          allowed_erps: [cleanKey],
-        });
-        if (directUrl) {
-          window.location.assign(directUrl);
-          return;
+          const directUrl = resolveSingleErpDirectUrl(singleMem, {
+            email: profEmail,
+            display_name: profName,
+            role: profRole,
+            session_id: Auth.getSessionId() || undefined,
+            allowed_erps: [cleanKey],
+          });
+          if (directUrl) {
+            window.location.assign(directUrl);
+            return;
+          }
         }
       }
 

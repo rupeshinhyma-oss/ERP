@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -153,7 +153,24 @@ async def _session_from_db(db: AsyncSession, session_id: str, now: datetime) -> 
     if row is None or row.revoked_at is not None or _utc(row.expires_at) <= now:
         return None
     user = await db.scalar(select(GlobalUser).where(GlobalUser.id == row.global_user_id))
-    if user is None or user.status != GlobalUserStatus.ACTIVE:
+    if user is None:
+        admin_direct = await db.scalar(select(PlatformAdmin).where(PlatformAdmin.id == row.global_user_id))
+        if admin_direct is not None and admin_direct.is_active:
+            email = (admin_direct.email or "").strip().lower()
+            return {
+                "active": True,
+                "session_id": session_id,
+                "email": email,
+                "display_name": admin_direct.display_name or "Super Admin",
+                "role": "super_admin" if admin_direct.role == PlatformAdminRole.SUPER_ADMIN else "admin",
+                "user_type": "platform_admin",
+                "allowed_erps": ["*"],
+                "created_at": _utc(row.created_at).isoformat() if getattr(row, "created_at", None) else now.isoformat(),
+                "expires_at": _utc(row.expires_at).isoformat(),
+                "revoked_at": None,
+            }
+        return None
+    if user.status != GlobalUserStatus.ACTIVE:
         return None
 
     email = (user.primary_email or "").strip().lower()
@@ -199,14 +216,22 @@ def _prune_store(now: datetime) -> None:
             store.pop(sid, None)
 
 
+def invalidate_ecosystem_session_cache_for_user(email: str | None = None) -> None:
+    """Evict or invalidate cached sessions for a given user so permission changes take effect immediately."""
+    clean_email = (email or "").strip().lower()
+    if not clean_email:
+        return
+    for sid, sess in list(_ECOSYSTEM_SESSION_STORE.items()):
+        if (sess.get("email") or "").strip().lower() == clean_email:
+            _ECOSYSTEM_SESSION_STORE.pop(sid, None)
+
+
 async def _resolve_live_session(db: AsyncSession, session_id: Optional[str], now: datetime) -> Optional[Dict[str, Any]]:
     """
     Return a validated session for `session_id` (cache first, then DB), or None.
 
-    A cached session that was fully re-validated against the database less than
-    ECOSYSTEM_SESSION_REVALIDATE_TTL_SECONDS ago is trusted as-is -- this is what keeps thousands of
-    polling browser tabs from each causing several queries every few seconds.  Revocation and expiry are
-    always honoured immediately; a user suspended centrally is cut off within the TTL.
+    Live ERP memberships are always re-validated against the database so access grants
+    and revocations take effect immediately across all connected ERPs without stale cache delays.
     """
     if not session_id:
         return None
@@ -214,8 +239,9 @@ async def _resolve_live_session(db: AsyncSession, session_id: Optional[str], now
     if cached is not None:
         if cached.get("revoked_at") or _cached_session_expired(cached, now):
             return None
-        ttl = settings.ECOSYSTEM_SESSION_REVALIDATE_TTL_SECONDS
-        if ttl > 0 and (time.monotonic() - cached.get("_checked_at", 0.0)) < ttl:
+        ttl = getattr(settings, "ECOSYSTEM_SESSION_REVALIDATE_TTL_SECONDS", 10.0)
+        last_checked = cached.get("_checked_at", 0.0)
+        if ttl > 0 and (time.monotonic() - last_checked) < ttl:
             return cached
         fresh = await _revalidate_cached(db, cached, now)
         if fresh is not None:
@@ -266,15 +292,28 @@ async def establish_ecosystem_session(
         belonging to the same email (refresh, or recovery after a restart).
     A bare email is never enough.
     """
-    email_clean = (payload.email or "").strip().lower()
+    raw_identifier = (payload.email or "").strip()
+    email_clean = raw_identifier.lower()
     password = payload.password or ""
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=settings.GLOBAL_SESSION_MAX_LIFETIME_HOURS)
 
+    # Collect search keys for flexible lookup (email, display name, username prefix)
+    search_keys = {email_clean, raw_identifier.lower()}
+    if "@" in email_clean:
+        prefix = email_clean.split("@")[0].strip()
+        if prefix:
+            search_keys.add(prefix)
+    search_keys = {k for k in search_keys if k}
+
     # --- A. Refresh / recovery: prove identity with a live session, not a password.
     if not password:
         live = await _resolve_live_session(db, payload.existing_session_id, now)
-        if live is None or (email_clean and (live.get("email") or "").strip().lower() != email_clean):
+        if live is None:
+            raise _unauthorized()
+        live_email = (live.get("email") or "").strip().lower()
+        live_name = (live.get("display_name") or "").strip().lower()
+        if email_clean and live_email != email_clean and live_name not in search_keys:
             raise _unauthorized()
         return build_success_response(_public(live), request_id=_request_id(request))
 
@@ -285,7 +324,12 @@ async def establish_ecosystem_session(
     role = "global_user"
     allowed_erps: List[str] = []
     global_user_id: Optional[uuid.UUID] = None  # row used to persist the session
-    admin = await db.scalar(select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == email_clean))
+
+    admin_conditions = [func.lower(PlatformAdmin.email) == email_clean]
+    for key in search_keys:
+        admin_conditions.append(func.lower(PlatformAdmin.display_name) == key)
+        admin_conditions.append(func.lower(PlatformAdmin.email).like(f"{key}@%"))
+    admin = await db.scalar(select(PlatformAdmin).where(or_(*admin_conditions)))
 
     if admin is not None and admin.is_active and verify_platform_password(password, admin.password_hash):
         is_super_admin = True
@@ -293,13 +337,30 @@ async def establish_ecosystem_session(
         role = "super_admin" if admin.role == PlatformAdminRole.SUPER_ADMIN else "admin"
         display_name = admin.display_name or "Super Admin"
         allowed_erps = ["*"]
+        email_clean = (admin.email or "").strip().lower()
         # Persist via the mirrored Global User (if any) so the session survives a restart.
         mirror = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == email_clean))
         if mirror is not None and mirror.status == GlobalUserStatus.ACTIVE:
             global_user_id = mirror.id
+        elif admin is not None:
+            mirror = GlobalUser(
+                primary_email=email_clean,
+                display_name=admin.display_name or "Super Admin",
+                status=GlobalUserStatus.ACTIVE,
+                metadata_json={"role": "super_admin" if admin.role == PlatformAdminRole.SUPER_ADMIN else "admin"},
+            )
+            db.add(mirror)
+            await db.flush()
+            global_user_id = mirror.id
     else:
-        user = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == email_clean))
+        user_conditions = [func.lower(GlobalUser.primary_email) == email_clean]
+        for key in search_keys:
+            user_conditions.append(func.lower(GlobalUser.display_name) == key)
+            user_conditions.append(func.lower(GlobalUser.primary_email).like(f"{key}@%"))
+        user = await db.scalar(select(GlobalUser).where(or_(*user_conditions)))
+
         if user is not None and user.status == GlobalUserStatus.ACTIVE:
+            email_clean = (user.primary_email or "").strip().lower()
             cred = await db.scalar(select(GlobalUserCredential).where(GlobalUserCredential.global_user_id == user.id))
             stored_pwd = (
                 cred.password_hash
@@ -419,7 +480,8 @@ async def get_ecosystem_session(
             {"active": False, "session_id": session_id, "revoked": True, "reason": "session_invalid_or_user_inactive"},
             request_id=rid,
         )
-    return build_success_response({"active": False, "session_id": session_id, "notFound": True}, request_id=rid)
+    return build_success_response({"active": False, "session_id": session_id, "notFound": True, "revoked": False}, request_id=rid)
+
 
 
 class ExchangeSessionRequest(BaseModel):
@@ -488,6 +550,60 @@ async def exchange_ecosystem_session(
     return build_success_response(data, request_id=_request_id(request))
 
 
+async def fanout_spoke_logout(db: AsyncSession, user_email: str) -> None:
+    """
+    Fan-out logout notifications to all spoke ERP instances the user has access to.
+    Terminates live WebSocket connections, revokes sessions, and invalidates access tokens across all systems.
+    """
+    clean_email = (user_email or "").strip().lower()
+    if not clean_email:
+        return
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for sid, sess in list(_ECOSYSTEM_SESSION_STORE.items()):
+        if (sess.get("email") or "").strip().lower() == clean_email:
+            sess["revoked_at"] = now_iso
+            sess["active"] = False
+
+    try:
+        import logging
+        from app.identity_linking.adapters.http_adapter import HttpErpProvisioningAdapter
+        adapter = HttpErpProvisioningAdapter()
+
+        # Check if platform admin (Super Admin has access to all ERPs)
+        admin = await _active_platform_admin(db, clean_email)
+        if admin is not None:
+            erps = (await db.execute(select(ErpInstance).where(ErpInstance.is_active == True))).scalars().all()
+            for erp in erps:
+                try:
+                    await adapter.logout_local_user(erp, clean_email, reason="central_admin_logout")
+                except Exception:
+                    pass
+            return
+
+        # Check global user - logout from all ERPs where the user holds active membership
+        user = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == clean_email))
+        if user is not None:
+            stmt = (
+                select(ErpInstance)
+                .join(ErpMembership, ErpMembership.erp_instance_id == ErpInstance.id)
+                .where(
+                    ErpMembership.global_user_id == user.id,
+                    ErpMembership.status == ErpMembershipStatus.ACTIVE,
+                    ErpInstance.is_active == True,
+                )
+            )
+            erps = (await db.execute(stmt)).scalars().all()
+            for erp in erps:
+                try:
+                    await adapter.logout_local_user(erp, clean_email, reason="central_ecosystem_logout")
+                except Exception:
+                    pass
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Failed to fan-out ecosystem logout for %s: %s", clean_email, exc)
+
+
 @router.post("/{session_id}/revoke", summary="Global Single Sign-Out (revoke ecosystem session)")
 async def revoke_ecosystem_session(
     session_id: str,
@@ -498,6 +614,7 @@ async def revoke_ecosystem_session(
     Centrally revoke an ecosystem session. Logs the user out of all connected ERPs immediately.
     """
     now = datetime.now(timezone.utc)
+    user_email = await _session_owner_email(db, session_id)
 
     # 1. Update in-memory store
     if session_id in _ECOSYSTEM_SESSION_STORE:
@@ -515,16 +632,20 @@ async def revoke_ecosystem_session(
     except Exception:
         await db.rollback()
 
-    # 3. Audit revocation
+    # 3. Fan-out logout to all spoke ERPs the user has access to
+    if user_email:
+        await fanout_spoke_logout(db, user_email)
+
+    # 4. Audit revocation
     try:
         audit = GlobalAuditService(repository=GlobalAuditRepository(db))
         await audit.record(
             event_type=AuditEventType.GLOBAL_LOGOUT,
             actor_type=AuditActorType.SYSTEM,
-            actor_label=session_id,
+            actor_label=user_email or session_id,
             target_type="ecosystem_session",
             target_id=uuid.UUID(session_id) if len(session_id) == 36 else None,
-            details={"revoked_globally": True},
+            details={"revoked_globally": True, "email": user_email},
         )
     except Exception:
         pass

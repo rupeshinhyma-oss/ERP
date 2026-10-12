@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
-import { createSsoHandoverUrlFromSession, routeForCentralSession } from "@/lib/ssoBridge";
+import { createSsoHandoverUrlFromSession, processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
 import { setBrandName } from "@/lib/brand";
 import { ErrorBanner } from "@/components/ui";
 import type { Profile, TokenPair } from "@/types";
@@ -99,7 +99,12 @@ export function LoginPage() {
 
   useEffect(() => {
     identifierRef.current?.focus();
-  }, []);
+    processIncomingSsoHandover().then((result) => {
+      if (result === "logged-in" || result === "already-logged-in") {
+        navigate("/dashboard", { replace: true });
+      }
+    });
+  }, [navigate]);
 
   if (Auth.isLoggedIn()) {
     return <Navigate to="/dashboard" replace />;
@@ -141,12 +146,14 @@ export function LoginPage() {
       if (central) {
         const route = routeForCentralSession(ERP_KEY, central);
         if (route.kind === "redirect") {
-          // Not an ERP they were granted (or they have several): send them where they belong.
+          // Not an ERP they were granted (or they have several / none): send them where they belong.
           window.location.href = route.url;
           return;
         }
         if (route.kind === "none") {
-          throw new Error("Your account has not been granted access to any ERP yet. Please contact your administrator.");
+          const host = window.location.hostname || "localhost";
+          window.location.href = createSsoHandoverUrlFromSession(`http://${host}:5170/dashboard`, central);
+          return;
         }
         // This ERP is allowed.  If the local password did not match (for example a password change that has
         // not reached this ERP yet) the verified central session is enough: sign in through the handover.
@@ -168,6 +175,18 @@ export function LoginPage() {
         } catch {
           /* navigate to dashboard regardless */
         }
+      }
+
+      if (!central) {
+        const sessionData = {
+          session_id: sessionId,
+          email: tokens.user?.email || email,
+          display_name: tokens.user?.username || email.split("@")[0],
+          role: (tokens.user?.role === "super_admin" ? "super_admin" : "admin") as any,
+          user_type: (tokens.user?.role === "super_admin" ? "platform_admin" : "global_user") as any,
+          allowed_erps: ["yinglima"],
+        };
+        setEcosystemCookie(sessionData);
       }
 
       navigate("/dashboard", { replace: true });

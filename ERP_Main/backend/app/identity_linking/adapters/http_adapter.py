@@ -42,6 +42,8 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
 
     def _resolve_erp_api_url(self, erp: ErpInstance) -> str:
         import os
+        from app.core.config import EnvironmentEnum, settings
+
         # Check environment variable overrides first (e.g. YINGLIMA_API_URL or INHYMA_API_URL)
         clean_key = (erp.key or "").upper().replace("-", "_")
         env_override = os.environ.get(f"{clean_key}_API_URL")
@@ -51,15 +53,21 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         base = (erp.base_url or "").strip().rstrip("/")
         if base.endswith("/dashboard"):
             base = base[:-len("/dashboard")].rstrip("/")
-        if ":5173" in base:
-            return os.environ.get("YINGLIMA_API_URL", "http://127.0.0.1:8001")
-        if ":5174" in base:
-            return os.environ.get("INHYMA_API_URL", "http://127.0.0.1:8002")
-        if not base or "localhost" in base or "127.0.0.1" in base:
-            if erp.key in ("yinglima", "erp-02"):
-                return os.environ.get("YINGLIMA_API_URL", "http://127.0.0.1:8001")
-            if erp.key in ("inhyma", "erp-01"):
-                return os.environ.get("INHYMA_API_URL", "http://127.0.0.1:8002")
+
+        is_local_env = getattr(settings, "ENVIRONMENT", None) in (EnvironmentEnum.LOCAL, EnvironmentEnum.TEST)
+        key_norm = (erp.key or "").lower().replace("-", "_")
+
+        if is_local_env or not base or "localhost" in base or "127.0.0.1" in base or ":5173" in base or ":5174" in base or "-frontend" in base:
+            if key_norm in ("yinglima", "yinglima_erp", "erp_02", "erp-02"):
+                return os.environ.get("YINGLIMA_API_URL", "http://127.0.0.1:8001").rstrip("/")
+            if key_norm in ("inhyma", "inhyma_erp", "erp_01", "erp-01"):
+                return os.environ.get("INHYMA_API_URL", "http://127.0.0.1:8002").rstrip("/")
+
+        if "-frontend." in base:
+            return base.replace("-frontend.", "-backend.")
+        elif "-frontend" in base:
+            return base.replace("-frontend", "-backend")
+
         return base
 
     def _get_headers(
@@ -328,4 +336,38 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
             logger.warning(
                 "Failed to reach ERP %s at %s to deprovision local user %s: %s", erp.key, url, local_user_id, exc
             )
-            return None
+            return None
+
+    async def logout_local_user(
+        self, erp: ErpInstance, local_user_id_or_email: str, *, reason: str | None = "global_logout"
+    ) -> dict[str, Any] | None:
+        """
+        Trigger immediate force logout of the user across all devices in the target spoke ERP.
+        Terminates live WebSocket connections, revokes local sessions, and invalidates in-flight tokens.
+        Deliberately soft-fails (logs a warning, returns None) rather than raising if unreachable.
+        """
+        if not erp.base_url:
+            logger.warning("ERP instance %s has no base_url configured; cannot logout local user %s.", erp.key, local_user_id_or_email)
+            return None
+
+        url = f"{self._resolve_erp_api_url(erp)}/api/v1/internal/users/{local_user_id_or_email}/logout"
+        try:
+            headers = self._get_headers(erp)
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, json={"reason": reason}, headers=headers)
+                if response.status_code == 200:
+                    return response.json().get("data", {})
+                logger.warning(
+                    "ERP %s rejected force-logout for %s: HTTP %s: %s",
+                    erp.key,
+                    local_user_id_or_email,
+                    response.status_code,
+                    response.text[:200],
+                )
+                return None
+        except Exception as exc:
+            logger.warning(
+                "Failed to reach ERP %s at %s to logout user %s: %s", erp.key, url, local_user_id_or_email, exc
+            )
+            return None
+

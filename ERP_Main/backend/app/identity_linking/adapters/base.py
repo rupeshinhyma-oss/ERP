@@ -69,3 +69,11 @@ class BaseErpProvisioningAdapter(ABC):
         Remove/deprovision a local user account when access is removed in ERP_Main.
         """
         return None
+
+    async def logout_local_user(
+        self, erp: ErpInstance, local_user_id_or_email: str, *, reason: str | None = None
+    ) -> dict[str, Any] | None:
+        """
+        Force logout a local user account across all devices in the target spoke ERP.
+        """
+        return None

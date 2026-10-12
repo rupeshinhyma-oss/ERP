@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPatch } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
 import { SectionNavTabs } from "@/components/SectionNavTabs";
@@ -88,10 +88,10 @@ export function ErpRegistry() {
     setActionLoading(true);
     try {
       if (confirmAction === "decommission") {
-        await apiPost(`/global/erps/${selectedErp.id}/decommission`);
+        await apiPatch(`/global/erps/${selectedErp.id}/status`, { status: "DECOMMISSIONED" });
         toast(`ERP ${selectedErp.name} decommissioned.`, "info");
       } else {
-        await apiPost(`/global/erps/${selectedErp.id}/reactivate`);
+        await apiPatch(`/global/erps/${selectedErp.id}/status`, { status: "ACTIVE" });
         toast(`ERP ${selectedErp.name} reactivated.`, "success");
       }
       setSelectedErp(null);

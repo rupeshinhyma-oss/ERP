@@ -14,7 +14,7 @@
  * /dashboard. It is now imported and routed below.
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { setUnauthorizedHandler } from "@/lib/api";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
@@ -123,10 +123,13 @@ export function App() {
   // genuine fresh auto-login ("logged-in") should redirect to /dashboard;
   // "already-logged-in" means nothing changed, so the user's current page
   // (wherever they navigated to) is left alone.
+  const ssoProcessedRef = useRef(false);
   useEffect(() => {
     if (window.location.pathname.startsWith("/auth/callback")) {
       return;
     }
+    if (ssoProcessedRef.current) return;
+    ssoProcessedRef.current = true;
     processIncomingSsoHandover().then((result) => {
       if (result === "logged-in") {
         navigate("/dashboard", { replace: true });

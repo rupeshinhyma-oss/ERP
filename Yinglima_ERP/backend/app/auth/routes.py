@@ -191,7 +191,8 @@ async def change_password(
         user, current_password=payload.current_password, new_password=payload.new_password
     )
     # One password per person across ERP_Main and every ERP (best effort; never fails the change).
-    await push_password_to_erp_main(user.email, payload.new_password)
+    if user.email:
+        await push_password_to_erp_main(user.email, payload.new_password)
     await audit_service.record(
         action=AuditAction.PASSWORD_CHANGE,
         module="auth",
@@ -318,11 +319,15 @@ async def sso_handover_login(
         raise UnauthorizedException("Identity mismatch in SSO token.")
 
     # ERP Isolation Enforcement
-    erp_key = getattr(settings, "ERP_KEY", "").lower()
-    if not erp_key:
-        erp_key = "yinglima" if "yinglima" in settings.APP_NAME.lower() else "inhyma"
+    my_erp_keys = {
+        getattr(settings, "ERP_KEY", "yinglima").lower(),
+        getattr(settings, "ERP_INSTANCE_ID", "erp-02").lower(),
+        "yinglima",
+        "erp-02",
+    }
+    my_erp_keys = {k for k in my_erp_keys if k}
     allowed_erps = [str(k).lower() for k in (token_data.get("allowed_erps") or ["*"])]
-    if "*" not in allowed_erps and erp_key not in allowed_erps:
+    if "*" not in allowed_erps and not my_erp_keys.intersection(allowed_erps):
         raise ForbiddenException(f"User '{req_email}' is not authorized to access this ERP.")
 
     # Central verification: the handover token is built in the browser, so it proves nothing by itself.
@@ -337,22 +342,58 @@ async def sso_handover_login(
             raise UnauthorizedException(
                 "Could not confirm your session with ERP_Main. Please try again in a moment."
             ) from exc
-        if not central.get("active") or central.get("revoked"):
+        if not central.get("active") or (central.get("revoked") and not central.get("notFound")):
             raise UnauthorizedException("Your central session is no longer active. Please sign in again.")
+        if central.get("notFound") and not central.get("active"):
+            raise UnauthorizedException("SSO handover requires an active central session. Please sign in again.")
         if (central.get("email") or "").strip().lower() != req_email:
             raise UnauthorizedException("Identity mismatch in SSO session.")
         central_allowed = [str(k).lower() for k in (central.get("allowed_erps") or [])]
-        if "*" not in central_allowed and erp_key not in central_allowed:
+        central_role = str(central.get("role") or "").lower()
+        if central_role != "super_admin" and "*" not in central_allowed and not my_erp_keys.intersection(central_allowed):
             raise ForbiddenException(f"User '{req_email}' is not authorized to access this ERP.")
 
     # Resolve local user
-    stmt = select(User).where(func.lower(User.email) == req_email, User.deleted_at.is_(None))
+    stmt = select(User).where(func.lower(User.email) == req_email)
     user = (await db.execute(stmt)).scalars().first()
-    if not user:
-        raise UnauthorizedException(f"Local account for '{req_email}' does not exist.")
+    if user:
+        if user.deleted_at is not None or not user.is_active or not user.can_login:
+            from app.users.models import UserStatus
+            user.deleted_at = None
+            user.is_active = True
+            user.status = UserStatus.ACTIVE
+            await db.flush()
+    else:
+        # Auto-provision minimal local user on confirmed central handover
+        from app.api.v1.internal_users import _system_actor_id
+        from app.users.repository import UserRepository
+        from app.users.service import UserService
+        import secrets
 
-    if not user.is_active or not user.can_login:
-        raise ForbiddenException(f"Account for '{req_email}' is inactive or suspended in this ERP.")
+        user_service = UserService(
+            user_repository=UserRepository(db),
+            user_role_repository=rbac_service.user_role_repository,
+            rbac_service=rbac_service,
+            auth_service=auth_service,
+        )
+        system_actor_id = await _system_actor_id(db)
+        display_name = str(token_data.get("user") or req_email.split("@")[0])
+        first = display_name.split()[0]
+        last = display_name.split()[-1] if len(display_name.split()) > 1 else None
+        dummy_phone = f"+0000{secrets.randbelow(900000) + 100000}"
+        temp_pass = f"Tmp!{secrets.token_urlsafe(12)}"
+        user, _ = await user_service.create_user(
+            first_name=first,
+            last_name=last,
+            display_name=display_name,
+            email=req_email,
+            username=req_email.split("@")[0],
+            phone=dummy_phone,
+            password=temp_pass,
+            has_login=True,
+            created_by=system_actor_id,
+        )
+        await db.flush()
 
     access_token, refresh_token = await auth_service.issue_session_for_federated_user(user, context)
     roles = await rbac_service.list_roles_for_user(user.id)

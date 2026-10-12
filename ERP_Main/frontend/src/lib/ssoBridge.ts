@@ -10,6 +10,7 @@ import { apiGet, apiPost } from "./api";
 import {
   getEcosystemCookie,
   setEcosystemCookie,
+  isExplicitlyLoggedOut,
   type EcosystemSessionData,
 } from "./ecosystemSession";
 import type { PlatformAdmin } from "@/types";
@@ -90,7 +91,7 @@ export const ECOSYSTEM_ERPS = getEcosystemErps();
 export function createSsoHandoverUrl(
   targetBaseUrl: string,
   targetPath?: string,
-  userOverride?: { email?: string; user?: string; role?: string; allowed_erps?: string[]; session_id?: string }
+  userOverride?: { email?: string; user?: string; role?: string | null; allowed_erps?: string[]; session_id?: string }
 ): string {
   if (!targetBaseUrl) return "#";
 
@@ -151,19 +152,29 @@ export function resolveSingleErpDirectUrl(
   membership: {
     erp_key?: string;
     erp_name?: string;
+    erp_display_name?: string;
     erp_instance_id?: string;
   },
   userContext?: {
     email?: string;
     display_name?: string;
-    role?: string;
+    role?: string | null;
     session_id?: string;
     allowed_erps?: string[];
   }
 ): string | null {
   const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
   const isLocal = isLocalhost(host);
-  const erpKey = (membership.erp_key || membership.erp_name || "").toLowerCase();
+
+  let erpKey = (membership.erp_key || membership.erp_display_name || membership.erp_name || "").toLowerCase().trim();
+  if (!erpKey && userContext?.allowed_erps) {
+    const fromContext = userContext.allowed_erps.find((k) => k && k !== "*" && k !== "control-plane");
+    if (fromContext) {
+      erpKey = fromContext.toLowerCase().trim();
+    }
+  }
+
+  if (!erpKey) return null;
 
   let targetHostUrl = "";
   let cleanErpKey = "";
@@ -175,7 +186,7 @@ export function resolveSingleErpDirectUrl(
     cleanErpKey = "inhyma";
   } else {
     const matched = getEcosystemErps().find(
-      (e) => e.key !== "control-plane" && (e.key.toLowerCase().includes(erpKey) || erpKey.includes(e.key.toLowerCase()))
+      (e) => e.key !== "control-plane" && (e.key.toLowerCase() === erpKey || e.key.toLowerCase().includes(erpKey) || erpKey.includes(e.key.toLowerCase()))
     );
     if (matched) {
       targetHostUrl = matched.hostUrl;
@@ -183,7 +194,7 @@ export function resolveSingleErpDirectUrl(
     }
   }
 
-  if (!targetHostUrl) return null;
+  if (!targetHostUrl || !cleanErpKey) return null;
   return createSsoHandoverUrl(
     targetHostUrl,
     undefined,
@@ -191,9 +202,9 @@ export function resolveSingleErpDirectUrl(
       ? {
         email: userContext.email,
         user: userContext.display_name,
-        role: userContext.role,
+        role: userContext.role || undefined,
         session_id: userContext.session_id,
-        allowed_erps: userContext.allowed_erps || [cleanErpKey],
+        allowed_erps: [cleanErpKey],
       }
       : {
         allowed_erps: [cleanErpKey],
@@ -229,8 +240,6 @@ export async function processIncomingSsoHandover(): Promise<
 
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("sso_handover");
-  const isExplicitLogout = typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true";
-
   let hasValidToken = false;
   let targetSessionId: string | undefined;
   let targetRole: "super_admin" | "admin" | "global_user" = "super_admin";
@@ -264,6 +273,7 @@ export async function processIncomingSsoHandover(): Promise<
   }
 
   // If user explicitly logged out and no new SSO token was provided in the URL, DO NOT auto-login
+  const isExplicitLogout = isExplicitlyLoggedOut(targetSessionId);
   if (isExplicitLogout && !hasValidToken) {
     return "not-logged-in";
   }
@@ -290,14 +300,22 @@ export async function processIncomingSsoHandover(): Promise<
   // page on every truthy result would otherwise reload every time this
   // runs while already logged in, forever.
   if (Auth.isLoggedIn()) {
-    if (targetSessionId && !Auth.getSessionId()) {
-      const currentProfile = Auth.getProfile();
-      const currentToken = Auth.getAccessToken();
-      if (currentToken) {
-        Auth.setSession(currentToken, currentProfile || undefined, Auth.getPrincipalType() || undefined, undefined, targetSessionId);
+    const profile = Auth.getProfile();
+    const currentLocalEmail = (
+      (profile && ("primary_email" in profile ? profile.primary_email : profile.email)) || ""
+    ).toLowerCase();
+    if (targetEmail && currentLocalEmail && currentLocalEmail !== targetEmail.toLowerCase()) {
+      Auth.clear();
+    } else {
+      if (targetSessionId && !Auth.getSessionId()) {
+        const currentProfile = Auth.getProfile();
+        const currentToken = Auth.getAccessToken();
+        if (currentToken) {
+          Auth.setSession(currentToken, currentProfile || undefined, Auth.getPrincipalType() || undefined, undefined, targetSessionId);
+        }
       }
+      return "already-logged-in";
     }
-    return "already-logged-in";
   }
 
   // 3. Sign THIS person in to ERP_Main.  The handover only carries a central session id; ERP_Main

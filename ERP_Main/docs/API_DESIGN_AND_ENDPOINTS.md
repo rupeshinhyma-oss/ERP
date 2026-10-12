@@ -19,6 +19,65 @@
 | `POST` | `/api/v1/global/ecosystem-session/exchange` | Exchange verified central session for authenticated user token | Session ID + Email |
 | `POST` | `/api/v1/global/ecosystem-session/{session_id}/revoke` | Revoke central ecosystem session across all ERPs | Authenticated |
 
+### Ecosystem Session Verification Contract (`GET /api/v1/global/ecosystem-session/{session_id}`)
+
+To avoid spurious "false logout" loops during inter-ERP switching or control-plane server restarts, this endpoint enforces a 3-way disambiguated status contract:
+
+1. **Active & Valid Session (`HTTP 200`):**
+   ```json
+   {
+     "success": true,
+     "data": {
+       "valid": true,
+       "session": {
+         "session_id": "c138f...-...",
+         "user_id": "00000000-0000-0000-0000-000000000001",
+         "email": "admin@inhyma.com",
+         "role": "super_admin",
+         "accessible_erps": ["erp-01", "erp-02", "inhyma", "yinglima"],
+         "primary_erp": "erp-01",
+         "expires_at": "2026-10-17T10:00:00Z"
+       },
+       "revoked": false,
+       "notFound": false
+     }
+   }
+   ```
+
+2. **Session Not Found / Expired (`HTTP 200`):**
+   - Returned when the session ID does not match any active in-memory or persisted DB record (e.g. wiped after backend restart or invalid cookie).
+   - **Crucial Invariant:** Returns `revoked: false` and `notFound: true`.
+   - Spoke frontends and background watchers treat `notFound` as an ignorable state, retaining the local authenticated session rather than triggering an aggressive `FORCE_LOGOUT` purge.
+   ```json
+   {
+     "success": true,
+     "data": {
+       "valid": false,
+       "session": null,
+       "revoked": false,
+       "notFound": true,
+       "reason": "Session not found"
+     }
+   }
+   ```
+
+3. **Explicitly Revoked Session (`HTTP 200`):**
+   - Returned ONLY when a user actively clicks "Logout" or an administrator revokes the session.
+   - Sets `revoked: true` and `notFound: false`.
+   - All spoke ERP instances immediately invalidate local JWTs, clear storage, and redirect the user to `/login`.
+   ```json
+   {
+     "success": true,
+     "data": {
+       "valid": false,
+       "session": null,
+       "revoked": true,
+       "notFound": false,
+       "reason": "Session explicitly revoked by user logout"
+     }
+   }
+   ```
+
 ---
 
 ## 2. Global Identity & Access Governance (`/global/users`)

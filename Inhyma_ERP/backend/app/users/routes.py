@@ -479,7 +479,7 @@ async def reset_password(
     )
     # One password per person across ERP_Main and every ERP (best effort; never fails the reset).
     target = await user_service.user_repository.get_by_id(user_id)
-    if target is not None and password_set:
+    if target is not None and target.email and password_set:
         await push_password_to_erp_main(target.email, password_set)
     await _record_user_action(
         audit_service=audit_service,

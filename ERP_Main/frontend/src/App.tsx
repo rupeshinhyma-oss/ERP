@@ -68,6 +68,27 @@ import { SettingsHub } from "./pages/SettingsHub";
 import { Forbidden } from "./pages/Forbidden";
 import { initGlobalAutocompleteBlocker } from "./lib/autocompleteBlocker";
 
+import { Auth } from "./lib/auth";
+
+interface ProtectedRouteProps {
+  permission?: string;
+  superAdminOnly?: boolean;
+  children: React.ReactElement;
+}
+
+function ProtectedRoute({ permission, superAdminOnly, children }: ProtectedRouteProps) {
+  if (!Auth.isLoggedIn()) {
+    return <Navigate to="/login" replace />;
+  }
+  if (superAdminOnly && !Auth.isSuperAdmin()) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  if (permission && !Auth.hasPermission(permission)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return children;
+}
+
 export function App() {
   const navigate = useNavigate();
 
@@ -112,21 +133,70 @@ export function App() {
           <Route path="/erps/launcher" element={<Navigate to="/dashboard" replace />} />
           <Route path="/my-erps" element={<Navigate to="/dashboard" replace />} />
           <Route path="/launcher" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/erps/registry" element={<ErpRegistry />} />
+          <Route
+            path="/erps/registry"
+            element={
+              <ProtectedRoute permission="platform.system.manage">
+                <ErpRegistry />
+              </ProtectedRoute>
+            }
+          />
           {/* ErpInstances and ErpModules removed (2026, approved): redundant
               list views with no unique backend/capability of their own --
               see the removed-pages note in this file's header comment. */}
           <Route path="/erps/instances" element={<Navigate to="/erps/registry" replace />} />
           <Route path="/erps/modules" element={<Navigate to="/erps/registry" replace />} />
-          <Route path="/erps/:id" element={<ErpDetail />} />
+          <Route
+            path="/erps/:id"
+            element={
+              <ProtectedRoute permission="platform.system.manage">
+                <ErpDetail />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Section 3: Users & Access */}
           <Route path="/access" element={<Navigate to="/access/users" replace />} />
-          <Route path="/access/users" element={<GlobalUsers />} />
-          <Route path="/access/users/:id" element={<GlobalUsers />} />
-          <Route path="/users" element={<GlobalUsers />} />
-          <Route path="/users/:id" element={<GlobalUsers />} />
-          <Route path="/access/roles" element={<PlatformAuthz />} />
+          <Route
+            path="/access/users"
+            element={
+              <ProtectedRoute permission="platform.user.read">
+                <GlobalUsers />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/access/users/:id"
+            element={
+              <ProtectedRoute permission="platform.user.read">
+                <GlobalUsers />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute permission="platform.user.read">
+                <GlobalUsers />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users/:id"
+            element={
+              <ProtectedRoute permission="platform.user.read">
+                <GlobalUsers />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/access/roles"
+            element={
+              <ProtectedRoute permission="platform.system.manage" superAdminOnly>
+                <PlatformAuthz />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/access/permissions" element={<Navigate to="/access/roles" replace />} />
           {/* Memberships page removed (2026, approved): never routed here
               even before removal, and redundant with what GlobalUsers
@@ -134,8 +204,22 @@ export function App() {
           <Route path="/access/memberships" element={<Navigate to="/access/users" replace />} />
           <Route path="/memberships" element={<Navigate to="/access/users" replace />} />
           <Route path="/access/policies" element={<Navigate to="/access/roles" replace />} />
-          <Route path="/authz" element={<PlatformAuthz />} />
-          <Route path="/conflicts" element={<IdentityConflicts />} />
+          <Route
+            path="/authz"
+            element={
+              <ProtectedRoute permission="platform.system.manage" superAdminOnly>
+                <PlatformAuthz />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/conflicts"
+            element={
+              <ProtectedRoute permission="platform.user.read">
+                <IdentityConflicts />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Section 4: Organizations (removed - redirect to dashboard) */}
           <Route path="/organizations" element={<Navigate to="/dashboard" replace />} />
@@ -152,15 +236,57 @@ export function App() {
 
           {/* Section 7: Monitoring & Audit (Audit Logs Only) */}
           <Route path="/monitoring" element={<Navigate to="/monitoring/audit" replace />} />
-          <Route path="/monitoring/audit" element={<GlobalAudit />} />
-          <Route path="/audit" element={<GlobalAudit />} />
+          <Route
+            path="/monitoring/audit"
+            element={
+              <ProtectedRoute permission="platform.audit.view">
+                <GlobalAudit />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/audit"
+            element={
+              <ProtectedRoute permission="platform.audit.view">
+                <GlobalAudit />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/monitoring/*" element={<Navigate to="/monitoring/audit" replace />} />
-          <Route path="/health" element={<Health />} />
-          <Route path="/reporting" element={<Reporting />} />
+          <Route
+            path="/health"
+            element={
+              <ProtectedRoute permission="platform.system.manage">
+                <Health />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reporting"
+            element={
+              <ProtectedRoute permission="platform.audit.view">
+                <Reporting />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Section 8: Settings (ERP_Main Settings Only) */}
-          <Route path="/settings" element={<SettingsHub />} />
-          <Route path="/settings/general" element={<SettingsHub />} />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute permission="platform.system.manage">
+                <SettingsHub />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/general"
+            element={
+              <ProtectedRoute permission="platform.system.manage">
+                <SettingsHub />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/settings/*" element={<Navigate to="/settings" replace />} />
 
           {/* Utilities & Fallbacks */}

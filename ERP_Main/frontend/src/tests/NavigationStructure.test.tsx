@@ -20,6 +20,7 @@ import { SectionNavTabs } from "@/components/SectionNavTabs";
 import { Auth } from "@/lib/auth";
 
 vi.mock("@/lib/api", () => ({
+  API_BASE: "http://localhost:8000/api/v1",
   apiGet: vi.fn().mockResolvedValue([]),
   apiPost: vi.fn().mockResolvedValue({}),
   apiPatch: vi.fn().mockResolvedValue({}),

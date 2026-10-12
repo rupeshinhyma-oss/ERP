@@ -128,6 +128,12 @@ class ErpMembershipService:
                 "local_user_id": payload.local_user_id,
             },
         )
+        try:
+            from app.global_auth.ecosystem_session import invalidate_ecosystem_session_cache_for_user
+            if global_user and global_user.primary_email:
+                invalidate_ecosystem_session_cache_for_user(global_user.primary_email)
+        except Exception:
+            pass
         return created
 
     async def get(self, membership_id: uuid.UUID) -> ErpMembership:
@@ -326,6 +332,13 @@ class ErpMembershipService:
                 "local_access_sync": sync_outcome,
             },
         )
+        try:
+            from app.global_auth.ecosystem_session import invalidate_ecosystem_session_cache_for_user
+            global_user = await self.global_user_repository.get_by_id(updated.global_user_id)
+            if global_user and global_user.primary_email:
+                invalidate_ecosystem_session_cache_for_user(global_user.primary_email)
+        except Exception:
+            pass
         return updated
 
     async def delete(self, membership_id: uuid.UUID, *, actor: PlatformAdmin, reason: str | None = None) -> None:
@@ -340,6 +353,13 @@ class ErpMembershipService:
                 logger.warning("Spoke user deprovisioning failed during membership deletion: %s", exc)
 
         await self.membership_repository.delete(membership)
+        try:
+            from app.global_auth.ecosystem_session import invalidate_ecosystem_session_cache_for_user
+            global_user = await self.global_user_repository.get_by_id(membership.global_user_id)
+            if global_user and global_user.primary_email:
+                invalidate_ecosystem_session_cache_for_user(global_user.primary_email)
+        except Exception:
+            pass
         await self.audit.record(
             event_type=AuditEventType.GLOBAL_USER_UNLINKED,
             actor_type=AuditActorType.HUMAN_ADMIN,

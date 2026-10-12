@@ -120,7 +120,7 @@ async def verify_ecosystem_session(session_id: str) -> dict[str, Any]:
     return data
 
 
-async def push_password_to_erp_main(email: str, new_password: str) -> bool:
+async def push_password_to_erp_main(email: str | None, new_password: str) -> bool:
     """
     Tell ERP_Main that this person's password changed in THIS ERP, so the whole ecosystem shares one password.
 

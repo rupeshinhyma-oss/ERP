@@ -100,7 +100,14 @@ async def list_user_memberships(
             raise ForbiddenException("This action requires the 'platform.user.read' permission.")
 
     memberships = await service.list_for_user(user_id)
-    data = [ErpMembershipRead.model_validate(m).model_dump(mode="json") for m in memberships]
+    data = []
+    for m in memberships:
+        item = ErpMembershipRead.model_validate(m).model_dump(mode="json")
+        inst = getattr(m, "erp_instance", None)
+        item["erp_key"] = inst.key if inst else None
+        item["erp_name"] = (inst.display_name or inst.name) if inst else None
+        item["erp_display_name"] = item["erp_name"]
+        data.append(item)
     return build_success_response(data, request_id=_request_id(request))
 
 

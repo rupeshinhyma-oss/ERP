@@ -635,20 +635,26 @@ describe("GlobalUsers Page", () => {
     // Filter by "None" - should show only unassigned user
     fireEvent.change(erpFilterSelect, { target: { value: "NONE" } });
 
-    expect(screen.queryByText("Assigned User")).toBeNull();
-    expect(screen.getByText("Unassigned User")).toBeDefined();
+    await waitFor(() => {
+      expect(screen.queryByText("Assigned User")).toBeNull();
+      expect(screen.getByText("Unassigned User")).toBeDefined();
+    });
 
     // Filter by "erp-1" - should show only assigned user
     fireEvent.change(erpFilterSelect, { target: { value: "erp-1" } });
 
-    expect(screen.getByText("Assigned User")).toBeDefined();
-    expect(screen.queryByText("Unassigned User")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByText("Assigned User")).toBeDefined();
+      expect(screen.queryByText("Unassigned User")).toBeNull();
+    });
 
     // Reset to "ALL" - should show both
     fireEvent.change(erpFilterSelect, { target: { value: "ALL" } });
 
-    expect(screen.getByText("Assigned User")).toBeDefined();
-    expect(screen.getByText("Unassigned User")).toBeDefined();
+    await waitFor(() => {
+      expect(screen.getByText("Assigned User")).toBeDefined();
+      expect(screen.getByText("Unassigned User")).toBeDefined();
+    });
   });
 });
 

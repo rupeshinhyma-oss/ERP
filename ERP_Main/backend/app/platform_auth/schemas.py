@@ -49,6 +49,7 @@ class PlatformAdminRead(BaseModel):
     display_name: str
     role: PlatformAdminRole
     is_active: bool
+    permissions: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
