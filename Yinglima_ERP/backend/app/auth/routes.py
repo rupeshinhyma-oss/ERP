@@ -41,7 +41,12 @@ from app.auth.security import InvalidTokenError, TokenType, decode_token
 from app.auth.service import AuthService, CurrentUser, LoginContext
 from app.core.config import settings
 from app.core.exceptions import UnauthorizedException
-from app.federation.erp_main_client import EcosystemSessionError, push_password_to_erp_main, verify_ecosystem_session
+from app.federation.erp_main_client import (
+    EcosystemSessionError,
+    push_password_to_erp_main,
+    push_signout_to_erp_main,
+    verify_ecosystem_session,
+)
 from app.core.responses import build_success_response
 from app.rbac.dependencies import get_rbac_service
 from app.rbac.service import RBACService
@@ -154,6 +159,16 @@ async def logout(
     await auth_service.logout(
         access_token_jti=access_payload["jti"], access_token_exp=exp, refresh_token=payload.refresh_token
     )
+    # Signing out here means signing out EVERYWHERE (dashboard on every device + every ERP the person can use).
+    # ERP_Main owns that decision; tell it directly, server-to-server.  Best effort: never blocks this logout.
+    try:
+        import uuid as _uuid
+
+        signed_out_user = await auth_service.user_repository.get_by_id(_uuid.UUID(str(access_payload["sub"])))
+        if signed_out_user is not None and signed_out_user.email:
+            await push_signout_to_erp_main(signed_out_user.email)
+    except Exception:
+        pass
     await audit_service.record(
         action=AuditAction.LOGOUT,
         module="auth",

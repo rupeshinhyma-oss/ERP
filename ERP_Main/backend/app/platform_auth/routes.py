@@ -9,8 +9,10 @@ the registry's own path prefix.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
 from app.platform_auth.dependencies import (
     get_platform_auth_service,
     require_platform_admin,
@@ -43,6 +45,22 @@ async def login(
     _admin, token, expires_at = await service.login(email=payload.email, password=payload.password)
     response = PlatformLoginResponse(access_token=token, expires_at=expires_at)
     return build_success_response(response.model_dump(mode="json"), request_id=_request_id(request))
+
+
+@router.post("/logout", summary="Platform admin sign-out: ends the admin's sessions EVERYWHERE")
+async def logout(
+    request: Request,
+    admin: PlatformAdmin = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """
+    Admin tokens are stateless, so signing out stamps `tokens_revoked_before`; every token issued up to now (all
+    browsers/devices) stops working, and every ERP is told to end the admin's sessions too.
+    """
+    from app.global_auth.ecosystem_session import sign_out_everywhere
+
+    summary = await sign_out_everywhere(db, admin.email)
+    return build_success_response({"status": "logged_out", **summary}, request_id=getattr(request.state, "request_id", ""))
 
 
 @router.get("/me", summary="Fetch the currently authenticated platform admin")

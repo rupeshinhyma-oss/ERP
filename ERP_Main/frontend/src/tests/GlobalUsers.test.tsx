@@ -75,9 +75,9 @@ describe("GlobalUsers Page", () => {
       expect(screen.getByText("bob@company.com")).toBeDefined();
     });
 
-    // Check status badges
-    expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Suspended").length).toBeGreaterThan(0);
+    // The list no longer has a Status column: per-user status badges must not appear in the table.
+    // (Access is shown per ERP; Disable/Enable stays in Actions and Account Status stays in the detail view.)
+    expect(screen.queryAllByText("Suspended").length).toBe(0);
 
 
     // Check action buttons

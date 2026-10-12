@@ -52,7 +52,7 @@ function LoginIllustration() {
 
 const BRAND_CACHE_KEY = "erp_brand_name";
 
-import { establishCentralEcosystemSession, getEcosystemCookie } from "@/lib/ecosystemSession";
+import { establishCentralEcosystemSession, getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
 
 export function LoginPage() {
   const navigate = useNavigate();

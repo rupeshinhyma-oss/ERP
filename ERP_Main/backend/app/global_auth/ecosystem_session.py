@@ -15,20 +15,21 @@ Features:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import logging
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.erp_memberships.models import ErpMembership, ErpMembershipStatus
-from app.erp_registry.models import ErpInstance
+from app.erp_registry.models import ErpInstance, ErpStatus
 from app.global_audit.models import AuditActorType, AuditEventType
 from app.global_audit.repository import GlobalAuditRepository
 from app.global_audit.service import GlobalAuditService
@@ -125,10 +126,31 @@ async def _revalidate_cached(db: AsyncSession, sess: Dict[str, Any], now: dateti
         return None
     email = (sess.get("email") or "").strip().lower()
 
+    # The in-memory flag only exists in the process that handled the sign-out.  With several workers (or after
+    # a restart) the DATABASE is the truth, so a persisted session that was revoked elsewhere is dead here too.
+    try:
+        row_revoked_at = await db.scalar(
+            select(GlobalSession.revoked_at).where(GlobalSession.id == uuid.UUID(str(sess.get("session_id"))))
+        )
+        if row_revoked_at is not None:
+            return None
+    except (ValueError, TypeError):
+        pass
+
     if sess.get("user_type") == "platform_admin":
         admin_row = await db.scalar(select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == email))
         if admin_row is not None:
-            return sess if admin_row.is_active else None
+            if not admin_row.is_active:
+                return None
+            cutoff = admin_row.tokens_revoked_before
+            created = sess.get("created_at")
+            if cutoff is not None and created:
+                try:
+                    if _utc(datetime.fromisoformat(created)) <= _utc(cutoff):
+                        return None  # this admin signed out after this session began
+                except ValueError:
+                    pass
+            return sess
         # No PlatformAdmin row: only sessions minted by the unseeded-DB fallback may exist.
         return sess if email in _DEFAULT_ADMIN_IDS else None
 
@@ -573,7 +595,7 @@ async def fanout_spoke_logout(db: AsyncSession, user_email: str) -> None:
         # Check if platform admin (Super Admin has access to all ERPs)
         admin = await _active_platform_admin(db, clean_email)
         if admin is not None:
-            erps = (await db.execute(select(ErpInstance).where(ErpInstance.is_active == True))).scalars().all()
+            erps = (await db.execute(select(ErpInstance).where(ErpInstance.status == ErpStatus.ACTIVE))).scalars().all()
             for erp in erps:
                 try:
                     await adapter.logout_local_user(erp, clean_email, reason="central_admin_logout")
@@ -590,7 +612,7 @@ async def fanout_spoke_logout(db: AsyncSession, user_email: str) -> None:
                 .where(
                     ErpMembership.global_user_id == user.id,
                     ErpMembership.status == ErpMembershipStatus.ACTIVE,
-                    ErpInstance.is_active == True,
+                    ErpInstance.status == ErpStatus.ACTIVE,
                 )
             )
             erps = (await db.execute(stmt)).scalars().all()
@@ -602,6 +624,43 @@ async def fanout_spoke_logout(db: AsyncSession, user_email: str) -> None:
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning("Failed to fan-out ecosystem logout for %s: %s", clean_email, exc)
+
+
+async def sign_out_everywhere(db: AsyncSession, user_email: str, *, now: Optional[datetime] = None) -> dict:
+    """
+    Sign a person out of EVERYTHING: the ERP_Main dashboard on every browser/device, plus every ERP they can use.
+
+    * every persisted dashboard session of the person is revoked (all devices, not just the one clicked);
+    * a platform admin's stateless tokens are invalidated via `tokens_revoked_before`;
+    * cached central sessions are marked revoked;
+    * every ERP the person may use is told to end their sessions (admin: all ERPs; normal user: only the ERPs
+      ticked in their ERP Access Grants, i.e. ACTIVE memberships).
+    Never disables the account: signing out is not the same as being blocked.
+    """
+    clean_email = (user_email or "").strip().lower()
+    stamp = now or datetime.now(timezone.utc)
+    summary = {"email": clean_email, "dashboard_sessions_revoked": 0, "admin_tokens_invalidated": False}
+    if not clean_email:
+        return summary
+    try:
+        user = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == clean_email))
+        if user is not None:
+            res = await db.execute(
+                update(GlobalSession)
+                .where(GlobalSession.global_user_id == user.id, GlobalSession.revoked_at.is_(None))
+                .values(revoked_at=stamp)
+            )
+            summary["dashboard_sessions_revoked"] = res.rowcount or 0
+        admin = await db.scalar(select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == clean_email))
+        if admin is not None:
+            admin.tokens_revoked_before = stamp
+            summary["admin_tokens_invalidated"] = True
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logging.getLogger(__name__).exception("Could not revoke dashboard sessions for %s", clean_email)
+    await fanout_spoke_logout(db, clean_email)
+    return summary
 
 
 @router.post("/{session_id}/revoke", summary="Global Single Sign-Out (revoke ecosystem session)")
@@ -632,9 +691,9 @@ async def revoke_ecosystem_session(
     except Exception:
         await db.rollback()
 
-    # 3. Fan-out logout to all spoke ERPs the user has access to
+    # 3. Sign the person out of EVERYTHING (all devices + every ERP they can use + admin tokens)
     if user_email:
-        await fanout_spoke_logout(db, user_email)
+        await sign_out_everywhere(db, user_email, now=now)
 
     # 4. Audit revocation
     try:

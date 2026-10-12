@@ -126,3 +126,26 @@ async def sync_password_from_erp(
     fanout = await push_password_to_memberships(db, user, payload.new_password, exclude_erp_key=erp_key)
     data: dict[str, Any] = {"stored": True, "pushed_to": fanout["synced"], "push_failed": fanout["failed"]}
     return build_success_response(data, request_id=getattr(request.state, "request_id", ""))
+
+
+class SignOutRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+
+
+@router.post("/signout", summary="An ERP reports that a person signed out there: sign them out everywhere")
+async def signout_from_erp(
+    payload: SignOutRequest,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_erp_key: str | None = Header(default=None, alias="X-ERP-Key"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """
+    Server-to-server twin of the browser's central sign-out.  Works even if the browser never reached ERP_Main
+    (no central session id, ERP_Main briefly unreachable from the page, cross-site blocking).
+    """
+    _verify_erp_caller(authorization, x_erp_key)
+    from app.global_auth.ecosystem_session import sign_out_everywhere
+
+    summary = await sign_out_everywhere(db, payload.email)
+    return build_success_response(summary, request_id=getattr(request.state, "request_id", ""))

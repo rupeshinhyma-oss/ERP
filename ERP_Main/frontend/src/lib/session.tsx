@@ -222,6 +222,9 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
     try {
       if (Auth.getPrincipalType() === "global_user" && Auth.isLoggedIn()) {
         await apiPost("/global/user-auth/logout", {});
+      } else if (Auth.getPrincipalType() === "platform_admin" && Auth.isLoggedIn()) {
+        // Admin tokens are stateless: the server stamps a sign-out time so every admin token stops working.
+        await apiPost("/global/auth/logout", {});
       }
     } catch {
       /* ignore server error during logout */
@@ -371,10 +374,10 @@ export function useGlobalSession(): GlobalSessionContextType {
       memberships: [],
       loading: false,
       sessionExpired: false,
-      login: async () => {},
-      logout: async () => {},
-      refreshSession: async () => {},
-      dismissExpiredModal: () => {},
+      login: async () => { },
+      logout: async () => { },
+      refreshSession: async () => { },
+      dismissExpiredModal: () => { },
     };
   }
   return context;

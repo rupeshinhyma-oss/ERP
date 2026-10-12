@@ -125,14 +125,15 @@ async def logout(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """
-    Revoke the current global session and force-logout the user from all connected spoke ERPs.
+    Sign the person out EVERYWHERE: all their dashboard sessions and every connected ERP they can use.
     """
-    from app.global_auth.ecosystem_session import fanout_spoke_logout
+    from app.global_auth.ecosystem_session import sign_out_everywhere
 
     user, session_id = user_and_session
     await service.logout(session_id, global_user_id=user.id)
     if user.primary_email:
-        await fanout_spoke_logout(db, user.primary_email)
+        # every dashboard session of this person (all browsers/devices) + every ERP they can use
+        await sign_out_everywhere(db, user.primary_email)
     return build_success_response({"status": "logged_out"}, request_id=_request_id(request))
 
 

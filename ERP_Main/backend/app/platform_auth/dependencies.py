@@ -39,6 +39,21 @@ def get_platform_auth_service(
     return PlatformAuthService(repository=PlatformAdminRepository(db), audit=audit)
 
 
+def admin_token_was_signed_out(admin, payload: dict) -> bool:
+    """True if the admin signed out (anywhere) at or after this token was issued."""
+    cutoff = getattr(admin, "tokens_revoked_before", None)
+    if cutoff is None:
+        return False
+    if cutoff.tzinfo is None:
+        from datetime import timezone
+        cutoff = cutoff.replace(tzinfo=timezone.utc)
+    try:
+        issued_at = int(payload.get("iat"))
+    except (TypeError, ValueError):
+        return True  # a token with no issue time cannot be proven newer than the sign-out
+    return issued_at <= int(cutoff.timestamp())
+
+
 async def require_platform_admin(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
     db: AsyncSession = Depends(get_db_session),
@@ -63,6 +78,8 @@ async def require_platform_admin(
     admin = await PlatformAdminRepository(db).get_by_id(admin_id)
     if admin is None or not admin.is_active:
         raise UnauthorizedException("This platform admin account no longer exists or is inactive.")
+    if admin_token_was_signed_out(admin, payload):
+        raise UnauthorizedException("This session was signed out. Please sign in again.")
     return admin
 
 

@@ -34,12 +34,6 @@ import type {
   PlatformRoleAssignment,
 } from "@/types";
 
-const STATUS_FILTERS = [
-  { value: "ALL", label: "All Statuses" },
-  { value: "ACTIVE", label: "Active" },
-  { value: "DISABLED", label: "Disabled" },
-];
-
 export function GlobalUsers() {
   const toast = useToast();
   const { id: routeUserId } = useParams<{ id?: string }>();
@@ -54,7 +48,8 @@ export function GlobalUsers() {
 
   // Filters & Search
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  // The Status column and its filter were removed from the list; access is shown per ERP instead.
+  const statusFilter: string = "ALL";
   const [erpFilter, setErpFilter] = useState("ALL");
 
   // Create User Modal
@@ -387,7 +382,7 @@ export function GlobalUsers() {
             e.stopPropagation();
             try {
               toast("Retrying provisioning...", "info");
-              await apiPost(`/global/memberships/${m.id}/retry`, {});
+              await apiPost(`/global/identity/provisioning/${m.id}/retry`, {});
               toast("Provisioning succeeded!", "success");
               await fetchUsers(true);
             } catch (err) {
@@ -689,7 +684,7 @@ export function GlobalUsers() {
             try {
               if (mem && mem.status === "PENDING") {
                 try {
-                  await apiPost(`/global/memberships/${mem.id}/retry`, {});
+                  await apiPost(`/global/identity/provisioning/${mem.id}/retry`, {});
                 } catch {
                   await apiPost(`/global/users/${editingUser.id}/provision`, { erp_instance_id: erp.id });
                 }
@@ -870,31 +865,6 @@ export function GlobalUsers() {
               )}
             </div>
 
-            <select
-              id="select-status-filter"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={{
-                width: "140px",
-                height: "36px",
-                fontSize: "13px",
-                color: "#334155",
-                background: "#ffffff",
-                border: "1px solid #cbd5e1",
-                borderRadius: "6px",
-                paddingLeft: "10px",
-                paddingRight: "30px",
-                cursor: "pointer",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            >
-              {STATUS_FILTERS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
 
             <select
               id="select-erp-filter"
@@ -974,10 +944,9 @@ export function GlobalUsers() {
             <table className="table" style={{ margin: 0 }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={{ width: "22%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Global Identity</th>
-                  <th style={{ width: "18%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Primary Email</th>
-                  <th style={{ width: "10%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</th>
-                  <th style={{ width: "26%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>ERP's Access</th>
+                  <th style={{ width: "24%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Global Identity</th>
+                  <th style={{ width: "22%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Primary Email</th>
+                  <th style={{ width: "30%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>ERP's Access</th>
                   <th style={{ width: "10%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated</th>
                   <th style={{ width: "14%", padding: "12px 16px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>Actions</th>
                 </tr>
@@ -1087,9 +1056,6 @@ export function GlobalUsers() {
                             <ICONS.copy width={12} height={12} />
                           </button>
                         </div>
-                      </td>
-                      <td style={{ padding: "12px 16px" }}>
-                        <StatusBadge status={u.status} />
                       </td>
                       <td style={{ padding: "12px 16px" }}>
                         {renderUserErpAccessCell(u)}

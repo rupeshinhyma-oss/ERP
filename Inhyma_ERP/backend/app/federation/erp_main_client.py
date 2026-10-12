@@ -142,3 +142,25 @@ async def push_password_to_erp_main(email: str | None, new_password: str) -> boo
         return response.status_code == 200
     except Exception:  # never break a successful local password change
         return False
+
+
+async def push_signout_to_erp_main(email: str | None) -> bool:
+    """
+    Tell ERP_Main that this person signed out of THIS ERP, so it signs them out of everything: the dashboard on
+    every device and every other ERP they can use.  Server-to-server, so it works even if the browser's own call
+    to ERP_Main never happens.  Best effort: never raises, returns False if ERP_Main cannot be reached.
+    """
+    try:
+        creds = settings.get_expected_erp_main_credentials()
+        if not creds or not email:
+            return False
+        url = f"{settings.ERP_MAIN_API_BASE_URL.rstrip('/')}/internal/users/signout"
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.post(
+                url,
+                json={"email": email},
+                headers={"Authorization": f"Bearer {creds[0]}", "X-ERP-Key": settings.ERP_KEY},
+            )
+        return response.status_code == 200
+    except Exception:
+        return False

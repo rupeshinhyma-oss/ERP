@@ -159,7 +159,10 @@ async def test_existing_local_user_successfully_linked(admin_client, test_adapte
     assert data["status"] == "ACTIVE"
     assert data["local_user_id"] == "loc-uuid-existing-99"
     assert data["metadata_json"]["provision_method"] == "linked_existing"
-    assert test_adapter.provision_call_count == 0  # Did NOT call provision
+    # Linking must never create a second account: the existing local id is kept.  Provisioning now also
+    # re-syncs the central password / re-enables the account on that SAME account (one call, no duplicate).
+    assert len(test_adapter.users) == 1
+    assert test_adapter.provision_call_count == 1
 
 
 # -----------------------------------------------------------------------------
@@ -205,8 +208,10 @@ async def test_repeated_provisioning_is_idempotent(admin_client, test_adapter):
     assert resp2.status_code == 201
     mem_id2 = resp2.json()["data"]["id"]
     assert mem_id1 == mem_id2
-    # Second call returns existing active membership without calling remote ERP again
-    assert test_adapter.provision_call_count == 1
+    # Second call returns the SAME membership (no duplicate record) and only re-syncs the existing account
+    # (self-healing); it never creates another account.
+    assert len(test_adapter.users) == 1
+    assert test_adapter.provision_call_count == 2
 
 
 # -----------------------------------------------------------------------------
