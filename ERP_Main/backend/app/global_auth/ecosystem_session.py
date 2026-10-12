@@ -265,13 +265,23 @@ async def _resolve_live_session(db: AsyncSession, session_id: Optional[str], now
         last_checked = cached.get("_checked_at", 0.0)
         if ttl > 0 and (time.monotonic() - last_checked) < ttl:
             return cached
-        fresh = await _revalidate_cached(db, cached, now)
+        try:
+            fresh = await _revalidate_cached(db, cached, now)
+        except Exception as exc:
+            logger.warning(
+                "Database error during ecosystem session revalidation (%s); retaining unrevoked cache", exc
+            )
+            return cached
         if fresh is not None:
             fresh["_checked_at"] = time.monotonic()
             _ECOSYSTEM_SESSION_STORE[session_id] = fresh
             return fresh
         return None
-    rebuilt = await _session_from_db(db, session_id, now)
+    try:
+        rebuilt = await _session_from_db(db, session_id, now)
+    except Exception as exc:
+        logger.warning("Database error during ecosystem session rebuild from DB (%s)", exc)
+        return None
     if rebuilt is not None:
         rebuilt["_checked_at"] = time.monotonic()
         _ECOSYSTEM_SESSION_STORE[session_id] = rebuilt
@@ -486,15 +496,24 @@ async def get_ecosystem_session(
     if cached is not None and cached.get("revoked_at"):
         return build_success_response({"active": False, "session_id": session_id, "revoked": True}, request_id=rid)
 
-    live = await _resolve_live_session(db, session_id, now)
-    if live is not None:
-        return build_success_response(_public(live), request_id=rid)
+    try:
+        live = await _resolve_live_session(db, session_id, now)
+        if live is not None:
+            return build_success_response(_public(live), request_id=rid)
+    except Exception as exc:
+        logger.warning("Database unavailable during session verification (%s)", exc)
+        if cached is not None and not cached.get("revoked_at") and not _cached_session_expired(cached, now):
+            return build_success_response(_public(cached), request_id=rid)
+        return build_success_response(
+            {"active": False, "session_id": session_id, "notFound": True, "revoked": False, "transient_error": True},
+            request_id=rid,
+        )
 
     # Distinguish "revoked / access removed" from "never heard of it".
     try:
         sid = uuid.UUID(session_id)
         row = await db.scalar(select(GlobalSession).where(GlobalSession.id == sid))
-    except (ValueError, TypeError):
+    except Exception:
         row = None
     if cached is not None or row is not None:
         _ECOSYSTEM_SESSION_STORE.pop(session_id, None)

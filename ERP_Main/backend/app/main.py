@@ -26,10 +26,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.dns_resilience import install_dns_resilience
 from app.core.exception_handlers import register_exception_handlers
 from app.core.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
 from app.database.base import Base
 from app.database.engine import dispose_engine, get_engine
+
+install_dns_resilience()
 
 
 @asynccontextmanager

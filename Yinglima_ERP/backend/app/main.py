@@ -29,9 +29,12 @@ from app.auth.service import CurrentUser
 from app.cache.dependency import get_cleanup_worker
 from app.common.storage import sanitize_filename
 from app.core.config import settings
+from app.core.dns_resilience import install_dns_resilience
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.database.engine import dispose_engine, get_engine
+
+install_dns_resilience()
 from app.integration import jobs as _integration_jobs  # noqa: F401 - import registers the dispatch_integration_event handler
 from app.integration import handlers as _integration_handlers  # noqa: F401 - import registers consumer handlers
 from app.middleware.audit_middleware import AuditMiddleware
