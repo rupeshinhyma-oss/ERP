@@ -63,3 +63,8 @@ backups/
 **/backups/
 *.sql
 
+# Exported test spreadsheets in root
+/Attendance_Export_*.xlsx
+/Attendance_Matrix_*.xlsx
+
+
