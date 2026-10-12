@@ -9,8 +9,10 @@ the registry's own path prefix.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
 from app.platform_auth.dependencies import (
     get_platform_auth_service,
     require_platform_admin,
@@ -45,12 +47,47 @@ async def login(
     return build_success_response(response.model_dump(mode="json"), request_id=_request_id(request))
 
 
+@router.post("/logout", summary="Platform admin sign-out: ends the admin's sessions EVERYWHERE")
+async def logout(
+    request: Request,
+    admin: PlatformAdmin = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """
+    Admin tokens are stateless, so signing out stamps `tokens_revoked_before`; every token issued up to now (all
+    browsers/devices) stops working, and every ERP is told to end the admin's sessions too.
+    """
+    from app.global_auth.ecosystem_session import sign_out_everywhere
+
+    summary = await sign_out_everywhere(db, admin.email)
+    return build_success_response({"status": "logged_out", **summary}, request_id=getattr(request.state, "request_id", ""))
+
+
 @router.get("/me", summary="Fetch the currently authenticated platform admin")
 async def get_me(request: Request, admin: PlatformAdmin = Depends(require_platform_admin)) -> dict:
     """Return the authenticated platform admin's own profile."""
-    return build_success_response(
-        PlatformAdminRead.model_validate(admin).model_dump(mode="json"), request_id=_request_id(request)
-    )
+    data = PlatformAdminRead.model_validate(admin).model_dump(mode="json")
+    role_str = getattr(admin.role, "value", str(admin.role))
+    if role_str == "SUPER_ADMIN":
+        data["permissions"] = ["*"]
+    elif role_str == "PLATFORM_ADMIN":
+        data["permissions"] = [
+            "platform.audit.view",
+            "platform.user.read",
+            "platform.user.create",
+            "platform.user.update",
+            "platform.user.disable",
+        ]
+    elif role_str == "OPERATOR":
+        data["permissions"] = [
+            "platform.audit.view",
+            "platform.user.read",
+            "platform.user.create",
+            "platform.user.update",
+        ]
+    elif role_str == "AUDITOR":
+        data["permissions"] = ["platform.audit.view", "platform.user.read"]
+    return build_success_response(data, request_id=_request_id(request))
 
 
 @router.post("/admins", status_code=status.HTTP_201_CREATED, summary="Create a new platform admin (SUPER_ADMIN only)")

@@ -243,6 +243,11 @@ class SupplierService:
     # Create / Update
     # ------------------------------------------------------------------
 
+    async def _ensure_tax_id_unique(self, tax_id: str | None, *, exclude_id: uuid.UUID | None = None) -> None:
+        """Spec: a duplicate GST number must be refused with an 'already exists' message."""
+        if tax_id and await self.repository.tax_id_exists(tax_id, exclude_id=exclude_id):
+            raise ConflictException(f"A supplier with GST number {tax_id.strip().upper()!r} already exists.")
+
     async def create(self, **field_values: Any) -> Supplier:
         """
         Create a new supplier profile.
@@ -276,6 +281,8 @@ class SupplierService:
                 "Company Name + City).",
                 details={"existing": model_to_dict(existing) if existing else None},
             )
+
+        await self._ensure_tax_id_unique(field_values.get("tax_id_number"))
 
         supplier = await self.repository.create(**field_values)
 
@@ -339,6 +346,9 @@ class SupplierService:
                     "(duplicate check: Company Name + City).",
                     details={"existing": model_to_dict(existing) if existing else None},
                 )
+
+        if field_values.get("tax_id_number") is not None:
+            await self._ensure_tax_id_unique(field_values["tax_id_number"], exclude_id=supplier_id)
 
         visited = field_values.get("visited_factory_office")
         visited = supplier.visited_factory_office if visited is None else visited
@@ -521,6 +531,7 @@ class SupplierService:
         # Pre-fetch existing suppliers for duplicate detection
         existing_suppliers = await self.repository.list_all()
         existing_map = {s.company_name.strip().lower(): s for s in existing_suppliers}
+        existing_gst_map = {s.tax_id_number.strip().upper(): s for s in existing_suppliers if s.tax_id_number}
 
         all_countries = await self.country_repository.list_all()
         all_states = await self.state_repository.list_all()
@@ -557,6 +568,17 @@ class SupplierService:
                     f"Supplier '{company_name}' already exists in Supplier Master (duplicate company name).",
                     details={"existing": _serialize_supplier_for_compare(dup_supplier)},
                 )
+
+            gst = (field_values.get("tax_id_number") or "").strip().upper()
+            if not gst:
+                raise BadRequestException("GST number is required.")
+            if gst in existing_gst_map:
+                raise ConflictException(
+                    f"A supplier with GST number {gst!r} already exists.",
+                    details={"existing": _serialize_supplier_for_compare(existing_gst_map[gst])},
+                )
+            field_values["tax_id_number"] = gst
+            existing_gst_map[gst] = None  # type: ignore[assignment]
 
             country_raw = field_values.pop("country_code", "").strip()
             state_raw = field_values.pop("state_name", "").strip()

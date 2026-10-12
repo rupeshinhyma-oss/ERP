@@ -28,10 +28,11 @@ def validate_city_row(raw_row: dict[str, str], row_number: int) -> dict[str, Any
         or raw_row.get("country")
         or raw_row.get("Country")
         or ""
-    ).strip().upper()
+    ).strip()
     state_name = (
         raw_row.get("state_name")
         or raw_row.get("Province / Region Name")
+        or raw_row.get("Province / Region")
         or raw_row.get("Province Name")
         or raw_row.get("State Name")
         or raw_row.get("State")

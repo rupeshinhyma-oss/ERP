@@ -19,6 +19,10 @@ import os
 import uuid
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+# Many tests create users through the public register route; production keeps it disabled.
+os.environ.setdefault("GLOBAL_SELF_REGISTRATION_ENABLED", "true")
+# Tests need suspensions etc. to be visible immediately (production trusts a validated session for a few seconds).
+os.environ.setdefault("ECOSYSTEM_SESSION_REVALIDATE_TTL_SECONDS", "0")
 
 import pytest
 from httpx import ASGITransport, AsyncClient

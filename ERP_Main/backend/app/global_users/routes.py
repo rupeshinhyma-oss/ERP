@@ -56,11 +56,17 @@ async def list_global_users(
     request: Request,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None, max_length=200),
+    status: str | None = Query(default=None, max_length=60),
+    erp_id: uuid.UUID | None = Query(default=None, description="Only users holding a non-revoked membership in this ERP."),
+    no_erp: bool = Query(default=False, description="Only users with no ERP access at all."),
     _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.user.read")),
     service: GlobalUserService = Depends(get_global_user_service),
 ) -> dict:
-    """List Global Users, paged."""
-    users = await service.list_all(limit=limit, offset=offset)
+    """List Global Users, paged, with optional name/email search and status filter."""
+    users = await service.list_all(
+        limit=limit, offset=offset, search=search, status=status, erp_id=erp_id, no_erp=no_erp
+    )
     data = [GlobalUserRead.model_validate(u).model_dump(mode="json", by_alias=True) for u in users]
     return build_success_response(data, request_id=_request_id(request))
 

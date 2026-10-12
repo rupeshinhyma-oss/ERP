@@ -19,7 +19,8 @@ import { useLiveModule } from "@/lib/live/useLive";
 import { useModalHistorySync } from "@/lib/hooks";
 import { MasterPage, type FormState, type MasterPageHandle } from "@/components/MasterPage";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
-import { StatusBadge } from "@/components/ui";
+import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
+import { StatusToggleSwitch } from "@/components/StatusToggleSwitch";
 import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import {
@@ -407,6 +408,7 @@ export function ProductsPage() {
   const [exactNameDuplicate, setExactNameDuplicate] = useState<string | null>(null);
   const [exactCodeDuplicate, setExactCodeDuplicate] = useState<{ code: string; name: string } | null>(null);
   const [liveReloadToken, setLiveReloadToken] = useState(0);
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
 
   /* Load suppliers list for Primary Supplier dropdown */
   useEffect(() => {
@@ -496,14 +498,21 @@ export function ProductsPage() {
   if (brandFilter) extraFilters.brand_id = brandFilter;
 
   /** Fetches the product fresh and opens the detail drawer, matching openProductDetailView() in the source. */
-  async function openProductDetailView(productId: string) {
-    setDrawerLoading(true);
-    setDrawerProduct(null);
+  async function openProductDetailView(productId: string, initialProduct?: Product) {
+    if (initialProduct) {
+      setDrawerProduct(initialProduct);
+      setDrawerLoading(false);
+    } else {
+      setDrawerLoading(true);
+      setDrawerProduct(null);
+    }
     try {
       const { data } = await apiGet<Product>(`/masters/products/${productId}`);
       setDrawerProduct(data);
     } catch (err) {
-      alert(`Failed to load product detail: ${err instanceof Error ? err.message : String(err)}`);
+      if (!initialProduct) {
+        alert(`Failed to load product detail: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } finally {
       setDrawerLoading(false);
     }
@@ -613,46 +622,33 @@ export function ProductsPage() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Sub Category</label>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: categoryFilter ? "#334155" : "#94a3b8" }}>Sub Category</label>
             <select
               value={subCategoryFilter}
+              disabled={!categoryFilter}
               onChange={(e) => setSubCategoryFilter(e.target.value)}
               style={{
                 padding: "9px 12px",
                 borderRadius: "6px",
                 border: "1px solid #cbd5e0",
                 fontSize: "13.5px",
-                background: "#ffffff",
-                color: "#1e293b",
+                background: categoryFilter ? "#ffffff" : "#f1f5f9",
+                color: categoryFilter ? "#1e293b" : "#94a3b8",
+                cursor: categoryFilter ? "pointer" : "not-allowed",
                 width: "100%",
               }}
             >
-              <option value="">All</option>
               {categoryFilter ? (
-                scopedFilterSubCategories.map((sc) => (
-                  <option key={sc.id} value={sc.id}>
-                    {sc.name}
-                  </option>
-                ))
+                <>
+                  <option value="">All</option>
+                  {scopedFilterSubCategories.map((sc) => (
+                    <option key={sc.id} value={sc.id}>
+                      {sc.name}
+                    </option>
+                  ))}
+                </>
               ) : (
-                (() => {
-                  const catMap = new Map(categories.items.map((c) => [c.id, c.name]));
-                  const groups = new Map<string, typeof scopedFilterSubCategories>();
-                  scopedFilterSubCategories.forEach((sc) => {
-                    const cName = catMap.get(sc.category_id) || "Other";
-                    if (!groups.has(cName)) groups.set(cName, []);
-                    groups.get(cName)!.push(sc);
-                  });
-                  return Array.from(groups.entries()).map(([cName, list]) => (
-                    <optgroup key={cName} label={cName}>
-                      {list.map((sc) => (
-                        <option key={sc.id} value={sc.id}>
-                          {sc.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ));
-                })()
+                <option value="">Select Category first</option>
               )}
             </select>
           </div>
@@ -727,7 +723,7 @@ export function ProductsPage() {
                   }}
                   onClick={(e) => {
                     e.preventDefault();
-                    openProductDetailView(p.id);
+                    openProductDetailView(p.id, p);
                   }}
                 >
                   {name}
@@ -888,7 +884,19 @@ export function ProductsPage() {
         {
           header: "Status",
           sortValue: (p) => p.status,
-          render: (p) => <StatusBadge status={p.status} />,
+          render: (p) => (
+            <StatusToggleSwitch
+              id={p.id}
+              status={p.status}
+              name={p.product_name_tally || p.product_name || undefined}
+              apiBase="/masters/products"
+              onStatusChanged={() => {
+                setTimeout(() => {
+                  setLiveReloadToken((v) => v + 1);
+                }, 350);
+              }}
+            />
+          ),
         },
       ]}
       importHeaders={[
@@ -1138,7 +1146,7 @@ export function ProductsPage() {
       renderFields={(f, set, errors = {}) => {
         const scopedSubCategories = f.category_id
           ? subCategories.items.filter((sc) => sc.category_id === f.category_id && (sc.status === "active" || sc.id === f.sub_category_id))
-          : subCategories.items.filter((sc) => sc.status === "active" || sc.id === f.sub_category_id);
+          : [];
 
         /** Dimension change also refreshes the read-only CBM preview. */
         const setDimension = (id: "length_cm" | "width_cm" | "height_cm", value: string) => {
@@ -1195,34 +1203,25 @@ export function ProductsPage() {
                     </option>
                   ))}
               </SelectField>
-              <SelectField id="sub_category_id" label="Sub-Category *" value={f.sub_category_id} onChange={(v) => set("sub_category_id", v)} error={errors.sub_category_id}>
-                <option value="">-- Select Sub-Category --</option>
-                {f.category_id ? (
-                  scopedSubCategories.map((sc) => (
-                    <option key={sc.id} value={sc.id}>
-                      {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
-                    </option>
-                  ))
-                ) : (
-                  (() => {
-                    const catMap = new Map(categories.items.map((c) => [c.id, c.name]));
-                    const groups = new Map<string, typeof scopedSubCategories>();
-                    scopedSubCategories.forEach((sc) => {
-                      const cName = catMap.get(sc.category_id) || "Other";
-                      if (!groups.has(cName)) groups.set(cName, []);
-                      groups.get(cName)!.push(sc);
-                    });
-                    return Array.from(groups.entries()).map(([cName, list]) => (
-                      <optgroup key={cName} label={cName}>
-                        {list.map((sc) => (
-                          <option key={sc.id} value={sc.id}>
-                            {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ));
-                  })()
-                )}
+              <SelectField
+                id="sub_category_id"
+                label="Sub-Category *"
+                required
+                disabled={!f.category_id}
+                value={f.sub_category_id}
+                onChange={(v) => set("sub_category_id", v)}
+                error={errors.sub_category_id}
+              >
+                <option value="">
+                  {f.category_id ? "-- Select Sub-Category --" : "-- Please select Category first --"}
+                </option>
+                {f.category_id
+                  ? scopedSubCategories.map((sc) => (
+                      <option key={sc.id} value={sc.id}>
+                        {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
+                      </option>
+                    ))
+                  : null}
               </SelectField>
               <SelectField
                 id="supplier_id"
@@ -1770,9 +1769,28 @@ export function ProductsPage() {
                 )}
               </div>
             )}
+
+            <div style={{ marginTop: "24px", paddingTop: "16px", borderTop: "1px solid #e2e8f0" }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setHistoryDrawerOpen(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                📜 View Trade &amp; Price History
+              </button>
+            </div>
           </>
         )}
       </SideDrawer>
+
+      <ProductTradeHistoryDrawer
+        productId={p?.id || null}
+        productName={p ? p.product_name_tally || p.product_name || "" : ""}
+        productCode={p?.product_code}
+        open={historyDrawerOpen}
+        onClose={() => setHistoryDrawerOpen(false)}
+      />
     </>
   );
 }

@@ -30,6 +30,7 @@ IMPORT_HEADERS = [
     "standard_price",
     "is_purchasable",
     "is_sellable",
+    "primary_supplier",
     "status",
 ]
 
@@ -39,6 +40,7 @@ EXPORT_HEADERS = [
     "Brand",
     "Category",
     "Sub Category",
+    "Primary Supplier",
     "HSN Code",
     "UOM",
     "Organization",

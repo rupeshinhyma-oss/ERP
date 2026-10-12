@@ -1,58 +1,26 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { INITIAL_PURCHASE_ORDERS, type PurchaseOrderRecord } from "@/pages/purchase/LocalPurchasePage";
 import { generateLocalPurchaseBillPdf } from "@/lib/localPurchasePdf";
-import { apiGet } from "@/lib/api";
+import { apiGet, errorMessage } from "@/lib/api";
+import { LOCAL_PURCHASE_API, mapLocalPurchase, type PurchaseOrderRecord } from "@/lib/purchaseApi";
 
 export function LocalPurchasePdfPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [liveItem, setLiveItem] = useState<PurchaseOrderRecord | null>(null);
+  const [currentItem, setCurrentItem] = useState<PurchaseOrderRecord | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Find item from localStorage or static INITIAL_PURCHASE_ORDERS
-  const staticItem = useMemo(() => {
-    let orderPool = INITIAL_PURCHASE_ORDERS;
-    try {
-      const saved = localStorage.getItem("inhyma_local_purchase_orders");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          orderPool = parsed;
-        }
-      }
-    } catch {}
-
-    if (!id) return orderPool[0];
-    const decodedId = decodeURIComponent(id).trim().toLowerCase();
-
-    const found = orderPool.find((item) => {
-      const itemNo = item.invoice_no.toLowerCase();
-      const itemId = item.id.toLowerCase();
-      return (
-        itemId === decodedId ||
-        itemNo === decodedId ||
-        itemNo.replace(/[\/\-_]/g, "") === decodedId.replace(/[\/\-_]/g, "") ||
-        itemNo.includes(decodedId) ||
-        decodedId.includes(itemNo)
-      );
-    });
-
-    return found || orderPool[0];
-  }, [id]);
-
-  // Also attempt to fetch live from API if exists
+  // The purchase (with real supplier / buyer details) comes from the API; nothing is made up if it fails.
   useEffect(() => {
     let cancelled = false;
     if (id) {
-      apiGet<PurchaseOrderRecord>(`/purchase/orders/${id}`)
+      apiGet<any>(`${LOCAL_PURCHASE_API}/${encodeURIComponent(id)}`)
         .then((res) => {
-          if (!cancelled && res?.data) {
-            setLiveItem(res.data);
-          }
+          if (!cancelled && res?.data) setCurrentItem(mapLocalPurchase(res.data, {}));
         })
-        .catch(() => {
-          // Fallback to static item
+        .catch((err) => {
+          if (!cancelled) setLoadError(errorMessage(err));
         });
     }
     return () => {
@@ -60,8 +28,7 @@ export function LocalPurchasePdfPage() {
     };
   }, [id]);
 
-  const currentItem = liveItem || staticItem;
-  const invoiceNo = currentItem?.invoice_no || "2026-27/SO/1534";
+  const invoiceNo = currentItem?.invoice_no || "";
 
   useEffect(() => {
     if (currentItem) {
@@ -222,7 +189,7 @@ export function LocalPurchasePdfPage() {
               fontSize: "15px",
             }}
           >
-            Generating Bill File PDF...
+            {loadError || (id ? "Generating Bill File PDF..." : "No purchase selected.")}
           </div>
         )}
       </div>

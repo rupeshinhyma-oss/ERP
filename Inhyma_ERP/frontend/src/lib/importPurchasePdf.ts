@@ -32,9 +32,9 @@ export function generateImportPurchaseBillPdf(
   const margin = 12;
   const contentWidth = pageWidth - margin * 2; // 186mm
 
-  const consignmentNo = order.consignment_no || "MUM51";
-  const orderedDate = order.ordered_date || "19-09-2026";
-  const warehouse = order.warehouse || "Mumbai Ordered";
+  const consignmentNo = order.consignment_no || "";
+  const orderedDate = order.ordered_date || "";
+  const warehouse = order.warehouse || "";
 
   doc.setProperties({
     title: `Import Bill File: ${consignmentNo}`,
@@ -74,24 +74,20 @@ export function generateImportPurchaseBillPdf(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text(order.supplier_name || "Yinglima Machinery Co., Ltd.", margin + 4, currentY + 11.5);
+  doc.text(order.supplier_name || "", margin + 4, currentY + 11.5);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
-  const supAddressLines = [
-    "No. 18, Industrial Development Zone, Beilun District",
-    "Ningbo, Zhejiang Province, 315800, China",
-    "Origin Country: P.R. China",
-  ];
+  const supAddressLines = doc.splitTextToSize(order.supplier_address || "", colWidth - 8).slice(0, 3) as string[];
   let supY = currentY + 16;
   supAddressLines.forEach((line) => {
     doc.text(line, margin + 4, supY);
     supY += 3.8;
   });
-  doc.text("Supplier Code: YGL-CHINA-01", margin + 4, currentY + 29);
-  doc.text("Email: export@yinglima-pack.com", margin + 4, currentY + 33);
-  doc.text("Contact: +86-574-8688-9922", margin + 4, currentY + 37);
+  doc.text(`GSTIN / Tax ID: ${order.supplier_gst || "—"}`, margin + 4, currentY + 29);
+  doc.text(`Email: ${order.supplier_email || "—"}`, margin + 4, currentY + 33);
+  doc.text(`Contact: ${order.supplier_phone || "—"}`, margin + 4, currentY + 37);
 
   // Right Box: Buyer (Importer)
   const rightX = margin + colWidth + 4;
@@ -106,24 +102,20 @@ export function generateImportPurchaseBillPdf(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text(order.to_name || `${getCachedBrandName().toUpperCase()} (MUMBAI HUB)`, rightX + 4, currentY + 11.5);
+  doc.text(order.to_name || "", rightX + 4, currentY + 11.5);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
-  const toAddressLines = [
-    "4th Floor, Office No 421, Supremus - I, Road No- 22",
-    "Near Passport Office, Wagle Estate, Thane (W), 400604",
-    "Maharashtra, India",
-  ];
+  const toAddressLines = doc.splitTextToSize(order.to_address || "", colWidth - 8).slice(0, 3) as string[];
   let toY = currentY + 16;
   toAddressLines.forEach((line) => {
     doc.text(line, rightX + 4, toY);
     toY += 3.8;
   });
-  doc.text("GSTIN: 27AAKFI9869H1ZL", rightX + 4, currentY + 29);
-  doc.text("IEC Code: 0316912345 (DGFT)", rightX + 4, currentY + 33);
-  doc.text("Email: procurement@inhymasolutions.com", rightX + 4, currentY + 37);
+  doc.text(`GSTIN: ${order.to_gst || "—"}`, rightX + 4, currentY + 29);
+  doc.text(`Phone: ${order.to_phone || "—"}`, rightX + 4, currentY + 33);
+  doc.text(`Email: ${order.to_email || "—"}`, rightX + 4, currentY + 37);
 
   currentY += infoBoxHeight + 3;
 
@@ -138,8 +130,8 @@ export function generateImportPurchaseBillPdf(
     { label: "Consignment No.", val: consignmentNo },
     { label: "Ordered Date", val: orderedDate },
     { label: "Destination Warehouse", val: warehouse },
-    { label: "ETD Origin", val: order.etd_origin_date || "10-10-2026" },
-    { label: "ETA Port", val: order.eta_port_date || "25-10-2026" },
+    { label: "ETD Origin", val: order.etd_origin_date || "—" },
+    { label: "ETA Port", val: order.eta_port_date || "—" },
     { label: "Consignment Status", val: order.status },
   ];
 
@@ -164,16 +156,15 @@ export function generateImportPurchaseBillPdf(
   doc.rect(margin, currentY, contentWidth, shippingStripH, "F");
 
   const shipFields = [
-    { label: "Port of Loading", val: "Ningbo Port, China" },
-    { label: "Port of Discharge", val: "Nhava Sheva (JNPT), Mumbai" },
-    { label: "Container Size", val: "40 FT HC High Cube" },
-    { label: "Total CBM", val: `${order.total_cbm || 65.4} CBM` },
-    { label: "Gross Weight", val: `${order.gross_weight || 12400} KG` },
-    { label: "Exchange Rate (USD/INR)", val: `1 USD = ₹ ${order.exchange_rate || 83.5}` },
+    { label: "Total CBM", val: order.total_cbm ? `${order.total_cbm} CBM` : "—" },
+    { label: "Conversion Rate (USD/INR)", val: order.con_rate_usd_to_inr ? `1 USD = ₹ ${order.con_rate_usd_to_inr}` : "—" },
+    { label: "Customs Rate (USD/INR)", val: order.custom_con_rate_usd_to_inr ? `1 USD = ₹ ${order.custom_con_rate_usd_to_inr}` : "—" },
+    { label: "Expected Arrival", val: order.exp_arri_date || "—" },
   ];
+  const colShipW = contentWidth / shipFields.length;
 
   shipFields.forEach((sf, i) => {
-    const x = margin + i * colMetaW;
+    const x = margin + i * colShipW;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
     doc.setTextColor(100, 116, 139);
@@ -321,9 +312,9 @@ export function generateImportPurchaseBillPdf(
 
   const summaryLines = [
     { label: "Invoice Total ($ USD):", val: formatUsdCurrency(order.invoice_total_usd || totalUsd) },
-    { label: "Basic Customs Value (INR):", val: formatIndianCurrency(order.invoice_total_inr || (totalUsd * (order.exchange_rate || 83.5))) },
+    { label: "Basic Customs Value (INR):", val: formatIndianCurrency(order.invoice_total_inr || totalUsd * (order.exchange_rate || 0)) },
     { label: "Total Import & Port Expenses:", val: formatIndianCurrency(order.total_expenses || 0) },
-    { label: "Total Landed Consignment Cost:", val: formatIndianCurrency(order.invoice_total_inr || totalLandingInr) },
+    { label: "Total Landed Consignment Cost:", val: formatIndianCurrency(order.gross_total_landing || totalLandingInr) },
   ];
 
   let sumY = currentY + 11.5;
@@ -352,8 +343,7 @@ export function generateImportPurchaseBillPdf(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
-  doc.text(order.remarks || "Direct overseas procurement from Yinglima China. Custom duty cleared under Chapter 84.", margin + 4, currentY + 12);
-  doc.text("Original Bill of Lading & Commercial Packing List archived in ERP files.", margin + 4, currentY + 17);
+  doc.text(order.remarks || "", margin + 4, currentY + 12);
   doc.text("This is an official computer-generated copy of the import purchase order.", margin + 4, currentY + 22);
 
   currentY += summaryH + 8;

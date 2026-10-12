@@ -138,6 +138,8 @@ A comprehensive, production-tested deployment manual is available in **[`DEPLOYM
 - **DigitalOcean:** Multi-service Droplet setup via `docker-compose.ecosystem.yml` or DigitalOcean App Platform PaaS.
 - **Amazon Web Services (AWS):** AWS ECS Fargate, AWS App Runner, and EC2 containerized topologies.
 - **Production URL & Port Decoupling:** Fully parametric URL resolution (zero hardcoded LAN IPs or localhost references).
-- **Cross-Subdomain SSO & Cookie Sync:** Unified session propagation via `VITE_COOKIE_DOMAIN` and central ecosystem sessions.
+- **Cross-Subdomain SSO & Cookie Sync:** Unified session propagation via `VITE_COOKIE_DOMAIN` and central ecosystem sessions (`ihm_ecosystem_session`).
+- **Disambiguated Session Verification & False Logout Prevention:** 3-way status contract (`valid` vs `notFound` vs `revoked`) ensuring client background watchers do not falsely terminate sessions on network blips or server restarts.
+- **Multi-Identifier Spoke Resolution:** Bidirectional resolution of machine keys (`erp-01` / `inhyma`, `erp-02` / `yinglima`) enabling uninterrupted SSO switching and centralized access governance across spokes.
 
 

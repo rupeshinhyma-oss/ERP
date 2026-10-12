@@ -6,6 +6,7 @@ import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.erp_memberships.models import ErpMembership, ErpMembershipStatus
 
@@ -45,7 +46,9 @@ class ErpMembershipRepository:
     async def list_for_user(self, global_user_id: uuid.UUID) -> list[ErpMembership]:
         """List every membership a Global User holds, across all ERPs."""
         result = await self.db.execute(
-            select(ErpMembership).where(ErpMembership.global_user_id == global_user_id)
+            select(ErpMembership)
+            .options(joinedload(ErpMembership.erp_instance))
+            .where(ErpMembership.global_user_id == global_user_id)
         )
         return list(result.scalars().all())
 
@@ -74,9 +77,12 @@ class ErpMembershipRepository:
         offset: int = 0,
         erp_instance_id: uuid.UUID | None = None,
         status: ErpMembershipStatus | None = None,
+        global_user_ids: list[uuid.UUID] | None = None,
     ) -> list[ErpMembership]:
-        """List memberships across all or specific ERP instances, with optional status filter."""
+        """List memberships across all or specific ERP instances, with optional status / user-set filters."""
         stmt = select(ErpMembership)
+        if global_user_ids is not None:
+            stmt = stmt.where(ErpMembership.global_user_id.in_(global_user_ids))
         if erp_instance_id is not None:
             stmt = stmt.where(ErpMembership.erp_instance_id == erp_instance_id)
         if status is not None:
@@ -96,4 +102,3 @@ class ErpMembershipRepository:
         """Delete a membership row from the database."""
         await self.db.delete(membership)
         await self.db.flush()
-

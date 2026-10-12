@@ -36,6 +36,7 @@ python-json-logger==3.2.1
 
 # --- Master Data import/export (Phase 7) ---
 openpyxl==3.1.5         # CSV/Excel import & export for master data modules
+types-openpyxl>=3.1.5   # Type stubs for openpyxl
 python-multipart==0.0.20  # required by FastAPI for UploadFile/File(...) form parsing
 
 # =============================================================================

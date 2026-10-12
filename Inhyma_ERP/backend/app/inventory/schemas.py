@@ -45,6 +45,40 @@ class ProductStockFilterParams(BaseModel):
     limit: int = Field(50, ge=1, le=500)
 
 
+class ProductReorderItemRead(BaseModel):
+    """Product Re-Order record matching live UI 16-column layout."""
+    id: str = Field(..., description="Stock/Product unique identifier")
+    sr_no: int = Field(..., description="Sequential row index")
+    product_id: Optional[str] = Field(None, description="Linked product master ID")
+    product_name_tally: str = Field(..., description="Product name as per Tally")
+    product_code: str = Field("-", description="SKU / product code")
+    brand: str = Field("-", description="Brand name")
+    category: Optional[str] = Field(None, description="Product category")
+    sub_category: Optional[str] = Field(None, description="Sub-category")
+    hsn_code: Optional[str] = Field(None, description="HSN code")
+    uom: Optional[str] = Field("SET", description="Unit of measurement")
+    mumbai: float = Field(0.0, description="Mumbai physical stock")
+    mumbai_transit: float = Field(0.0, description="Mumbai transit container stock")
+    mumbai_ordered: float = Field(0.0, description="Mumbai factory ordered stock")
+    ahmedabad: float = Field(0.0, description="Ahmedabad physical stock")
+    ahmedabad_transit: float = Field(0.0, description="Ahmedabad transit container stock")
+    ahmedabad_ordered: float = Field(0.0, description="Ahmedabad factory ordered stock")
+    indore: float = Field(0.0, description="Indore physical stock")
+    indore_transit: float = Field(0.0, description="Indore transit container stock")
+    indore_ordered: float = Field(0.0, description="Indore factory ordered stock")
+    total_qty: float = Field(0.0, description="Total gross inventory across all warehouses")
+    reorder_level: float = Field(0.0, description="Re-Order threshold level")
+    short_fall: float = Field(0.0, description="Shortfall quantity requiring restock")
+    moq: float = Field(0.0, description="Minimum order quantity")
+    order_to_be_place: float = Field(0.0, description="Recommended order quantity to place")
+
+
+class ProductReorderUpdateSchema(BaseModel):
+    """Payload to update reorder level and MOQ for a product."""
+    reorder_level: Optional[float] = Field(None, ge=0)
+    minimum_order_quantity: Optional[float] = Field(None, ge=0)
+
+
 # ==============================================================================
 # Stock Adjustment Schemas
 # ==============================================================================

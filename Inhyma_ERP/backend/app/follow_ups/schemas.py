@@ -40,6 +40,13 @@ class FollowUpBase(BaseModel):
     added_on: date | None = None
     notes: str | None = None
 
+    # Lead & Import Attributes
+    direct_import_from_china: str | None = None
+    monthly_import_volume: str | None = None
+    lead_status: str | None = None
+    reason_for_won_loss: str | None = None
+    entry_source: str | None = "Outside"
+
 
 class FollowUpCreate(FollowUpBase):
     pass
@@ -73,6 +80,12 @@ class FollowUpUpdate(BaseModel):
     followup_date: date | None = None
     added_on: date | None = None
     notes: str | None = None
+
+    direct_import_from_china: str | None = None
+    monthly_import_volume: str | None = None
+    lead_status: str | None = None
+    reason_for_won_loss: str | None = None
+    entry_source: str | None = None
 
 
 class FollowUpRead(FollowUpBase):

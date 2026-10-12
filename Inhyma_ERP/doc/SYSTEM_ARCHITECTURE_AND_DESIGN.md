@@ -95,6 +95,31 @@ flowchart TD
 - Real-time typeahead company extraction powered by `ClientNameAutocomplete`.
 - Soft-deletion lifecycle with single and bulk delete operations, fully recoverable via Trash.
 
+### 2.6 Purchase Management & Costing Engine (`/purchase/localpurchase` & `/purchase/importpurchase`)
+- **Local Purchase Orders:** Full domestic PO workflow with overhead expense absorption (Freight, Handling, Insurance). Calculates dynamic itemized landing costs via the Expense Factor formula and supports atomic inventory stock-in into destination warehouses.
+- **Import Consignments:** Multi-currency international purchase tracking with live exchange rates, shipping logistics (BL, vessel, container references), Indian Customs statutory tariff computation (Assessable Value, BCD, SWS 10%, IGST), and dual landing cost matrices (with vs. without statutory duty/tax).
+
+### 2.7 Sales Proforma Invoices & Commercial Terms (`/proforma-invoice/list`)
+- Formal B2B quotation and Proforma Invoice lifecycle with independent Billing and Shipping address routing.
+- Extended commercial terms: payment terms, delivery timelines, transport carrier, dispatch port, and dynamic RTGS/NEFT corporate bank detail embedding.
+- Automatic intra-state (CGST+SGST) vs. inter-state (IGST) tax resolution based on dispatch and delivery state combinations.
+
+### 2.8 Database-Driven Workflow Rules Engine (`app_workflow_rules`)
+- Universal status transition framework replacing hardcoded status graphs.
+- Enforces role-based permissions (`purchase.local.status`, `purchase.import.status`, `proforma.status`) before permitting entity state mutations.
+
+### 2.9 Federated Authentication, Central Verification & Password Synchronization
+- **Central Session Routing & Graceful Login:** Spoke login authenticates locally and simultaneously establishes an ecosystem session with `ERP_Main`. If a user is not authorized for Inhyma, they are redirected automatically to their assigned spoke or to the Central Control Plane. If a recent password change hasn't synced locally, the verified central session completes authentication via SSO handover.
+- **Bi-Directional Password Synchronization:** Local password changes (`/auth/change-password` and `/users/{id}/reset-password`) are securely transmitted to `ERP_Main` via `POST /internal/users/password` using internal service credentials, fanning out updates across the ecosystem.
+- **Fail-Closed Central Session Verification:** Inbound SSO handover logins verify the central session against ERP_Main's live database via `verify_ecosystem_session()`. Revoked or suspended accounts cannot bypass security checks.
+- **Central Identity Protection:** User email addresses are locked to the central control plane (`enforce_central_identity`), preventing local edits from breaking global SSO mappings.
+
+### 2.10 Multi-Identifier Spoke Recognition & Resilient SSO Switching
+- **Multi-Identifier Spoke Resolution:** The SSO handover route (`/auth/sso-handover`) accepts any registered alias for the spoke (`{"inhyma", "erp-01", settings.ERP_KEY, settings.ERP_INSTANCE_ID}`). This eliminates cross-ERP switching failures when ERP_Main issues access grants under varying keys.
+- **Super Administrator Omnipresence:** Users holding central `super_admin` or `platform_admin` roles are exempt from spoke restriction checks, guaranteeing unconditional administrative access across all nodes.
+- **Watcher Polling Loop Protection:** Frontend session watcher (`ecosystemSession.ts`) distinguishes between an unauthenticated state (`notFound: true`) and an active revocation (`revoked: true`). Unauthenticated states retain local sessions and do not trigger infinite reload loops.
+- **SSO Switching Fallbacks:** `ssoBridge.ts` passes the caller's target path (`/login?sso_handover=...`) and gracefully falls back to direct navigation if the destination already holds a valid local session.
+
 ---
 
 ## 3. Frontend Architecture & Platform Hardening
@@ -120,16 +145,20 @@ Inhyma_ERP/
 │   │   ├── masters/districts/    # District lookup and relations
 │   │   ├── masters/states/       # State lookup and relations
 │   │   ├── inventory/            # Stock adjustments & vouchers
+│   │   ├── purchase/             # Local & Import PO models, costing, stock-in, and routes
+│   │   ├── sales/                # Proforma invoices, commercial terms, and routes
+│   │   ├── common/workflow.py    # Database-driven workflow transition validator
+│   │   ├── suppliers/            # Supplier directory with mandatory calling number
 │   │   ├── technical_tasks/      # Field service tickets & technician dispatch
 │   │   ├── api/v1/internal_users.py # Spoke user deprovisioning endpoint
 │   │   └── events/               # WebSocket connection manager & broadcast
-│   ├── alembic/                  # Database migrations
-│   └── tests/                    # Backend test suites
+│   ├── alembic/                  # Database migrations (j1 through o1)
+│   └── tests/                    # Backend test suites (38 passing tests)
 ├── frontend/
 │   ├── src/
 │   │   ├── components/           # UI design tokens, SideDrawer, ActionMenu
-│   │   ├── lib/                  # autocompleteBlocker.ts, api.ts, authContext
-│   │   ├── pages/                # Companies.tsx, StockAdjustmentPage.tsx, etc.
+│   │   ├── lib/                  # autocompleteBlocker.ts, api.ts, purchaseApi.ts, workflowRules.ts
+│   │   ├── pages/                # Companies.tsx, Suppliers.tsx, LocalPurchasePage.tsx, etc.
 │   │   ├── styles/               # style.css (spin button removal)
 │   │   ├── App.tsx               # App lifecycle & blocker initialization
 │   │   └── main.tsx              # Wheel scroll lockout listener
@@ -154,3 +183,13 @@ To achieve complete decoupling between infrastructure routing and organizational
 3. **Dynamic Single Source of Truth (`ERP Settings -> Company Name`):**
    - The human-facing brand name is never hardcoded in source files.
    - All frontend components, document templates, and PDF renderers query `getCachedBrandName()`, which stays synchronized with the active record in the `organizations` database table.
+
+---
+
+## 6. Database Connection Resilience & Production Security
+
+1. **PgBouncer / Supabase Transaction Pooler Statement Cache Auto-Disable:**
+   - In [`app/database/engine.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/database/engine.py), `_statement_cache_must_be_disabled()` automatically detects port 6543 / PgBouncer and sets `statement_cache_size=0` on asyncpg, preventing PostgreSQL `DuplicatePreparedStatementError`.
+2. **Production HTTPS Origin Protection & Mixed Content Elimination:**
+   - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts), `isLocalhost()` guards prevent fallback to insecure `http://localhost:*` URLs when served on HTTPS domains (Render, custom domains).
+

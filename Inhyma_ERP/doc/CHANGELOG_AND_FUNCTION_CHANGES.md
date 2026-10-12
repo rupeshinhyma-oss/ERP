@@ -3,7 +3,179 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
-## [Release 2026-10-05] — Production Deployment Readiness, Zero-LAN URL Decoupling & Multi-Cloud Infrastructure
+## [Release 2026-10-10] — Cross-Ecosystem Single Sign-Out (SLO), M2M Force Logout API & WebSocket Disconnect
+
+### 1. Internal Machine-to-Machine Force-Logout API
+- **Endpoint Implementation in [`internal_users.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/api/v1/internal_users.py):**
+  - Added `POST /api/v1/internal/users/{identifier}/logout` guarded by `internal_service_dep` HMAC authentication.
+  - Accepts local UUID or email/username prefix to resolve the user record.
+  - Invokes `auth_service.force_logout_user(user.id)`, invalidating active sessions and recording a revocation timestamp to blacklist bearer tokens.
+  - Emits real-time `FORCE_LOGOUT` frame across live WebSocket channels (`ws_manager.disconnect_user(str(user.id))`) to instantly disconnect open browser sessions.
+- **Unit Test Coverage:**
+  - Added `test_internal_logout_endpoint_works` in [`test_internal_users_foreign_keys.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/tests/test_internal_users_foreign_keys.py).
+
+### 2. Multi-Origin Browser Session Invalidation & Shared Cookie Logout
+- **Cross-Port Cookie Synchronization in [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ecosystemSession.ts):**
+  - Sets `ihm_ecosystem_logged_out=1` cookie on logout across domain `localhost` and configured subdomains with root path `/`.
+  - Added `isExplicitlyLoggedOut()` helper checking both `sessionStorage` and the shared cookie marker.
+  - Clears `ihm_ecosystem_logged_out` on fresh logins via `setEcosystemCookie()`.
+- **Fast Watcher & App Lifecycle Defense:**
+  - Configured `initEcosystemSessionWatcher()` to poll every 2.5 seconds and trigger on window focus and visibility changes.
+  - In [`AppShell.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/AppShell.tsx), verified `isExplicitlyLoggedOut()` on mount and immediately purged local auth state (`Auth.clear()`) if any other ecosystem tab or app logged out.
+  - In [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts), updated `isExplicitLogout` to use `isExplicitlyLoggedOut()`, preventing automatic SSO re-authentication after a user explicitly logged out.
+
+---
+
+## [Release 2026-10-10] — Spoke 403 Loop Elimination, Address Bar Query Sanitization & Cross-ERP Failover Redirection
+
+### 1. Spoke ERP 403 Loop Prevention & Failover Cross-ERP Redirection
+- **Immediate Address Bar Query Sanitization in [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts):**
+  - In `processIncomingSsoHandover()`, stripped `sso_handover` from `window.location.search` immediately upon parsing via `window.history.replaceState`. Prevents re-submitting rejected tickets on browser refreshes or navigation changes.
+- **Failover Cross-ERP Redirection on 403 Forbidden:**
+  - When backend `POST /api/v1/auth/sso-handover` responds with 403 (e.g. user granted only Yinglima attempts to access Inhyma), the `catch` block clears stale credentials (`Auth.clear()`) and inspects the active central session.
+  - Automatically redirects users to their granted spoke ERP (e.g. Yinglima at `http://localhost:5173/dashboard?sso_handover=...`) or the official central control plane (`http://localhost:5170/dashboard`), avoiding endless 403 exception retries.
+- **AppShell & App Lifecycle Loop Defense:**
+  - In [`AppShell.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/AppShell.tsx), sanitized `location.search` when redirecting to `/login` to ensure rejected handover parameters are not carried into login route state.
+  - In [`App.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/App.tsx), added `ssoProcessedRef = useRef(false)` guard preventing repeated invocations across component re-renders.
+
+### 2. Auto-Activation on Central SSO Handover & Eviction Guard
+- **Verified Account Auto-Activation in [`auth/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/auth/routes.py):**
+  - In `sso_handover_login`, when central verification confirms the user is authorized for Inhyma, any existing account marked inactive or soft-deleted is automatically restored (`deleted_at = None`, `is_active = True`, `status = UserStatus.ACTIVE`). Unregistered users are auto-provisioned on the fly. Eliminates 403 errors when central permissions are restored.
+- **Central Verification Before Eviction in [`AppShell.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/AppShell.tsx):**
+  - Gated the logged-in access check behind `verifyCentralEcosystemSession`. Prevents stale localhost browser cookies from evicting newly authenticated users and eliminates multi-tab redirect loops.
+- **Failover SSO Error Signaling in [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts):**
+  - Appended `?sso_error=handover_failed` when redirecting back to the control plane, allowing ERP_Main to halt automated bouncing and retain the user on the control plane dashboard.
+
+---
+
+## [Release 2026-10-10] — Production HTTPS Mixed Content Elimination, Supabase PgBouncer Statement Cache Auto-Disable & Bi-Directional Password Sync Federation
+
+### 1. Production Origin Security, Dynamic SSO Routing & User Isolation
+- **`isLocalhost()` Security Interceptor:**
+  - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts), wrapped all `http://localhost:*` fallback URLs with `isLocalhost()` guards.
+  - In production HTTPS deployments (e.g. Render, Cloudflare, custom domains), insecure `http://` calls to ports `:8000`, `:8001`, `:8002`, `:5170`, `:5173`, and `:5174` are suppressed, eliminating browser Mixed Content blocking errors (`Blocked loading mixed active content`).
+- **Dynamic SSO Route Handling (`routeForCentralSession`):**
+  - Added `routeForCentralSession` and `createSsoHandoverUrlFromSession` in [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts) to handle multi-ERP routing directly from central session data.
+  - Users with 0 granted spoke ERPs (e.g. `User A`, `User B`, `User C`, `User D` with `allowed_erps = ["control-plane"]`) or $\ge 2$ spoke ERPs are automatically redirected to `http://localhost:5170/dashboard`.
+  - Users with exactly 1 other spoke ERP are redirected to their assigned ERP dashboard.
+- **User Isolation Guard:**
+  - In `processIncomingSsoHandover()`, if the incoming ticket or cookie email differs from the local cached profile, `Auth.clear()` runs immediately to enforce strict account isolation and avoid session leakage across logins.
+  - Direct navigation to Inhyma routes (`/dashboard`) by unassigned users triggers an automatic bounce to `http://localhost:5170/dashboard`.
+
+### 2. Dual-Path Centralized Spoke Login (`Login.tsx`)
+- **Central Session Routing & Graceful SSO Fallback in [`Login.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Login.tsx):**
+  - Updated the login workflow to perform local authentication while concurrently establishing the central ecosystem session with `ERP_Main`.
+  - Supports flexible user lookup by canonical email, display name (e.g. `User A`), or username prefix.
+  - If a user is not authorized for Inhyma (including zero-grant users), `routeForCentralSession` immediately redirects them via SSO handover to the official central dashboard (`http://localhost:5170/dashboard`) or their designated spoke ERP rather than throwing an unhandled error.
+  - If a user's password was changed on another ERP and has not yet synced locally, the verified central session logs them in via SSO handover, preventing user lockouts.
+  - Fails closed: if the user's central session is reported revoked or inactive, login is rejected immediately.
+
+### 3. Bi-Directional Password Synchronization with ERP_Main
+- **Password Fanout Client [`erp_main_client.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/federation/erp_main_client.py):**
+  - Added `push_password_to_erp_main(email, new_password)` transmitting password changes to `ERP_Main` via `POST /internal/users/password` using internal service credentials.
+- **Route Interceptors:**
+  - Hooked into `change_password` in [`auth/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/auth/routes.py) and `reset_password` in [`users/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/users/routes.py).
+  - Automatically pushes password updates to ERP_Main so they propagate across the entire multi-ERP ecosystem without raising into or interrupting the local caller.
+- **Automated Test Suite:**
+  - Added [`test_password_sync_to_erp_main.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/tests/test_password_sync_to_erp_main.py).
+
+### 4. SSO Handover Central Verification Guard
+- **Fail-Closed Session Confirmation in [`auth/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/auth/routes.py):**
+  - Integrated `verify_ecosystem_session(session_id)` from [`erp_main_client.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/federation/erp_main_client.py) into `sso_handover_login`.
+  - When `SSO_HANDOVER_REQUIRE_CENTRAL_VERIFICATION` is enabled, the backend verifies the central session against ERP_Main's live database before generating local tokens.
+  - Ensures tokens constructed client-side cannot bypass access governance, and immediately rejects revoked or suspended accounts.
+- **Automated Test Suite:**
+  - Added [`test_sso_handover_central_verification.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/tests/test_sso_handover_central_verification.py).
+
+### 5. Central Identity Protection on Local Profile Edits
+- **Email Modification Lock in [`users/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/users/routes.py):**
+  - Implemented `enforce_central_identity(user_service, user_id, payload)`.
+  - Form re-submissions containing the existing email are permitted, but attempting to modify an email address locally throws `ForbiddenException("A user's email is managed centrally. Please change it from the ERP_Main Control Panel.")`, preventing broken SSO identity mappings.
+
+### 6. Database Connection Hardening for Supabase Transaction Pooler (PgBouncer)
+- **Prepared Statement Cache Auto-Disable:**
+  - In [`app/database/engine.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/database/engine.py), implemented `_statement_cache_must_be_disabled()`.
+  - Auto-detects port 6543 / PgBouncer connection strings and disables asyncpg's prepared statement cache (`statement_cache_size=0`), preventing `DuplicatePreparedStatementError`.
+
+### 7. Python Virtualenv Interpreter Resolution in `server.py`
+- Fixed Windows virtual environment symlink resolution by using `sys.executable` directly rather than `Path(sys.executable).resolve()`.
+
+---
+
+## [Release 2026-10-06] — Purchase Order Modules, Database-Driven Workflow Engine, Proforma Invoice Extensions & Company Specification Upgrades
+
+### 1. Purchase Module — Local Purchase Management (`/purchase/local-orders`)
+- **Backend Architecture & Routes (`app/purchase/local_routes.py`):**
+  - Implemented complete CRUD, server-side pagination, search across invoice number/supplier/warehouse, date filters (`date_from`, `date_to`), and status tabs.
+  - **Dynamic Expense Factor Costing Engine (`app/purchase/costing.py`):** Computes `total_expenses = packing_forwarding + transport + offloading` and calculates `loading_percent = (total_expenses / basic_amount) * 100`. Each line item computes `expense_per_unit = round(unit_rate * (loading_percent / 100), 2)` and `unit_landing_value = unit_rate + expense_per_unit`.
+  - **Automated Stock-In Application:** Transitioning a local purchase to `confirmed` status automatically updates warehouse physical inventory (`app/inventory/stock_service.py` / `move_stock`) and marks `stock_applied = True`.
+  - **Database Migration (`l1a2b3c4d5e9_create_purchase_tables.py`):** Creates `local_purchases` and `local_purchase_items` with supplier foreign key links, invoice details, expenses breakdown, and versioning.
+- **Frontend Interface (`LocalPurchasePage.tsx`):**
+  - Interactive table with status counters (`all`, `pending`, `confirmed`), search bar, item limit selector, and dynamic sorting indicators.
+  - **Dynamic Masters Lookups:** Replaced hardcoded dropdowns with live API lookups for active suppliers (`/suppliers`), physical warehouses (`/masters/warehouses`), and units of measurement (`/masters/uom`).
+  - Integrated typeahead search with datalist `<datalist id="local-supplier-options">` and canonical supplier name normalization.
+  - Line-item table automatically renders UOM unit badges and performs live recalculations of landing rates as expenses change.
+  - Full A4 PDF generation integration (`localPurchasePdf.ts`, `LocalPurchasePdfPage.tsx`).
+
+### 2. Purchase Module — Import Purchase Consignments (`/purchase/import-orders`)
+- **Backend Architecture & Routes (`app/purchase/import_routes.py`):**
+  - Consignment tracking with exchange rate (`conversion_rate`), customs valuation rate (`customs_conversion_rate`), import duty percentage, and CBM volumetric calculations.
+  - **Dual Landing Valuation Matrix:** Computes landing rate on both Value Basis (`VB`) and CBM Volume Basis (`CB`), including `landing_diff = unit_landing_cb - unit_landing_vb`.
+  - **Live Preview Endpoint (`POST /purchase/import-orders/preview`):** Provides instant recalculation of CBM, duty, and landing expenses while the user types in the creation/edit drawer.
+  - **Multi-Date Range Filtering:** Supports server-side and client-side filtering across three distinct date ranges: **Expected Arrival Date Range**, **ETD Origin Date Range**, and **ETA Port Date Range**, with presets (Today, Yesterday, Last 7 Days, This Month, Custom).
+  - **Ordered Status Warehouse Restriction:** Automatically hides physical destination warehouses during the `pending` phase, ensuring consignments still in transit can only be routed to non-physical / transit holding locations (e.g. `Mumbai Ordered`, `Ahmedabad Ordered`, `Indore Ordered`).
+- **Frontend Interface (`ImportPurchasePage.tsx`):**
+  - Full consignment management with status tabs (`all`, `pending`, `confirmed`, `received`, `closed`).
+  - Searchable supplier input with datalist (`<datalist id="import-supplier-options">`) and validation requiring selection from the supplier master.
+  - Interactive table showing Consignment No., Ordered Date, Invoice Date, Supplier, Warehouse, Total USD, Total INR, and landing totals.
+  - Detailed side drawer and modal view showing breakdown of shipping line charges, CFS charges, clearing transport, stamp duty, insurance, freight, and misc remarks.
+  - Import Purchase PDF generator (`importPurchasePdf.ts`, `ImportPurchasePdfPage.tsx`).
+
+### 3. Database-Driven Workflow Rules Engine & Resilience Fallbacks
+- **Architecture (`app/common/workflow.py`):**
+  - Workflow transitions, editable rules, deletable permissions, and initial statuses are stored dynamically in the `meta` column of the `option_lists` table (`group_key` = `purchase.local.status`, `purchase.import.status`, `proforma.status`).
+  - Replaces hardcoded transition constants with configurable data rules: `next`, `admin_only_to`, `perm_to`, `reason_required_to`, `edit`, `delete`, and `stock_in`.
+- **Alembic Seeding Migrations:**
+  - `m1a2b3c4d5ea_seed_purchase_rules.py`: Seeds status groups and workflow options for Local and Import Purchases.
+  - `k1a2b3c4d5e8_seed_proforma_rules.py`: Seeds status rules, commercial defaults, and numbering rules for Proforma Invoices.
+- **Alembic Version Desynchronization Resolution:**
+  - Identified and resolved invalid revision identifier `'g1a2b3c4d5e8'` in the database's `alembic_version` table.
+  - Successfully upgraded database to head revision `m1a2b3c4d5ea` (and subsequent `o1a2b3c4d5ec`), restoring full schema alignment across Supabase PostgreSQL.
+- **Client & Server Fallback Resilience:**
+  - Added `FALLBACK_RULES` dictionary in `app/common/workflow.py` and `DEFAULT_LOCAL_PURCHASE_RULES` / `DEFAULT_IMPORT_PURCHASE_RULES` in `frontend/src/lib/workflowRules.ts` to ensure endpoints and pages never fail if database rules are momentarily unseeded.
+
+### 4. Extended Company Profile Specification Upgrades
+- **Database Migrations (`n1a2b3c4d5eb_extend_company_profile.py`, `o1a2b3c4d5ec_seed_company_option_lists.py`):**
+  - Added new columns to `companies`: `monthly_turnover`, `potential_business_per_month`, `direct_import_from_china`, `monthly_import_volume`, `products_needed_for_imports`.
+  - Added new columns to `company_contacts`: `birth_date` and `anniversary_date`.
+  - Seeded option list groups for `company.business_type`, `company.business_category`, `company.monthly_turnover`, `company.potential_business_per_month`, `company.direct_import_from_china`, and `company.monthly_import_volume`.
+- **Backend Validation & Conditional Constraints (`app/companies/schemas.py`, `models.py`):**
+  - **Direct Import from China Cluster:** Strictly restricted to companies where `company_type` (Business Type) is `B2B`.
+  - **Import Volume & Products:** Restricted to when `direct_import_from_china == "Yes"`.
+  - **Potential Reason:** Mandatory when `potential == "no"`.
+  - **Potential Business per Month:** Allowed only when `potential == "yes"`.
+  - **Contact Birth Date & Anniversary Date:** Validated and stored on sub-contacts.
+- **Frontend Enhancements (`Companies.tsx`, `companyFields.ts`):**
+  - Dynamic conditional rendering of Monthly Turnover (when Business Type is selected), Potential Reason (when Potential = No), and Potential Business per Month (when Potential = Yes).
+  - Dedicated Section 2b: **Direct Import from China** with automatic field clearing (`clearInapplicableCompanyFields`) when prerequisites change.
+  - Birth Date and Anniversary Date pickers on Company Sub-Contacts with automated age calculation (`computeAge`).
+
+### 5. Supplier Directory — Mandatory Calling Number
+- **Backend Enforcement (`app/suppliers/schemas.py`, `repository.py`, `service.py`):**
+  - Made `contact_calling_number` a mandatory field (`min_length=1`) on supplier creation.
+  - Added validator `_validate_calling_not_blanked` ensuring updates cannot wipe or blank the calling number.
+- **Frontend Validation (`Suppliers.tsx`):**
+  - Added required red asterisk (`*`) to the Calling Number field in both quick and full supplier creation drawers.
+  - Client-side pre-submission validation flags empty calling numbers immediately with `Calling number is required.`.
+
+### 6. RBAC & Workflow Permission Seeds
+- **Scripts (`scripts/seed_purchase_permissions.py`, `scripts/seed.py`):**
+  - Created and granted permissions: `proforma.approve` (Approve proforma invoices), `localpurchase.update` (Edit pending local purchases), `localpurchase.confirm` (Confirm local purchases & add stock).
+  - Added these permissions directly to `BOOTSTRAP_PERMISSIONS` in `scripts/seed.py`.
+
+---
+
+
 
 ### 1. Quotation Portal URL Parametrization
 - **Eliminated Hardcoded LAN Fallback:** In [`routes.py:1052`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/inquiries/routes.py#L1052), replaced the hardcoded `192.168.1.23:5173` LAN IP fallback with `(request.headers.get("origin") or getattr(settings, "FRONTEND_URL", "http://localhost:5174")).rstrip("/")`. Automated RFQ quotation email links now resolve dynamically to the live production domain.
@@ -23,6 +195,32 @@
 - **Render Blueprint:** Added [`render.yaml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/render.yaml) for 1-click Render web service and static site provisioning.
 - **Dynamic Port Binding:** Updated [`backend/Dockerfile`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/Dockerfile) to dynamically bind to `${PORT:-8002}`.
 - **Compose Orchestration:** Added [`docker-compose.prod.yml`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/docker-compose.prod.yml).
+
+## [Release 2026-10-10] — Real-Time Provisioning Synchronization & Soft-Deleted User Restoration
+- **Re-Granting Restoration:** Updated `POST /api/v1/internal/users/provision` in [`internal_users.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/api/v1/internal_users.py) to look up users by email regardless of `deleted_at`. When access is restored in ERP_Main, any soft-deleted user is reactivated (`deleted_at = None`, `is_active = True`, `status = ACTIVE`) and their password updated if provided.
+- **Dynamic List Filtering:** Soft-deleted users are omitted from active user queries (`/users`), while restored users immediately reappear upon being granted access.
+
+---
+
+## [Release 2026-10-10 Part 2] — Ecosystem Session Reliability, Cross-ERP Switching & False Logout Elimination
+
+### 1. Root Cause Resolution for False Logouts and Switch Loops
+- **Session Revocation Disambiguation:** In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ecosystemSession.ts), the `ihm_ecosystem_logged_out` cookie was previously written as a generic `"1"`, causing newly established sessions to be flagged as revoked.
+- **Session-ID Keyed Revocation:** `clearEcosystemCookie(sessionId)` now records the exact revoked session ID inside `ihm_ecosystem_logged_out`. `isExplicitlyLoggedOut(currentSessionId)` only flags revocation if the cookie's recorded ID matches the current active session.
+- **SSO Handover Exemption:** Added immediate exemption for incoming SSO handover navigation (`sso_handover` query param in URL) ensuring switching users are never rejected as logged out.
+- **Cross-Domain/Port Cleansing:** Added `clearCookieEverywhere` and `setCookieEverywhere` covering host-only, `localhost`, `127.0.0.1`, current hostname, and `VITE_COOKIE_DOMAIN`.
+
+### 2. Multi-Tab Session Synchronization & Polling Loop Hardening
+- **Watcher Polling Loop Fix:** Removed redundant calls to `clearEcosystemCookie()` inside periodic polling, preventing perpetual renewal of the 60-second logout window.
+- **Tab Focus Stale State Recovery:** Window `focus` events purge stale tab-scoped `ihm_explicit_logout` flags when an active local session exists.
+
+### 3. Switcher Fallbacks & Local Login Session Recovery
+- **Switch Failure Fallback:** Wrapped `handleSwitch` in [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/EcosystemSwitcher.tsx) in try/catch blocks with direct navigation fallback.
+- **Local Login Fallback Session:** In [`Login.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Login.tsx), local login automatically establishes a fallback ecosystem session cookie if central control plane communication is degraded.
+
+### 4. Backend Multi-Identifier & Role-Based Authorization
+- **Comprehensive Key Resolution:** In [`routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/auth/routes.py), `sso_handover_login` matches against all known Inhyma identifiers (`inhyma`, `erp-01`, and dynamic `settings.ERP_KEY`), eliminating 403 Forbidden false rejections when central permissions use machine keys or friendly names.
+- **Central Authority & Super Admin Exemption:** Central role verification honors `central.get("role") == "super_admin"` with ecosystem-wide access, preventing super admins or users with valid grants from getting trapped in redirect loops.
 
 ---
 

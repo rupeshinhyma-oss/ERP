@@ -145,17 +145,15 @@ class HsnService:
         hsn_codes = await self.repository.list_all()
         rows = [
             {
-                "id": str(h.id),
-                "code": h.code,
-                "description": h.description,
-                "gst_percent": h.gst_percent,
-                "refund_vat_percent": h.refund_vat_percent or 0.0,
-                "status": h.status.value,
-                "created_at": h.created_at.isoformat(),
-                "updated_at": h.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "HSN Code": h.code,
+                "Description": h.description or "",
+                "GST %": h.gst_percent,
+                "Refund VAT %": h.refund_vat_percent if h.refund_vat_percent is not None else 0.0,
+                "Status": h.status.value.capitalize(),
             }
-            for h in hsn_codes
+            for idx, h in enumerate(hsn_codes)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)
-        return build_excel_export(EXPORT_HEADERS, rows, sheet_title="HSN")
+        return build_excel_export(EXPORT_HEADERS, rows, sheet_title="HSN Codes")

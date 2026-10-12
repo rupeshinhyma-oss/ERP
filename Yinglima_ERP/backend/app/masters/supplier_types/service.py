@@ -142,15 +142,13 @@ class SupplierTypeService:
         items = await self.repository.list_all()
         rows = [
             {
-                "id": str(b.id),
-                "name": b.name,
-                "code": b.code,
-                "description": b.description,
-                "status": b.status.value,
-                "created_at": b.created_at.isoformat(),
-                "updated_at": b.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "Supplier Type Name": b.name,
+                "Code": b.code or "",
+                "Description": b.description or "",
+                "Status": b.status.value.capitalize(),
             }
-            for b in items
+            for idx, b in enumerate(items)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)

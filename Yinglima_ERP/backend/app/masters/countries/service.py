@@ -171,17 +171,15 @@ class CountryService:
         countries = await self.repository.list_all()
         rows = [
             {
-                "id": str(c.id),
-                "name": c.name,
-                "code": c.code,
-                "phone_code": c.phone_code,
-                "nationality": c.nationality,
-                "currency": c.currency,
-                "status": c.status.value,
-                "created_at": c.created_at.isoformat(),
-                "updated_at": c.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "Country Name": c.name,
+                "Code": c.code,
+                "Phone Code": c.phone_code or "",
+                "Currency": c.currency or "",
+                "Nationality": c.nationality or "",
+                "Status": c.status.value.capitalize(),
             }
-            for c in countries
+            for idx, c in enumerate(countries)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)

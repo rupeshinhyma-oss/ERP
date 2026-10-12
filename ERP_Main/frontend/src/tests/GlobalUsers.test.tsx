@@ -75,9 +75,9 @@ describe("GlobalUsers Page", () => {
       expect(screen.getByText("bob@company.com")).toBeDefined();
     });
 
-    // Check status badges
-    expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Suspended").length).toBeGreaterThan(0);
+    // The list no longer has a Status column: per-user status badges must not appear in the table.
+    // (Access is shown per ERP; Disable/Enable stays in Actions and Account Status stays in the detail view.)
+    expect(screen.queryAllByText("Suspended").length).toBe(0);
 
 
     // Check action buttons
@@ -635,20 +635,26 @@ describe("GlobalUsers Page", () => {
     // Filter by "None" - should show only unassigned user
     fireEvent.change(erpFilterSelect, { target: { value: "NONE" } });
 
-    expect(screen.queryByText("Assigned User")).toBeNull();
-    expect(screen.getByText("Unassigned User")).toBeDefined();
+    await waitFor(() => {
+      expect(screen.queryByText("Assigned User")).toBeNull();
+      expect(screen.getByText("Unassigned User")).toBeDefined();
+    });
 
     // Filter by "erp-1" - should show only assigned user
     fireEvent.change(erpFilterSelect, { target: { value: "erp-1" } });
 
-    expect(screen.getByText("Assigned User")).toBeDefined();
-    expect(screen.queryByText("Unassigned User")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByText("Assigned User")).toBeDefined();
+      expect(screen.queryByText("Unassigned User")).toBeNull();
+    });
 
     // Reset to "ALL" - should show both
     fireEvent.change(erpFilterSelect, { target: { value: "ALL" } });
 
-    expect(screen.getByText("Assigned User")).toBeDefined();
-    expect(screen.getByText("Unassigned User")).toBeDefined();
+    await waitFor(() => {
+      expect(screen.getByText("Assigned User")).toBeDefined();
+      expect(screen.getByText("Unassigned User")).toBeDefined();
+    });
   });
 });
 

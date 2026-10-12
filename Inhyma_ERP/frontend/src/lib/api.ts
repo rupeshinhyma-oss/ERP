@@ -725,11 +725,56 @@ export async function downloadExport(
 export interface ProductStockFilterParams {
   warehouse?: string;
   category?: string;
+  sub_category?: string;
   brand?: string;
+  negative_stock?: string;
   status?: string;
   search?: string;
   skip?: number;
   limit?: number;
+}
+
+export interface ProductStockBreakupParams {
+  product_name: string;
+  warehouse: string;
+  type?: "physical" | "transit" | "ordered";
+}
+
+export interface ProductReorderFilterParams {
+  category?: string;
+  sub_category?: string;
+  brand?: string;
+  shortfall?: string;
+  reorder?: string;
+  warehouse?: string;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+export interface ProductReorderItem {
+  id: string;
+  sr_no: number;
+  product_id?: string | null;
+  product_name_tally: string;
+  product_code: string;
+  brand: string;
+  category?: string;
+  sub_category?: string;
+  mumbai: number;
+  mumbai_transit: number;
+  mumbai_ordered: number;
+  ahmedabad: number;
+  ahmedabad_transit: number;
+  ahmedabad_ordered: number;
+  indore: number;
+  indore_transit: number;
+  indore_ordered: number;
+  total_qty: number;
+  reorder_level: number;
+  short_fall: number;
+  moq: number;
+  order_to_be_place: number;
 }
 
 export interface StockAdjustmentFilterParams {
@@ -759,7 +804,9 @@ export const InventoryApi = {
     const qs = new URLSearchParams();
     if (params?.warehouse && params.warehouse !== "All") qs.set("warehouse", params.warehouse);
     if (params?.category && params.category !== "All") qs.set("category", params.category);
+    if (params?.sub_category && params.sub_category !== "All") qs.set("sub_category", params.sub_category);
     if (params?.brand && params.brand !== "All") qs.set("brand", params.brand);
+    if (params?.negative_stock && params.negative_stock !== "Select") qs.set("negative_stock", params.negative_stock);
     if (params?.status && params.status !== "All") qs.set("status", params.status);
     if (params?.search) qs.set("search", params.search);
     if (params?.skip !== undefined) qs.set("skip", String(params.skip));
@@ -774,6 +821,60 @@ export const InventoryApi = {
    */
   async getProductStock(stockId: string) {
     return apiGet<any>(`/inventory/product-stock/${stockId}`);
+  },
+
+  /**
+   * Fetch breakup data (Sale Order Information or Consignment Breakup) for (i) popup.
+   */
+  async getProductStockBreakup(params: ProductStockBreakupParams) {
+    const qs = new URLSearchParams();
+    qs.set("product_name", params.product_name);
+    qs.set("warehouse", params.warehouse);
+    if (params.type) qs.set("type", params.type);
+    return apiGet<any>(`/inventory/product-stock/breakup?${qs.toString()}`);
+  },
+
+  /**
+   * Fetch Goods Expected Date Report for marketing machine lookup.
+   */
+  async getGoodsExpectedReport(params?: {
+    machine?: string;
+    warehouse?: string;
+    status?: string;
+    limit?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.machine) qs.set("machine", params.machine);
+    if (params?.warehouse && params.warehouse !== "All") qs.set("warehouse", params.warehouse);
+    if (params?.status && params.status !== "All") qs.set("status", params.status);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    return apiGet<any>(`/inventory/goods-expected-report?${qs.toString()}`);
+  },
+
+  /**
+   * Fetch product re-order list with shortfall and MOQ calculations.
+   */
+  async listProductReorder(params?: ProductReorderFilterParams) {
+    const qs = new URLSearchParams();
+    if (params?.category && params.category !== "All") qs.set("category", params.category);
+    if (params?.sub_category && params.sub_category !== "All") qs.set("sub_category", params.sub_category);
+    if (params?.brand && params.brand !== "All") qs.set("brand", params.brand);
+    if (params?.shortfall && params.shortfall !== "All") qs.set("shortfall", params.shortfall);
+    if (params?.reorder && params.reorder !== "All") qs.set("reorder", params.reorder);
+    if (params?.warehouse && params.warehouse !== "All") qs.set("warehouse", params.warehouse);
+    if (params?.search) qs.set("search", params.search);
+    if (params?.skip !== undefined) qs.set("skip", String(params.skip));
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+
+    const endpoint = `/inventory/product-reorder${qs.toString() ? `?${qs.toString()}` : ""}`;
+    return apiGet<any>(endpoint);
+  },
+
+  /**
+   * Update reorder level and MOQ for a product.
+   */
+  async updateProductReorder(productId: string, data: { reorder_level?: number; minimum_order_quantity?: number }) {
+    return apiPatch<any>(`/inventory/product-reorder/${productId}`, data);
   },
 
   /**
@@ -857,4 +958,62 @@ export const InventoryApi = {
   async updateStockTransferStatus(transferId: string, status: string) {
     return apiPatch<any>(`/inventory/stock-transfer/${transferId}/status`, { status });
   },
+
+  /**
+   * Receive in-transit transfer into physical main destination warehouse (Point 69).
+   */
+  async receiveStockTransferToMain(transferId: string) {
+    return apiPost<any>(`/inventory/stock-transfer/${transferId}/receive-to-main`, {});
+  },
 };
+
+export interface DeletedOrderItem {
+  id: string;
+  order_no: string;
+  order_date: string;
+  warehouse: string;
+  expected_delivery_date: string;
+  company_name: string;
+  city: string;
+  state: string;
+  third_party: string;
+  po: string;
+  sales_person: string;
+  amount_inc_gst: number;
+  discount: number;
+  status: string;
+  deleted_at: string;
+  acc_dep: string;
+  gatepass: string;
+  remark?: string;
+}
+
+export interface DeletedOrdersFilterParams {
+  order_date_range?: string;
+  expected_delivery_date_range?: string;
+  warehouse?: string;
+  sales_person?: string;
+  state?: string;
+  search?: string;
+  skip?: number;
+  limit?: number;
+}
+
+export const DeletedOrdersApi = {
+  async listDeletedOrders(params?: DeletedOrdersFilterParams) {
+    const qs = new URLSearchParams();
+    if (params?.warehouse && params.warehouse !== "All") qs.set("warehouse", params.warehouse);
+    if (params?.sales_person && params.sales_person !== "All") qs.set("sales_person", params.sales_person);
+    if (params?.state && params.state !== "All" && params.state !== "x All") qs.set("state", params.state);
+    if (params?.search) qs.set("search", params.search);
+    if (params?.skip !== undefined) qs.set("skip", String(params.skip));
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+
+    const endpoint = `/sales/deleted-orders${qs.toString() ? `?${qs.toString()}` : ""}`;
+    return apiGet<any>(endpoint);
+  },
+
+  async restoreDeletedOrder(id: string) {
+    return apiPost<any>(`/sales/deleted-orders/${encodeURIComponent(id)}/restore`, {});
+  },
+};

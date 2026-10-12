@@ -158,16 +158,14 @@ class CurrencyService:
         currencies = await self.repository.list_all()
         rows = [
             {
-                "id": str(c.id),
-                "name": c.name,
-                "code": c.code,
-                "symbol": c.symbol,
-                "decimal_places": c.decimal_places,
-                "status": c.status.value,
-                "created_at": c.created_at.isoformat(),
-                "updated_at": c.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "Currency Name": c.name,
+                "Code": c.code,
+                "Symbol": c.symbol or "",
+                "Decimal Places": c.decimal_places,
+                "Status": c.status.value.capitalize(),
             }
-            for c in currencies
+            for idx, c in enumerate(currencies)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)

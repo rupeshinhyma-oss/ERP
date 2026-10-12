@@ -27,9 +27,9 @@ class SaleRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def generate_order_no(self, order_date: date) -> str:
+    async def generate_order_no(self, order_date: date, prefix_code: str = "MH") -> str:
         """
-        Generate sequential order numbers matching SO-YLM/YY-YY/XXXX.
+        Generate sequential order numbers matching SO-MH/YY-YY/XXXXX (5 digits).
         Financial year rollover: April 1 - March 31.
         """
         year = order_date.year
@@ -41,10 +41,36 @@ class SaleRepository:
             start_yr = (year - 1) % 100
             end_yr = year % 100
 
-        prefix = f"SO-INH/{start_yr:02d}-{end_yr:02d}/"
+        prefix = f"SO-{prefix_code}/{start_yr:02d}-{end_yr:02d}/"
 
         q = select(func.count(SaleOrder.id)).where(
-            SaleOrder.order_no.like(f"{prefix}%")
+            or_(
+                SaleOrder.order_no.like(f"{prefix}%"),
+                SaleOrder.order_no.like(f"SO-INH/{start_yr:02d}-{end_yr:02d}/%"),
+            )
+        )
+        res = await self.session.execute(q)
+        count = (res.scalar() or 0) + 1
+        return f"{prefix}{count:05d}"
+
+    async def generate_gatepass_no(self, gp_date: date | None = None) -> str:
+        """
+        Generate sequential gatepass numbers matching GP-YY-YY/XXXX.
+        Financial year rollover: April 1 - March 31.
+        """
+        d = gp_date or date.today()
+        year = d.year
+        month = d.month
+        if month >= 4:
+            start_yr = year % 100
+            end_yr = (year + 1) % 100
+        else:
+            start_yr = (year - 1) % 100
+            end_yr = year % 100
+
+        prefix = f"GP-{start_yr:02d}-{end_yr:02d}/"
+        q = select(func.count(SaleOrder.id)).where(
+            SaleOrder.gatepass_no.like(f"{prefix}%")
         )
         res = await self.session.execute(q)
         count = (res.scalar() or 0) + 1
@@ -74,10 +100,23 @@ class SaleRepository:
         consignment_code: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        delivery_date_from: str | None = None,
+        delivery_date_to: str | None = None,
+        state: str | None = None,
+        dispatch: str | None = None,
+        warehouses: list[str] | None = None,
+        exclude_statuses: list[str] | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[SaleOrder], int]:
         conditions: list[Any] = [SaleOrder.deleted_at.is_(None)]
+        # visibility limits for accounts / warehouse staff (see SaleService.visible_filters)
+        if warehouses is not None:
+            conditions.append(SaleOrder.warehouse.in_(warehouses))
+        if exclude_statuses:
+            conditions.append(SaleOrder.status.notin_(exclude_statuses))
 
         if organization_id:
             conditions.append(SaleOrder.organization_id == organization_id)
@@ -96,12 +135,46 @@ class SaleRepository:
         if date_to:
             conditions.append(SaleOrder.order_date <= date_to)
 
+        if invoice_date_from:
+            conditions.append(SaleOrder.invoice_date >= invoice_date_from.strip())
+        if invoice_date_to:
+            conditions.append(SaleOrder.invoice_date <= invoice_date_to.strip())
+
+        if delivery_date_from:
+            conditions.append(SaleOrder.delivery_date >= delivery_date_from.strip())
+        if delivery_date_to:
+            conditions.append(SaleOrder.delivery_date <= delivery_date_to.strip())
+
+        if state and state.strip():
+            conditions.append(SaleOrder.state.ilike(f"%{state.strip()}%"))
+
+        if dispatch and dispatch.strip():
+            d = dispatch.strip().lower()
+            if d in ("yes", "y", "true", "1"):
+                conditions.append(
+                    or_(
+                        SaleOrder.status.in_(["dispatched", "lr", "delivered", "completed"]),
+                        and_(SaleOrder.lr_no.isnot(None), SaleOrder.lr_no != ""),
+                    )
+                )
+            elif d in ("no", "n", "false", "0"):
+                conditions.append(
+                    and_(
+                        SaleOrder.status.notin_(["dispatched", "lr", "delivered", "completed"]),
+                        or_(SaleOrder.lr_no.is_(None), SaleOrder.lr_no == ""),
+                    )
+                )
+
         if search and search.strip():
             clean_search = f"%{search.strip()}%"
             conditions.append(
                 or_(
                     SaleOrder.order_no.ilike(clean_search),
                     SaleOrder.buyer_name.ilike(clean_search),
+                    SaleOrder.company_name.ilike(clean_search),
+                    SaleOrder.warehouse.ilike(clean_search),
+                    SaleOrder.sales_person.ilike(clean_search),
+                    SaleOrder.proforma_no.ilike(clean_search),
                     SaleOrder.consignment_code.ilike(clean_search),
                     SaleOrder.container_no.ilike(clean_search),
                     SaleOrder.bl_no.ilike(clean_search),
@@ -162,6 +235,8 @@ class SaleRepository:
         metrics = SaleSummaryMetrics()
         all_count = 0
         all_amount = 0.0
+        admin_to_lr_count = 0
+        admin_to_lr_amount = 0.0
 
         for r in rows:
             st = str(r[0]).lower().strip()
@@ -171,12 +246,22 @@ class SaleRepository:
             all_count += cnt
             all_amount += amt
 
+            if st in ("admin_approved", "acc_confirmed", "gatepass_created", "dispatched", "lr"):
+                admin_to_lr_count += cnt
+                admin_to_lr_amount += amt
+
             if st == "pending":
                 metrics.pending = MetricItem(count=cnt, amount=amt)
             elif st == "sales_confirmed":
                 metrics.sales_confirmed = MetricItem(count=cnt, amount=amt)
             elif st == "admin_approved":
                 metrics.admin_approved = MetricItem(count=cnt, amount=amt)
+            elif st == "acc_confirmed":
+                metrics.acc_confirmed = MetricItem(count=cnt, amount=amt)
+            elif st == "gatepass_created":
+                metrics.gatepass_created = MetricItem(count=cnt, amount=amt)
+            elif st == "gatepass_cancelled":
+                metrics.gatepass_cancelled = MetricItem(count=cnt, amount=amt)
             elif st == "dispatched":
                 metrics.dispatched = MetricItem(count=cnt, amount=amt)
             elif st == "lr":
@@ -185,6 +270,7 @@ class SaleRepository:
                 metrics.cancelled = MetricItem(count=cnt, amount=amt)
 
         metrics.all = MetricItem(count=all_count, amount=round(all_amount, 2))
+        metrics.admin_confirmed_to_lr = MetricItem(count=admin_to_lr_count, amount=round(admin_to_lr_amount, 2))
         return metrics
 
     async def create(self, order: SaleOrder) -> SaleOrder:
@@ -210,5 +296,20 @@ class SaleRepository:
         order.deleted_at = _utcnow()
         if deleted_by:
             order.remarks = f"{order.remarks or ''}\n[{date.today()}] Deleted by {deleted_by}".strip()
+        await self.session.flush()
+        return True
+
+    async def restore(self, order_or_id: SaleOrder | uuid.UUID, restored_by: str | None = None) -> bool:
+        if isinstance(order_or_id, uuid.UUID):
+            stmt = select(SaleOrder).where(SaleOrder.id == order_or_id)
+            order = (await self.session.execute(stmt)).scalars().first()
+            if not order:
+                return False
+        else:
+            order = order_or_id
+
+        order.deleted_at = None
+        if restored_by:
+            order.remarks = f"{order.remarks or ''}\n[{date.today()}] Restored by {restored_by}".strip()
         await self.session.flush()
         return True

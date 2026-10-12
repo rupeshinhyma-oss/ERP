@@ -68,15 +68,37 @@ flowchart TD
 - **Dynamic Deprovisioning:** Unchecking an ERP access grant invokes the spoke's internal API (`POST /api/v1/internal/users/{id}/deprovision`), soft-deleting the user record on the spoke and invalidating all active sessions.
 - **Status Normalization:** Revoked or unassigned spoke access renders cleanly as `None` badges (`Inhyma: • None`).
 
-### 2.3 Conditional Routing Engine (Single-ERP vs Multi-ERP)
-- **Single-ERP Authorized Users:** If an account only has permission for one spoke (e.g. Yinglima only), logging into `ERP_Main` (`:5170`) immediately redirects them to their designated spoke ERP with an SSO handover token. The central control plane dashboard and ecosystem switcher are hidden.
+### 2.3 Conditional Routing Engine (Single-ERP vs Multi-ERP vs Zero-Grant)
+- **Zero-Grant / Unassigned Users (e.g. User A, User B, User C, User D):**
+  - Users with no spoke memberships assigned (`allowed_erps = ["control-plane"]`) who attempt to log in at spoke ERP login pages (`:5174/login` or `:5173/login`) or navigate directly to spoke routes are automatically redirected via SSO handover to the official central dashboard (`http://localhost:5170/dashboard`).
+  - Central login supports flexible identification by primary email, display name (e.g. `User A`), or username prefix.
+  - On `ERP_Main`, users with role `NONE` see a dedicated "No ERP Access Assigned" welcome card and their sidebar navigation displays exclusively the `Dashboard` module.
+- **Single-ERP Authorized Users:** If an account only has permission for one spoke (e.g. Yinglima only), logging into `ERP_Main` (`:5170`) or another spoke immediately redirects them to their designated spoke ERP with an SSO handover token. The central control plane dashboard and ecosystem switcher are hidden.
 - **Multi-ERP Authorized Users:** Users with access to multiple ERPs land on the ERP Dashboard and are provided with the topbar Ecosystem Switcher dropdown across all applications.
 - **Platform Super Admins:** Unrestricted access across all registered ERP instances.
+- **User Isolation Guard:** All nodes clear local auth state if an incoming SSO handover ticket or ecosystem session cookie targets a different user email than the local cached profile.
 
 ### 2.4 Materialized Analytical Projections
 - Asynchronously consumes transactional outbox events from spoke ERPs.
 - Builds high-performance read-only projections for cross-system executive search, financial metrics, and operational dashboards.
 - Features idempotency deduplication (`event_id` tracking) and Dead Letter Queue (DLQ) retry mechanisms.
+
+### 2.5 Bi-Directional Password Synchronization & Unified Identity
+- **Single Password Per Identity:** Password updates originating from either ERP_Main or any connected spoke ERP (e.g., Inhyma or Yinglima) are automatically propagated throughout the entire ecosystem.
+- **Inbound Spoke Sync (`POST /api/v1/internal/users/password`):** Spoke backends securely submit changed passwords with internal service credentials; ERP_Main persists them centrally and immediately fans out re-provisioning calls across all other active ERP memberships (`push_password_to_memberships`).
+- **Graceful Fallback:** Operations never fail if a peer spoke is temporarily unreachable; spoken logins automatically verify credentials against the live central ecosystem session.
+
+### 2.6 Durable Access Sync Recovery Engine (`access_sync_tasks`)
+- **Fault-Tolerant Deprovisioning:** When an administrator revokes, suspends, or restores user access in ERP_Main, any network error reaching a spoke triggers a durable database record in `access_sync_tasks`.
+- **Bounded Exponential Backoff & Leases:** Tasks are reclaimed and retried with distributed worker leases (`claimed_by`, `lease_expires_at`) preventing duplicate execution.
+- **Fail-Closed Verification:** Spoke login verification calls ERP_Main's live database state, ensuring that even during synchronization delays, revoked users cannot access spoke ERPs.
+
+### 2.8 Ecosystem Session Lifecycle, Disambiguated Revocation & Switch Reliability
+- **Session-ID Keyed Revocation:** Single sign-out marks `ihm_ecosystem_logged_out=<session_id>` with the exact revoked session ID rather than a generic boolean flag. Other tabs or fresh sessions established via SSO switch or re-login are never falsely diagnosed as revoked.
+- **Universal Cookie Cleansing (`clearCookieEverywhere` / `setCookieEverywhere`):** Operates across host-only, `localhost`, `127.0.0.1`, current hostname, and `VITE_COOKIE_DOMAIN`, preventing stale host-level cookies from causing unintended logouts.
+- **Watcher Polling Loop Stabilization:** Removed redundant invocation of `clearEcosystemCookie()` inside periodic session verification, stopping perpetual 60-second expiration renewal loops.
+- **Server Restart Resilience & DB Persistence:** `PlatformAdmin` logins automatically ensure a mirrored `GlobalUser` row, persisting sessions to `global_sessions` in the database so administrative sessions survive server restarts and multi-worker reload.
+- **Accurate Not-Found Disambiguation:** `GET /global/ecosystem-session/{session_id}` distinguishes unknown sessions (`notFound: True, revoked: False`) from genuinely revoked sessions (`revoked: True`), protecting in-flight tokens and handover tickets from premature invalidation.
 
 ---
 

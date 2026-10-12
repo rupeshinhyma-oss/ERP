@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ColumnElement, Select, and_, exists, or_, select
+from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -216,6 +216,18 @@ class SupplierRepository(BaseRepository[Supplier]):
         if exclude_id is not None:
             stmt = stmt.where(Supplier.id != exclude_id)
         result = await self.session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def tax_id_exists(self, tax_id: str, *, exclude_id: uuid.UUID | None = None) -> bool:
+        """Return True if a non-deleted supplier already uses this GST / tax id (case-insensitive)."""
+        stmt = (
+            self._base_select()
+            .with_only_columns(Supplier.id)
+            .where(func.upper(Supplier.tax_id_number) == tax_id.strip().upper())
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Supplier.id != exclude_id)
+        result = await self.session.execute(stmt.limit(1))
         return result.scalar_one_or_none() is not None
 
     async def get_by_name_city(

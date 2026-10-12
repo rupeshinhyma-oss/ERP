@@ -10,9 +10,10 @@ import { apiGet, apiPost } from "./api";
 import {
   getEcosystemCookie,
   setEcosystemCookie,
+  isExplicitlyLoggedOut,
   type EcosystemSessionData,
 } from "./ecosystemSession";
-import type { PlatformAdmin, TokenPair } from "@/types";
+import type { PlatformAdmin } from "@/types";
 
 export interface SsoHandoverPayload {
   role: "super_admin" | "admin" | "global_user";
@@ -29,6 +30,12 @@ const SSO_VALIDITY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 const getHost = () => (typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1");
 
+const isLocalhost = (hostname: string) =>
+  hostname === "localhost" ||
+  hostname === "127.0.0.1" ||
+  hostname === "0.0.0.0" ||
+  hostname.endsWith(".local");
+
 export interface EcosystemErpEntry {
   key: string;
   id: string;
@@ -40,17 +47,33 @@ export interface EcosystemErpEntry {
 
 export const getEcosystemErps = (): EcosystemErpEntry[] => {
   const host = getHost();
+  const isLocal = isLocalhost(host);
+
   const controlPlaneHost =
     import.meta.env.VITE_CONTROL_PLANE_URL ||
-    (typeof window !== "undefined" && window.location.origin ? `${window.location.origin}/dashboard` : `http://${host}:5170/dashboard`);
+    (typeof window !== "undefined" && window.location.origin
+      ? `${window.location.origin}/dashboard`
+      : isLocal
+        ? `http://${host}:5170/dashboard`
+        : "#");
+
   const controlPlaneApi =
-    import.meta.env.VITE_API_ORIGIN
+    import.meta.env.VITE_CONTROL_PLANE_API_URL ||
+    (import.meta.env.VITE_API_ORIGIN
       ? `${import.meta.env.VITE_API_ORIGIN.replace(/\/+$/, "")}/api/v1`
-      : `http://${host}:8000/api/v1`;
-  const yinglimaHost = import.meta.env.VITE_YINGLIMA_URL || `http://${host}:5173/dashboard`;
-  const yinglimaApi = import.meta.env.VITE_YINGLIMA_API_URL || `http://${host}:8001/api/v1`;
-  const inhymaHost = import.meta.env.VITE_INHYMA_URL || `http://${host}:5174/dashboard`;
-  const inhymaApi = import.meta.env.VITE_INHYMA_API_URL || `http://${host}:8002/api/v1`;
+      : isLocal
+        ? `http://${host}:8000/api/v1`
+        : undefined);
+
+  const yinglimaHost =
+    import.meta.env.VITE_YINGLIMA_URL || (isLocal ? `http://${host}:5173/dashboard` : "");
+  const yinglimaApi =
+    import.meta.env.VITE_YINGLIMA_API_URL || (isLocal ? `http://${host}:8001/api/v1` : undefined);
+
+  const inhymaHost =
+    import.meta.env.VITE_INHYMA_URL || (isLocal ? `http://${host}:5174/dashboard` : "");
+  const inhymaApi =
+    import.meta.env.VITE_INHYMA_API_URL || (isLocal ? `http://${host}:8002/api/v1` : undefined);
 
   return [
     { key: "control-plane", id: "control-plane", name: "ERP Dashboard", hostUrl: controlPlaneHost, apiUrl: controlPlaneApi, badge: "Control Plane" },
@@ -68,7 +91,7 @@ export const ECOSYSTEM_ERPS = getEcosystemErps();
 export function createSsoHandoverUrl(
   targetBaseUrl: string,
   targetPath?: string,
-  userOverride?: { email?: string; user?: string; role?: string; allowed_erps?: string[]; session_id?: string }
+  userOverride?: { email?: string; user?: string; role?: string | null; allowed_erps?: string[]; session_id?: string }
 ): string {
   if (!targetBaseUrl) return "#";
 
@@ -108,7 +131,7 @@ export function createSsoHandoverUrl(
   try {
     const url = new URL(targetBaseUrl, window.location.origin);
     const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
-    if (url.hostname === "localhost" && host !== "localhost") {
+    if (url.hostname === "localhost" && host !== "localhost" && isLocalhost(host)) {
       url.hostname = host;
     }
     if (targetPath) {
@@ -129,30 +152,41 @@ export function resolveSingleErpDirectUrl(
   membership: {
     erp_key?: string;
     erp_name?: string;
+    erp_display_name?: string;
     erp_instance_id?: string;
   },
   userContext?: {
     email?: string;
     display_name?: string;
-    role?: string;
+    role?: string | null;
     session_id?: string;
     allowed_erps?: string[];
   }
 ): string | null {
   const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
-  const erpKey = (membership.erp_key || membership.erp_name || "").toLowerCase();
+  const isLocal = isLocalhost(host);
+
+  let erpKey = (membership.erp_key || membership.erp_display_name || membership.erp_name || "").toLowerCase().trim();
+  if (!erpKey && userContext?.allowed_erps) {
+    const fromContext = userContext.allowed_erps.find((k) => k && k !== "*" && k !== "control-plane");
+    if (fromContext) {
+      erpKey = fromContext.toLowerCase().trim();
+    }
+  }
+
+  if (!erpKey) return null;
 
   let targetHostUrl = "";
   let cleanErpKey = "";
   if (erpKey.includes("yinglima")) {
-    targetHostUrl = import.meta.env.VITE_YINGLIMA_URL || `http://${host}:5173/dashboard`;
+    targetHostUrl = import.meta.env.VITE_YINGLIMA_URL || (isLocal ? `http://${host}:5173/dashboard` : "");
     cleanErpKey = "yinglima";
   } else if (erpKey.includes("inhyma")) {
-    targetHostUrl = import.meta.env.VITE_INHYMA_URL || `http://${host}:5174/dashboard`;
+    targetHostUrl = import.meta.env.VITE_INHYMA_URL || (isLocal ? `http://${host}:5174/dashboard` : "");
     cleanErpKey = "inhyma";
   } else {
     const matched = getEcosystemErps().find(
-      (e) => e.key !== "control-plane" && (e.key.toLowerCase().includes(erpKey) || erpKey.includes(e.key.toLowerCase()))
+      (e) => e.key !== "control-plane" && (e.key.toLowerCase() === erpKey || e.key.toLowerCase().includes(erpKey) || erpKey.includes(e.key.toLowerCase()))
     );
     if (matched) {
       targetHostUrl = matched.hostUrl;
@@ -160,22 +194,29 @@ export function resolveSingleErpDirectUrl(
     }
   }
 
-  if (!targetHostUrl) return null;
+  if (!targetHostUrl || !cleanErpKey) return null;
   return createSsoHandoverUrl(
     targetHostUrl,
     undefined,
     userContext
       ? {
-          email: userContext.email,
-          user: userContext.display_name,
-          role: userContext.role,
-          session_id: userContext.session_id,
-          allowed_erps: userContext.allowed_erps || [cleanErpKey],
-        }
+        email: userContext.email,
+        user: userContext.display_name,
+        role: userContext.role || undefined,
+        session_id: userContext.session_id,
+        allowed_erps: [cleanErpKey],
+      }
       : {
-          allowed_erps: [cleanErpKey],
-        }
+        allowed_erps: [cleanErpKey],
+      }
   );
+}
+
+interface ExchangeResult {
+  principal_type: "platform_admin" | "global_user";
+  access_token: string;
+  expires_at?: string;
+  session?: Partial<EcosystemSessionData>;
 }
 
 /**
@@ -199,8 +240,6 @@ export async function processIncomingSsoHandover(): Promise<
 
   const urlParams = new URLSearchParams(window.location.search);
   const token = urlParams.get("sso_handover");
-  const isExplicitLogout = typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true";
-
   let hasValidToken = false;
   let targetSessionId: string | undefined;
   let targetRole: "super_admin" | "admin" | "global_user" = "super_admin";
@@ -234,6 +273,7 @@ export async function processIncomingSsoHandover(): Promise<
   }
 
   // If user explicitly logged out and no new SSO token was provided in the URL, DO NOT auto-login
+  const isExplicitLogout = isExplicitlyLoggedOut(targetSessionId);
   if (isExplicitLogout && !hasValidToken) {
     return "not-logged-in";
   }
@@ -260,48 +300,65 @@ export async function processIncomingSsoHandover(): Promise<
   // page on every truthy result would otherwise reload every time this
   // runs while already logged in, forever.
   if (Auth.isLoggedIn()) {
-    if (targetSessionId && !Auth.getSessionId()) {
-      const currentProfile = Auth.getProfile();
-      const currentToken = Auth.getAccessToken();
-      if (currentToken) {
-        Auth.setSession(currentToken, currentProfile || undefined, Auth.getPrincipalType() || undefined, undefined, targetSessionId);
+    const profile = Auth.getProfile();
+    const currentLocalEmail = (
+      (profile && ("primary_email" in profile ? profile.primary_email : profile.email)) || ""
+    ).toLowerCase();
+    if (targetEmail && currentLocalEmail && currentLocalEmail !== targetEmail.toLowerCase()) {
+      Auth.clear();
+    } else {
+      if (targetSessionId && !Auth.getSessionId()) {
+        const currentProfile = Auth.getProfile();
+        const currentToken = Auth.getAccessToken();
+        if (currentToken) {
+          Auth.setSession(currentToken, currentProfile || undefined, Auth.getPrincipalType() || undefined, undefined, targetSessionId);
+        }
       }
+      return "already-logged-in";
     }
-    return "already-logged-in";
   }
 
-  // 3. Establish local session in ERP_Main via auto-login with valid SSO credentials
+  // 3. Sign THIS person in to ERP_Main.  The handover only carries a central session id; ERP_Main
+  //    verifies it server-side and issues a token for that same person (an admin gets an admin token, a
+  //    normal user gets a token with exactly their own access) -- never a shared/hard-coded login.
+  if (!targetSessionId || targetSessionId.startsWith("ihm-sess-")) {
+    return "not-logged-in";
+  }
   try {
-    const res = await apiPost<TokenPair>("/global/auth/login", {
-      email: "admin@example.com",
-      password: "ChangeMe!12345",
+    const res = await apiPost<ExchangeResult>("/global/ecosystem-session/exchange", {
+      session_id: targetSessionId,
+      email: targetEmail,
     });
-
-    const tokenData = (res as { data?: TokenPair })?.data || res;
-    if (tokenData?.access_token) {
-      const finalSessionId = targetSessionId || `ihm-sess-${Date.now()}`;
+    const data = (res as { data?: ExchangeResult })?.data || (res as unknown as ExchangeResult);
+    if (data?.access_token) {
+      const principal = data.principal_type === "platform_admin" ? "platform_admin" : "global_user";
+      Auth.setSession(data.access_token, undefined, principal, data.expires_at, targetSessionId);
       try {
-        const profileRes = await apiGet<PlatformAdmin>("/global/auth/me");
-        const profile = (profileRes as { data?: PlatformAdmin })?.data || profileRes;
-        Auth.setSession(tokenData.access_token, profile, "platform_admin", tokenData.expires_at, finalSessionId);
+        const profileRes = await apiGet<Record<string, unknown>>(
+          principal === "platform_admin" ? "/global/auth/me" : "/global/user-auth/me"
+        );
+        const profile = ((profileRes as { data?: unknown })?.data || profileRes) as PlatformAdmin;
+        Auth.updateProfile(profile);
       } catch {
-        Auth.setSession(tokenData.access_token, undefined, "platform_admin", tokenData.expires_at, finalSessionId);
+        /* the session is valid; the profile loads on the next refresh */
       }
 
-      // Sync cookie
+      const live = data.session;
       const sessionData: EcosystemSessionData = {
-        session_id: finalSessionId,
-        email: targetEmail,
-        display_name: "Super Admin",
-        role: targetRole,
-        user_type: "platform_admin",
-        allowed_erps: allowedErps,
+        session_id: targetSessionId,
+        email: live?.email || targetEmail,
+        display_name: live?.display_name || "User",
+        role: (live?.role as EcosystemSessionData["role"]) || targetRole,
+        user_type:
+          (live?.user_type as EcosystemSessionData["user_type"]) ||
+          (principal === "platform_admin" ? "platform_admin" : "global_user"),
+        allowed_erps: live?.allowed_erps || allowedErps,
       };
       setEcosystemCookie(sessionData);
       return "logged-in";
     }
   } catch (err) {
-    console.warn("Auto-login in ERP_Main failed:", err);
+    console.warn("Could not sign in to ERP_Main from the central session:", err);
   }
 
   return "not-logged-in";

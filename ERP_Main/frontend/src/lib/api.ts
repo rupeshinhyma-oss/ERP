@@ -8,7 +8,15 @@
 import { Auth } from "./auth";
 import type { ApiResponse } from "@/types";
 
-export const API_BASE = "/api/v1";
+/**
+ * Backend origin. Leave VITE_API_ORIGIN empty in local dev (the Vite dev server
+ * proxies /api to the backend). On a split deployment (e.g. Render: static
+ * frontend + separate backend service) set it to the backend's public URL,
+ * e.g. https://erp-main-backend-ti6d.onrender.com -- otherwise every API call,
+ * including login, is sent to the static site itself and fails.
+ */
+export const API_ORIGIN: string = (import.meta.env.VITE_API_ORIGIN ?? "").replace(/\/+$/, "");
+export const API_BASE = `${API_ORIGIN}/api/v1`;
 
 export class ApiError extends Error {
   status: number;

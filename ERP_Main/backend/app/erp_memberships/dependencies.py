@@ -20,6 +20,8 @@ def get_erp_membership_service(
     audit: GlobalAuditService = Depends(get_global_audit_service),
 ) -> ErpMembershipService:
     """Build a request-scoped `ErpMembershipService`."""
+    if not isinstance(audit, GlobalAuditService):
+        audit = get_global_audit_service(db)
     return ErpMembershipService(
         membership_repository=ErpMembershipRepository(db),
         global_user_repository=GlobalUserRepository(db),

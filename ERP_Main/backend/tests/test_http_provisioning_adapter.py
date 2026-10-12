@@ -43,10 +43,11 @@ def _restore_federation_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Every test in this file explicitly sets FEDERATION_SERVICE_CREDENTIAL
     (or deliberately clears it) via monkeypatch, which pytest already
-    reverts after each test -- this fixture exists only to make that
-    guarantee explicit and to ensure test order never leaks a value
-    between cases, without needing to know the real configured value.
+    reverts after each test. We also clear directional credentials so
+    they fall back to FEDERATION_SERVICE_CREDENTIAL.
     """
+    monkeypatch.setattr(settings, "ERP_MAIN_TO_YINGLIMA_SERVICE_CREDENTIAL", "")
+    monkeypatch.setattr(settings, "ERP_MAIN_TO_INHYMA_SERVICE_CREDENTIAL", "")
     yield
 
 

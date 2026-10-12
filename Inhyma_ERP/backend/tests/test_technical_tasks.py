@@ -135,3 +135,91 @@ async def test_technical_task_crud(test_db: AsyncSession, test_client: AsyncClie
     )
     assert del_resp.status_code == 200
     assert del_resp.json()["deleted_count"] == 1
+
+
+async def test_serial_number_integration_and_lookup(test_db: AsyncSession, test_client: AsyncClient):
+    create_payload = {
+        "company_name": "Precision Automation",
+        "task_type": "Onsite Visit",
+        "city": "Pune",
+        "machine_model": "DX-500 Band Sealer",
+        "serial_number": "SN-2026-DX-9901",
+        "task_description": "Heating element failure",
+        "contact_person_name": "Anil Deshmukh",
+        "contact_phone": "9812345678",
+        "service_type": "Free",
+        "call_type": "Breakdown",
+        "priority": "A",
+        "status": "Pending",
+    }
+    resp = await test_client.post("/api/v1/technical-tasks", json=create_payload)
+    assert resp.status_code == 201
+    task_id = resp.json()["data"]["id"]
+    assert resp.json()["data"]["serial_number"] == "SN-2026-DX-9901"
+
+    # Search past tasks by serial number
+    filter_resp = await test_client.get("/api/v1/technical-tasks?serial_number=SN-2026-DX-9901")
+    assert filter_resp.status_code == 200
+    items = filter_resp.json()["data"]
+    assert len(items) == 1
+    assert items[0]["serial_number"] == "SN-2026-DX-9901"
+
+    # Lookup by serial number endpoint
+    lookup_resp = await test_client.get("/api/v1/technical-tasks/serial-lookup/SN-2026-DX-9901")
+    assert lookup_resp.status_code == 200
+    data = lookup_resp.json()["data"]
+    assert data["serial_number"] == "SN-2026-DX-9901"
+    assert data["machine_model"] == "DX-500 Band Sealer"
+    assert data["company_name"] == "Precision Automation"
+    assert data["past_tasks_count"] == 1
+
+
+async def test_cancellation_mandatory_remarks_and_reopen_workflow(test_db: AsyncSession, test_client: AsyncClient):
+    # 1. Create task
+    create_payload = {
+        "company_name": "Alpha Pharma Ltd",
+        "task_type": "In-House",
+        "city": "Vadodara",
+        "machine_model": "Auger Filler AF-100",
+        "serial_number": "SN-AF-4001",
+        "task_description": "Load cell calibration",
+        "service_type": "Chargeable",
+        "call_type": "Maintenance",
+        "priority": "B",
+        "status": "Pending",
+    }
+    resp = await test_client.post("/api/v1/technical-tasks", json=create_payload)
+    assert resp.status_code == 201
+    task_id = resp.json()["data"]["id"]
+
+    # 2. Try to cancel WITHOUT remarks -> strictly blocked (422 from Pydantic validator or 400 from service)
+    bad_cancel_resp = await test_client.patch(
+        f"/api/v1/technical-tasks/{task_id}/status",
+        json={"status": "Cancel", "remarks": "", "cancel_remarks": ""},
+    )
+    assert bad_cancel_resp.status_code in (400, 422)
+
+    # 3. Cancel with mandatory remarks -> succeeds
+    cancel_resp = await test_client.patch(
+        f"/api/v1/technical-tasks/{task_id}/status",
+        json={"status": "Cancel", "cancel_remarks": "Customer postponed production shut-down to next quarter."},
+    )
+    assert cancel_resp.status_code == 200
+    task_data = cancel_resp.json()["data"]
+    assert task_data["status"] == "Cancel"
+    assert task_data["cancel_remarks"] == "Customer postponed production shut-down to next quarter."
+
+    # 4. Reopen and reassign cancelled task to a new technician
+    reopen_resp = await test_client.post(
+        f"/api/v1/technical-tasks/{task_id}/reopen",
+        json={
+            "status": "Approved",
+            "task_allotted_to": "Vikas Shinde",
+            "remarks": "Reopened as customer requested urgent service visit next Monday.",
+        },
+    )
+    assert reopen_resp.status_code == 200
+    reopened_data = reopen_resp.json()["data"]
+    assert reopened_data["status"] == "Approved"
+    assert reopened_data["task_allotted_to"] == "Vikas Shinde"
+    assert reopened_data["cancel_remarks"] is None

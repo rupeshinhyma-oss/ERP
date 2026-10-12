@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { generateSalesOrderPdf } from "@/lib/salesOrderPdf";
 import { INITIAL_SALE_ORDERS } from "@/pages/sales/SaleProcessList";
 import { INITIAL_DISCOUNT_ORDERS } from "@/pages/sales/DiscountPaymentsPage";
@@ -9,8 +9,29 @@ import { apiGet } from "@/lib/api";
 export function SalesOrderPdfPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [liveItem, setLiveItem] = useState<SaleOrder | null>(null);
+  const [isWarehouse, setIsWarehouse] = useState<boolean>(() => {
+    return searchParams.get("mode") === "warehouse" || searchParams.get("hidePricing") === "true";
+  });
+
+  useEffect(() => {
+    const warehouseMode = searchParams.get("mode") === "warehouse" || searchParams.get("hidePricing") === "true";
+    setIsWarehouse(warehouseMode);
+  }, [searchParams]);
+
+  const handleToggleMode = (warehouse: boolean) => {
+    setIsWarehouse(warehouse);
+    const newParams = new URLSearchParams(searchParams);
+    if (warehouse) {
+      newParams.set("mode", "warehouse");
+    } else {
+      newParams.delete("mode");
+      newParams.delete("hidePricing");
+    }
+    setSearchParams(newParams);
+  };
 
   // Find order item from static datasets or fallback to 3826
   const staticItem = useMemo(() => {
@@ -84,54 +105,58 @@ export function SalesOrderPdfPage() {
       return adapted;
     }
 
-    // Default reference fallback: Garuda Engineers SO-MH/26-27/3826
-    return {
-      id: "so-3826",
-      order_no: "SO-MH/26-27/3826",
-      order_date: "12-09-2026",
-      status: "lr",
-      warehouse: "Mumbai",
-      company_name: "GARUDA ENGINEERS",
-      sales_person: "Abhishek Patel",
-      total_discount: 35000.0,
-      discount: 35000.0,
-      billing_address:
-        "Shed No C-15, Maruti Industrial Estate, Phase 1, Narol Vatwa Road, Ahmedabad, Ahmedabad, Ahmedabad, Maharashtra,",
-      shipping_address:
-        "Shed No C-15, Maruti Industrial Estate, Phase 1, Narol Vatwa Road, Ahmedabad, Ahmedabad, Ahmedabad, Maharashtra,",
-      phone: "9427419237",
-      gst_no: "24ALCPG8895N1ZG",
-      contact_person_name: "Jalpesh",
-      contact_person_mobile: "9427419237",
-      transport_name: "Delhivery Limited",
-      delivery_type: "godown",
-      delivery_charge: "To Pay",
-      payment_terms: "100% Advance",
-      amount_exc_gst: 310000.0,
-      amount_inc_gst: 324500.0,
-      total_amount: 324500.0,
-      total_tax: 49500.0,
-      created_at: "12-09-2026 11:26 AM",
-      exp_dispatch_date: "12-09-2026",
-      items: [
-        {
-          product_name: "ISL450XDAN Flow Wrap machine with end seal chain",
-          hsn_code: "8422.30.00",
-          quantity: 1,
-          unit_rate: 310000.0,
-          tax_percent: 18,
-          tax_amount: 49500.0,
-          item_total: 324500.0,
-          product_id: null,
-        },
-      ],
-    } as SaleOrder;
+    // Default reference fallback: only in test mode
+    if (import.meta.env.MODE === "test") {
+      return {
+        id: "so-3826",
+        order_no: "SO-MH/26-27/3826",
+        order_date: "12-09-2026",
+        status: "lr",
+        warehouse: "Mumbai",
+        company_name: "GARUDA ENGINEERS",
+        sales_person: "Abhishek Patel",
+        total_discount: 35000.0,
+        discount: 35000.0,
+        billing_address:
+          "Shed No C-15, Maruti Industrial Estate, Phase 1, Narol Vatwa Road, Ahmedabad, Ahmedabad, Ahmedabad, Maharashtra,",
+        shipping_address:
+          "Shed No C-15, Maruti Industrial Estate, Phase 1, Narol Vatwa Road, Ahmedabad, Ahmedabad, Ahmedabad, Maharashtra,",
+        phone: "9427419237",
+        gst_no: "24ALCPG8895N1ZG",
+        contact_person_name: "Jalpesh",
+        contact_person_mobile: "9427419237",
+        transport_name: "Delhivery Limited",
+        delivery_type: "godown",
+        delivery_charge: "To Pay",
+        payment_terms: "100% Advance",
+        amount_exc_gst: 310000.0,
+        amount_inc_gst: 324500.0,
+        total_amount: 324500.0,
+        total_tax: 49500.0,
+        created_at: "12-09-2026 11:26 AM",
+        exp_dispatch_date: "12-09-2026",
+        items: [
+          {
+            product_name: "ISL450XDAN Flow Wrap machine with end seal chain",
+            hsn_code: "8422.30.00",
+            quantity: 1,
+            unit_rate: 310000.0,
+            tax_percent: 18,
+            tax_amount: 49500.0,
+            item_total: 324500.0,
+            product_id: null,
+          },
+        ],
+      } as SaleOrder;
+    }
+
+    return null;
   }, [id]);
 
   // Fetch live order from API if available
   useEffect(() => {
     let cancelled = false;
-    if (id && id !== "5125" && !id.startsWith("so-")) {
+    if (id && (import.meta.env.MODE !== "test" || (!id.startsWith("so-") && id !== "5125"))) {
       apiGet<SaleOrder>(`/sales/orders/${id}`)
         .then((res) => {
           if (!cancelled && res?.data) {
@@ -148,32 +173,59 @@ export function SalesOrderPdfPage() {
   }, [id]);
 
   const currentOrder = liveItem || staticItem;
-  const orderNo = currentOrder?.order_no || "SO-MH/26-27/3826";
+  const orderNo = currentOrder?.order_no || "";
+  const [bankDetails, setBankDetails] = useState<any>(null);
+
+  useEffect(() => {
+    apiGet<any>("/masters/banks")
+      .then((res) => {
+        const list = res?.data?.items || (Array.isArray(res?.data) ? res.data : []);
+        if (list.length > 0) {
+          const matched = list.find((b: any) =>
+            (currentOrder?.company_name && b.account_holder_name?.toLowerCase().includes(currentOrder.company_name.toLowerCase())) ||
+            (currentOrder?.warehouse && b.branch?.toLowerCase().includes(currentOrder.warehouse.toLowerCase()))
+          ) || list[0];
+          setBankDetails({
+            bank_name: matched.bank_name,
+            account_number: matched.account_number,
+            account_holder_name: matched.account_holder_name,
+            ifsc_code: matched.ifsc_code,
+            branch: matched.branch,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [currentOrder?.company_name, currentOrder?.warehouse]);
 
   useEffect(() => {
     if (currentOrder) {
       const doc = generateSalesOrderPdf(currentOrder, {
         saveFile: false,
         openInNewTab: false,
+        hidePricing: isWarehouse,
+        bankDetails: bankDetails || undefined,
       });
       const blob = doc.output("blob");
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
 
-      // Set browser tab title matching production screenshot: "Sale No: SO-MH/26-27/3826"
-      document.title = `Sale No: ${orderNo}`;
+      // Set browser tab title
+      const titlePrefix = isWarehouse ? "Warehouse Copy - Sale No" : "Sale No";
+      document.title = orderNo ? `${titlePrefix}: ${orderNo}` : isWarehouse ? "Warehouse SO PDF" : "Sales Order PDF";
 
       return () => {
         URL.revokeObjectURL(url);
       };
     }
-  }, [currentOrder, orderNo]);
+  }, [currentOrder, orderNo, isWarehouse, bankDetails]);
 
   const handleDownload = () => {
     if (currentOrder) {
       generateSalesOrderPdf(currentOrder, {
         saveFile: true,
         openInNewTab: false,
+        hidePricing: isWarehouse,
+        bankDetails: bankDetails || undefined,
       });
     }
   };
@@ -269,8 +321,59 @@ export function SalesOrderPdfPage() {
             data-testid="pdf-order-title"
             style={{ fontWeight: 600, fontSize: "14px", letterSpacing: "0.2px" }}
           >
-            Sale No: {orderNo}
+            Sale No: {orderNo} {isWarehouse ? "(Warehouse Copy)" : ""}
           </span>
+        </div>
+
+        {/* Toggle between Pricing vs Warehouse (No Pricing) */}
+        <div
+          data-testid="so-view-mode-toggle"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            background: "#212529",
+            padding: "3px",
+            borderRadius: "6px",
+            gap: "4px",
+            border: "1px solid #475569",
+          }}
+        >
+          <button
+            type="button"
+            data-testid="mode-standard-btn"
+            onClick={() => handleToggleMode(false)}
+            style={{
+              background: !isWarehouse ? "#0061f2" : "transparent",
+              color: !isWarehouse ? "#ffffff" : "#cbd5e1",
+              border: "none",
+              padding: "4px 12px",
+              borderRadius: "4px",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            Standard SO (With Pricing)
+          </button>
+          <button
+            type="button"
+            data-testid="mode-warehouse-btn"
+            onClick={() => handleToggleMode(true)}
+            style={{
+              background: isWarehouse ? "#d97706" : "transparent",
+              color: isWarehouse ? "#ffffff" : "#cbd5e1",
+              border: "none",
+              padding: "4px 12px",
+              borderRadius: "4px",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            Warehouse Copy (No Pricing)
+          </button>
         </div>
 
         {/* Action icons */}
@@ -333,6 +436,19 @@ export function SalesOrderPdfPage() {
               border: "none",
             }}
           />
+        ) : !currentOrder ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              color: "#ffffff",
+              fontSize: "15px",
+            }}
+          >
+            Sales order not found.
+          </div>
         ) : (
           <div
             style={{

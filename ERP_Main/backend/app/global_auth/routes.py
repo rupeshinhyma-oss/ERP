@@ -13,8 +13,10 @@ import uuid
 
 from fastapi import APIRouter, Depends, Request, status
 
+from app.core.config import settings
 from app.core.exceptions import ForbiddenException
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
 from app.global_auth.dependencies import get_client_ip, get_global_auth_service, require_global_user
 from app.global_auth.schemas import (
     GlobalChangePasswordRequest,
@@ -28,8 +30,12 @@ from app.global_auth.schemas import (
 )
 from app.global_auth.service import GlobalAuthService
 from app.global_users.models import GlobalUser
+from app.platform_authz.dependencies import get_platform_authz_service
+from app.platform_authz.service import PlatformAuthzService
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/global/user-auth", tags=["Global User Authentication"])
+
 
 
 def _request_id(request: Request) -> str:
@@ -53,6 +59,10 @@ async def register(
 ) -> dict:
     """Create a new Global User with a global password credential."""
     _require_feature_enabled()
+    if not settings.GLOBAL_SELF_REGISTRATION_ENABLED:
+        raise ForbiddenException(
+            "Self-registration is disabled. Users are created by an ERP_Main administrator."
+        )
     user = await service.register(payload)
     return build_success_response(
         GlobalUserProfile.model_validate(user).model_dump(mode="json"),
@@ -78,12 +88,32 @@ async def login(
 
 @router.get("/me", summary="Fetch the currently authenticated Global User")
 async def get_me(
-    request: Request, user_and_session: tuple[GlobalUser, uuid.UUID] = Depends(require_global_user)
+    request: Request,
+    user_and_session: tuple[GlobalUser, uuid.UUID] = Depends(require_global_user),
+    authz_service: PlatformAuthzService = Depends(get_platform_authz_service),
 ) -> dict:
     """Return the authenticated Global User's own profile."""
     user, _session_id = user_and_session
+    global_perms, _ = await authz_service.compute_effective_permissions(user.id)
+    meta = user.metadata_json or {}
+    role = meta.get("role") or ""
+    if not role:
+        assignments = await authz_service.list_assignments_for_user(user.id)
+        active_assign = next((a for a in assignments if a.is_active), None)
+        if active_assign and active_assign.role:
+            role = active_assign.role.role_key
+
+    profile = GlobalUserProfile(
+        id=user.id,
+        display_name=user.display_name,
+        primary_email=user.primary_email,
+        status=user.status.value if hasattr(user.status, "value") else str(user.status),
+        metadata=meta,
+        role=role or "NONE",
+        permissions=sorted(global_perms),
+    )
     return build_success_response(
-        GlobalUserProfile.model_validate(user).model_dump(mode="json"), request_id=_request_id(request)
+        profile.model_dump(mode="json"), request_id=_request_id(request)
     )
 
 
@@ -92,17 +122,20 @@ async def logout(
     request: Request,
     user_and_session: tuple[GlobalUser, uuid.UUID] = Depends(require_global_user),
     service: GlobalAuthService = Depends(get_global_auth_service),
+    db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """
-    Revoke the current global session.
-
-    Distinct from any ERP's own local logout (Step 29) -- this never
-    reaches into, and has no way to reach into, Yinglima's or Inhyma's
-    own session state.
+    Sign the person out EVERYWHERE: all their dashboard sessions and every connected ERP they can use.
     """
+    from app.global_auth.ecosystem_session import sign_out_everywhere
+
     user, session_id = user_and_session
     await service.logout(session_id, global_user_id=user.id)
+    if user.primary_email:
+        # every dashboard session of this person (all browsers/devices) + every ERP they can use
+        await sign_out_everywhere(db, user.primary_email)
     return build_success_response({"status": "logged_out"}, request_id=_request_id(request))
+
 
 
 @router.get("/sessions", summary="List the authenticated Global User's own sessions")

@@ -33,6 +33,7 @@ class LeadRepository(BaseRepository[Lead]):
         "requirements",
         "allotted_to",
         "lead_status",
+        "reason_for_won_loss",
     )
     sortable_fields = ("company_name", "priority", "added_on", "created_at", "city", "lead_status")
     filterable_fields = ("business_type", "source", "priority", "city", "state", "allotted_to", "lead_status")
@@ -53,6 +54,8 @@ class LeadRepository(BaseRepository[Lead]):
         city: str | None = None,
         district: str | None = None,
         state: str | None = None,
+        call_type: str | None = None,
+        company_name: str | None = None,
         date_from: Any | None = None,
         date_to: Any | None = None,
         sort_by: str = "created_at",
@@ -62,6 +65,12 @@ class LeadRepository(BaseRepository[Lead]):
     ) -> tuple[list[Lead], int]:
         """Query leads with full text search, field filtering, sorting, and pagination."""
         stmt = self._base_select()
+
+        # Specific filters
+        if company_name and company_name.strip():
+            stmt = stmt.where(func.lower(Lead.company_name) == company_name.strip().lower())
+        if call_type and call_type.strip() and call_type.strip().lower() not in ("all", "select"):
+            stmt = stmt.where(func.lower(Lead.call_type) == call_type.strip().lower())
 
         # Specific filters
         if source and source.strip():
@@ -103,6 +112,7 @@ class LeadRepository(BaseRepository[Lead]):
                     Lead.requirements.ilike(term),
                     Lead.source.ilike(term),
                     Lead.allotted_to.ilike(term),
+                    Lead.reason_for_won_loss.ilike(term),
                 )
             )
 
@@ -123,6 +133,12 @@ class LeadRepository(BaseRepository[Lead]):
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())
         return items, total
+
+    async def allot_lead(self, lead: Lead, allotted_to: str) -> Lead:
+        """Allot lead to a specific salesperson or team member."""
+        lead.allotted_to = allotted_to
+        await self.session.flush()
+        return lead
 
     async def bulk_soft_delete(self, ids: list[uuid.UUID]) -> int:
         """Soft-delete multiple lead records in a single query."""

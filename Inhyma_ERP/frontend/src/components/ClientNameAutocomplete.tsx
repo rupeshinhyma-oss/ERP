@@ -18,94 +18,11 @@ export interface CompanyAutocompleteItem {
   contact_indiamart_number?: string | null;
   primary_website?: string | null;
   sales_person_id?: string | null;
+  address?: string | null;
+  pincode?: string | null;
+  city_name?: string | null;
+  state_name?: string | null;
 }
-
-const DEFAULT_PRELOADED_CLIENTS: CompanyAutocompleteItem[] = [
-  {
-    id: "client-pre-1",
-    company_name: "A B Sales",
-    contact_full_name: "Yesaji Bhosale",
-    contact_calling_number: "0000959414",
-  },
-  {
-    id: "client-pre-2",
-    company_name: "Buildmart Solutions",
-    contact_full_name: "",
-    contact_calling_number: "9875840850",
-  },
-  {
-    id: "client-pre-3",
-    company_name: "Cirkla Technologies Pvt Ltd",
-    contact_full_name: "Kartik Raj",
-    contact_calling_number: "7977168570",
-  },
-  {
-    id: "client-pre-4",
-    company_name: "Fieldlife Chemicals",
-    contact_full_name: "",
-    contact_calling_number: "9879051140",
-  },
-  {
-    id: "client-pre-5",
-    company_name: "Genius Engineering & Solutions",
-    contact_full_name: "Kishan",
-    contact_calling_number: "9099702298",
-  },
-  {
-    id: "client-pre-6",
-    company_name: "Ge Packaging Sales And Service",
-    contact_full_name: "",
-    contact_calling_number: "9594210244",
-  },
-  {
-    id: "client-pre-7",
-    company_name: "Grace Gratitude Pvt Limited",
-    contact_full_name: "",
-    contact_calling_number: "9819041743",
-  },
-  {
-    id: "client-pre-8",
-    company_name: "Apex Valves & Automation India Pvt Ltd",
-    contact_full_name: "Rajesh Sharma",
-    contact_calling_number: "9876543210",
-  },
-  {
-    id: "client-pre-9",
-    company_name: "Zenith Engineering & Automation Pvt Ltd",
-    contact_full_name: "Amit Patel",
-    contact_calling_number: "9825012345",
-  },
-  {
-    id: "client-pre-10",
-    company_name: "DURAPAK (VAPI)",
-    contact_full_name: "Ramesh Shah",
-    contact_calling_number: "9824056789",
-  },
-  {
-    id: "client-pre-11",
-    company_name: "Panjab Engineering Corporation",
-    contact_full_name: "Harpreet Singh",
-    contact_calling_number: "9814098765",
-  },
-  {
-    id: "client-pre-12",
-    company_name: "Stayfine Multi Supermart Private Limited",
-    contact_full_name: "Sanjay Gupta",
-    contact_calling_number: "9820034567",
-  },
-  {
-    id: "client-pre-13",
-    company_name: "Vortex Automation Systems Pvt Ltd",
-    contact_full_name: "Nilesh Joshi",
-    contact_calling_number: "9898011223",
-  },
-  {
-    id: "client-pre-14",
-    company_name: "ABC packaging",
-    contact_full_name: "Suresh Mehta",
-    contact_calling_number: "9879022334",
-  },
-];
 
 export interface ClientNameAutocompleteProps {
   id?: string;
@@ -138,7 +55,7 @@ export function ClientNameAutocomplete({
 }: ClientNameAutocompleteProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const [allCompanies, setAllCompanies] = useState<CompanyAutocompleteItem[]>(DEFAULT_PRELOADED_CLIENTS);
+  const [allCompanies, setAllCompanies] = useState<CompanyAutocompleteItem[]>([]);
   const [remoteResults, setRemoteResults] = useState<CompanyAutocompleteItem[]>([]);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const [hasSelectedExact, setHasSelectedExact] = useState(false);
@@ -210,7 +127,7 @@ export function ClientNameAutocomplete({
             setRemoteResults(res.data);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }, 150);
     return () => clearTimeout(timer);
   }, [term, isFocused, hasSelectedExact]);

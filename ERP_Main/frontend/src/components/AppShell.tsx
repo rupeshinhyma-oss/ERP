@@ -23,7 +23,9 @@ import {
   PAGE_TITLES,
 } from "@/lib/nav";
 import { processIncomingSsoHandover, resolveSingleErpDirectUrl } from "@/lib/ssoBridge";
-import { globalEcosystemLogout } from "@/lib/ecosystemSession";
+import { getEcosystemCookie, isExplicitlyLoggedOut, setEcosystemCookie } from "@/lib/ecosystemSession";
+
+
 import { useGlobalSession } from "@/lib/session";
 import { Breadcrumb } from "./Breadcrumb";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
@@ -46,9 +48,9 @@ export function AppShell({
   actions,
   children,
 }: AppShellProps) {
-  const { profile, isLoggedIn, isSuperAdmin } = useAuth();
+  const { profile, isLoggedIn, isSuperAdmin, hasPermission } = useAuth();
   const userEmail = profile ? ("primary_email" in profile ? profile.primary_email : profile.email) : "";
-  const userRole = profile ? ("role" in profile ? profile.role : "GLOBAL_USER") : "";
+  const userRole = profile ? ("role" in profile && profile.role ? profile.role : "GLOBAL_USER") : "";
   const rawDisplayName = profile?.display_name || userEmail || "Platform Admin";
   const userDisplayName =
     rawDisplayName === "Platform Super Admin" || rawDisplayName === "Platform SuperAdmin"
@@ -57,24 +59,61 @@ export function AppShell({
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { userType, memberships, loading: sessionLoading } = useGlobalSession();
+  const { userType, memberships, loading: sessionLoading, logout } = useGlobalSession();
   const activeMemberships = (memberships || []).filter((m) => m.status === "ACTIVE");
+
 
   useEffect(() => {
     if (!sessionLoading && isLoggedIn && userType === "global_user" && activeMemberships.length === 1) {
-      const singleMem = activeMemberships[0];
-      const assignedKey = (singleMem.erp_key || singleMem.erp_name || "yinglima").toLowerCase();
-      const cleanKey = assignedKey.includes("yinglima") ? "yinglima" : assignedKey.includes("inhyma") ? "inhyma" : assignedKey;
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has("sso_error")) {
+          return;
+        }
+      }
 
-      const directUrl = resolveSingleErpDirectUrl(singleMem, {
-        email: userEmail,
-        display_name: userDisplayName,
-        role: userRole,
-        session_id: Auth.getSessionId() || undefined,
-        allowed_erps: [cleanKey],
-      });
-      if (directUrl) {
-        window.location.assign(directUrl);
+      const singleMem = activeMemberships[0];
+      const rawKey = (
+        singleMem.erp_key ||
+        (singleMem as any).erp_display_name ||
+        singleMem.erp_name ||
+        ""
+      ).toLowerCase().trim();
+      const cleanKey = rawKey.includes("yinglima")
+        ? "yinglima"
+        : rawKey.includes("inhyma")
+        ? "inhyma"
+        : rawKey;
+
+      if (cleanKey) {
+        if (typeof sessionStorage !== "undefined") {
+          const redirectKey = `erp_redirect_${cleanKey}`;
+          const lastRedirect = Number(sessionStorage.getItem(redirectKey) || 0);
+          const now = Date.now();
+          if (now - lastRedirect < 10000) {
+            return;
+          }
+          sessionStorage.setItem(redirectKey, String(now));
+        }
+
+        const currentCookie = getEcosystemCookie();
+        if (currentCookie) {
+          setEcosystemCookie({
+            ...currentCookie,
+            allowed_erps: [cleanKey, "control-plane"],
+          });
+        }
+
+        const directUrl = resolveSingleErpDirectUrl(singleMem, {
+          email: userEmail,
+          display_name: userDisplayName,
+          role: userRole || undefined,
+          session_id: Auth.getSessionId() || undefined,
+          allowed_erps: [cleanKey],
+        });
+        if (directUrl) {
+          window.location.assign(directUrl);
+        }
       }
     }
   }, [sessionLoading, isLoggedIn, userType, activeMemberships, userEmail, userDisplayName, userRole]);
@@ -140,11 +179,18 @@ export function AppShell({
   usePageTitle(currentTitle);
 
   const handleLogout = useCallback(() => {
-    const sid = Auth.getSessionId() || undefined;
-    globalEcosystemLogout(sid);
-    Auth.clear();
-    navigate("/login");
-  }, [navigate]);
+    logout();
+  }, [logout]);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      const currentSid = Auth.getSessionId();
+      if (isExplicitlyLoggedOut(currentSid || undefined)) {
+        logout();
+      }
+    }
+  }, [isLoggedIn, logout]);
+
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -293,6 +339,7 @@ export function AppShell({
           {NAV_SECTIONS.map((section) => {
             const visibleItems = section.items.filter((item) => {
               if (item.superAdminOnly && !isSuperAdmin) return false;
+              if (item.permission && !hasPermission(item.permission)) return false;
               return true;
             });
 
@@ -498,29 +545,31 @@ export function AppShell({
                     </div>
                     <div style={{ marginTop: "4px" }}>
                       <span className="badge badge-info" style={{ fontSize: "10px" }}>
-                        {userRole || "ADMIN"}
+                        {roleLabel(userRole, Auth.getPrincipalType())}
                       </span>
                     </div>
                   </div>
 
-                  <div style={{ padding: "4px 0" }}>
-                    <Link
-                      to="/health"
-                      onClick={() => setUserDropdownOpen(false)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "8px 16px",
-                        fontSize: "13px",
-                        color: "var(--color-text)",
-                        textDecoration: "none",
-                      }}
-                    >
-                      <ICONS.settings width={15} height={15} />
-                      Platform Settings
-                    </Link>
-                  </div>
+                  {hasPermission("platform.system.manage") && (
+                    <div style={{ padding: "4px 0" }}>
+                      <Link
+                        to="/health"
+                        onClick={() => setUserDropdownOpen(false)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          padding: "8px 16px",
+                          fontSize: "13px",
+                          color: "var(--color-text)",
+                          textDecoration: "none",
+                        }}
+                      >
+                        <ICONS.settings width={15} height={15} />
+                        Platform Settings
+                      </Link>
+                    </div>
+                  )}
 
                   <div style={{ borderTop: "1px solid var(--color-border)", padding: "4px 0 0" }}>
                     <button

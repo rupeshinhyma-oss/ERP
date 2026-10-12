@@ -31,8 +31,6 @@ export function LocalPurchasesPage() {
   // Filters state
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [selectedOrgId, setSelectedOrgId] = useState("");
-  const [selectedBranchId, setSelectedBranchId] = useState("");
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -53,28 +51,10 @@ export function LocalPurchasesPage() {
   }, [openActionId]);
 
   // Lookups
-  const orgLookup = useLookup<{ id: string; name: string; branches?: { id: string; name: string }[] | null }>(
-    "/masters/company-list/lookup",
-    250
-  );
   const supplierLookup = useLookup<{ id: string; company_name: string }>(
     "/suppliers?page_size=1000",
     500
   );
-
-  // Extract branches for selected organization
-  const availableBranches = useMemo(() => {
-    if (!selectedOrgId || !orgLookup.items) return [];
-    const org = orgLookup.items.find((o: { id: string; name: string }) => o.id === selectedOrgId);
-    return org?.branches || [];
-  }, [selectedOrgId, orgLookup.items]);
-
-  // When organization changes, reset branch if no longer valid
-  useEffect(() => {
-    if (selectedBranchId && !availableBranches.some((b: { id: string; name: string }) => b.id === selectedBranchId)) {
-      setSelectedBranchId("");
-    }
-  }, [selectedOrgId, availableBranches, selectedBranchId]);
 
   // Fetch Purchases
   const fetchPurchases = useCallback(async () => {
@@ -85,8 +65,6 @@ export function LocalPurchasesPage() {
         page_size: String(pageSize),
       });
       if (search.trim()) params.set("search", search.trim());
-      if (selectedOrgId) params.set("organization_id", selectedOrgId);
-      if (selectedBranchId) params.set("branch_id", selectedBranchId);
       if (selectedSupplierId) params.set("supplier_id", selectedSupplierId);
       if (selectedStatus) params.set("status", selectedStatus);
       if (dateFrom) params.set("date_from", dateFrom);
@@ -109,7 +87,7 @@ export function LocalPurchasesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, selectedOrgId, selectedBranchId, selectedSupplierId, selectedStatus, dateFrom, dateTo, toast]);
+  }, [page, pageSize, search, selectedSupplierId, selectedStatus, dateFrom, dateTo, toast]);
 
   useEffect(() => {
     fetchPurchases();
@@ -145,8 +123,6 @@ export function LocalPurchasesPage() {
     try {
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
-      if (selectedOrgId) params.set("organization_id", selectedOrgId);
-      if (selectedBranchId) params.set("branch_id", selectedBranchId);
       if (selectedSupplierId) params.set("supplier_id", selectedSupplierId);
       if (selectedStatus) params.set("status", selectedStatus);
       if (dateFrom) params.set("date_from", dateFrom);
@@ -171,13 +147,11 @@ export function LocalPurchasesPage() {
   // Count active filters
   const activeFiltersCount = useMemo(() => {
     let count = 0;
-    if (selectedOrgId) count++;
-    if (selectedBranchId) count++;
     if (selectedSupplierId) count++;
     if (selectedStatus) count++;
     if (dateFrom || dateTo) count++;
     return count;
-  }, [selectedOrgId, selectedBranchId, selectedSupplierId, selectedStatus, dateFrom, dateTo]);
+  }, [selectedSupplierId, selectedStatus, dateFrom, dateTo]);
 
   // Aggregate stats from current view
   const stats = useMemo(() => {
@@ -442,8 +416,6 @@ export function LocalPurchasesPage() {
                 type="button"
                 className="btn btn-small"
                 onClick={() => {
-                  setSelectedOrgId("");
-                  setSelectedBranchId("");
                   setSelectedSupplierId("");
                   setSelectedStatus("");
                   setDateFrom("");
@@ -467,59 +439,6 @@ export function LocalPurchasesPage() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
-              {/* Organization Filter */}
-              <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
-                  Organization
-                </label>
-                <select
-                  value={selectedOrgId}
-                  onChange={(e) => {
-                    setSelectedOrgId(e.target.value);
-                    setPage(1);
-                  }}
-                  style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#ffffff" }}
-                >
-                  <option value="">All Organizations</option>
-                  {orgLookup.items?.map((org: { id: string; name: string }) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Branch Filter */}
-              <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
-                  Operating Branch
-                </label>
-                <select
-                  value={selectedBranchId}
-                  onChange={(e) => {
-                    setSelectedBranchId(e.target.value);
-                    setPage(1);
-                  }}
-                  disabled={!selectedOrgId || availableBranches.length === 0}
-                  style={{
-                    width: "100%",
-                    padding: "7px 10px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                    background: !selectedOrgId ? "#f8fafc" : "#ffffff",
-                    color: !selectedOrgId ? "#94a3b8" : "#0f172a",
-                  }}
-                >
-                  <option value="">{selectedOrgId ? "All Branches" : "Select Org first"}</option>
-                  {availableBranches.map((br: { id: string; name: string }) => (
-                    <option key={br.id} value={br.id}>
-                      {br.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               {/* Supplier Filter */}
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
@@ -725,7 +644,6 @@ export function LocalPurchasesPage() {
                 <tr>
                   <th style={{ width: "60px", textAlign: "center" }}>SR.</th>
                   <th style={{ minWidth: "160px" }}>INVOICE NO & DATE</th>
-                  <th style={{ minWidth: "190px" }}>ORGANIZATION & BRANCH</th>
                   <th style={{ minWidth: "180px" }}>SUPPLIER</th>
                   <th style={{ textAlign: "right", minWidth: "130px" }}>INVOICE TOTAL (VAT)</th>
                   <th style={{ textAlign: "right", minWidth: "110px" }}>EXPENSES</th>
@@ -739,14 +657,14 @@ export function LocalPurchasesPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={11} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
+                    <td colSpan={10} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
                       <div style={{ display: "inline-block", fontSize: "16px", marginBottom: "8px" }}>⏳</div>
                       <div>Loading local purchases...</div>
                     </td>
                   </tr>
                 ) : purchases.length === 0 ? (
                   <tr>
-                    <td colSpan={11} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
+                    <td colSpan={10} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
                       No local purchase records found. Click <strong>+ ADD LOCAL PURCHASE</strong> to create one.
                     </td>
                   </tr>
@@ -792,26 +710,6 @@ export function LocalPurchasesPage() {
                             {p.invoice_no}
                           </button>
                           <span style={{ fontSize: "11px", color: "#64748b" }}>{p.invoice_date}</span>
-                        </td>
-
-                        {/* Organization & Branch */}
-                        <td>
-                          <div style={{ fontWeight: 600, color: "#1e293b" }}>{p.organization_name}</div>
-                          <span
-                            style={{
-                              display: "inline-block",
-                              marginTop: "2px",
-                              padding: "1px 6px",
-                              fontSize: "11px",
-                              fontWeight: 600,
-                              background: "#f1f5f9",
-                              color: "#475569",
-                              borderRadius: "4px",
-                              border: "1px solid #e2e8f0",
-                            }}
-                          >
-                            📍 {p.branch_name}
-                          </span>
                         </td>
 
                         {/* Supplier */}

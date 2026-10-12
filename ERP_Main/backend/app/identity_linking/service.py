@@ -424,11 +424,31 @@ class IdentityLinkingService:
         if existing_membership is not None:
             if existing_membership.status == ErpMembershipStatus.ACTIVE:
                 logger.info(
-                    "GlobalUser %s already has active membership %s in ERP %s; returning existing.",
+                    "GlobalUser %s already has active membership %s in ERP %s; ensuring spoke account is active.",
                     global_user_id,
                     existing_membership.id,
                     erp_instance.key,
                 )
+                adapter = self.adapter_registry.get_adapter(erp_instance)
+                pwd = (global_user.metadata_json or {}).get("default_password") or (global_user.metadata_json or {}).get("password")
+                extra_kwargs = {"password": pwd} if pwd else {}
+                try:
+                    await adapter.provision_local_user(
+                        erp_instance,
+                        email=global_user.primary_email,
+                        display_name=global_user.display_name,
+                        **extra_kwargs,
+                    )
+                except Exception:
+                    pass
+                try:
+                    await adapter.set_local_user_access(
+                        erp_instance, existing_membership.local_user_id, allow_login=True, reason="Central access verified"
+                    )
+                except Exception:
+                    pass
+                from app.global_auth.ecosystem_session import invalidate_ecosystem_session_cache_for_user
+                invalidate_ecosystem_session_cache_for_user(global_user.primary_email)
                 return existing_membership
             # Existing membership is PENDING/error; proceed with recovery/retry
             membership = existing_membership
@@ -462,16 +482,21 @@ class IdentityLinkingService:
             if existing_local and "local_user_id" in existing_local:
                 local_user_id = str(existing_local["local_user_id"])
                 created_new = False
-                if "password" in extra_kwargs:
-                    try:
-                        await adapter.provision_local_user(
-                            erp_instance,
-                            email=global_user.primary_email,
-                            display_name=global_user.display_name,
-                            **extra_kwargs,
-                        )
-                    except Exception:
-                        pass
+                try:
+                    await adapter.provision_local_user(
+                        erp_instance,
+                        email=global_user.primary_email,
+                        display_name=global_user.display_name,
+                        **extra_kwargs,
+                    )
+                except Exception:
+                    pass
+                try:
+                    await adapter.set_local_user_access(
+                        erp_instance, local_user_id, allow_login=True, reason="Central provisioning confirmed"
+                    )
+                except Exception:
+                    pass
             else:
                 # Step 2: Provision minimal local user
                 provision_res = await self._retry_transient(

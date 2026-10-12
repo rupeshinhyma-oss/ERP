@@ -28,8 +28,19 @@ from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
+from app.masters.import_export import build_csv_export, build_excel_export
 from app.masters.products.dependencies import get_product_service
-from app.masters.products.schemas import ImportSummaryRead, ProductCreate, ProductRead, ProductUpdate
+from app.masters.products.schemas import (
+    BulkDeletePayload,
+    ImportSummaryRead,
+    MachineSpareMappingIn,
+    MachineSpareUnmapIn,
+    MachineWithSparesRead,
+    PackageDimensionReportRow,
+    ProductCreate,
+    ProductRead,
+    ProductUpdate,
+)
 from app.masters.products.service import ProductService
 from app.rbac.dependencies import require_permission
 from app.integration.jobs import enqueue_dispatch
@@ -256,6 +267,138 @@ async def upload_product_image(
         content_type=file.content_type,
     )
     return {"success": True, "data": {"url": image_url}}
+
+
+@router.post("/bulk-delete", summary="Bulk delete products with zero-stock enforcement")
+async def bulk_delete_products(
+    payload: BulkDeletePayload,
+    request: Request,
+    service: ProductService = Depends(get_product_service),
+    current_user: CurrentUser = Depends(require_permission("product.delete")),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Soft-delete multiple products, strictly enforcing zero-stock across all warehouses."""
+    result = await service.bulk_delete(payload.product_ids)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.DELETE,
+        actor=current_user,
+        entity_id="bulk",
+        description=f"Bulk deleted {result['deleted_count']} products.",
+    )
+    for pid in payload.product_ids:
+        await _publish_product_event(
+            db=db,
+            dispatcher=dispatcher,
+            event_type="product.deleted",
+            product_id=pid,
+            user_id=current_user.id,
+            changes={},
+        )
+    return build_success_response(data=result, request_id=request.state.request_id)
+
+
+@router.get("/machine-spares/universal-view", summary="Universal view showing machine-wise spare parts mapping")
+async def get_machine_spares_universal_view(
+    request: Request,
+    search: str | None = None,
+    service: ProductService = Depends(get_product_service),
+    _current_user: CurrentUser = Depends(require_permission("product.view")),
+) -> dict:
+    """Return machine-wise spare parts mapping."""
+    data = await service.get_machine_spares_universal_view(search=search)
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/machine-spares/map", summary="Link a spare part to a machine")
+async def map_machine_spare(
+    payload: MachineSpareMappingIn,
+    request: Request,
+    service: ProductService = Depends(get_product_service),
+    _current_user: CurrentUser = Depends(require_permission("product.update")),
+) -> dict:
+    """Link a spare part to a machine."""
+    mapping = await service.map_machine_spare(
+        machine_id=payload.machine_id,
+        spare_part_id=payload.spare_part_id,
+        remarks=payload.remarks,
+    )
+    return build_success_response(data={"mapped": True, "id": str(mapping.id)}, request_id=request.state.request_id)
+
+
+@router.post("/machine-spares/unmap", summary="Unlink a spare part from a machine")
+@router.delete("/machine-spares/unmap", summary="Unlink a spare part alias")
+async def unmap_machine_spare(
+    payload: MachineSpareUnmapIn,
+    request: Request,
+    service: ProductService = Depends(get_product_service),
+    _current_user: CurrentUser = Depends(require_permission("product.update")),
+) -> dict:
+    """Unlink a spare part from a machine."""
+    success = await service.unmap_machine_spare(
+        machine_id=payload.machine_id,
+        spare_part_id=payload.spare_part_id,
+    )
+    return build_success_response(data={"unmapped": success}, request_id=request.state.request_id)
+
+
+@router.get("/package-dimensions/report", summary="Separate report for dimensions of each package")
+async def get_package_dimensions_report(
+    request: Request,
+    search: str | None = None,
+    service: ProductService = Depends(get_product_service),
+    _current_user: CurrentUser = Depends(require_permission("product.view")),
+) -> dict:
+    """Return dimensions and weights for each package across multi-package products."""
+    data = await service.get_package_dimensions_report(search=search)
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/package-dimensions/export", summary="Export package dimensions report to CSV/Excel")
+async def export_package_dimensions(
+    format: str = "csv",
+    search: str | None = None,
+    service: ProductService = Depends(get_product_service),
+    _current_user: CurrentUser = Depends(require_permission("product.export")),
+) -> Response:
+    """Export package dimensions to CSV or Excel."""
+    rows = await service.get_package_dimensions_report(search=search)
+    headers = [
+        "Product Name", "Product Code", "Product Type", "Package Name",
+        "Title / Description", "Length (cm)", "Width (cm)", "Height (cm)",
+        "CBM", "Net Weight (kg)", "Gross Weight (kg)"
+    ]
+    export_rows = []
+    for r in rows:
+        export_rows.append({
+            "Product Name": r["product_name"],
+            "Product Code": r["product_code"] or "",
+            "Product Type": r["product_type"],
+            "Package Name": r["package_name"] or "",
+            "Title / Description": r["title"] or "",
+            "Length (cm)": r["length"] if r["length"] is not None else "",
+            "Width (cm)": r["width"] if r["width"] is not None else "",
+            "Height (cm)": r["height"] if r["height"] is not None else "",
+            "CBM": r["cbm"] if r["cbm"] is not None else "",
+            "Net Weight (kg)": r["net_weight"] if r["net_weight"] is not None else "",
+            "Gross Weight (kg)": r["gross_weight"] if r["gross_weight"] is not None else "",
+        })
+    if format.lower() == "xlsx":
+        content = build_excel_export(headers, export_rows)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = "package_dimensions_report.xlsx"
+    else:
+        content = build_csv_export(headers, export_rows)
+        media_type = "text/csv; charset=utf-8"
+        filename = "package_dimensions_report.csv"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{product_id}", summary="Get a product")

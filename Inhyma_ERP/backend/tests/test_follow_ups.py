@@ -123,3 +123,82 @@ async def test_follow_up_service_create_and_list():
     mock_repo.bulk_soft_delete.return_value = 2
     count = await service.bulk_delete([item_id, uuid.uuid4()])
     assert count == 2
+
+
+@pytest.mark.asyncio
+async def test_follow_up_lead_and_china_import_fields():
+    """Verify lead status, reason for won/loss, and china import fields."""
+    lead_payload = FollowUpCreate(
+        company_name="Apex Packaging Machine Co",
+        call_category="Lead",
+        call_type="Telecall",
+        lead_status="Won",
+        reason_for_won_loss="Superior technical support and prompt quote delivery",
+        direct_import_from_china="Yes",
+        monthly_import_volume="4 Containers",
+        entry_source="Outside",
+        current_status="Existing",
+    )
+    dumped = lead_payload.model_dump()
+    assert dumped["call_category"] == "Lead"
+    assert dumped["lead_status"] == "Won"
+    assert dumped["reason_for_won_loss"] == "Superior technical support and prompt quote delivery"
+    assert dumped["direct_import_from_china"] == "Yes"
+    assert dumped["monthly_import_volume"] == "4 Containers"
+    assert dumped["entry_source"] == "Outside"
+
+    mock_repo = AsyncMock()
+    mock_item = FollowUp(
+        id=uuid.uuid4(),
+        company_name="Apex Packaging Machine Co",
+        call_category="Lead",
+        lead_status="Won",
+        reason_for_won_loss="Superior technical support and prompt quote delivery",
+        direct_import_from_china="Yes",
+        monthly_import_volume="4 Containers",
+        current_status="Existing",
+        added_on=date.today(),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    mock_repo.list_follow_ups.return_value = ([mock_item], 1)
+    service = FollowUpService(mock_repo)
+
+    items, total = await service.list_follow_ups(
+        call_category="Lead",
+        lead_status="Won",
+        direct_import_from_china="Yes",
+        monthly_import_volume="4 Containers",
+    )
+    assert total == 1
+    assert items[0].lead_status == "Won"
+    assert items[0].direct_import_from_china == "Yes"
+    assert items[0].monthly_import_volume == "4 Containers"
+    mock_repo.list_follow_ups.assert_called_once_with(
+        search=None,
+        call_type=None,
+        marketing_person=None,
+        business_type=None,
+        state=None,
+        district=None,
+        city=None,
+        current_status=None,
+        category=None,
+        client_grade=None,
+        potential_type=None,
+        business_category=None,
+        company_name=None,
+        call_category="Lead",
+        direct_import_from_china="Yes",
+        monthly_import_volume="4 Containers",
+        lead_status="Won",
+        entry_source=None,
+        added_date=None,
+        date_from=None,
+        date_to=None,
+        sort_by="created_at",
+        sort_dir="desc",
+        limit=50,
+        offset=0,
+    )
+

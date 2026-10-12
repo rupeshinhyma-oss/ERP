@@ -12,14 +12,23 @@
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/companies` | List paginated companies with grade, potential, and search filters | `company.view` |
 | `POST` | `/api/v1/companies` | Create company account with extended intelligence fields & contacts | `company.create` |
-| `GET` | `/api/v1/companies/{id}` | Inspect detailed profile (10 extended fields, social media matrix) | `company.view` |
-| `PATCH` | `/api/v1/companies/{id}` | Update company details, credit terms, and intelligence | `company.update` |
+| `GET` | `/api/v1/companies/{id}` | Inspect detailed profile (extended fields, social media matrix, Direct Import from China cluster) | `company.view` |
+| `PATCH` | `/api/v1/companies/{id}` | Update company details, credit terms, turnover, import volume, and intelligence | `company.update` |
 | `DELETE`| `/api/v1/companies/{id}` | Soft-delete company record and linked contacts | `company.delete` |
 | `PATCH` | `/api/v1/companies/{id}/grade` | Inline update corporate grade (A, B, C, D) | `company.update` |
-| `PATCH` | `/api/v1/companies/{id}/potential` | Inline update revenue potential rating (High, Medium, Low) | `company.update` |
-| `POST` | `/api/v1/companies/{id}/contacts` | Add sub-contact person to roster | `company.update` |
+| `PATCH` | `/api/v1/companies/{id}/potential` | Inline update revenue potential rating (Yes / No; requires `potential_reason` if No, allows `potential_business_per_month` if Yes) | `company.update` |
+| `POST` | `/api/v1/companies/{id}/contacts` | Add sub-contact person with birth_date & anniversary_date | `company.update` |
 | `POST` | `/api/v1/companies/import` | Bulk Excel/CSV import wizard | `company.import` |
 | `GET` | `/api/v1/companies/export` | Export company records to Excel/CSV | `company.export` |
+
+> **Company Spec Extensions:**
+> - `monthly_turnover`: Monthly sales band (active when Business Type is selected).
+> - `potential_reason`: Mandatory text reason when `potential == "no"`.
+> - `potential_business_per_month`: Projected business volume (active when `potential == "yes"`).
+> - `direct_import_from_china`: "Yes" / "No" (restricted to `company_type == "B2B"`).
+> - `monthly_import_volume` & `products_needed_for_imports`: Active only when `direct_import_from_china == "Yes"`.
+> - Sub-contacts include `birth_date` and `anniversary_date` with automated client-side age computation.
+
 
 ---
 
@@ -60,11 +69,18 @@
 
 ---
 
-## 5. Spoke Governance & Internal Deprovisioning
+## 5. Spoke Governance & Internal Identity Provisioning (`/internal/users`)
+
+Machine-to-machine internal service endpoints invoked by `ERP_Main` over authenticated HTTP channels (Bearer Token with `X-ERP-Key` / HMAC token validation).
 
 | Method | Endpoint URI | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/internal/users/{id}/deprovision` | Invalidate sessions and soft-delete user record upon control plane deprovisioning | Internal Service Key |
+| `POST` | `/api/v1/internal/users/check` | Inspect whether a user already exists locally by email or username | Internal Service Bearer |
+| `POST` | `/api/v1/internal/users/provision` | Provision minimal local account or reactivate previously deactivated account | Internal Service Bearer |
+| `POST` | `/api/v1/internal/users/{id}/access` | Block (`allow_login: false`) or restore (`allow_login: true`) local authentication | Internal Service Bearer |
+| `POST` | `/api/v1/internal/users/{id}/deprovision` | Soft-delete user and revoke all active sessions upon ERP_Main deprovisioning | Internal Service Bearer |
+| `DELETE`| `/api/v1/internal/users/{id}` | Idempotent alias for user deprovisioning | Internal Service Bearer |
+| `POST` | `/api/v1/internal/users/{id}/logout` | Force logout local user and broadcast WebSocket `FORCE_LOGOUT` upon ecosystem logout | Internal Service Bearer |
 
 ---
 
@@ -79,4 +95,77 @@
 | `PUT` | `/api/v1/leads/{id}` | Update lead details, stage, status, or assignment | Authenticated |
 | `DELETE`| `/api/v1/leads/{id}` | Soft-delete a lead record (`is_deleted = True`) | Authenticated |
 | `POST` | `/api/v1/leads/bulk-delete` | Bulk soft-delete selected leads by array of IDs | Authenticated |
+
+---
+
+## 7. Purchase — Local Purchase Orders (`/purchase/local-orders`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/purchase/local-orders` | List local purchases with status counts (`all`, `pending`, `confirmed`), search, warehouse, and date filters | Authenticated |
+| `POST` | `/api/v1/purchase/local-orders` | Create local purchase with multi-product lines; server auto-calculates expense loading & landing rates | Authenticated |
+| `GET` | `/api/v1/purchase/local-orders/{id}` | Inspect detailed local purchase record and items | Authenticated |
+| `PUT` | `/api/v1/purchase/local-orders/{id}` | Update pending local purchase lines or invoice expenses | `localpurchase.update` |
+| `PATCH` | `/api/v1/purchase/local-orders/{id}/status` | Transition purchase status (`pending` -> `confirmed`); auto-applies physical stock-in movement | `localpurchase.confirm` |
+| `DELETE`| `/api/v1/purchase/local-orders/{id}` | Soft-delete local purchase order | Administrator |
+| `POST` | `/api/v1/purchase/local-orders/{id}/bill` | Upload scanned invoice bill document | Authenticated |
+| `DELETE`| `/api/v1/purchase/local-orders/{id}/bill` | Delete uploaded invoice bill attachment | Authenticated |
+| `GET` | `/api/v1/purchase/local-orders/{id}/bill-file` | Stream or view attached bill file | Authenticated |
+
+---
+
+## 8. Purchase — Import Purchase Consignments (`/purchase/import-orders`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/purchase/import-orders` | List import consignments with status counts (`all`, `pending`, `confirmed`, `received`, `closed`) and 3-way date ranges | Authenticated |
+| `POST` | `/api/v1/purchase/import-orders` | Create import consignment with exchange rates, duty %, shipping, and dual VB/CB landing calculations | Authenticated |
+| `POST` | `/api/v1/purchase/import-orders/preview` | Live preview calculation of CBM, duty, and landing expenses while typing in form | Authenticated |
+| `GET` | `/api/v1/purchase/import-orders/{id}` | Inspect detailed consignment record, line items, and landed costs | Authenticated |
+| `PUT` | `/api/v1/purchase/import-orders/{id}` | Update pending import consignment details or product lines | Authenticated |
+| `PATCH` | `/api/v1/purchase/import-orders/{id}/status` | Move consignment through workflow (`pending` -> `confirmed` -> `received` -> `closed`) | Authenticated / Admin |
+| `DELETE`| `/api/v1/purchase/import-orders/{id}` | Soft-delete import consignment order | Authenticated / Admin |
+| `POST` | `/api/v1/purchase/import-orders/{id}/bill` | Upload consignment document / shipping bill | Authenticated |
+| `DELETE`| `/api/v1/purchase/import-orders/{id}/bill` | Delete uploaded consignment document | Authenticated |
+| `GET` | `/api/v1/purchase/import-orders/{id}/bill-file` | Stream or download consignment document | Authenticated |
+
+---
+
+## 9. Sales — Proforma Invoices (`/sales/proforma-invoices`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/sales/proforma-invoices` | List proforma invoices with status tabs, commercial terms, and search | Authenticated |
+| `POST` | `/api/v1/sales/proforma-invoices` | Create new proforma invoice with line items, tax breakdown, and commercial terms | Authenticated |
+| `GET` | `/api/v1/sales/proforma-invoices/{id}` | Inspect detailed proforma invoice with billing/shipping address and line calculations | Authenticated |
+| `PUT` | `/api/v1/sales/proforma-invoices/{id}` | Update editable proforma invoice record | Authenticated |
+| `PATCH` | `/api/v1/sales/proforma-invoices/{id}/status` | Move proforma invoice through workflow (`pending` -> `admin_approved` -> `confirmed` or `cancelled`) | `proforma.approve` / Admin |
+| `DELETE`| `/api/v1/sales/proforma-invoices/{id}` | Soft-delete proforma invoice record | Administrator |
+
+---
+
+## 10. Suppliers Directory (`/suppliers`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/suppliers` | List paginated suppliers with filters and product categories | `supplier.view` |
+| `POST` | `/api/v1/suppliers` | Create supplier profile; **`contact_calling_number` is mandatory** with strict phone validation | `supplier.create` |
+| `GET` | `/api/v1/suppliers/{id}` | Inspect detailed supplier record and linked products | `supplier.view` |
+| `PATCH` | `/api/v1/suppliers/{id}` | Update supplier profile (cannot blank out mandatory calling number) | `supplier.update` |
+| `DELETE`| `/api/v1/suppliers/{id}` | Soft-delete supplier profile | `supplier.delete` |
+
+---
+
+## 11. Authentication, SSO Handover & Identity Federation (`/auth`, `/users`)
+
+| Method | Endpoint URI | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/auth/login` | Local credential authentication returning token pair & profile | Public |
+| `POST` | `/api/v1/auth/sso-handover` | Authenticate incoming SSO handover token with mandatory live central session verification against ERP_Main | Public / Handover Token |
+| `POST` | `/api/v1/auth/change-password` | Update current user's password and asynchronously push to ERP_Main | Authenticated |
+| `POST` | `/api/v1/users/{id}/reset-password` | Administrative password reset and automatic fanout push to ERP_Main | `user.manage` |
+| `PATCH` | `/api/v1/users/{id}` | Update user attributes; email is locked to central control plane | `user.update` |
+| `POST` | `/api/v1/internal/users/{id}/deprovision` | Invalidate spoke sessions and soft-delete user upon ERP_Main deprovisioning | Internal Service Key |
+| `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and logo | Public |
+
 

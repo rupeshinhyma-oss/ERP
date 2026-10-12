@@ -105,7 +105,7 @@ describe("Reporting Page", () => {
       if (url === "/global/reports/export") {
         return mockExportJobs;
       }
-      if (url === "/global/erp-instances") {
+      if (url === "/global/erp-instances" || url === "/global/erps") {
         return mockErps;
       }
       if (url === "/global/dashboard") {

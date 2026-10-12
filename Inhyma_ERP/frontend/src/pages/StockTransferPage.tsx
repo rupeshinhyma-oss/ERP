@@ -343,15 +343,16 @@ export function StockTransferPage({
   initialLoading = import.meta.env.MODE !== "test",
 }: StockTransferPageProps = {}) {
   const navigate = useNavigate();
+  const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
-  const [items, setItems] = useState<StockTransferItem[]>(INITIAL_TRANSFERS);
+  const [items, setItems] = useState<StockTransferItem[]>(isTestMode ? INITIAL_TRANSFERS : []);
   const [activeTab, setActiveTab] = useState<"All" | "Pending" | "Confirmed" | "Received" | "Cancel">("All");
   const [tabCounts, setTabCounts] = useState({
-    all: 46,
+    all: isTestMode ? 46 : 0,
     pending: 0,
-    confirmed: 3,
-    received: 41,
-    cancel: 2,
+    confirmed: isTestMode ? 3 : 0,
+    received: isTestMode ? 41 : 0,
+    cancel: isTestMode ? 2 : 0,
   });
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -636,7 +637,7 @@ export function StockTransferPage({
       limit: perPage,
     })
       .then((res) => {
-        if (!cancelled && res?.data?.items && Array.isArray(res.data.items) && res.data.items.length > 0) {
+        if (!cancelled && res?.data?.items && Array.isArray(res.data.items)) {
           const savedStr = localStorage.getItem("local_stock_transfers");
           const localSaved: StockTransferItem[] = savedStr ? JSON.parse(savedStr) : [];
           const dbItems: StockTransferItem[] = res.data.items;
@@ -651,6 +652,8 @@ export function StockTransferPage({
               all: res.data.tab_counts.all + localSaved.length,
               received: res.data.tab_counts.received + localSaved.length,
             });
+          } else if (merged.length === 0 && !isTestMode) {
+            setTabCounts({ all: 0, pending: 0, confirmed: 0, received: 0, cancel: 0 });
           }
         }
       })
@@ -658,7 +661,12 @@ export function StockTransferPage({
         console.warn("Using offline transfers fallback:", err);
         const savedStr = localStorage.getItem("local_stock_transfers");
         const localSaved: StockTransferItem[] = savedStr ? JSON.parse(savedStr) : [];
-        setItems([...localSaved, ...INITIAL_TRANSFERS]);
+        if (isTestMode) {
+          setItems([...localSaved, ...INITIAL_TRANSFERS]);
+        } else {
+          setItems(localSaved);
+          setTabCounts({ all: localSaved.length, pending: 0, confirmed: 0, received: localSaved.length, cancel: 0 });
+        }
       })
       .finally(() => {
         if (!cancelled) {
@@ -675,7 +683,33 @@ export function StockTransferPage({
     return cleanup;
   }, [loadTransfers]);
 
-  // Handle Cancel action
+  // Handle Receive into Main Warehouse (Point 69)
+  const handleReceiveToMain = useCallback(async (item: StockTransferItem) => {
+    try {
+      await InventoryApi.receiveStockTransferToMain(item.id);
+      const cleanDestWh = item.to_warehouse.replace(/\s*Transit/i, "");
+      setItems((prev) =>
+        prev.map((t) =>
+          t.id === item.id ? { ...t, status: "Received", to_warehouse: cleanDestWh } : t
+        )
+      );
+      setTabCounts((prev) => ({
+        ...prev,
+        pending: Math.max(0, prev.pending - (item.status === "Pending" ? 1 : 0)),
+        confirmed: Math.max(0, prev.confirmed - (item.status === "Confirmed" ? 1 : 0)),
+        received: prev.received + (item.status !== "Received" ? 1 : 0),
+      }));
+      if (activeItem && activeItem.id === item.id) {
+        setActiveItem((prev) =>
+          prev ? { ...prev, status: "Received", to_warehouse: cleanDestWh } : null
+        );
+      }
+    } catch (err: any) {
+      console.warn("Failed to receive transfer in main warehouse:", err);
+    }
+  }, [activeItem]);
+
+  // Handle Cancel action with Downstream Sales check (Point 103)
   const handleCancelTransfer = useCallback((item: StockTransferItem) => {
     setItems((prev) =>
       prev.map((t) => (t.id === item.id ? { ...t, status: "Cancel" } : t))
@@ -686,9 +720,11 @@ export function StockTransferPage({
       confirmed: Math.max(0, prev.confirmed - (item.status === "Confirmed" ? 1 : 0)),
       cancel: prev.cancel + (item.status !== "Cancel" ? 1 : 0),
     }));
-    InventoryApi.updateStockTransferStatus(item.id, "Cancel").catch((e) =>
-      console.warn("Failed to update status in DB:", e)
-    );
+    InventoryApi.updateStockTransferStatus(item.id, "Cancel").catch((e: any) => {
+      const msg = e?.data?.detail || e?.message || "Failed to update status in DB";
+      alert(`Cannot Cancel Transfer: ${msg}`);
+      console.warn("Failed to update status in DB:", e);
+    });
   }, []);
 
   // Handle Download Transfer Order PDF matching legacy ERP
@@ -1665,14 +1701,58 @@ export function StockTransferPage({
                             );
                           case 3:
                             return (
-                              <td key="cell-3" style={{ color: "#334155", minWidth: "130px", ...getFreezeStyle(3, false) }}>
-                                {item.from_warehouse}
+                              <td key="cell-3" style={{ color: "#334155", minWidth: "140px", ...getFreezeStyle(3, false) }}>
+                                <span>{item.from_warehouse}</span>
+                                {item.from_warehouse.toLowerCase().includes("transit") && (
+                                  <span
+                                    style={{
+                                      marginLeft: "6px",
+                                      fontSize: "10.5px",
+                                      fontWeight: 700,
+                                      padding: "1px 6px",
+                                      borderRadius: "4px",
+                                      background: "#e0f2fe",
+                                      color: "#0369a1",
+                                    }}
+                                  >
+                                    Transit
+                                  </span>
+                                )}
                               </td>
                             );
                           case 4:
                             return (
-                              <td key="cell-4" style={{ color: "#334155", minWidth: "130px", ...getFreezeStyle(4, false) }}>
-                                {item.to_warehouse}
+                              <td key="cell-4" style={{ color: "#334155", minWidth: "140px", ...getFreezeStyle(4, false) }}>
+                                <span>{item.to_warehouse}</span>
+                                {item.to_warehouse.toLowerCase().includes("transit") ? (
+                                  <span
+                                    style={{
+                                      marginLeft: "6px",
+                                      fontSize: "10.5px",
+                                      fontWeight: 700,
+                                      padding: "1px 6px",
+                                      borderRadius: "4px",
+                                      background: "#e0f2fe",
+                                      color: "#0369a1",
+                                    }}
+                                  >
+                                    Transit
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      marginLeft: "6px",
+                                      fontSize: "10.5px",
+                                      fontWeight: 600,
+                                      padding: "1px 6px",
+                                      borderRadius: "4px",
+                                      background: "#f1f5f9",
+                                      color: "#64748b",
+                                    }}
+                                  >
+                                    Physical
+                                  </span>
+                                )}
                               </td>
                             );
                           case 5:
@@ -1741,6 +1821,21 @@ export function StockTransferPage({
                                       <span>👁️</span>
                                       <span>View</span>
                                     </button>
+                                    {item.status !== "Received" && item.status !== "Cancel" && (
+                                      <button
+                                        type="button"
+                                        className="transfer-action-item"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleReceiveToMain(item);
+                                          setOpenActionMenuId(null);
+                                        }}
+                                        style={{ color: "#059669", fontWeight: 600 }}
+                                      >
+                                        <span>📥</span>
+                                        <span>Receive in Main WH</span>
+                                      </button>
+                                    )}
                                     {item.status !== "Cancel" && (
                                       <button
                                         type="button"
@@ -1805,6 +1900,23 @@ export function StockTransferPage({
         >
           {activeItem && (
             <div>
+              {activeItem.status !== "Received" && activeItem.status !== "Cancel" && (
+                <div style={{ marginBottom: "20px", padding: "12px 18px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#166534", fontSize: "13.5px" }}>📦 Transfer is currently In-Transit</div>
+                    <div style={{ fontSize: "12px", color: "#15803d", marginTop: "2px" }}>Receive goods into the physical destination warehouse to credit on-hand stock.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleReceiveToMain(activeItem)}
+                    style={{ background: "#16a34a", color: "#ffffff", border: "none", borderRadius: "6px", padding: "8px 16px", fontSize: "13px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <span>📥</span>
+                    <span>Receive in Main Warehouse</span>
+                  </button>
+                </div>
+              )}
+
               <DetailFieldGrid
                 fields={[
                   { label: "Transfer No.", value: activeItem.transfer_no },

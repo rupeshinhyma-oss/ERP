@@ -62,7 +62,9 @@ def test_proforma_invoice_create_schema():
         status="pending",
     )
     assert payload.company_name == "PRINT WORLD CORPORATION"
-    assert payload.status == "pending"
+    # status, totals and discount are server-controlled: a client-supplied value is ignored
+    for server_field in ("status", "amount_inc_gst", "discount", "created_by"):
+        assert not hasattr(payload, server_field)
 
 
 def test_discount_payment_model_and_schema():
@@ -115,3 +117,18 @@ def test_sale_order_model():
     assert so.order_no.startswith("SO-INH/")
     assert so.buyer_name == "V S Machines"
     assert so.total_amount == 271400.0
+
+
+def test_deleted_orders_seed_data():
+    from app.sales.routes import _DELETED_ORDERS_SEED
+    assert len(_DELETED_ORDERS_SEED) >= 7
+    order_nos = [o["order_no"] for o in _DELETED_ORDERS_SEED]
+    assert "SO-MP/26-27/0618" in order_nos
+    assert "SO-MH/26-27/4476" in order_nos
+    assert "SO-MH/26-27/4401" in order_nos
+    assert "SO-GJ/26-27/0862" in order_nos
+    for order in _DELETED_ORDERS_SEED:
+        assert order["status"] == "Trash"
+        assert "deleted_at" in order
+        assert "warehouse" in order
+

@@ -64,6 +64,7 @@ import app.masters.lead_sources.models  # noqa: F401,E402
 import app.masters.adjustment_purposes.models  # noqa: F401,E402
 import app.masters.call_types.models  # noqa: F401,E402
 import app.masters.option_lists.models  # noqa: F401,E402
+import app.purchase.models  # noqa: F401,E402
 import app.masters.brands.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_sub_categories.models  # noqa: F401,E402 - Phase 7

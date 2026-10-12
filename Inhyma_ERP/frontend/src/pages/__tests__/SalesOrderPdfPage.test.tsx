@@ -113,4 +113,39 @@ describe("SalesOrderPdfPage", () => {
 
     expect(screen.getByTestId("discount-list")).toBeTruthy();
   });
+
+  it("supports toggling between Standard SO and Warehouse Copy (No Pricing)", () => {
+    render(
+      <MemoryRouter initialEntries={["/sale-order/invoice/so-3826"]}>
+        <Routes>
+          <Route path="/sale-order/invoice/:id" element={<SalesOrderPdfPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    const warehouseBtn = screen.getByTestId("mode-warehouse-btn");
+    expect(warehouseBtn).toBeTruthy();
+    expect(warehouseBtn.textContent).toContain("Warehouse Copy (No Pricing)");
+
+    fireEvent.click(warehouseBtn);
+    expect(screen.getByTestId("pdf-order-title").textContent).toContain("(Warehouse Copy)");
+    expect(document.title).toContain("Warehouse Copy");
+
+    const standardBtn = screen.getByTestId("mode-standard-btn");
+    fireEvent.click(standardBtn);
+    expect(screen.getByTestId("pdf-order-title").textContent).not.toContain("(Warehouse Copy)");
+  });
+
+  it("initializes directly into Warehouse Copy mode when ?mode=warehouse is present", () => {
+    render(
+      <MemoryRouter initialEntries={["/sale-order/invoice/so-3826?mode=warehouse"]}>
+        <Routes>
+          <Route path="/sale-order/invoice/:id" element={<SalesOrderPdfPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId("pdf-order-title").textContent).toContain("(Warehouse Copy)");
+    expect(document.title).toContain("Warehouse Copy");
+  });
 });

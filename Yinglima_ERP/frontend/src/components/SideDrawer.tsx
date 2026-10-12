@@ -26,6 +26,7 @@ export interface SideDrawerProps {
   onClose: () => void;
   onEdit?: () => void;
   editLabel?: string;
+  cardStyle?: React.CSSProperties;
   children: ReactNode;
 }
 
@@ -36,6 +37,7 @@ export function SideDrawer({
   onClose,
   onEdit,
   editLabel = "✏️ Edit",
+  cardStyle,
   children,
 }: SideDrawerProps) {
   useBodyScrollLock(open);
@@ -47,7 +49,7 @@ export function SideDrawer({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="side-drawer-card">
+      <div className="side-drawer-card" style={cardStyle}>
         <div
           style={{
             padding: "18px 24px",

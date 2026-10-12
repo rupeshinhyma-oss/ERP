@@ -14,7 +14,8 @@ import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Banner, Modal } from "@/components/ui";
 import { SearchableDropdown } from "@/components/SearchableDropdown";
-import { apiDelete, apiGet, apiPatch, apiPost, API_ORIGIN, downloadExport, toQueryString } from "@/lib/api";
+import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_ORIGIN, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type { Brand, Hsn, Product, ProductCategory, ProductSubCategory, Uom } from "@/types";
 
@@ -49,6 +50,7 @@ interface ProductPriceRow {
   primary_link_id: string | null;
   supplier_count: number;
   has_price: boolean;
+  is_preferred?: boolean;
 }
 
 interface SupplierQuote {
@@ -69,6 +71,7 @@ interface SupplierQuote {
   notes: string | null;
   updated_at: string | null;
   created_at: string | null;
+  is_preferred?: boolean;
 }
 
 interface SupplierLookupItem {
@@ -143,7 +146,17 @@ export function ProductPricesPage() {
   const [subTablePrice, setSubTablePrice] = useState<Record<string, string>>({});
   const [subTableCurrency, setSubTableCurrency] = useState<Record<string, string>>({});
   const [subTableMoq, setSubTableMoq] = useState<Record<string, string>>({});
+  const [subTableIsPreferred, setSubTableIsPreferred] = useState<Record<string, boolean>>({});
   const [subTableSaving, setSubTableSaving] = useState<Record<string, boolean>>({});
+
+  // Product Trade History Drawer State
+  const [historyProduct, setHistoryProduct] = useState<{ id: string; name: string; code: string | null } | null>(null);
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+
+  const openHistoryDrawer = (p: { product_id: string; product_name: string; product_code: string | null }) => {
+    setHistoryProduct({ id: p.product_id, name: p.product_name, code: p.product_code });
+    setHistoryDrawerOpen(true);
+  };
 
   /* Freeze Columns State */
   const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
@@ -292,6 +305,7 @@ export function ProductPricesPage() {
   const [assignCurrency, setAssignCurrency] = useState<string>("CNY");
   const [assignMoq, setAssignMoq] = useState<string>("");
   const [assignNotes, setAssignNotes] = useState<string>("");
+  const [assignIsPreferred, setAssignIsPreferred] = useState<boolean>(true);
   const [assignSubmitting, setAssignSubmitting] = useState<boolean>(false);
 
 
@@ -511,20 +525,22 @@ export function ProductPricesPage() {
 
       // Also keep the main row strictly synchronized with the database quotes
       if (quotes.length > 0) {
+        const preferredQuote = quotes.find((q) => q.is_preferred);
         const sorted = [...quotes].sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
-        const best = sorted[0];
+        const activeQuote = preferredQuote || sorted[0];
         setItems((prev) =>
           prev.map((r) => {
             if (r.product_id === productId) {
               return {
                 ...r,
-                best_price: best.unit_price,
-                best_currency: best.currency || r.best_currency,
-                primary_supplier_id: best.supplier_id,
-                primary_supplier_name: best.supplier_name,
-                primary_link_id: best.link_id,
+                best_price: activeQuote.unit_price,
+                best_currency: activeQuote.currency || r.best_currency,
+                primary_supplier_id: activeQuote.supplier_id,
+                primary_supplier_name: activeQuote.supplier_name,
+                primary_link_id: activeQuote.link_id,
                 supplier_count: quotes.length,
-                has_price: best.unit_price != null,
+                has_price: activeQuote.unit_price != null,
+                is_preferred: Boolean(preferredQuote),
               };
             }
             return r;
@@ -537,6 +553,66 @@ export function ProductPricesPage() {
       setLoadingQuotes((prev) => ({ ...prev, [productId]: false }));
     }
   }, [toUsd]);
+
+  // Manually select or unselect preferred supplier for a product
+  const handleSetPreferredSupplier = async (productId: string, supplierId: string | null, supplierName?: string) => {
+    // 1. Optimistic update of quotes in memory
+    setSupplierQuotes((prev) => {
+      const list = prev[productId] || [];
+      return {
+        ...prev,
+        [productId]: list.map((q) => ({
+          ...q,
+          is_preferred: supplierId ? q.supplier_id === supplierId : false,
+        })),
+      };
+    });
+
+    // 2. Optimistic update of main row
+    setItems((prev) =>
+      prev.map((r) => {
+        if (r.product_id === productId) {
+          const quotes = supplierQuotes[productId] || [];
+          const targetQuote = supplierId ? quotes.find((q) => q.supplier_id === supplierId) : null;
+          if (targetQuote) {
+            return {
+              ...r,
+              primary_supplier_id: targetQuote.supplier_id,
+              primary_supplier_name: targetQuote.supplier_name,
+              best_price: targetQuote.unit_price,
+              best_currency: targetQuote.currency || r.best_currency,
+              primary_link_id: targetQuote.link_id,
+              is_preferred: true,
+            };
+          } else if (!supplierId) {
+            const sorted = [...quotes].sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
+            const best = sorted[0];
+            return {
+              ...r,
+              primary_supplier_id: best ? best.supplier_id : null,
+              primary_supplier_name: best ? best.supplier_name : null,
+              best_price: best ? best.unit_price : null,
+              best_currency: best ? best.currency : r.best_currency,
+              primary_link_id: best ? best.link_id : null,
+              is_preferred: false,
+            };
+          }
+        }
+        return r;
+      })
+    );
+
+    try {
+      await apiPut(`/inventory/product-prices/${productId}/preferred-supplier`, { supplier_id: supplierId });
+      setSuccess(supplierId ? `Supplier ${supplierName || ""} selected as preferred` : "Preferred supplier reset to lowest quote");
+      setTimeout(() => setSuccess(null), 3000);
+      loadProductSuppliers(productId);
+    } catch (err) {
+      alert("Failed to update preferred supplier: " + (err instanceof Error ? err.message : String(err)));
+      loadProductSuppliers(productId);
+      fetchPrices();
+    }
+  };
 
   // Hover Pre-fetching: Fetches supplier quotes into memory as soon as mouse hovers over row or button
   const prefetchProductSuppliers = useCallback(
@@ -696,6 +772,8 @@ export function ProductPricesPage() {
     const moqVal = moqStr ? parseFloat(moqStr.replace(/[^0-9.]/g, "")) : null;
     const resolvedSuppName = allSuppliers.find((s) => s.id === suppId)?.company_name || "Supplier";
 
+    const isPref = Boolean(subTableIsPreferred[productId]);
+
     // 1. INSTANT OPTIMISTIC SUB-TABLE UPDATE
     setSupplierQuotes((prev) => {
       const existing = prev[productId] || [];
@@ -718,8 +796,10 @@ export function ProductPricesPage() {
         notes: null,
         updated_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
+        is_preferred: isPref,
       };
-      const nextList = idx >= 0 ? existing.map((q, i) => (i === idx ? newQuote : q)) : [...existing, newQuote];
+      const cleaned = isPref ? existing.map(q => ({ ...q, is_preferred: false })) : existing;
+      const nextList = idx >= 0 ? cleaned.map((q, i) => (i === idx ? newQuote : q)) : [...cleaned, newQuote];
       nextList.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
       return { ...prev, [productId]: nextList };
     });
@@ -731,14 +811,16 @@ export function ProductPricesPage() {
           const isNewBest = row.best_price == null || toUsd(priceNum, curr) <= toUsd(row.best_price, row.best_currency);
           const wasLinked = supplierQuotes[productId]?.some((q) => q.supplier_id === suppId);
           const newCount = wasLinked ? row.supplier_count : (row.supplier_count || 0) + 1;
+          const makeActive = isPref || (!row.is_preferred && isNewBest);
           return {
             ...row,
-            best_price: isNewBest ? priceNum : row.best_price,
-            best_currency: isNewBest ? curr : row.best_currency,
-            primary_supplier_id: isNewBest ? suppId : row.primary_supplier_id,
-            primary_supplier_name: isNewBest ? resolvedSuppName : row.primary_supplier_name,
+            best_price: makeActive ? priceNum : row.best_price,
+            best_currency: makeActive ? curr : row.best_currency,
+            primary_supplier_id: makeActive ? suppId : row.primary_supplier_id,
+            primary_supplier_name: makeActive ? resolvedSuppName : row.primary_supplier_name,
             supplier_count: newCount,
             has_price: true,
+            is_preferred: isPref || row.is_preferred,
           };
         }
         return row;
@@ -749,6 +831,7 @@ export function ProductPricesPage() {
     setSubTableSupplierId((prev) => ({ ...prev, [productId]: "" }));
     setSubTablePrice((prev) => ({ ...prev, [productId]: "" }));
     setSubTableMoq((prev) => ({ ...prev, [productId]: "" }));
+    setSubTableIsPreferred((prev) => ({ ...prev, [productId]: false }));
     setSuccess("Supplier quote added successfully");
     setTimeout(() => setSuccess(null), 3000);
 
@@ -761,11 +844,12 @@ export function ProductPricesPage() {
         unit_price: priceNum,
         currency: curr,
         moq: moqVal,
+        is_preferred: isPref,
       });
       if (res.data?.link_id) {
         setItems((prev) =>
           prev.map((r) =>
-            r.product_id === productId && (!r.primary_link_id || priceNum <= (r.best_price ?? 999999))
+            r.product_id === productId && (isPref || !r.primary_link_id || priceNum <= (r.best_price ?? 999999))
               ? { ...r, primary_link_id: res.data!.link_id, has_price: true }
               : r
           )
@@ -788,6 +872,7 @@ export function ProductPricesPage() {
     setAssignCurrency(row.best_currency || "CNY");
     setAssignMoq("");
     setAssignNotes("");
+    setAssignIsPreferred(true);
     if ((row.supplier_count || 0) > 0 && !supplierQuotes[row.product_id]) {
       loadProductSuppliers(row.product_id);
     }
@@ -831,14 +916,16 @@ export function ProductPricesPage() {
           const isNewBest = row.best_price == null || toUsd(priceVal, curr) <= toUsd(row.best_price, row.best_currency);
           const wasLinked = supplierQuotes[productId]?.some((q) => q.supplier_id === suppId);
           const newCount = wasLinked ? row.supplier_count : (row.supplier_count || 0) + 1;
+          const makeActive = assignIsPreferred || (!row.is_preferred && isNewBest);
           return {
             ...row,
-            best_price: isNewBest ? priceVal : row.best_price,
-            best_currency: isNewBest ? curr : row.best_currency,
-            primary_supplier_id: isNewBest ? suppId : row.primary_supplier_id,
-            primary_supplier_name: isNewBest ? resolvedSuppName : row.primary_supplier_name,
+            best_price: makeActive ? priceVal : row.best_price,
+            best_currency: makeActive ? curr : row.best_currency,
+            primary_supplier_id: makeActive ? suppId : row.primary_supplier_id,
+            primary_supplier_name: makeActive ? resolvedSuppName : row.primary_supplier_name,
             supplier_count: newCount,
             has_price: true,
+            is_preferred: assignIsPreferred || row.is_preferred,
           };
         }
         return row;
@@ -868,8 +955,10 @@ export function ProductPricesPage() {
         notes: notesVal,
         updated_at: new Date().toISOString(),
         created_at: idx >= 0 ? existing[idx].created_at : new Date().toISOString(),
+        is_preferred: assignIsPreferred,
       };
-      const nextList = idx >= 0 ? existing.map((q, i) => (i === idx ? newQuote : q)) : [...existing, newQuote];
+      const cleaned = assignIsPreferred ? existing.map(q => ({ ...q, is_preferred: false })) : existing;
+      const nextList = idx >= 0 ? cleaned.map((q, i) => (i === idx ? newQuote : q)) : [...cleaned, newQuote];
       nextList.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
       return { ...prev, [productId]: nextList };
     });
@@ -888,11 +977,12 @@ export function ProductPricesPage() {
         currency: curr,
         moq: moqVal,
         notes: notesVal,
+        is_preferred: assignIsPreferred,
       });
       if (res.data?.link_id) {
         setItems((prev) =>
           prev.map((r) =>
-            r.product_id === productId && (!r.primary_link_id || priceVal <= (r.best_price ?? 999999))
+            r.product_id === productId && (assignIsPreferred || !r.primary_link_id || priceVal <= (r.best_price ?? 999999))
               ? { ...r, primary_link_id: res.data!.link_id, has_price: true }
               : r
           )
@@ -1914,9 +2004,27 @@ export function ProductPricesPage() {
                                   <td key={4} style={{ padding: "12px 14px", fontSize: "13px", ...getFreezeStyle(4, false, rowBg) }}>
                                     {row.primary_supplier_name ? (
                                       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                        <span style={{ fontWeight: 600, color: "#1e293b" }}>
-                                          {row.primary_supplier_name}
-                                        </span>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                          <span style={{ fontWeight: 600, color: "#1e293b" }}>
+                                            {row.primary_supplier_name}
+                                          </span>
+                                          {row.is_preferred && (
+                                            <span
+                                              style={{
+                                                fontSize: "10.5px",
+                                                background: "#fef3c7",
+                                                color: "#b45309",
+                                                border: "1px solid #fde68a",
+                                                padding: "1px 6px",
+                                                borderRadius: "4px",
+                                                fontWeight: 700,
+                                              }}
+                                              title="Manually Chosen Preferred Supplier"
+                                            >
+                                              ⭐ Preferred
+                                            </span>
+                                          )}
+                                        </div>
                                         <div>
                                           <button
                                             type="button"
@@ -1980,6 +2088,24 @@ export function ProductPricesPage() {
                                       )}
                                       <button
                                         type="button"
+                                        onClick={() => openHistoryDrawer(row)}
+                                        className="btn btn-small"
+                                        style={{
+                                          fontSize: "12px",
+                                          padding: "4px 8px",
+                                          background: "#eff6ff",
+                                          color: "#1d4ed8",
+                                          border: "1px solid #bfdbfe",
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          gap: "4px",
+                                        }}
+                                        title="View complete Purchase and Sales History"
+                                      >
+                                        📜 History
+                                      </button>
+                                      <button
+                                        type="button"
                                         onClick={() => toggleRowExpansion(row.product_id, row.supplier_count)}
                                         onMouseEnter={() => prefetchProductSuppliers(row.product_id, row.supplier_count)}
                                         className="btn btn-small"
@@ -2030,13 +2156,24 @@ export function ProductPricesPage() {
                                       Supplier Quotations &amp; Comparison ({quotes.length} Quotes)
                                     </strong>
                                   </div>
-                                  <button
-                                    type="button"
-                                    className="btn btn-tiny btn-secondary"
-                                    onClick={() => loadProductSuppliers(row.product_id)}
-                                  >
-                                    🔄 Refresh Quotes
-                                  </button>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-tiny btn-outline"
+                                      onClick={() => openHistoryDrawer(row)}
+                                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                                      title="Open complete Purchase & Sales trade history"
+                                    >
+                                      📜 Full Trade History
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-tiny btn-secondary"
+                                      onClick={() => loadProductSuppliers(row.product_id)}
+                                    >
+                                      🔄 Refresh Quotes
+                                    </button>
+                                  </div>
                                 </div>
 
                                 {isLoadingQuotes ? (
@@ -2077,14 +2214,32 @@ export function ProductPricesPage() {
                                             key={q.link_id}
                                             style={{
                                               borderBottom: "1px solid #f1f5f9",
-                                              background: isLowest ? "#f0fdf4" : "#ffffff",
+                                              background: q.is_preferred ? "#fefce8" : isLowest ? "#f0fdf4" : "#ffffff",
                                             }}
                                           >
                                             {/* Supplier Name */}
                                             <td style={{ padding: "8px 10px", fontWeight: 600 }}>
                                               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                                 <span>{q.supplier_name}</span>
-                                                {isLowest && (
+                                                {q.is_preferred ? (
+                                                  <span
+                                                    style={{
+                                                      fontSize: "10px",
+                                                      background: "#fef3c7",
+                                                      color: "#b45309",
+                                                      border: "1px solid #fde68a",
+                                                      padding: "1px 6px",
+                                                      borderRadius: "10px",
+                                                      fontWeight: 700,
+                                                      display: "inline-flex",
+                                                      alignItems: "center",
+                                                      gap: "3px",
+                                                    }}
+                                                    title="Manually Selected Preferred Supplier"
+                                                  >
+                                                    ⭐ PREFERRED
+                                                  </span>
+                                                ) : isLowest ? (
                                                   <span
                                                     style={{
                                                       fontSize: "10px",
@@ -2094,10 +2249,11 @@ export function ProductPricesPage() {
                                                       borderRadius: "10px",
                                                       fontWeight: 700,
                                                     }}
+                                                    title="Lowest Quote"
                                                   >
-                                                    BEST
+                                                    LOWEST
                                                   </span>
-                                                )}
+                                                ) : null}
                                               </div>
                                               <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 400 }}>
                                                 {q.contact_calling_number && `📞 ${q.contact_calling_number}`}
@@ -2228,22 +2384,69 @@ export function ProductPricesPage() {
 
                                             {/* Actions */}
                                             <td style={{ padding: "8px 10px", textAlign: "center" }}>
-                                              {hasPermission("product_price.delete") && (
-                                              <button
-                                                type="button"
-                                                onClick={() => handleDeleteQuote(q.link_id, row.product_id, q.supplier_name)}
-                                                style={{
-                                                  background: "transparent",
-                                                  border: "none",
-                                                  color: "#ef4444",
-                                                  cursor: "pointer",
-                                                  fontSize: "13px",
-                                                }}
-                                                title="Delete this supplier quote"
-                                              >
-                                                🗑️
-                                              </button>
-                                              )}
+                                              <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", justifyContent: "center" }}>
+                                                {hasPermission("product_price.update") && (
+                                                  q.is_preferred ? (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleSetPreferredSupplier(row.product_id, null)}
+                                                      style={{
+                                                        background: "#fef3c7",
+                                                        color: "#92400e",
+                                                        border: "1px solid #fcd34d",
+                                                        borderRadius: "4px",
+                                                        padding: "3px 8px",
+                                                        fontSize: "11px",
+                                                        fontWeight: 600,
+                                                        cursor: "pointer",
+                                                        display: "inline-flex",
+                                                        alignItems: "center",
+                                                        gap: "3px",
+                                                      }}
+                                                      title="Click to unset preferred supplier and revert to lowest quote"
+                                                    >
+                                                      ⭐ Preferred (Unset)
+                                                    </button>
+                                                  ) : (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleSetPreferredSupplier(row.product_id, q.supplier_id, q.supplier_name)}
+                                                      style={{
+                                                        background: "#ffffff",
+                                                        color: "#334155",
+                                                        border: "1px solid #cbd5e1",
+                                                        borderRadius: "4px",
+                                                        padding: "3px 8px",
+                                                        fontSize: "11px",
+                                                        fontWeight: 600,
+                                                        cursor: "pointer",
+                                                        display: "inline-flex",
+                                                        alignItems: "center",
+                                                        gap: "3px",
+                                                      }}
+                                                      title="Set this supplier as preferred for this product"
+                                                    >
+                                                      ⭐ Set Preferred
+                                                    </button>
+                                                  )
+                                                )}
+                                                {hasPermission("product_price.delete") && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteQuote(q.link_id, row.product_id, q.supplier_name)}
+                                                    style={{
+                                                      background: "transparent",
+                                                      border: "none",
+                                                      color: "#ef4444",
+                                                      cursor: "pointer",
+                                                      fontSize: "13px",
+                                                    }}
+                                                    title="Delete this supplier quote"
+                                                  >
+                                                    🗑️
+                                                  </button>
+                                                )}
+                                              </div>
                                             </td>
                                           </tr>
                                         );
@@ -2372,6 +2575,32 @@ export function ProductPricesPage() {
                                       fontSize: "12.5px",
                                     }}
                                   />
+
+                                  <label
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      color: "#1e293b",
+                                      cursor: "pointer",
+                                      userSelect: "none",
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(subTableIsPreferred[row.product_id])}
+                                      onChange={(e) =>
+                                        setSubTableIsPreferred((prev) => ({
+                                          ...prev,
+                                          [row.product_id]: e.target.checked,
+                                        }))
+                                      }
+                                      style={{ cursor: "pointer" }}
+                                    />
+                                    <span>⭐ Set as Preferred</span>
+                                  </label>
 
                                   <button
                                     type="button"
@@ -2637,6 +2866,22 @@ export function ProductPricesPage() {
                   />
                 </div>
 
+                {/* Preferred Supplier Toggle */}
+                <div style={{ marginTop: "4px", padding: "8px 12px", background: "#fefce8", border: "1px solid #fef08a", borderRadius: "6px" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "#854d0e", userSelect: "none" }}>
+                    <input
+                      type="checkbox"
+                      checked={assignIsPreferred}
+                      onChange={(e) => setAssignIsPreferred(e.target.checked)}
+                      style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                    />
+                    <span>⭐ Set as Preferred Supplier for this product</span>
+                  </label>
+                  <div style={{ fontSize: "11px", color: "#a16207", marginLeft: "24px", marginTop: "2px" }}>
+                    When enabled, this supplier's price will be displayed as the primary rate instead of automatic lowest quote.
+                  </div>
+                </div>
+
                 {/* Actions Footer */}
                 <div
                   className="form-actions modal-footer"
@@ -2829,9 +3074,36 @@ export function ProductPricesPage() {
                   </p>
                 </div>
               )}
+
+              {/* View History Button */}
+              <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    openHistoryDrawer({
+                      product_id: drawerProduct.id,
+                      product_name: drawerProduct.product_name_tally || drawerProduct.product_name || "Product",
+                      product_code: drawerProduct.product_code || null,
+                    });
+                  }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  📜 View Trade &amp; Price History
+                </button>
+              </div>
             </>
           )}
         </SideDrawer>
+
+        {/* Full 360-Degree Trade & Price History Drawer */}
+        <ProductTradeHistoryDrawer
+          productId={historyProduct?.id || null}
+          productName={historyProduct?.name}
+          productCode={historyProduct?.code}
+          open={historyDrawerOpen}
+          onClose={() => setHistoryDrawerOpen(false)}
+        />
       </main>
     </AppShell>
   );

@@ -34,6 +34,7 @@ import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, 
 import { useLookup, useLookupNames } from "@/lib/lookups";
 import { useBodyScrollLock } from "@/lib/hooks";
 import { useLiveModule } from "@/lib/live/useLive";
+import { handleFormEnterKeyNavigation } from "@/lib/formUtils";
 
 function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return "";
@@ -397,6 +398,7 @@ export function SuppliersPage() {
   const canBulkAction = hasPermission("supplier.bulk_action");
   const canEditGrade = hasPermission("supplier.grade_edit");
   const canEditPotential = hasPermission("supplier.potential_edit");
+  const canEditCurrentStatus = hasPermission("supplier.currentstatus") || hasPermission("supplier.update");
 
   const [rows, setRows] = useState<Supplier[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
@@ -634,6 +636,18 @@ export function SuppliersPage() {
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+
+  const handleOpenDrawer = useCallback(async (supplier: Supplier) => {
+    setDrawerSupplier(supplier);
+    try {
+      const { data } = await apiGet<Supplier>(`/suppliers/${supplier.id}`);
+      if (data) {
+        setDrawerSupplier(data);
+      }
+    } catch (err) {
+      console.error("Failed to load full supplier detail for drawer:", err);
+    }
+  }, []);
 
   // Sync browser back arrow with modal & drawer so it closes them instead of
   // navigating back to Dashboard.
@@ -2523,7 +2537,7 @@ export function SuppliersPage() {
             )}
             {/* TAB 1: PROFILE FORM (SAME ORIGINAL DATA & FIELDS) */}
             {(editTab === "profile" || modalMode === "quick") && (
-              <form onSubmit={handleSubmit} noValidate>
+              <form onSubmit={handleSubmit} onKeyDown={handleFormEnterKeyNavigation} noValidate>
                 {/* SECTION 1: General & Primary Contact Info (First Data Form) */}
                 <div style={{ marginBottom: "24px" }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
@@ -2623,7 +2637,9 @@ export function SuppliersPage() {
                         onChange={(newCatIds) => {
                           setFormCategoryIds(newCatIds);
                           // Auto-prune any subCategoryIds that no longer belong to selected categories
-                          if (newCatIds.length > 0) {
+                          if (newCatIds.length === 0) {
+                            setFormSubCategoryIds([]);
+                          } else {
                             setFormSubCategoryIds((prevSubIds) => {
                               const validCategorySubIds = subCategoriesLookup.items
                                 .filter((sc) => newCatIds.includes(sc.category_id))
@@ -2646,8 +2662,12 @@ export function SuppliersPage() {
                       <SearchableDropdownMultiPanel
                         values={formSubCategoryIds}
                         onChange={setFormSubCategoryIds}
-                        placeholder={formCategoryIds.length > 0 ? "-- Select Sub-Categories --" : "-- Select Categories First (or search all) --"}
+                        disabled={formCategoryIds.length === 0}
+                        placeholder={formCategoryIds.length > 0 ? "-- Select Sub-Categories --" : "-- Please select Category first --"}
                         fetchOptions={async (query, signal) => {
+                          if (formCategoryIds.length === 0) {
+                            return [];
+                          }
                           const q = query.trim().toLowerCase();
                           let items = subCategoriesLookup.items;
                           if (items.length === 0) {
@@ -2661,15 +2681,13 @@ export function SuppliersPage() {
                               // fallback
                             }
                           }
-                          if (formCategoryIds.length > 0) {
-                            items = items.filter((sc) => formCategoryIds.includes(sc.category_id));
-                            items = [...items].sort((a, b) => {
-                              const idxA = formCategoryIds.indexOf(a.category_id);
-                              const idxB = formCategoryIds.indexOf(b.category_id);
-                              if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
-                              return a.name.localeCompare(b.name);
-                            });
-                          }
+                          items = items.filter((sc) => formCategoryIds.includes(sc.category_id));
+                          items = [...items].sort((a, b) => {
+                            const idxA = formCategoryIds.indexOf(a.category_id);
+                            const idxB = formCategoryIds.indexOf(b.category_id);
+                            if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                            return a.name.localeCompare(b.name);
+                          });
                           if (q) {
                             items = items.filter(
                               (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
@@ -3363,6 +3381,7 @@ export function SuppliersPage() {
                           id="supplier-contact-drawer-form"
                           autoComplete="none"
                           onSubmit={(e) => { void handleContactSubmit(e); }}
+                          onKeyDown={handleFormEnterKeyNavigation}
                           style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}
                         >
                         {Boolean(drawerError) && (
@@ -3953,11 +3972,8 @@ export function SuppliersPage() {
                     onChange={(v) => {
                       setCurrentPage(1);
                       setCategoryFilter(v);
-                      if (v && subCategoryFilter) {
-                        const sc = subCategoriesLookup.items.find((item) => item.id === subCategoryFilter);
-                        if (sc && sc.category_id !== v) {
-                          setSubCategoryFilter(null);
-                        }
+                      if (v !== categoryFilter) {
+                        setSubCategoryFilter(null);
                       }
                     }}
                     placeholder="Filter: Product Category"
@@ -3966,17 +3982,22 @@ export function SuppliersPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Key Strength Sub Category</label>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: categoryFilter ? "#475569" : "#94a3b8", marginBottom: "4px", display: "block" }}>Key Strength Sub Category</label>
                   <SearchableDropdown
                     value={subCategoryFilter}
+                    disabled={!categoryFilter}
                     onChange={(v) => {
                       setCurrentPage(1);
                       setSubCategoryFilter(v);
                     }}
-                    placeholder="Filter: Sub Category"
-                    fetchOptions={searchFetcher("/masters/product-sub-categories", (): Record<string, string> =>
-                      categoryFilter ? { category_id: categoryFilter } : {}
-                    )}
+                    placeholder={categoryFilter ? "Filter: Sub Category" : "Select Category first"}
+                    fetchOptions={
+                      categoryFilter
+                        ? searchFetcher("/masters/product-sub-categories", (): Record<string, string> => ({
+                            category_id: categoryFilter,
+                          }))
+                        : async () => []
+                    }
                     fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                   />
                 </div>
@@ -4009,35 +4030,43 @@ export function SuppliersPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Province / State</label>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: countryFilter ? "#475569" : "#94a3b8", marginBottom: "4px", display: "block" }}>Province / State</label>
                   <SearchableDropdown
                     value={stateFilter}
+                    disabled={!countryFilter}
                     onChange={(v) => {
                       setStateFilter(v);
                       setCityFilter(null);
                       setCurrentPage(1);
                     }}
-                    placeholder="Filter: Province"
-                    fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
-                      countryFilter ? { country_id: countryFilter } : {}
-                    )}
+                    placeholder={countryFilter ? "Filter: Province / State" : "Select Country first"}
+                    fetchOptions={
+                      countryFilter
+                        ? searchFetcher("/masters/states", (): Record<string, string> => ({
+                            country_id: countryFilter,
+                          }))
+                        : async () => []
+                    }
                     fetchLabelForValue={fetchNameLabel("/masters/states")}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>City</label>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: stateFilter ? "#475569" : "#94a3b8", marginBottom: "4px", display: "block" }}>City</label>
                   <SearchableDropdown
                     value={cityFilter}
+                    disabled={!stateFilter}
                     onChange={(v) => {
                       setCityFilter(v);
                       setCurrentPage(1);
                     }}
-                    placeholder="Filter: City"
-                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
-                      if (stateFilter) return { state_id: stateFilter };
-                      if (countryFilter) return { country_id: countryFilter };
-                      return {};
-                    })}
+                    placeholder={stateFilter ? "Filter: City" : (countryFilter ? "Select Province first" : "Select Country first")}
+                    fetchOptions={
+                      stateFilter
+                        ? searchFetcher("/masters/cities", (): Record<string, string> => ({
+                            state_id: stateFilter,
+                          }))
+                        : async () => []
+                    }
                     fetchLabelForValue={fetchNameLabel("/masters/cities")}
                   />
                 </div>
@@ -4481,7 +4510,7 @@ export function SuppliersPage() {
                                     title={s.company_name}
                                     onClick={(e) => {
                                       e.preventDefault();
-                                      setDrawerSupplier(s);
+                                      void handleOpenDrawer(s);
                                     }}
                                     style={{
                                       display: "-webkit-box",
@@ -4526,12 +4555,57 @@ export function SuppliersPage() {
                                   {s.supplier_type ? s.supplier_type : <span className="muted">—</span>}
                                 </td>
                               );
-                            case 11:
+                            case 11: {
+                              const currStatus = (s.current_status || "").toLowerCase();
+                              const isExisting = currStatus === "existing";
+                              const isNew = currStatus === "new";
+                              const statusBg = isExisting ? "#dcfce7" : isNew ? "#fef9c3" : "#f8fafc";
+                              const statusColor = isExisting ? "#15803d" : isNew ? "#854d0e" : "#64748b";
+
                               return (
-                                <td key="cell-11" style={{ width: "105px", minWidth: "95px", maxWidth: "115px", ...getFreezeStyle(11, false) }}>
-                                  <StatusPill value={s.current_status} />
+                                <td key="cell-11" style={{ width: "115px", minWidth: "105px", maxWidth: "125px", ...getFreezeStyle(11, false) }}>
+                                  {canEditCurrentStatus ? (
+                                    <select
+                                      className="inline-select"
+                                      value={currStatus}
+                                      onChange={(e) =>
+                                        handleInlineUpdate(s.id, `/suppliers/${s.id}/current-status`, {
+                                          current_status: e.target.value || null,
+                                        })
+                                      }
+                                      style={{
+                                        padding: "3px 6px",
+                                        borderRadius: "4px",
+                                        fontSize: "12px",
+                                        fontWeight: 600,
+                                        border: "1px solid #cbd5e1",
+                                        background: statusBg,
+                                        color: statusColor,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      <option value="">SELECT</option>
+                                      {!isExisting && <option value="new">NEW</option>}
+                                      <option value="existing">EXISTING</option>
+                                    </select>
+                                  ) : (
+                                    <span
+                                      style={{
+                                        padding: "3px 8px",
+                                        borderRadius: "12px",
+                                        fontSize: "11.5px",
+                                        fontWeight: 600,
+                                        background: statusBg,
+                                        color: statusColor,
+                                        display: "inline-block",
+                                      }}
+                                    >
+                                      {s.current_status ? s.current_status.toUpperCase() : "SELECT"}
+                                    </span>
+                                  )}
                                 </td>
                               );
+                            }
                             case 12:
                               return (
                                 <td key="cell-12" style={getFreezeStyle(12, false)}>

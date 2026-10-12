@@ -25,6 +25,23 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def _statement_cache_must_be_disabled() -> bool:
+    """
+    Return True when asyncpg's prepared-statement cache must be switched off.
+
+    Always honours the explicit ``DATABASE_DISABLE_STATEMENT_CACHE`` setting.
+    Additionally auto-enables it when DATABASE_URL points at a transaction-mode
+    PgBouncer (Supabase's pooled connection on port 6543, or an explicit
+    ``pgbouncer`` marker), because on those poolers asyncpg raises
+    ``DuplicatePreparedStatementError`` as soon as the app opens several
+    connections at once -- exactly what happens at application startup.
+    """
+    if settings.DATABASE_DISABLE_STATEMENT_CACHE:
+        return True
+    url = str(settings.DATABASE_URL).lower()
+    return ":6543/" in url or ":6543?" in url or "pgbouncer" in url
+
+
 def get_engine() -> AsyncEngine:
     """
     Return the process-wide async SQLAlchemy engine, creating it on first use.
@@ -36,7 +53,7 @@ def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         connect_args = {}
-        if settings.DATABASE_DISABLE_STATEMENT_CACHE:
+        if _statement_cache_must_be_disabled():
             # Required when connecting through a transaction-mode PgBouncer
             # (e.g. Supabase's default pooled connection on port 6543):
             # asyncpg's prepared-statement cache doesn't survive statements

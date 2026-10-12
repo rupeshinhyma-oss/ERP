@@ -150,7 +150,7 @@ export function Reporting() {
     try {
       const [dash, erpList] = await Promise.all([
         apiGet<{ projection_health: ProjectionHealth[] }>("/global/dashboard").catch(() => null),
-        apiGet<ErpInstance[]>("/global/erp-instances").catch(() => []),
+        apiGet<ErpInstance[]>("/global/erps").catch(() => []),
       ]);
       if (dash && Array.isArray(dash.projection_health)) {
         setProjectionHealth(dash.projection_health);

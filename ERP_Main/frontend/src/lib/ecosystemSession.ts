@@ -6,6 +6,8 @@
  * and any future attached ERP instances.
  */
 
+import { API_BASE } from "./api";
+
 export interface EcosystemSessionData {
   session_id: string;
   email: string;
@@ -21,7 +23,123 @@ export interface EcosystemSessionData {
 
 const COOKIE_NAME = "ihm_ecosystem_session";
 const LOCAL_STORAGE_KEY = "ihm_ecosystem_session";
+const LOGOUT_COOKIE_NAME = "ihm_ecosystem_logged_out";
 const BROADCAST_CHANNEL_NAME = "ihm_ecosystem_auth";
+
+const isLocalhost = (hostname: string) =>
+  hostname === "localhost" ||
+  hostname === "127.0.0.1" ||
+  hostname === "0.0.0.0" ||
+  hostname.endsWith(".local");
+
+function clearCookieEverywhere(name: string): void {
+  if (typeof document === "undefined") return;
+  const domainAttr = import.meta.env.VITE_COOKIE_DOMAIN ? `; domain=${import.meta.env.VITE_COOKIE_DOMAIN}` : "";
+  const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "";
+  const domains = ["", "; domain=localhost", "; domain=127.0.0.1"];
+  if (host && host !== "localhost" && host !== "127.0.0.1") {
+    domains.push(`; domain=${host}`);
+  }
+  if (domainAttr && !domains.includes(domainAttr)) {
+    domains.push(domainAttr);
+  }
+  for (const d of domains) {
+    document.cookie = `${name}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax${d}`;
+  }
+}
+
+function setCookieEverywhere(name: string, value: string, maxAgeSeconds: number): void {
+  if (typeof document === "undefined") return;
+  const domainAttr = import.meta.env.VITE_COOKIE_DOMAIN ? `; domain=${import.meta.env.VITE_COOKIE_DOMAIN}` : "";
+  const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "";
+  const domains = ["", "; domain=localhost"];
+  if (host && host !== "localhost") {
+    domains.push(`; domain=${host}`);
+  }
+  if (domainAttr && !domains.includes(domainAttr)) {
+    domains.push(domainAttr);
+  }
+  for (const d of domains) {
+    document.cookie = `${name}=${value}; path=/; max-age=${maxAgeSeconds}; SameSite=Lax${d}`;
+  }
+}
+
+export function getRawEcosystemCookie(): EcosystemSessionData | null {
+  if (typeof document === "undefined") return null;
+  try {
+    const match = document.cookie
+      .split("; ")
+      .find((row) => row.startsWith(`${COOKIE_NAME}=`));
+    if (match) {
+      const val = match.split("=")[1];
+      if (val) {
+        return JSON.parse(decodeURIComponent(val));
+      }
+    }
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch {
+    /* ignore parsing errors */
+  }
+  return null;
+}
+
+export function isExplicitlyLoggedOut(currentSessionId?: string): boolean {
+  if (typeof window === "undefined") return false;
+
+  // 1. If an incoming SSO handover ticket is in the URL, this is an explicit cross-ERP login or switch!
+  // Any prior logout in this tab or cookie is superseded.
+  if (typeof window !== "undefined" && window.location.search) {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has("sso_handover")) {
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.removeItem("ihm_explicit_logout");
+        }
+        return false;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 2. Check if a logout cookie exists
+  if (typeof document !== "undefined") {
+    const match = document.cookie
+      .split("; ")
+      .find((row) => row.startsWith(`${LOGOUT_COOKIE_NAME}=`));
+    if (match) {
+      const val = decodeURIComponent(match.split("=")[1] || "");
+      // If the logout marker specifies a session ID and current session ID is different,
+      // it means this is a newly authenticated session -> not logged out!
+      if (val && val !== "1" && val !== "true" && currentSessionId && val !== currentSessionId) {
+        return false;
+      }
+      // If there is an active session in cookies that has a session_id different from the logged-out one:
+      const rawCookie = getRawEcosystemCookie();
+      if (rawCookie?.session_id && val && val !== "1" && val !== "true" && rawCookie.session_id !== val) {
+        return false;
+      }
+      return true;
+    }
+  }
+
+  // 3. Check sessionStorage flag (tab-scoped)
+  if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true") {
+    // If an active session exists in cookies, then the sessionStorage flag is stale from a prior session!
+    const rawCookie = getRawEcosystemCookie();
+    if (rawCookie?.session_id) {
+      sessionStorage.removeItem("ihm_explicit_logout");
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 const getCentralAuthApi = (): string => {
   if (import.meta.env.VITE_CENTRAL_AUTH_API) {
     return import.meta.env.VITE_CENTRAL_AUTH_API;
@@ -29,11 +147,15 @@ const getCentralAuthApi = (): string => {
   if (import.meta.env.VITE_CONTROL_PLANE_API_URL) {
     return `${import.meta.env.VITE_CONTROL_PLANE_API_URL.replace(/\/+$/, "")}/global/ecosystem-session`;
   }
-  if (typeof window !== "undefined" && window.location.hostname) {
-    const host = window.location.hostname;
+  // In ERP_Main, route directly through the configured backend API_BASE
+  if (API_BASE) {
+    return `${API_BASE}/global/ecosystem-session`;
+  }
+  const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
+  if (isLocalhost(host)) {
     return `http://${host}:8000/api/v1/global/ecosystem-session`;
   }
-  return "http://127.0.0.1:8000/api/v1/global/ecosystem-session";
+  return "";
 };
 export const CENTRAL_AUTH_API = getCentralAuthApi();
 
@@ -47,9 +169,11 @@ export function setEcosystemCookie(session: EcosystemSessionData): void {
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.removeItem("ihm_explicit_logout");
     }
+    // Completely clear any prior explicit logout flag across all domain permutations
+    clearCookieEverywhere(LOGOUT_COOKIE_NAME);
+
     const serialized = encodeURIComponent(JSON.stringify(session));
-    const domainAttr = import.meta.env.VITE_COOKIE_DOMAIN ? `; domain=${import.meta.env.VITE_COOKIE_DOMAIN}` : "";
-    document.cookie = `${COOKIE_NAME}=${serialized}; path=/; max-age=604800; SameSite=Lax${domainAttr}`;
+    setCookieEverywhere(COOKIE_NAME, serialized, 604800);
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(session));
   } catch (err) {
     console.warn("Could not write ecosystem session cookie:", err);
@@ -58,52 +182,35 @@ export function setEcosystemCookie(session: EcosystemSessionData): void {
 
 export function getEcosystemCookie(): EcosystemSessionData | null {
   if (typeof document === "undefined") return null;
-  try {
-    if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("ihm_explicit_logout") === "true") {
-      return null;
-    }
+  const session = getRawEcosystemCookie();
+  if (!session) return null;
 
-    // 1. Try reading cookie
-    const match = document.cookie
-      .split("; ")
-      .find((row) => row.startsWith(`${COOKIE_NAME}=`));
-    if (match) {
-      const val = match.split("=")[1];
-      if (val) {
-        return JSON.parse(decodeURIComponent(val));
-      }
-    }
-
-    // 2. Fallback to localStorage
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-  } catch (err) {
-    console.warn("Could not read ecosystem session cookie:", err);
+  // Only consider null if THIS specific session was explicitly marked as logged out
+  if (isExplicitlyLoggedOut(session.session_id)) {
+    return null;
   }
-  return null;
+  return session;
 }
 
-export function clearEcosystemCookie(): void {
+export function clearEcosystemCookie(sessionId?: string): void {
   if (typeof document === "undefined") return;
   try {
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.setItem("ihm_explicit_logout", "true");
     }
-    document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
-    document.cookie = `${COOKIE_NAME}=; path=/; domain=localhost; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
-    if (import.meta.env.VITE_COOKIE_DOMAIN) {
-      document.cookie = `${COOKIE_NAME}=; path=/; domain=${import.meta.env.VITE_COOKIE_DOMAIN}; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
-    }
-    if (typeof window !== "undefined" && window.location.hostname && window.location.hostname !== "localhost") {
-      document.cookie = `${COOKIE_NAME}=; path=/; domain=${window.location.hostname}; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
-    }
+    clearCookieEverywhere(COOKIE_NAME);
+
+    // Write logout marker with the revoked session ID so tabs recognize THAT session was revoked
+    const logoutVal = encodeURIComponent(sessionId || "true");
+    setCookieEverywhere(LOGOUT_COOKIE_NAME, logoutVal, 60);
+
     localStorage.removeItem(LOCAL_STORAGE_KEY);
   } catch (err) {
     console.warn("Could not clear ecosystem session cookie:", err);
   }
 }
+
+
 
 /* ------------------------------------------------------------------ */
 /* Real-Time Multi-Tab Synchronization via BroadcastChannel            */
@@ -145,6 +252,7 @@ export async function establishCentralEcosystemSession(params: {
   source_erp: string;
   existing_session_id?: string;
 }): Promise<EcosystemSessionData | null> {
+  if (!CENTRAL_AUTH_API) return null;
   try {
     const res = await fetch(`${CENTRAL_AUTH_API}/establish`, {
       method: "POST",
@@ -173,7 +281,7 @@ export async function establishCentralEcosystemSession(params: {
 export async function verifyCentralEcosystemSession(sessionId: string): Promise<{ active: boolean; revoked?: boolean; session?: EcosystemSessionData }> {
   // Local standalone sessions (ihm-sess-*) are strictly internal to an ERP
   // and must NEVER be queried against ERP_Main or considered revoked.
-  if (!sessionId || sessionId.startsWith("ihm-sess-")) {
+  if (!sessionId || sessionId.startsWith("ihm-sess-") || !CENTRAL_AUTH_API) {
     return { active: true, revoked: false };
   }
 
@@ -210,15 +318,20 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
     sessionStorage.setItem("ihm_explicit_logout", "true");
   }
 
-  const current = getEcosystemCookie();
-  const idToRevoke = sessionId || current?.session_id;
+  const current = getRawEcosystemCookie();
+  const idToRevoke =
+    sessionId ||
+    current?.session_id ||
+    (typeof localStorage !== "undefined"
+      ? localStorage.getItem("erp_session_id") || localStorage.getItem("erp_main_session_id") || undefined
+      : undefined);
 
-  clearEcosystemCookie();
+  clearEcosystemCookie(idToRevoke);
 
   // Notify all open tabs across all ports immediately (0ms perceived latency)
   broadcastEcosystemEvent({ type: "LOGOUT", session_id: idToRevoke });
 
-  if (idToRevoke && !idToRevoke.startsWith("ihm-sess-")) {
+  if (idToRevoke && !idToRevoke.startsWith("ihm-sess-") && CENTRAL_AUTH_API) {
     try {
       await fetch(`${CENTRAL_AUTH_API}/${idToRevoke}/revoke`, {
         method: "POST",
@@ -246,9 +359,7 @@ export function initEcosystemSessionWatcher(
 ): () => void {
   if (typeof window === "undefined") return () => { };
 
-  // Tear down any previously-registered watcher first so calling this
-  // again (for any reason) can never leave a prior interval/listener set
-  // running alongside the new one.
+  // Tear down any previously-registered watcher first
   if (activeWatcherCleanup) {
     activeWatcherCleanup();
     activeWatcherCleanup = null;
@@ -269,7 +380,7 @@ export function initEcosystemSessionWatcher(
         if (typeof sessionStorage !== "undefined") {
           sessionStorage.setItem("ihm_explicit_logout", "true");
         }
-        clearEcosystemCookie();
+        clearEcosystemCookie(currentSessionId || undefined);
         onSessionRevoked();
       }
     }
@@ -279,42 +390,42 @@ export function initEcosystemSessionWatcher(
     ch.addEventListener("message", handleMessage);
   }
 
-  const handleFocus = async () => {
-    if (typeof sessionStorage !== "undefined") {
-      sessionStorage.removeItem("ihm_explicit_logout");
+  const checkRevocation = async () => {
+    // 1. If explicit logout was triggered across any tab/port for THIS session:
+    if (isExplicitlyLoggedOut(currentSessionId || undefined)) {
+      onSessionRevoked();
+      return;
     }
 
-    // Only verify central ecosystem session if one was established (not local standalone)
+    // 2. Only verify central ecosystem session if one was established (not local standalone)
     if (currentSessionId && !currentSessionId.startsWith("ihm-sess-")) {
       const res = await verifyCentralEcosystemSession(currentSessionId);
       if (res.revoked === true) {
-        clearEcosystemCookie();
+        clearEcosystemCookie(currentSessionId);
         onSessionRevoked();
       }
     }
   };
 
-  window.addEventListener("focus", handleFocus);
-
-  const intervalId = setInterval(async () => {
+  const handleFocus = async () => {
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.removeItem("ihm_explicit_logout");
     }
+    await checkRevocation();
+  };
 
-    if (currentSessionId && !currentSessionId.startsWith("ihm-sess-")) {
-      const res = await verifyCentralEcosystemSession(currentSessionId);
-      if (res.revoked === true) {
-        clearEcosystemCookie();
-        onSessionRevoked();
-      }
-    }
-  }, 15000);
+  window.addEventListener("focus", handleFocus);
+  document.addEventListener("visibilitychange", checkRevocation);
+
+  // Poll every 2.5s for fast synchronization across localhost origins
+  const intervalId = setInterval(checkRevocation, 2500);
 
   const cleanup = () => {
     if (ch) {
       ch.removeEventListener("message", handleMessage);
     }
     window.removeEventListener("focus", handleFocus);
+    document.removeEventListener("visibilitychange", checkRevocation);
     clearInterval(intervalId);
     if (activeWatcherCleanup === cleanup) {
       activeWatcherCleanup = null;

@@ -167,16 +167,72 @@ export const Auth = {
 
   isSuperAdmin(): boolean {
     const profile = this.getProfile();
-    return Boolean(profile && "role" in profile && profile.role === "SUPER_ADMIN");
+    if (!profile) return false;
+    if ("role" in profile && (profile.role === "SUPER_ADMIN" || profile.role === "PLATFORM_SUPER_ADMIN")) {
+      return true;
+    }
+    const userRole = (profile as any).role || (profile as any).metadata?.role;
+    if (userRole === "PLATFORM_SUPER_ADMIN" || userRole === "SUPER_ADMIN") {
+      return true;
+    }
+    if (Array.isArray((profile as any).permissions) && (profile as any).permissions.includes("*")) {
+      return true;
+    }
+    return false;
   },
 
-  hasPermission(_permissionKey: string): boolean {
+  hasPermission(permissionKey?: string | null): boolean {
+    // If no permission is required (e.g. Dashboard), access is granted
+    if (!permissionKey) return true;
     if (this.isSuperAdmin()) return true;
-    const admin = this.getPlatformAdmin();
-    if (admin) return admin.is_active;
 
+    const profile = this.getProfile();
+    if (!profile) return false;
+
+    // Check explicit permissions array in profile if present
+    if (Array.isArray((profile as any).permissions)) {
+      const perms = (profile as any).permissions as string[];
+      if (perms.includes("*") || perms.includes(permissionKey)) {
+        return true;
+      }
+    }
+
+    // PlatformAdmin principal
+    const admin = this.getPlatformAdmin();
+    if (admin && admin.is_active) {
+      if (admin.role === "SUPER_ADMIN") return true;
+      if (admin.role === "PLATFORM_ADMIN") {
+        return permissionKey.startsWith("platform.user.") || permissionKey === "platform.audit.view";
+      }
+      if (admin.role === "OPERATOR") {
+        return (permissionKey.startsWith("platform.user.") && permissionKey !== "platform.user.disable") || permissionKey === "platform.audit.view";
+      }
+      if (admin.role === "AUDITOR") {
+        return permissionKey === "platform.user.read" || permissionKey === "platform.audit.view";
+      }
+    }
+
+    // GlobalUser principal
     const user = this.getGlobalUser();
-    return Boolean(user && user.status === "ACTIVE");
+    if (user && user.status === "ACTIVE") {
+      const role = (user as any).role || (user as any).metadata?.role;
+      // If user has NO role / "NONE" / "" -> strictly NO platform permissions!
+      if (!role || role === "NONE" || role === "none" || role === "") {
+        return false;
+      }
+      if (role === "PLATFORM_SUPER_ADMIN" || role === "SUPER_ADMIN") return true;
+      if (role === "PLATFORM_ADMIN") {
+        return permissionKey.startsWith("platform.user.") || permissionKey === "platform.audit.view";
+      }
+      if (role === "PLATFORM_OPERATOR") {
+        return (permissionKey.startsWith("platform.user.") && permissionKey !== "platform.user.disable") || permissionKey === "platform.audit.view";
+      }
+      if (role === "PLATFORM_VIEWER") {
+        return permissionKey === "platform.user.read" || permissionKey === "platform.audit.view";
+      }
+    }
+
+    return false;
   },
 };
 
@@ -188,13 +244,13 @@ export function initials(name?: string | null): string {
 }
 
 export function roleLabel(role?: string | null, principalType?: PrincipalType | null): string {
-  if (principalType === "global_user") {
-    return "Global User";
+  if (!role || role === "NONE" || role === "none" || role === "") {
+    return principalType === "global_user" ? "• None" : "Platform Administrator";
   }
-  if (!role) return "Platform Administrator";
-  if (role === "SUPER_ADMIN") return "Super Admin";
+  if (role === "SUPER_ADMIN" || role === "PLATFORM_SUPER_ADMIN") return "Super Admin";
   if (role === "PLATFORM_ADMIN") return "Platform Admin";
   if (role === "AUDITOR") return "Platform Auditor";
-  if (role === "OPERATOR") return "Platform Operator";
+  if (role === "OPERATOR" || role === "PLATFORM_OPERATOR") return "Platform Operator";
+  if (role === "PLATFORM_VIEWER") return "Platform Viewer";
   return role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }

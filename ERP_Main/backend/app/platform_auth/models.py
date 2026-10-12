@@ -17,7 +17,9 @@ from __future__ import annotations
 
 from enum import Enum
 
-from sqlalchemy import Boolean, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -56,6 +58,9 @@ class PlatformAdmin(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Admin access tokens are stateless JWTs, so they cannot be revoked one by one.  Instead, signing out
+    # (anywhere) stamps this column and every token issued at or before that moment stops working.
+    tokens_revoked_before: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         """Return a debug-friendly representation (never includes the password hash)."""

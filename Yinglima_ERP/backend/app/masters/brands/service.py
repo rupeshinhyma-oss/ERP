@@ -178,16 +178,13 @@ class BrandService:
         brands = await self.repository.list_all()
         rows = [
             {
-                "id": str(b.id),
-                "name": b.name,
-                "code": b.code,
-                "description": b.description,
-                "logo_url": b.logo_url,
-                "status": b.status.value,
-                "created_at": b.created_at.isoformat(),
-                "updated_at": b.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "Brand Name": b.name,
+                "Code": b.code or "",
+                "Description": b.description or "",
+                "Status": b.status.value.capitalize(),
             }
-            for b in brands
+            for idx, b in enumerate(brands)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)

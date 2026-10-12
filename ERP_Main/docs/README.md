@@ -20,8 +20,13 @@ Welcome to the dedicated documentation directory for **ERP_Main** (Global Contro
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of functional updates and bug fixes.
+  - Release October 10, 2026 (Part 2): Ecosystem session disambiguation (`notFound` vs `revoked`), cross-ERP switcher loop protection, watcher interval optimization, PlatformAdmin mirrored sessions, and zero-downtime switch fallbacks.
+  - Platform authorization starter demo role separation & deletion preservation.
+  - Production HTTPS Mixed Content elimination & origin resolution.
+  - Supabase PgBouncer prepared statement cache auto-disable.
+  - Durable access sync retry engine (`access_sync_tasks`) & high-scale indexes.
+  - Bi-directional password synchronization and central session exchange.
   - Global autocomplete & autofill blocker implementation (`autocompleteBlocker.ts`).
-  - Wheel scroll value lockout and spin-button removal.
   - Access governance unification and true spoke user deprovisioning.
 
 - 🛡️ **[Disaster Recovery & Operational Runbooks](DISASTER_RECOVERY_AND_RUNBOOKS.md)**:

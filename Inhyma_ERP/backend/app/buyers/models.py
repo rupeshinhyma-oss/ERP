@@ -28,7 +28,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, Unique
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+from app.database.base import CaseResilientEnum, GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 def _utcnow() -> datetime:
@@ -113,17 +113,17 @@ class Buyer(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteM
     website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     current_status: Mapped[BuyerCurrentStatus | None] = mapped_column(
-        SAEnum(BuyerCurrentStatus, name="buyer_current_status", native_enum=False, length=20), nullable=True
+        CaseResilientEnum(BuyerCurrentStatus, length=20), nullable=True
     )  # "by default Select" -- modeled as nullable rather than a forced default
     product_range: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )  # "Product Range they manufacture or supply"
     potential: Mapped[BuyerPotential | None] = mapped_column(
-        SAEnum(BuyerPotential, name="buyer_potential", native_enum=False, length=10), nullable=True
+        CaseResilientEnum(BuyerPotential, length=10), nullable=True
     )  # "by default Select"
     potential_reason: Mapped[str | None] = mapped_column(Text, nullable=True)  # "If Potential is No, then reason"
     buyer_grade: Mapped[BuyerGrade | None] = mapped_column(
-        SAEnum(BuyerGrade, name="buyer_grade", native_enum=False, length=5), nullable=True
+        CaseResilientEnum(BuyerGrade, length=5), nullable=True
     )
     currently_buying_from: Mapped[str | None] = mapped_column(Text, nullable=True)
     overall_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)  # "Overall Observation / Remarks"

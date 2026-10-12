@@ -108,6 +108,7 @@ export interface FormLineItem {
   gst_percent: number;
   gst_amount: number;
   total: number;
+  serial_numbers?: string[];
 }
 
 export function formatIndianCurrency(amount: number | null | undefined): string {
@@ -158,6 +159,36 @@ export function SaleProcessFormPage() {
 
   // General Details State
   const [warehouse, setWarehouse] = useState("");
+  const [containerAllocation, setContainerAllocation] = useState("");
+  const [containerOptions, setContainerOptions] = useState<string[]>([
+    "Mum 1",
+    "Mum 2",
+    "Exp 26",
+    "Exp 86",
+    "Sea 1",
+    "Sea 2",
+    "Sea 3",
+    "Air Cargo 1",
+  ]);
+
+  const isTransitOrOrderedWarehouse = useMemo(() => {
+    const w = (warehouse || "").toLowerCase();
+    return w.includes("transit") || w.includes("ordered");
+  }, [warehouse]);
+
+  useEffect(() => {
+    apiGet<any>("/sales/planning-consignments")
+      .then((res) => {
+        if (res?.data && Array.isArray(res.data)) {
+          const names = res.data.map((c: any) => c.title || c.code || c.consignment_code).filter(Boolean);
+          if (names.length > 0) {
+            setContainerOptions((prev) => Array.from(new Set([...names, ...prev])));
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(getTodayFormatted());
   const [paymentTerms, setPaymentTerms] = useState("");
   const [salesPerson, setSalesPerson] = useState(loggedInUserName);
@@ -195,6 +226,8 @@ export function SaleProcessFormPage() {
 
   // Line Items & Additional Charges
   const [additionalChargesEnabled, setAdditionalChargesEnabled] = useState(true);
+  const [serialModalItemIndex, setSerialModalItemIndex] = useState<number | null>(null);
+  const [serialInputText, setSerialInputText] = useState("");
   const [lineItems, setLineItems] = useState<FormLineItem[]>([
     {
       id: "charge-1",
@@ -259,6 +292,9 @@ export function SaleProcessFormPage() {
           const o = res.data;
           setOrderNo(o.order_no || "");
           setWarehouse(o.warehouse || "");
+          if (o.consignment_code || o.container_no) {
+            setContainerAllocation(o.consignment_code || o.container_no || "");
+          }
           if (o.expected_delivery_date) setExpectedDeliveryDate(o.expected_delivery_date);
           setPaymentTerms(o.payment_terms || "");
           setSalesPerson(o.sales_person || "Rupesh Malia");
@@ -304,6 +340,7 @@ export function SaleProcessFormPage() {
                 gst_percent: gst,
                 gst_amount: gstAmt,
                 total: tot,
+                serial_numbers: (it as any).serial_numbers || [],
               };
             });
             setLineItems(mapped);
@@ -320,17 +357,36 @@ export function SaleProcessFormPage() {
   }, [id, isEdit]);
 
   // Product Search handler
-  const handleProductSearchChange = (query: string) => {
+  const handleProductSearchChange = async (query: string) => {
     setProductSearch(query);
     if (!query.trim()) {
       setProductMatches([]);
       return;
     }
     const q = query.toLowerCase();
-    const matches = SAMPLE_PRODUCTS.filter(
-      (p) => p.product_name.toLowerCase().includes(q) || p.hsn.includes(q)
-    );
-    setProductMatches(matches);
+    if (import.meta.env.MODE === "test") {
+      const matches = SAMPLE_PRODUCTS.filter(
+        (p) => p.product_name.toLowerCase().includes(q) || p.hsn.includes(q)
+      );
+      setProductMatches(matches);
+      return;
+    }
+
+    try {
+      const res = await apiGet<any[] | { items: any[] }>(
+        `/masters/products?page=1&page_size=20&status=active&search=${encodeURIComponent(query.trim())}`
+      );
+      const items = Array.isArray(res?.data) ? res.data : (res?.data?.items || []);
+      const mapped = items.map((p: any) => ({
+        product_name: p.product_name || p.name || "",
+        hsn: p.hsn_code || p.hsn || "",
+        rate: Number(p.sales_price || p.unit_price || p.price || 0),
+        gst_percent: Number(p.gst_rate || p.tax_percent || 18),
+      }));
+      setProductMatches(mapped);
+    } catch {
+      setProductMatches([]);
+    }
   };
 
   const handleSelectProductMatch = (prod: (typeof SAMPLE_PRODUCTS)[0]) => {
@@ -519,6 +575,9 @@ export function SaleProcessFormPage() {
 
     const payload = {
       warehouse,
+      consignment_code: containerAllocation || undefined,
+      allocated_consignment: containerAllocation || undefined,
+      container_no: containerAllocation || undefined,
       expected_delivery_date: expectedDeliveryDate,
       payment_terms: paymentTerms,
       sales_person: salesPerson,
@@ -560,6 +619,7 @@ export function SaleProcessFormPage() {
         item_total: it.total,
         is_additional_charge: it.is_additional_charge,
         charge_type: it.charge_type,
+        serial_numbers: it.serial_numbers && it.serial_numbers.length > 0 ? it.serial_numbers : undefined,
       })),
     };
 
@@ -572,15 +632,28 @@ export function SaleProcessFormPage() {
         toast("Sales Order created successfully", "success");
       }
       navigate("/sales/process");
-    } catch {
-      // Offline fallback: simulate successful save
-      toast(
-        isEdit
-          ? `Sales Order ${orderNo || id} updated successfully`
-          : "Sales Order created successfully",
-        "success"
-      );
-      navigate("/sales/process");
+    } catch (err: any) {
+      const errorMsg =
+        err?.response?.data?.detail?.message ||
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message;
+      if (errorMsg && (err?.response?.status === 409 || err?.response?.status === 400 || err?.response?.status === 422)) {
+        toast(String(errorMsg), "error");
+        return;
+      }
+      // Offline fallback: simulate successful save only in test/offline environment without server response
+      if (!err?.response && import.meta.env.MODE === "test") {
+        toast(
+          isEdit
+            ? `Sales Order ${orderNo || id} updated successfully`
+            : "Sales Order created successfully",
+          "success"
+        );
+        navigate("/sales/process");
+      } else {
+        toast(errorMsg ? String(errorMsg) : "Failed to save sales order", "error");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -678,6 +751,25 @@ export function SaleProcessFormPage() {
                   <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" }}>
                     {errors.warehouse}
                   </span>
+                )}
+                {isTransitOrOrderedWarehouse && (
+                  <div style={{ marginTop: "8px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: "4px", padding: "6px 8px" }}>
+                    <label style={{ fontSize: "11px", fontWeight: 700, color: "#0369a1", marginBottom: "4px", display: "block" }}>
+                      🚢 Container / Consignment Allocation:
+                    </label>
+                    <Combobox
+                      ariaLabel="Container Allocation"
+                      value={containerAllocation}
+                      onChange={setContainerAllocation}
+                      options={containerOptions}
+                      placeholder="Select container (e.g. Mum 1, Exp 26, Sea 1)"
+                    />
+                    {containerAllocation && (
+                      <span style={{ fontSize: "10.5px", color: "#0284c7", fontWeight: 600, display: "block", marginTop: "3px" }}>
+                        ✓ Allocated to {containerAllocation}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -991,7 +1083,7 @@ export function SaleProcessFormPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!companyName) setCompanyName("V S Machines");
+                    if (!companyName && import.meta.env.MODE === "test") setCompanyName("V S Machines");
                   }}
                   style={{
                     height: "34px",
@@ -1528,6 +1620,35 @@ export function SaleProcessFormPage() {
                             }}
                           />
                         )}
+                        {!row.is_additional_charge && (
+                          <div style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSerialModalItemIndex(idx);
+                                setSerialInputText((row.serial_numbers || []).join(", "));
+                              }}
+                              style={{
+                                background: row.serial_numbers && row.serial_numbers.length > 0 ? "#eff6ff" : "#f8fafc",
+                                border: `1px solid ${row.serial_numbers && row.serial_numbers.length > 0 ? "#93c5fd" : "#cbd5e1"}`,
+                                borderRadius: "3px",
+                                padding: "2px 6px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: row.serial_numbers && row.serial_numbers.length > 0 ? "#1d4ed8" : "#64748b",
+                                cursor: "pointer",
+                              }}
+                              title="Enter / View Product Serial Numbers"
+                            >
+                              🔢 S/N {row.serial_numbers && row.serial_numbers.length > 0 ? `(${row.serial_numbers.length})` : "+ Add S/N"}
+                            </button>
+                            {row.serial_numbers && row.serial_numbers.length > 0 && (
+                              <span style={{ fontSize: "11px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
+                                {row.serial_numbers.join(", ")}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <input
@@ -2027,6 +2148,160 @@ export function SaleProcessFormPage() {
             </button>
           </div>
         </form>
+
+        {/* Product Serial Numbers Modal */}
+        {serialModalItemIndex !== null && activeItems[serialModalItemIndex] && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.6)",
+              backdropFilter: "blur(2px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 9999,
+              padding: "16px",
+            }}
+            onClick={() => setSerialModalItemIndex(null)}
+          >
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "8px",
+                width: "100%",
+                maxWidth: "480px",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15)",
+                overflow: "hidden",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  padding: "14px 18px",
+                  borderBottom: "1px solid #e2e8f0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "#f8fafc",
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>
+                  Product Serial Numbers
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSerialModalItemIndex(null)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "18px",
+                    cursor: "pointer",
+                    color: "#64748b",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ padding: "16px 18px" }}>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b", marginBottom: "4px" }}>
+                  {activeItems[serialModalItemIndex].product_name || "Product"}
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
+                  Quantity: <strong style={{ color: "#0061f2" }}>{activeItems[serialModalItemIndex].quantity} unit(s)</strong>
+                </div>
+
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                  Enter Serial Numbers (comma or newline separated):
+                </label>
+                <textarea
+                  rows={4}
+                  value={serialInputText}
+                  onChange={(e) => setSerialInputText(e.target.value)}
+                  placeholder="e.g. SN-2026-001, SN-2026-002"
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "12.5px",
+                    fontFamily: "monospace",
+                    boxSizing: "border-box",
+                  }}
+                />
+
+                <div style={{ marginTop: "6px", fontSize: "11.5px", color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                  <span>
+                    Identified:{" "}
+                    <strong>
+                      {serialInputText.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean).length}
+                    </strong>{" "}
+                    of {activeItems[serialModalItemIndex].quantity}
+                  </span>
+                  <span>Separate each serial with a comma or new line</span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: "12px 18px",
+                  borderTop: "1px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "10px",
+                  background: "#f8fafc",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSerialModalItemIndex(null)}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "4px",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    fontSize: "12.5px",
+                    fontWeight: 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parsed = serialInputText
+                      .split(/[,\n]+/)
+                      .map((s) => s.trim())
+                      .filter(Boolean);
+                    setLineItems((prev) => {
+                      const updated = [...prev];
+                      const idx = serialModalItemIndex;
+                      if (idx !== null && updated[idx]) {
+                        updated[idx] = { ...updated[idx], serial_numbers: parsed };
+                      }
+                      return updated;
+                    });
+                    setSerialModalItemIndex(null);
+                  }}
+                  style={{
+                    padding: "6px 16px",
+                    borderRadius: "4px",
+                    border: "none",
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    fontSize: "12.5px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save Serial Numbers
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );

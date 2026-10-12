@@ -157,17 +157,15 @@ class UomService:
         uoms = await self.repository.list_all()
         rows = [
             {
-                "id": str(u.id),
-                "code": u.code,
-                "name": u.name,
-                "short_name": u.short_name,
-                "description": u.description,
-                "status": u.status.value,
-                "created_at": u.created_at.isoformat(),
-                "updated_at": u.updated_at.isoformat(),
+                "Sr. No.": idx + 1,
+                "UOM Name": u.name,
+                "UOM Code": u.code,
+                "Short Name": u.short_name or "",
+                "Description": u.description or "",
+                "Status": u.status.value.capitalize(),
             }
-            for u in uoms
+            for idx, u in enumerate(uoms)
         ]
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)
-        return build_excel_export(EXPORT_HEADERS, rows, sheet_title="UOM")
+        return build_excel_export(EXPORT_HEADERS, rows, sheet_title="Units of Measurement")

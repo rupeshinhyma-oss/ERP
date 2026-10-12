@@ -126,6 +126,7 @@ export interface PlatformAdmin {
   display_name: string;
   role: string;
   is_active: boolean;
+  permissions?: string[];
   last_login_at?: string | null;
   created_at: string;
 }
@@ -344,7 +345,11 @@ export interface GlobalUserProfile {
   id: string;
   display_name: string;
   primary_email: string;
+  email?: string;
   status: string;
+  metadata?: Record<string, unknown> | null;
+  role?: string | null;
+  permissions?: string[];
 }
 
 export interface GlobalLoginResponse {

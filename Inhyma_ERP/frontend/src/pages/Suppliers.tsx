@@ -130,119 +130,6 @@ export const SUPPLIER_TABLE_COLUMNS: SupplierTableColumn[] = [
   { idx: 9, key: "action", label: "Action", sortable: false, align: "center", width: "65px" },
 ];
 
-export const INITIAL_SUPPLIERS: Supplier[] = [
-  {
-    id: "sup-welcome-elec",
-    company_name: "WELCOME ELECTRICALS SOLUTION",
-    city_name: "Mumbai",
-    state_name: "Maharashtra",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-shree-kalika",
-    company_name: "Shree Kalika Industries",
-    city_name: "Ahmedabad",
-    state_name: "Gujarat",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-univ-packaging",
-    company_name: "Universal Packaging Solutions",
-    city_name: "New Delhi",
-    state_name: "Delhi",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-darsh-impex-mum",
-    company_name: "Darsh Impex India LLP Mumbai",
-    city_name: "Mumbai",
-    state_name: "Maharashtra",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-multi-fill",
-    company_name: "MULTI FILL IMPEX",
-    city_name: "Faridabad",
-    state_name: "Haryana",
-    supplier_type: "Importer",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-worship-pkg",
-    company_name: "Worship Packaging LLP",
-    city_name: "Mumbai",
-    state_name: "Maharashtra",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-genuine-pkg",
-    company_name: "Genuine Packaging Solutions",
-    city_name: "Indore",
-    state_name: "Madhya Pradesh",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-srd-pkg",
-    company_name: "SRD Packaging And Automation",
-    city_name: "Thane",
-    state_name: "Maharashtra",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-packten-pkg",
-    company_name: "Packten Packaging Machinery",
-    city_name: "Ahmedabad",
-    state_name: "Gujarat",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-  {
-    id: "sup-darsh-impex-chn",
-    company_name: "Darsh Impex India Pvt Ltd (Chennai)",
-    city_name: "Chennai",
-    state_name: "Tamil Nadu",
-    supplier_type: "Trader",
-    current_status: null,
-    supplier_grade: null,
-    potential: null,
-    is_active: true,
-  },
-];
-
 type ModalTab = "first" | "second" | "contacts" | "continue";
 
 const EMPTY_SUPPLIER_FORM = {
@@ -479,7 +366,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const canEditGrade = hasPermission("supplier.grade_edit");
   const canEditPotential = hasPermission("supplier.potential_edit");
 
-  const [rows, setRows] = useState<Supplier[]>(INITIAL_SUPPLIERS);
+  const [rows, setRows] = useState<Supplier[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -1243,26 +1130,8 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
           setRows(data);
           setPagination(meta?.pagination);
         } else {
-          // Fallback to authentic initial records if backend returns empty
-          let fallback = INITIAL_SUPPLIERS.filter((s) => (statusTab === "active" ? s.is_active !== false : s.is_active === false));
-          if (effectiveSearch) {
-            const q = effectiveSearch.toLowerCase();
-            fallback = fallback.filter((s) =>
-              (s.company_name || "").toLowerCase().includes(q) ||
-              (s.city_name || "").toLowerCase().includes(q) ||
-              (s.state_name || "").toLowerCase().includes(q) ||
-              (s.supplier_type || "").toLowerCase().includes(q)
-            );
-          }
-          setRows(fallback);
-          setPagination({
-            current_page: currentPage,
-            page_size: pageSize,
-            total_records: fallback.length,
-            total_pages: Math.ceil(fallback.length / pageSize) || 1,
-            has_next: currentPage * pageSize < fallback.length,
-            has_previous: currentPage > 1,
-          });
+          setRows([]);
+          setPagination({ current_page: currentPage, page_size: pageSize, total_records: 0, total_pages: 1, has_next: false, has_previous: currentPage > 1 });
         }
         setError(null);
         setLoading(false);
@@ -1285,26 +1154,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         }
       } catch (err) {
         if (cancelled) return;
-        let fallback = INITIAL_SUPPLIERS.filter((s) => (statusTab === "active" ? s.is_active !== false : s.is_active === false));
-        if (effectiveSearch) {
-          const q = effectiveSearch.toLowerCase();
-          fallback = fallback.filter((s) =>
-            (s.company_name || "").toLowerCase().includes(q) ||
-            (s.city_name || "").toLowerCase().includes(q) ||
-            (s.state_name || "").toLowerCase().includes(q) ||
-            (s.supplier_type || "").toLowerCase().includes(q)
-          );
-        }
-        setRows(fallback);
-        setPagination({
-          current_page: currentPage,
-          page_size: pageSize,
-          total_records: fallback.length,
-          total_pages: Math.ceil(fallback.length / pageSize) || 1,
-          has_next: currentPage * pageSize < fallback.length,
-          has_previous: currentPage > 1,
-        });
-        setError(null);
+        setRows([]);
+        setPagination({ current_page: currentPage, page_size: pageSize, total_records: 0, total_pages: 1, has_next: false, has_previous: currentPage > 1 });
+        setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -1580,7 +1432,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       contact_whatsapp_number: normalizePhoneValue(form.contact_whatsapp_number),
       contact_wechat_number: normalizePhoneValue(form.contact_wechat_number),
       emails,
-      tax_id_number: form.tax_id_number.trim() || null,
+      tax_id_number: form.tax_id_number.trim().toUpperCase(),
       address: form.address.trim() || null,
       town: form.town.trim() || null,
       primary_website: form.primary_website.trim() || null,
@@ -1688,6 +1540,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     if (!form.company_name.trim()) {
       initialErrors.company_name = "Company Name is required.";
     }
+    if (!form.tax_id_number.trim()) {
+      initialErrors.tax_id_number = "GST number is required.";
+    }
     if (!formCountryId) {
       initialErrors["field-country"] = "Country is required.";
     }
@@ -1697,7 +1552,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     if (!formCityId && !formCityCustomText.trim()) {
       initialErrors["field-city"] = "City is required.";
     }
-    if (form.contact_calling_number) {
+    if (!form.contact_calling_number.trim()) {
+      initialErrors["field-calling-number"] = "Calling number is required.";
+    } else {
       const callingErr = validatePhoneNumber(form.contact_calling_number, "Calling number");
       if (callingErr) {
         initialErrors["field-calling-number"] = callingErr;
@@ -1807,6 +1664,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         setValidationErrors((prev) => ({ ...prev, company_name: msg }));
         focusAndScrollToField("company_name");
         return false;
+      }
+      if (lower.includes("gst number")) {
+        setValidationErrors((prev) => ({ ...prev, tax_id_number: msg }));
       }
       const title = lower.includes("duplicate") || lower.includes("already exists")
         ? "Duplicate Supplier Warning"
@@ -2503,6 +2363,20 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                     </div>
                     <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
                   </div>
+                  {/* GST Number is mandatory and must be unique (Add Supplier spec) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
+                    <TextField
+                      id="tax_id_number"
+                      label="GST Number"
+                      required
+                      maxLength={100}
+                      placeholder="e.g. 27ABCDE1234F1Z5"
+                      value={form.tax_id_number}
+                      onChange={(v) => setField("tax_id_number", v.toUpperCase())}
+                      hasError={Boolean(validationErrors.tax_id_number)}
+                      errorMessage={validationErrors.tax_id_number}
+                    />
+                  </div>
 
 
 
@@ -2657,7 +2531,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
 
                     <PhoneGroupField
                       id="field-calling-number"
-                      label="Calling Number"
+                      label={
+                        <>
+                          Calling Number <span style={{ color: "#ef4444" }}>*</span>
+                        </>
+                      }
                       defaultPrefix={formCountryPhoneCode}
                       value={form.contact_calling_number}
                       hasError={Boolean(validationErrors["field-calling-number"] || callingNumberError)}
@@ -2783,7 +2661,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                       2. Supplier Profile &amp; Verification Details
                     </h3>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "18px" }}>
-                      <TextField id="tax_id_number" label="Tax ID Number" maxLength={100} value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
                       <TextField id="address" label="Address" maxLength={500} value={form.address} onChange={(v) => setField("address", v)} />
                       <TextField id="town" label="Town" maxLength={150} value={form.town} onChange={(v) => setField("town", v)} />
                       <WebsiteField id="primary_website" label="Primary Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />

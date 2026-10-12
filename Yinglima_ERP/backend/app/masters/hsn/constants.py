@@ -6,4 +6,4 @@ MODULE_NAME = "hsn"
 DROPDOWN_CACHE_NAME = "hsn_codes"
 
 IMPORT_HEADERS = ["code", "description", "gst_percent", "refund_vat_percent", "status"]
-EXPORT_HEADERS = ["id", "code", "description", "gst_percent", "refund_vat_percent", "status", "created_at", "updated_at"]
+EXPORT_HEADERS = ["Sr. No.", "HSN Code", "Description", "GST %", "Refund VAT %", "Status"]

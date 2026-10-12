@@ -404,5 +404,25 @@ describe("StockTransferPage", () => {
       expect(screen.queryByText("▼")).toBeNull();
     });
   });
+
+  it("renders Physical warehouse badges and displays Receive in Main WH button for in-transit orders (Point 69)", async () => {
+    render(
+      <BrowserRouter>
+        <StockTransferPage initialLoading={false} />
+      </BrowserRouter>
+    );
+
+    // Verify Physical badges are rendered for standard physical warehouse entries
+    const physicalBadges = screen.getAllByText("Physical");
+    expect(physicalBadges.length).toBeGreaterThan(0);
+
+    // Open first row SideDrawer
+    const dateLink = screen.getByText("18-09-2026 04:37 PM");
+    fireEvent.click(dateLink);
+
+    await waitFor(() => {
+      expect(screen.getByText("Stock Transfer Details")).toBeTruthy();
+    });
+  });
 });
 

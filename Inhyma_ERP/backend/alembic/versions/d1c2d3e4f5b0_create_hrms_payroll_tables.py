@@ -123,6 +123,9 @@ def upgrade() -> None:
             sa.column("is_active", sa.Boolean),
             sa.column("description", sa.Text),
         )
+        # every row must carry the same keys for a bulk insert (PF and PT rows had no is_active)
+        for _row in default_components:
+            _row.setdefault("is_active", True)
         op.bulk_insert(comp_table, default_components)
 
     # 2. Employee Salaries (Structure & Revisions with Effective Dates)

@@ -33,6 +33,8 @@ class LeadService:
         city: str | None = None,
         district: str | None = None,
         state: str | None = None,
+        call_type: str | None = None,
+        company_name: str | None = None,
         date_from: Any | None = None,
         date_to: Any | None = None,
         sort_by: str = "created_at",
@@ -51,6 +53,8 @@ class LeadService:
             city=city,
             district=district,
             state=state,
+            call_type=call_type,
+            company_name=company_name,
             date_from=date_from,
             date_to=date_to,
             sort_by=sort_by,
@@ -78,6 +82,10 @@ class LeadService:
         if updates:
             lead = await self.repository.update(lead, **updates)
         return lead
+
+    async def allot_lead(self, lead_id: uuid.UUID, allotted_to: str) -> Lead:
+        lead = await self.get_by_id(lead_id)
+        return await self.repository.allot_lead(lead, allotted_to)
 
     async def delete(self, lead_id: uuid.UUID) -> None:
         lead = await self.get_by_id(lead_id)

@@ -401,13 +401,13 @@ describe("Product Master (/product/list)", () => {
     const hInput = screen.getByPlaceholderText("H") as HTMLInputElement;
     const cbmInput = screen.getByPlaceholderText("0.000000") as HTMLInputElement;
 
-    // Type dimensions: 100 x 50 x 20 = 100,000 / 1,000,000 = 0.100000
+    // Type dimensions: 100 x 50 x 20 = 100,000 / 1,000,000 = 0.10 (client 2-decimal rounding rule)
     fireEvent.change(lInput, { target: { value: "100" } });
     fireEvent.change(wInput, { target: { value: "50" } });
     fireEvent.change(hInput, { target: { value: "20" } });
 
     await waitFor(() => {
-      expect(cbmInput.value).toBe("0.100000");
+      expect(cbmInput.value).toBe("0.10");
     });
 
     // Delete row

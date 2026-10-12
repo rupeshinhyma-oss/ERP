@@ -29,8 +29,9 @@ import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/
 import { ICONS, IconBell, IconChevronDown, IconChevronRight } from "./icons";
 import { UniversalSearch } from "./UniversalSearch";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
-import { processIncomingSsoHandover } from "@/lib/ssoBridge";
-import { globalEcosystemLogout, initEcosystemSessionWatcher } from "@/lib/ecosystemSession";
+import { processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
+import { getEcosystemCookie, globalEcosystemLogout, initEcosystemSessionWatcher, isExplicitlyLoggedOut, setEcosystemCookie, verifyCentralEcosystemSession } from "@/lib/ecosystemSession";
+
 import { ErrorBanner } from "./ui";
 import type { Profile } from "@/types";
 
@@ -1061,7 +1062,43 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
 
   useEffect(() => {
     if (loggedIn) {
+      const currentSid = Auth.getSessionId();
+      if (isExplicitlyLoggedOut(currentSid || undefined)) {
+        Auth.clear();
+        navigate("/login", { replace: true });
+        return;
+      }
       setSsoCheckPending(false);
+      const cookie = getEcosystemCookie();
+
+      if (cookie?.session_id) {
+        const allowed = (cookie.allowed_erps || []).map((k) => String(k).toLowerCase());
+        const role = cookie.role?.toLowerCase();
+        const hasErpAccess = role === "super_admin" || allowed.includes("*") || allowed.includes("yinglima");
+        if (!hasErpAccess) {
+          verifyCentralEcosystemSession(cookie.session_id)
+            .then((res) => {
+              if (res.active && res.session) {
+                const liveAllowed = (res.session.allowed_erps || []).map((k) => String(k).toLowerCase());
+                if (liveAllowed.includes("*") || liveAllowed.includes("yinglima")) {
+                  setEcosystemCookie({
+                    ...cookie,
+                    allowed_erps: res.session.allowed_erps,
+                  });
+                  return;
+                }
+              }
+              Auth.clear();
+              const route = routeForCentralSession("yinglima", res.session || cookie);
+              if (route.kind === "redirect" && typeof window !== "undefined") {
+                window.location.replace(route.url);
+              }
+            })
+            .catch(() => {
+              // Maintain local session if central re-verification network is unreachable
+            });
+        }
+      }
       return;
     }
     let cancelled = false;
@@ -1095,7 +1132,10 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
         </div>
       );
     }
-    return <Navigate to={`/login${location.search}`} replace state={{ from: location.pathname }} />;
+    const cleanParams = new URLSearchParams(location.search);
+    cleanParams.delete("sso_handover");
+    const cleanSearch = cleanParams.toString() ? `?${cleanParams.toString()}` : "";
+    return <Navigate to={`/login${cleanSearch}`} replace state={{ from: location.pathname }} />;
   }
 
   const navItem = NAV_ITEMS_BY_KEY[activeKey];

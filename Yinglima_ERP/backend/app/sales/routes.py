@@ -204,6 +204,22 @@ async def list_sale_orders(
     )
 
 
+@router.get(
+    "/products/{product_id}/costing-info",
+    summary="Get product CI costing details (supplier from Local Purchase, factory RMB price with VAT, CBM, and HSN refund VAT)",
+)
+async def get_product_costing_info(
+    product_id: uuid.UUID,
+    request: Request,
+    quantity: float = Query(default=1.0, ge=0.01),
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-") if request else "-"
+    data = await service.get_product_costing_info(product_id, quantity)
+    return build_success_response(data=data, request_id=req_id)
+
+
 @router.post("/orders", summary="Create a new sale order", status_code=status.HTTP_201_CREATED)
 async def create_sale_order(
     payload: SaleOrderCreate,
@@ -353,13 +369,15 @@ async def get_trade_document_details(
 )
 async def export_trade_documents_excel(
     id: uuid.UUID,
+    mode: str = Query("internal", description="Export mode: 'internal' (16 columns) or 'customer' (7 columns)"),
     service: SaleService = Depends(get_sale_service),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Response:
-    output = await service.export_trade_documents_excel(id)
+    output = await service.export_trade_documents_excel(id, mode=mode)
     order = await service.repo.get_by_id(id)
     clean_code = (order.consignment_code or f"Order_{order.order_no}").replace("/", "_").replace(" ", "_") if order else str(id)
-    filename = f"Yinglima_CI_PL_{clean_code}.xlsx"
+    prefix = "Yinglima_Costing_16Col" if mode == "internal" else "Yinglima_Customer_CI"
+    filename = f"{prefix}_{clean_code}.xlsx"
     return Response(
         content=output.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

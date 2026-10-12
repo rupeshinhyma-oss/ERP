@@ -75,7 +75,8 @@ describe("ProformaInvoicePdfPage", () => {
     );
 
     expect(screen.getByRole("button", { name: "← Back to List" })).toBeTruthy();
-    expect(screen.getByText(/PI No: PI-MH\/26-27\/1714/i)).toBeTruthy();
+    // the invoice is loaded from the API, so wait for it
+    expect(await screen.findByText(/PI No: PI-MH\/26-27\/1714/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Print/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download PDF/i })).toBeTruthy();
   });
@@ -119,6 +120,7 @@ describe("ProformaInvoicePdfPage", () => {
       </MemoryRouter>
     );
 
+    await screen.findByText(/PI No: PI-MH\/26-27\/1714/i);
     const downloadBtn = screen.getByRole("button", { name: /Download PDF/i });
     fireEvent.click(downloadBtn);
 
@@ -130,5 +132,19 @@ describe("ProformaInvoicePdfPage", () => {
         saveFile: true,
       })
     );
+  });
+
+  it("shows an error instead of a made-up invoice when the API call fails", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockRejectedValueOnce(new Error("boom"));
+    render(
+      <MemoryRouter initialEntries={["/proforma-invoice/download-proforma-invoice/9999"]}>
+        <Routes>
+          <Route path="/proforma-invoice/download-proforma-invoice/:id" element={<ProformaInvoicePdfPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    expect(await screen.findByText(/Could not load this proforma invoice/i)).toBeTruthy();
+    expect(screen.queryByText(/PI No: PI-MH/i)).toBeNull();
   });
 });

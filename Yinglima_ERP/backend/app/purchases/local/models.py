@@ -21,12 +21,7 @@ class LocalPurchase(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "local_purchases"
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("master_companies.id"), nullable=False, index=True
-    )
-    organization_name: Mapped[str] = mapped_column(String(150), nullable=False)
-    branch_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    branch_name: Mapped[str] = mapped_column(String(150), nullable=False)
+
 
     supplier_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("suppliers.id"), nullable=False, index=True

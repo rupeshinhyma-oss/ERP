@@ -28,11 +28,11 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+from app.database.base import CaseResilientEnum, GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 def _utcnow() -> datetime:
@@ -135,14 +135,14 @@ class Supplier(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDele
     secondary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     supplier_grade: Mapped[SupplierGrade | None] = mapped_column(
-        SAEnum(SupplierGrade, name="supplier_grade", native_enum=False, length=5), nullable=True
+        CaseResilientEnum(SupplierGrade, length=5), nullable=True
     )
     current_status: Mapped[SupplierCurrentStatus | None] = mapped_column(
-        SAEnum(SupplierCurrentStatus, name="supplier_current_status", native_enum=False, length=20),
+        CaseResilientEnum(SupplierCurrentStatus, length=20),
         nullable=True,
     )  # "by default Select" -- modeled as nullable rather than a forced default
     potential: Mapped[SupplierPotential | None] = mapped_column(
-        SAEnum(SupplierPotential, name="supplier_potential", native_enum=False, length=10), nullable=True
+        CaseResilientEnum(SupplierPotential, length=10), nullable=True
     )  # "by default Select"
     potential_reason: Mapped[str | None] = mapped_column(
         Text, nullable=True
@@ -330,9 +330,16 @@ class SupplierProductLink(Base, UUIDPrimaryKeyMixin):
         GUID(), ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    unit_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
+    moq: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
 
     supplier: Mapped[Supplier] = relationship(back_populates="product_links")
 
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
-        return f"<SupplierProductLink supplier_id={self.supplier_id} product_id={self.product_id}>"
+        return f"<SupplierProductLink supplier_id={self.supplier_id} product_id={self.product_id} price={self.unit_price} {self.currency}>"

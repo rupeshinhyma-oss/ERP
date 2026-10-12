@@ -62,10 +62,6 @@ class LocalPurchaseItemResponse(LocalPurchaseItemBase):
 class LocalPurchaseBase(BaseModel):
     """Base fields for a local purchase invoice."""
 
-    organization_id: uuid.UUID
-    organization_name: str = Field(..., min_length=1, max_length=150)
-    branch_id: str = Field(..., min_length=1, max_length=100)
-    branch_name: str = Field(..., min_length=1, max_length=150)
     supplier_id: uuid.UUID
     supplier_name: str = Field(..., min_length=1, max_length=200)
     invoice_no: str = Field(..., min_length=1, max_length=100)
@@ -91,10 +87,6 @@ class LocalPurchaseCreate(LocalPurchaseBase):
 class LocalPurchaseUpdate(BaseModel):
     """Payload to update a local purchase with items."""
 
-    organization_id: uuid.UUID | None = None
-    organization_name: str | None = None
-    branch_id: str | None = None
-    branch_name: str | None = None
     supplier_id: uuid.UUID | None = None
     supplier_name: str | None = None
     invoice_no: str | None = None
@@ -118,10 +110,6 @@ class LocalPurchaseSummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    organization_id: uuid.UUID
-    organization_name: str
-    branch_id: str
-    branch_name: str
     supplier_id: uuid.UUID
     supplier_name: str
     invoice_no: str

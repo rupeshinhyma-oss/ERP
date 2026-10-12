@@ -13,6 +13,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import select, or_
+
 from app.cache.manager import CacheManager
 from app.common.list_query import ListQueryParams
 from app.core.constants import RecordStatus
@@ -248,7 +250,6 @@ class ProductService:
         """Ensure SupplierProductLink exists for this primary supplier."""
         if not supplier_id:
             return
-        from sqlalchemy import select
         from app.suppliers.models import SupplierProductLink
 
         stmt = select(SupplierProductLink).where(
@@ -379,6 +380,10 @@ class ProductService:
         hsns_map = {str(h.id): h.code for h in await self.hsn_repository.list(limit=2000)}
         uoms_map = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
 
+        from app.suppliers.models import Supplier
+        sup_rows = (await self.repository.session.execute(select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None)))).all()
+        suppliers_map = {str(r.id): r.company_name for r in sup_rows}
+
         def _serialize_for_compare(p: Product) -> dict[str, Any]:
             return {
                 "Product Name (As Per Tally)": p.product_name_tally or p.product_name or "—",
@@ -386,6 +391,7 @@ class ProductService:
                 "Brand": brands_map.get(str(p.brand_id), "—") if p.brand_id else "—",
                 "Category": categories_map.get(str(p.category_id), "—") if p.category_id else "—",
                 "Sub Category": sub_categories_map.get(str(p.sub_category_id), "—") if p.sub_category_id else "—",
+                "Primary Supplier": suppliers_map.get(str(p.supplier_id), "—") if p.supplier_id else "—",
                 "HSN Code": hsns_map.get(str(p.hsn_id), "—") if p.hsn_id else "—",
                 "UOM": uoms_map.get(str(p.uom_id), "—") if p.uom_id else "—",
                 "Pack. Qty": p.packaging_quantity if p.packaging_quantity is not None else "—",
@@ -407,6 +413,17 @@ class ProductService:
             hsn_code = field_values.pop("hsn_code", None)
             uom_code = field_values.pop("uom_code")
             secondary_uom_code = field_values.pop("secondary_uom_code", None)
+
+            supplier_name = field_values.pop("supplier_name", None)
+            if supplier_name:
+                stmt_sup = select(Supplier).where(
+                    Supplier.company_name.ilike(supplier_name.strip()),
+                    Supplier.deleted_at.is_(None),
+                )
+                res_sup = await self.repository.session.execute(stmt_sup)
+                found_supplier = res_sup.scalars().first()
+                if found_supplier:
+                    field_values["supplier_id"] = found_supplier.id
 
             category = await self.category_repository.get_by_code(category_code)
             if category is None:
@@ -493,7 +510,6 @@ class ProductService:
             # Check if Product Name already exists in DB
             existing_dup = None
             if product_name:
-                from sqlalchemy import select, or_
                 stmt_dup = select(Product).where(
                     or_(
                         Product.product_name_tally.ilike(product_name),
@@ -512,6 +528,8 @@ class ProductService:
                 has_changes, update_kwargs = update_record_fields(target_prod, field_values, skip_fields=skip_keys)
                 if has_changes and update_kwargs:
                     await self.repository.update(target_prod, **update_kwargs)
+                    if "supplier_id" in update_kwargs and update_kwargs["supplier_id"]:
+                        await self._sync_supplier_link(target_prod.id, update_kwargs["supplier_id"])
                     await notify_source_record_changed("product", target_prod.id)
                     await refresh_planning_cells_for_record(self.repository.session, "product", target_prod.id)
                 seen_names.add(clean_name_key)
@@ -543,6 +561,8 @@ class ProductService:
                 field_values["packaging_unit_cbm"] = 0.001
 
             created_prod = await self.repository.create(**field_values)
+            if "supplier_id" in field_values and field_values["supplier_id"]:
+                await self._sync_supplier_link(created_prod.id, field_values["supplier_id"])
             seen_names.add(clean_name_key)
             if clean_code_key:
                 seen_codes.add(clean_code_key)
@@ -558,7 +578,6 @@ class ProductService:
 
     async def export_file(self, file_format: str) -> bytes:
         """Export every product to CSV or XLSX bytes with clean, resolved business headers matching UI sequence."""
-        from sqlalchemy import select
         from app.masters.company_list.models import MasterCompany
 
         products = await self.repository.list_all()
@@ -569,6 +588,13 @@ class ProductService:
         brands = {str(b.id): b.name for b in await self.brand_repository.list(limit=2000)}
         hsns = {str(h.id): h.code for h in await self.hsn_repository.list(limit=2000)}
         uoms = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
+
+        # Suppliers lookup for Primary Supplier
+        from app.suppliers.models import Supplier
+        sup_res = await self.repository.session.execute(
+            select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None))
+        )
+        suppliers_export_map = {str(row.id): row.company_name for row in sup_res}
 
         # Organizations
         org_res = await self.repository.session.execute(select(MasterCompany.id, MasterCompany.name, MasterCompany.branches))
@@ -605,6 +631,7 @@ class ProductService:
                 "Brand": brands.get(str(p.brand_id), "") if p.brand_id else "",
                 "Category": categories.get(str(p.category_id), "") if p.category_id else "",
                 "Sub Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",
+                "Primary Supplier": suppliers_export_map.get(str(p.supplier_id), "") if p.supplier_id else "",
                 "HSN Code": hsns.get(str(p.hsn_id), "") if p.hsn_id else "",
                 "UOM": uoms.get(str(p.uom_id), "") if p.uom_id else "",
                 "Organization": ", ".join(org_names),

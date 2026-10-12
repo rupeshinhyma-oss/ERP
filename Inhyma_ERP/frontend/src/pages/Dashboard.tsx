@@ -5,8 +5,8 @@ export function DashboardPage() {
   const { profile } = useAuth();
 
   const titleName = profile && typeof profile === "object"
-    ? profile.full_name || profile.username || "Rupesh Malla"
-    : "Rupesh Malla";
+    ? profile.full_name || profile.username || "Inhyma ERP"
+    : "Inhyma ERP";
 
   return (
     <AppShell activeKey="dashboard">

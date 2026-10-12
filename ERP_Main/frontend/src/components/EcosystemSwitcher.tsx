@@ -79,19 +79,28 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
     };
   }, [open]);
 
-  const handleSwitch = (hostUrl: string) => {
-    setOpen(false);
-    const target = createSsoHandoverUrl(hostUrl);
-    window.location.href = target;
-  };
-
   const isSuperAdmin = userType === "platform_admin";
   const activeMemberships = (memberships || []).filter((m) => m.status === "ACTIVE");
+  const allowedKeys = isSuperAdmin
+    ? ["*"]
+    : activeMemberships.map((m) => (m.erp_key || m.erp_name || "").toLowerCase()).filter(Boolean);
+
+  const handleSwitch = (hostUrl: string) => {
+    setOpen(false);
+    try {
+      const target = createSsoHandoverUrl(hostUrl);
+      window.location.href = target;
+    } catch (err) {
+      console.error("Failed to generate switch URL:", err);
+      window.location.href = hostUrl;
+    }
+  };
 
   // Switch ERP is shown only when the user has more than one ACTIVE ERP membership (or is super admin)
   if (!isSuperAdmin && activeMemberships.length <= 1) {
     return null;
   }
+
 
   return (
     <div style={{ position: "relative" }} ref={dropdownRef}>
@@ -176,7 +185,11 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
             Connected Fleet Applications
           </div>
 
-          {ECOSYSTEM_ERPS.map((erp) => {
+          {ECOSYSTEM_ERPS.filter((erp) => {
+            if (isSuperAdmin) return true;
+            if (erp.key === "control-plane") return true;
+            return allowedKeys.some((k) => k === erp.key.toLowerCase() || (erp.name && k === erp.name.toLowerCase()));
+          }).map((erp) => {
             const isCurrent = erp.key === currentKey;
             return (
               <button

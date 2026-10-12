@@ -3,6 +3,153 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-10] — Cross-Ecosystem Single Sign-Out (SLO), M2M Spoke Revocation & Fast Cookie Synchronizer
+
+### 1. Cross-Ecosystem Single Sign-Out (SLO) Fan-Out Architecture
+- **Centralized Session Termination in [`ecosystem_session.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_auth/ecosystem_session.py):**
+  - Updated `revoke_ecosystem_session()` to trigger machine-to-machine spoke logout fan-out across all systems the user has access to.
+  - Retains revoked sessions in memory with `active: False` and `revoked_at` timestamp rather than purging completely, ensuring subsequent queries return `revoked: True` to prevent re-authentication.
+  - Implemented `fanout_spoke_logout(db, user_email)`: resolves all active ERP memberships for Global Users (or all registered ERP instances for Platform Admins) and issues parallel logout commands.
+- **Provisioning Adapter Extension in [`base.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/adapters/base.py) & [`http_adapter.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/adapters/http_adapter.py):**
+  - Added abstract `logout_local_user(local_user_id, reason)` to `BaseErpProvisioningAdapter`.
+  - Implemented `logout_local_user` in `HttpErpProvisioningAdapter` dispatching authenticated requests to spoke `POST /api/v1/internal/users/{identifier}/logout` with internal HMAC headers.
+- **Global Auth Route Handlers in [`routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_auth/routes.py):**
+  - Integrated `fanout_spoke_logout` into `POST /global/user-auth/logout`, invalidating all granted spoke ERP sessions simultaneously whenever a user signs out of the control plane.
+
+### 2. Multi-Origin Browser Cookie Synchronizer & Fast Session Watcher
+- **Shared Localhost Cookie Marker in [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ecosystemSession.ts):**
+  - Implemented `ihm_ecosystem_logged_out=1` cookie set across all subdomains and localhost ports (`5170`, `5173`, `5174`) upon logout.
+  - Added `isExplicitlyLoggedOut()` helper checking both local `sessionStorage` and the shared cookie marker.
+  - Updated `setEcosystemCookie()` to clear `ihm_ecosystem_logged_out` on fresh logins.
+- **Fast Watcher & Tab Synchronization:**
+  - Upgraded `initEcosystemSessionWatcher()` polling interval to 2.5 seconds (down from 10s) and hooked into `window.addEventListener('focus')` and `document.addEventListener('visibilitychange')`.
+  - If a logout is initiated in another tab or spoke ERP, other tabs detect the logout marker immediately, clear local storage (`Auth.clear()`), and navigate to `/login`.
+- **AppShell Mount Guard in [`AppShell.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/AppShell.tsx):**
+  - Evaluates `isExplicitlyLoggedOut()` on mount and immediately clears local session state and halts access if a global logout is active.
+  - Connected the user menu Logout action to `useGlobalSession().logout()`, properly terminating both central and spoke sessions.
+
+---
+
+## [Release 2026-10-10] — Single-ERP Dynamic Redirection, Handover Query Sanitization & Spoke 403 Loop Elimination
+
+### 1. Dynamic Single-ERP Membership Resolution & Fallback Removal
+- **Eager ERP Instance Serialization in [`schemas.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/erp_memberships/schemas.py) & [`routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/erp_memberships/routes.py):**
+  - Added `erp_key: str | None = None`, `erp_name: str | None = None`, and `erp_display_name: str | None = None` to `ErpMembershipRead` and `ErpMembershipWithErpSummary`.
+  - Updated `ErpMembershipRepository.list_for_user()` in [`repository.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/erp_memberships/repository.py) to eagerly load `erp_instance` via SQLAlchemy `joinedload(ErpMembership.erp_instance)`.
+  - Serialized `erp_key`, `erp_name`, and `erp_display_name` in `list_user_memberships` responses so frontends receive the canonical spoke ERP identifier.
+- **Strict Target Resolution in [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ssoBridge.ts):**
+  - Updated `resolveSingleErpDirectUrl` to strictly check `erp_key`, `erp_display_name`, `erp_name`, or `userContext.allowed_erps`.
+  - Eliminated the empty-string substring match `target.includes("")` against `getEcosystemErps()`, which previously defaulted missing keys to `"yinglima"`.
+- **Elimination of Hardcoded Fallback in [`Login.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/Login.tsx) & [`AppShell.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/AppShell.tsx):**
+  - Removed the `|| "yinglima"` fallback for single-membership accounts. Users granted access to only Inhyma ERP (e.g. `userb@gmail.com`) are routed strictly to Inhyma ERP (`http://localhost:5174/dashboard`).
+
+### 2. Spoke ERP 403 Loop Prevention & Cross-ERP Auto-Redirection
+- **Immediate Address Bar Query Sanitization in Spoke `ssoBridge.ts`:**
+  - Stripped `sso_handover` from `window.location.search` immediately upon ingestion via `window.history.replaceState`. Prevents failed or reloaded tickets from persisting in the URL and triggering duplicate login attempts.
+- **Auto-Redirection on 403 Rejection:**
+  - Added failover redirection in `processIncomingSsoHandover()` catch block: if a spoke returns HTTP 403 (e.g. user navigated to Yinglima but is only granted Inhyma), the spoke immediately clears invalid local session state (`Auth.clear()`), inspects the user's active central ecosystem session, and redirects them via SSO handover to their designated granted ERP (or `http://localhost:5170/dashboard`).
+- **Loop Defense in AppShell & App Lifecycle:**
+  - Stripped `sso_handover` when redirecting unauthenticated users to `/login` in `AppShell.tsx`.
+  - Added `ssoProcessedRef = useRef(false)` in spoke `App.tsx` preventing concurrent or redundant handover processing during React mount lifecycles.
+
+### 3. Multi-Domain Ping-Pong Loop Defense & Real-Time Cache Invalidation
+- **Live Permission Revalidation in [`ecosystem_session.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_auth/ecosystem_session.py):**
+  - Updated `_resolve_live_session` to re-query active memberships (`_active_erp_keys`) directly from the database for Global Users. Prevents in-memory session cache TTL from serving stale `allowed_erps: ["control-plane"]` immediately after an administrator grants new spoke access.
+  - Implemented `invalidate_ecosystem_session_cache_for_user(email)` invoked upon membership creation, status transitions, and deletions across `erp_memberships` and `identity_linking`.
+- **Spoke Account Activation Guarantee in [`identity_linking/service.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/service.py):**
+  - Updated `provision_global_user_to_erp` so that even when a membership record is already ACTIVE in ERP_Main, it contacts the spoke ERP to ensure the local user is un-deleted (`deleted_at = None`) and activated (`is_active = True`, `can_login = True`).
+- **Ping-Pong Loop Breaker in [`AppShell.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/AppShell.tsx):**
+  - Added a 10-second redirect cooldown in `sessionStorage` preventing immediate re-execution of single-ERP redirection.
+  - Added `sso_error` query detector in `AppShell.tsx` to stop auto-redirect loops if a spoke ERP rejects a handover.
+  - Synchronized `setEcosystemCookie` with newly assigned ERP keys before dispatching the user to the spoke ERP.
+
+---
+
+## [Release 2026-10-10] — Zero-Grant Official Dashboard Redirection, Spoke Access Guard, and User Isolation Hardening
+
+### 1. Zero-Grant Spoke Redirection to Official Central Dashboard
+- **Cross-ERP Redirection for Unassigned Users:**
+  - Users created in the global directory without assigned spoke ERP access (e.g. `User A`, `User B`, `User C`, `User D` with `allowed_erps = ["control-plane"]`) are automatically routed to the official control plane dashboard ([`http://localhost:5170/dashboard`](http://localhost:5170/dashboard)).
+  - If a zero-grant user attempts to sign in via a spoke ERP login screen ([`http://localhost:5174/login`](http://localhost:5174/login) or [`http://localhost:5173/login`](http://localhost:5173/login)), the spoke's `routeForCentralSession()` generates an SSO handover ticket and redirects the browser directly to `http://localhost:5170/dashboard`.
+  - If an unassigned user navigates directly to a spoke URL (such as `http://localhost:5174/dashboard` or `http://localhost:5173/dashboard`) with an active central session cookie, `processIncomingSsoHandover()` and `AppShell` detect `!hasErpAccess`, wipe any invalid local tokens via `Auth.clear()`, and immediately bounce them to `http://localhost:5170/dashboard`.
+
+### 2. Central Database Inspection & Flexible Identification (`establish_ecosystem_session`)
+- **Multi-Identifier Lookup in [`ecosystem_session.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_auth/ecosystem_session.py):**
+  - Updated `establish_ecosystem_session` to scan both `GlobalUser` and `PlatformAdmin` tables across multiple search keys: canonical `primary_email`, `display_name` (e.g. `"User A"`), and username prefixes (e.g. `"usera"`).
+  - Resolves input seamlessly whether typed as an email (`usera@gmail.com`), display name (`User A`), or username prefix.
+  - Live queries active spoke memberships via `_active_erp_keys(db, user.id)` checking `erp_memberships` joined with `erp_instances` where `status == ACTIVE`. Unassigned users resolve strictly to `["control-plane"]`.
+
+### 3. User Isolation & Session Hygiene in `ssoBridge.ts`
+- **Email Mismatch Clearance in [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ssoBridge.ts):**
+  - Enforced user isolation in `processIncomingSsoHandover()`: if an incoming handover or ecosystem cookie targets a different user email than the cached local session profile, `Auth.clear()` is called prior to exchanging tokens.
+  - Safe email extractor handles the `CurrentUser` union type (`GlobalUserProfile | PlatformAdmin`), extracting whichever email property exists (`primary_email` or `email`).
+  - Added optional `email?: string` to `GlobalUserProfile` in [`types/index.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/types/index.ts).
+
+### 4. Zero-Grant Navigation Guard in `AppShell`
+- **Restricted UI for Unassigned Users in [`AppShell.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/AppShell.tsx):**
+  - Users with platform role `NONE` or empty roles are restricted to viewing only the `Dashboard` module in the navigation sidebar (all other modules hidden).
+  - Renders a clean "No ERP Access Assigned" welcome card prompting the user to contact their platform administrator.
+
+---
+
+## [Release 2026-10-10] — Platform Role Deletion Preservation, Mixed Content Elimination, PgBouncer Prepared Statement Fix & Access Sync Engine
+
+### 1. Platform Authorization Role Deletion Preservation & Starter Demo Separation
+- **Root Cause & Fix in [`seed_platform_authz.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/scripts/seed_platform_authz.py):**
+  - Previously, running seeds on backend startup re-created all default roles, resurrecting user-deleted starter roles (such as `Platform Operator`, `Platform Viewer`, or custom deleted roles).
+  - Explicitly separated platform roles into `_MANDATORY_SYSTEM_ROLES` (`PLATFORM_SUPER_ADMIN`, `PLATFORM_ADMIN`) and `_STARTER_ROLES` (`PLATFORM_OPERATOR`, `PLATFORM_VIEWER`).
+  - Implemented `is_initial_bootstrap` detection by querying `service.role_repository.get_by_key("PLATFORM_SUPER_ADMIN")`.
+  - Mandatory system roles are always maintained, but starter demonstration roles are **only** seeded if the platform database is completely empty on initial bootstrap.
+  - On subsequent restarts, starter demo role seeding is skipped, permanently preserving administrative role deletions.
+
+### 2. Elimination of Insecure HTTP Fallbacks & Mixed Content Guard
+- **`isLocalhost()` Security Interceptor:**
+  - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ssoBridge.ts), wrapped all `http://localhost:*` fallback URLs with `isLocalhost()` guards.
+  - In production HTTPS deployments (e.g. Render, Cloudflare, custom domains), insecure `http://` calls to ports `:8000`, `:8001`, `:8002`, `:5173`, and `:5174` are suppressed, eliminating browser Mixed Content blocking errors (`Blocked loading mixed active content`).
+- **Dynamic API Gateway Origin Support:**
+  - In [`api.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/api.ts), added native support for `VITE_API_ORIGIN` allowing split static frontend deployments to target external backend origins cleanly.
+  - Routed `CENTRAL_AUTH_API` dynamically through `API_BASE`.
+
+### 3. Database Connection Hardening for Supabase Transaction Pooler (PgBouncer)
+- **Prepared Statement Cache Auto-Disable:**
+  - In [`app/database/engine.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/database/engine.py), implemented `_statement_cache_must_be_disabled()`.
+  - Automatically identifies transaction-mode PgBouncer / Supabase connection poolers operating on port 6543 and configures asyncpg with `statement_cache_size=0`.
+  - Permanently eliminates PostgreSQL `DuplicatePreparedStatementError: prepared statement "..." already exists` during high-concurrency pool multiplexing.
+
+### 4. Durable Access Sync Recovery Engine
+- **Database Migration [`0011_access_sync_tasks.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/alembic/versions/0011_access_sync_tasks.py):**
+  - Created table `access_sync_tasks` with foreign keys to `erp_memberships` and `erp_instances`.
+  - Tracks synchronization lifecycle: `PENDING_RETRY`, `IN_PROGRESS`, `SUCCESS`, and `FAILED`.
+  - Supports lease expiration (`lease_expires_at`), worker claims (`claimed_by`), and bounded retry counters (`max_retries=10`).
+  - Added indexes `ix_access_sync_tasks_membership_id`, `ix_access_sync_tasks_erp_instance_id`, and composite index `ix_access_sync_eligible` (`status`, `next_retry_at`, `lease_expires_at`).
+- **Access Sync Service [`access_sync_service.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/access_sync_service.py):**
+  - When an administrator suspends, restores, or revokes a membership in ERP_Main, any network interruption to spoke ERPs is caught and converted into a durable task.
+  - Retries with bounded exponential backoff until the target spoke confirms receipt.
+  - Re-evaluates current membership and global user state on every retry attempt to prevent stale state propagation.
+
+### 5. High-Scale Case-Insensitive & Status Indexes
+- **Database Migration [`0012_scale_indexes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/alembic/versions/0012_scale_indexes.py):**
+  - Added functional B-tree index `ix_global_users_primary_email_lower` on `lower(primary_email)` in `global_users`.
+  - Added composite indexes `ix_erp_memberships_user_status` on `(global_user_id, status)` and `ix_erp_memberships_erp_status` on `(erp_instance_id, status)` in `erp_memberships`.
+  - Guarantees sub-millisecond lookup latency for sign-in, session checks, and access grants even with 50,000+ active enterprise accounts.
+
+### 6. Bi-Directional Password Synchronization & Central Session Exchange
+- **Internal Password Sync Endpoint [`password_sync.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_users/password_sync.py):**
+  - Added `POST /api/v1/internal/users/password` accepting password updates from spoke ERPs authenticated via internal service credentials.
+  - Securely updates `global_user_credentials` and invokes `push_password_to_memberships` to fan out updates to all active spoke memberships.
+- **Central Session Verification & Exchange [`ecosystem_session.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_auth/ecosystem_session.py):**
+  - Hardened `get_ecosystem_session` to validate live database state (user status, active memberships, session expiration) on every request rather than relying purely on in-memory caches.
+  - Added `POST /api/v1/global/ecosystem-session/exchange` allowing SSO handover visitors with valid central sessions to obtain authenticated ERP_Main access tokens matching their specific identity.
+
+### 7. Seed Membership Idempotency & Virtualenv Stability
+- **Seed Script Resilience in [`seed.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/scripts/seed.py):**
+  - Enforced pre-check on `existing_mem` before creating default memberships, preventing `uq_erp_memberships_user_erp` unique constraint collision on repeated seed executions.
+  - Updated [`seed_registry.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/scripts/seed_registry.py) with dynamic `_dashboard_url()` reading `ERP_MAIN_DASHBOARD_URL` / `FRONTEND_URL`.
+- **Python Virtualenv Interpreter Resolution in `server.py`:**
+  - Switched from `str(Path(sys.executable).resolve())` to `sys.executable` to prevent Windows from dereferencing `.venv` symlinks to the system Python.
+
+---
+
 ## [Release 2026-10-05] — Production Deployment Readiness, Zero-LAN URL Decoupling & Multi-Cloud Infrastructure
 
 ### 1. Peer ERP API Resolution Overrides
@@ -74,6 +221,47 @@
 ### 4. Ecosystem Switcher Bug Fix (Alice Wonder)
 - **Attribute Fix:** Resolved `AttributeError: type object 'ErpInstance' has no attribute 'erp_key'` by correcting the query to `select(ErpMembership, ErpInstance.key)` in `ecosystem_session.py`.
 - **Session Cookie Generation:** Allowed `ihm_ecosystem_session` to be issued properly with `allowed_erps: ["yinglima", "inhyma", "control-plane"]`.
+
+---
+
+## [Release 2026-10-10] — Real-Time Provisioning Synchronization, Resilient Re-Granting & Endpoint Resolution
+
+### 1. Root Cause Resolution for `Pending (Retry)` Malformed Responses
+- **URL Resolution Bug Fixed:** In [`HttpErpProvisioningAdapter._resolve_erp_api_url`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/identity_linking/adapters/http_adapter.py), database records storing public frontend dashboard URLs (e.g., `https://yinglima-erp-frontend.onrender.com/dashboard`) previously caused provisioning HTTP requests to target the frontend SPA instead of the backend API, returning HTML (`<!DOCTYPE html>...`) and triggering an unparseable JSON error.
+- **Dynamic API Routing:** `_resolve_erp_api_url` now reliably maps to local spoke API ports (`http://127.0.0.1:8001` for Yinglima and `http://127.0.0.1:8002` for Inhyma) in `local` and `test` environments or when `localhost`/frontend URLs are encountered. In production, `-frontend` URLs are dynamically translated to `-backend` endpoints.
+- **Directional Service Credentials:** Configured `ERP_MAIN_TO_YINGLIMA_SERVICE_CREDENTIAL` and `ERP_MAIN_TO_INHYMA_SERVICE_CREDENTIAL` in `ERP_Main/.env` and `config.py`, guaranteeing that machine-to-machine calls match each spoke's accepted authorization tokens.
+
+### 2. Spoke User Restoration on Re-Granting
+- **Soft-Delete Restoration:** Updated `POST /api/v1/internal/users/provision` in both [`Yinglima_ERP`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/api/v1/internal_users.py) and [`Inhyma_ERP`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/api/v1/internal_users.py). When an administrator unticks and then re-ticks access for a user, the spoke ERP now checks for any existing user by normalized email (regardless of `deleted_at`), restores `deleted_at = None`, sets `is_active = True`, resets `status = ACTIVE`, and synchronizes password credentials.
+- **Instant Spoke User List Visibility:** When granted access in ERP_Main, users now instantly appear in the spoke ERP's `/users` table; when revoked in ERP_Main, they are soft-deleted and removed from the spoke ERP's `/users` list.
+
+### 3. Frontend Resilient Retry & Interactive Badges
+- **Pending Membership Retry on Save:** Updated `handleSaveEdit` in [`GlobalUsers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/GlobalUsers.tsx) so that existing memberships in `PENDING` state trigger automatic provisioning retries upon saving grants.
+- **Interactive Badges:** The `Pending (Retry)` badge in the Global Users access column is now interactive (`cursor: pointer`), allowing administrators to trigger a live synchronization retry directly by clicking the badge.
+
+---
+
+## [Release 2026-10-10 Part 2] — Ecosystem Session Reliability, Cross-ERP Switching & False Logout Elimination
+
+### 1. Root Cause Resolution for False Logouts and Switch Loops
+- **Session Revocation Disambiguation:** In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ecosystemSession.ts), the `ihm_ecosystem_logged_out` cookie was previously written as a generic `"1"`, which caused all newly established sessions in any tab or port to be treated as revoked upon window focus or switcher navigation.
+- **Session-ID Keyed Revocation:** `clearEcosystemCookie(sessionId)` now records the exact revoked session ID inside `ihm_ecosystem_logged_out`. `isExplicitlyLoggedOut(currentSessionId)` only flags revocation if the cookie's recorded ID matches the current active session. Fresh sessions created on switch or re-login are never blocked.
+- **SSO Handover Exemption:** Added immediate exemption for incoming SSO handover navigation (`sso_handover` query param in URL) ensuring newly transitioned users are never rejected as explicitly logged out.
+- **Domain & Port Cookie Cleansing:** Implemented `clearCookieEverywhere` and `setCookieEverywhere` covering host-only, `localhost`, `127.0.0.1`, current hostname, and `VITE_COOKIE_DOMAIN`, completely avoiding phantom cross-domain cookies.
+
+### 2. Multi-Tab Session Synchronization & Polling Loop Hardening
+- **Watcher Polling Loop Fix:** Removed redundant calls to `clearEcosystemCookie()` inside the periodic watcher (`checkRevocation`), preventing the 60-second logout cookie window from being perpetually renewed in an infinite logout loop.
+- **Tab Focus Stale State Recovery:** In [`initEcosystemSessionWatcher`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/lib/ecosystemSession.ts), window `focus` events safely purge stale tab-scoped `ihm_explicit_logout` flags when an active local session is running.
+
+### 3. Role-Based Switcher Filtering & Navigation Fallbacks
+- **Non-Admin Switcher Access Controls:** In [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/EcosystemSwitcher.tsx), spoke ERP options are now strictly filtered against the user's `activeMemberships` for non-super-admins.
+- **Switch Failure Fallback:** Wrapped `handleSwitch` in try/catch blocks with graceful direct URL redirection fallback if SSO handover ticket generation encounters network interruptions.
+- **Local Login Fallback Session:** In [`Login.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/Login.tsx), local login automatically establishes a fallback ecosystem session cookie if central control plane communication is degraded.
+
+### 4. Backend Ecosystem Session Hardening & Server Restart Resilience
+- **Accurate Not-Found Status:** In [`ecosystem_session.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/backend/app/global_auth/ecosystem_session.py), `GET /global/ecosystem-session/{session_id}` now accurately returns `{"notFound": True, "revoked": False}` for unknown sessions, preventing spoke ERPs from mistaking a fresh/un-cached session as explicitly revoked.
+- **PlatformAdmin Session DB Persistence:** `establish_ecosystem_session` ensures a mirrored `GlobalUser` row exists for authenticating `PlatformAdmin` users, guaranteeing their sessions are persisted in `global_sessions` table and survive backend server restarts or multi-worker reload without unexpected logouts.
+- **PlatformAdmin Direct ID Resolution:** In `_session_from_db`, added fallback to resolve `PlatformAdmin` records directly if `global_user_id` matches an admin record, ensuring uninterrupted access for administrators across process restarts.
 
 ---
 

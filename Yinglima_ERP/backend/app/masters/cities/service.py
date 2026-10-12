@@ -154,9 +154,14 @@ class CityService:
         async def _create(field_values: dict[str, Any]) -> City | tuple[str, City]:
             country_code = field_values.pop("country_code")
             state_name = field_values.pop("state_name")
-            country = await self.country_repository.get_by_code(country_code)
+            country = await self.country_repository.get_by_code(country_code.upper())
             if country is None:
                 country = await self.country_repository.get_by_name(country_code)
+            if country is None:
+                for c in await self.country_repository.list_all():
+                    if c.code.upper() == country_code.upper() or c.name.strip().lower() == country_code.strip().lower():
+                        country = c
+                        break
             if country is None:
                 raise BadRequestException(f"Country {country_code!r} does not exist.")
             matching_states = [
@@ -194,20 +199,23 @@ class CityService:
         return summary
 
     async def export_file(self, file_format: str) -> bytes:
-        """Export every city to CSV or XLSX bytes."""
+        """Export every city to CSV or XLSX with clean human-readable business headers matching UI table sequence."""
         cities = await self.repository.list_all()
-        rows = [
-            {
-                "id": str(c.id),
-                "country_id": str(c.country_id),
-                "state_id": str(c.state_id),
-                "name": c.name,
-                "status": c.status.value,
-                "created_at": c.created_at.isoformat(),
-                "updated_at": c.updated_at.isoformat(),
-            }
-            for c in cities
-        ]
+        countries = {c.id: c.name for c in await self.country_repository.list_all()}
+        states = {s.id: s.name for s in await self.state_repository.list_all()}
+
+        rows = []
+        for idx, c in enumerate(cities, start=1):
+            status_val = c.status.value.capitalize() if hasattr(c.status, "value") else str(c.status or "").capitalize()
+            rows.append(
+                {
+                    "Sr. No.": idx,
+                    "City Name": c.name,
+                    "Province / Region": states.get(c.state_id, ""),
+                    "Country": countries.get(c.country_id, ""),
+                    "Status": status_val,
+                }
+            )
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)
         return build_excel_export(EXPORT_HEADERS, rows, sheet_title="Cities")

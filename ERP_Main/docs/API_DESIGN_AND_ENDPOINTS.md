@@ -15,6 +15,68 @@
 | `POST` | `/api/v1/auth/logout` | Revoke session and blacklist tokens | Authenticated |
 | `GET` | `/api/v1/auth/me` | Fetch active user profile and effective platform roles | Authenticated |
 | `POST` | `/api/v1/global/ecosystem-session/establish` | Establishes cross-subdomain ecosystem session cookie (`ihm_ecosystem_session`) | Authenticated |
+| `GET` | `/api/v1/global/ecosystem-session/{session_id}` | Live DB verification of central ecosystem session & allowed ERPs | Public / Spoke |
+| `POST` | `/api/v1/global/ecosystem-session/exchange` | Exchange verified central session for authenticated user token | Session ID + Email |
+| `POST` | `/api/v1/global/ecosystem-session/{session_id}/revoke` | Revoke central ecosystem session across all ERPs | Authenticated |
+
+### Ecosystem Session Verification Contract (`GET /api/v1/global/ecosystem-session/{session_id}`)
+
+To avoid spurious "false logout" loops during inter-ERP switching or control-plane server restarts, this endpoint enforces a 3-way disambiguated status contract:
+
+1. **Active & Valid Session (`HTTP 200`):**
+   ```json
+   {
+     "success": true,
+     "data": {
+       "valid": true,
+       "session": {
+         "session_id": "c138f...-...",
+         "user_id": "00000000-0000-0000-0000-000000000001",
+         "email": "admin@inhyma.com",
+         "role": "super_admin",
+         "accessible_erps": ["erp-01", "erp-02", "inhyma", "yinglima"],
+         "primary_erp": "erp-01",
+         "expires_at": "2026-10-17T10:00:00Z"
+       },
+       "revoked": false,
+       "notFound": false
+     }
+   }
+   ```
+
+2. **Session Not Found / Expired (`HTTP 200`):**
+   - Returned when the session ID does not match any active in-memory or persisted DB record (e.g. wiped after backend restart or invalid cookie).
+   - **Crucial Invariant:** Returns `revoked: false` and `notFound: true`.
+   - Spoke frontends and background watchers treat `notFound` as an ignorable state, retaining the local authenticated session rather than triggering an aggressive `FORCE_LOGOUT` purge.
+   ```json
+   {
+     "success": true,
+     "data": {
+       "valid": false,
+       "session": null,
+       "revoked": false,
+       "notFound": true,
+       "reason": "Session not found"
+     }
+   }
+   ```
+
+3. **Explicitly Revoked Session (`HTTP 200`):**
+   - Returned ONLY when a user actively clicks "Logout" or an administrator revokes the session.
+   - Sets `revoked: true` and `notFound: false`.
+   - All spoke ERP instances immediately invalidate local JWTs, clear storage, and redirect the user to `/login`.
+   ```json
+   {
+     "success": true,
+     "data": {
+       "valid": false,
+       "session": null,
+       "revoked": true,
+       "notFound": false,
+       "reason": "Session explicitly revoked by user logout"
+     }
+   }
+   ```
 
 ---
 
@@ -77,3 +139,13 @@
 | `GET` | `/api/v1/projections/search` | Federated full-text search across all ERP projections | `search.read` |
 | `POST` | `/api/v1/exports/create` | Queue background asynchronous CSV/XLSX export job | `exports.create` |
 | `GET` | `/api/v1/exports/status/{id}` | Inspect status and download signed artifact URL | `exports.read` |
+
+---
+
+## 7. Internal Spoke Federation & Password Synchronization (`/internal`)
+
+| Method | Endpoint URI | Description | Auth Required |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/internal/users/password` | Ingest password changed on a spoke ERP, update central credentials, and fan out to active spoke memberships | Internal Service Bearer + `X-ERP-Key` |
+| `GET` | `/api/v1/internal/memberships/by-local-user/{local_user_id}` | Query central membership metadata linked to a local spoke user record | Internal Service Bearer + `X-ERP-Key` |
+

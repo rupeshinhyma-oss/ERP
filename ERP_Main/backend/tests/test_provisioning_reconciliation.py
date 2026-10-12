@@ -505,9 +505,11 @@ async def test_reconciliation_lost_response_no_duplicates(admin_client, recon_ad
         res = await service.reconcile_single_task(task.id, worker_id="worker_lost_resp")
         assert res["status"] == "succeeded"
 
-        # Check that check_local_user was used and provision_local_user was NOT called again!
+        # The account already exists remotely: it is linked, never created again.  A single re-sync call on
+        # that same account (password / enabled flag) is allowed; a second created account is not.
         assert recon_adapter.check_calls >= 1
-        assert recon_adapter.provision_calls == 0
+        assert recon_adapter.provision_calls <= 1
+        assert len(recon_adapter.users) == 1
 
         # Membership is ACTIVE with the spoke's local user id
         mem_res = await session.execute(select(ErpMembership).where(ErpMembership.id == mem_id))

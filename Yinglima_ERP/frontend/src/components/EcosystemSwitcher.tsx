@@ -139,8 +139,13 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
    */
   const handleSwitch = (hostUrl: string) => {
     setOpen(false);
-    const target = createSsoHandoverUrl(hostUrl);
-    window.location.href = target;
+    try {
+      const target = createSsoHandoverUrl(hostUrl);
+      window.location.href = target;
+    } catch (err) {
+      console.error("Failed to generate switch URL:", err);
+      window.location.href = hostUrl;
+    }
   };
 
   return (

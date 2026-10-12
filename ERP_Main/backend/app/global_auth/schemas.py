@@ -48,8 +48,11 @@ class GlobalUserProfile(BaseModel):
     display_name: str
     primary_email: str
     status: str
+    metadata: dict | None = Field(default=None, validation_alias="metadata_json", serialization_alias="metadata")
+    role: str | None = None
+    permissions: list[str] = Field(default_factory=list)
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class GlobalChangePasswordRequest(BaseModel):
