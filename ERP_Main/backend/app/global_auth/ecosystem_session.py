@@ -40,6 +40,7 @@ from app.platform_auth.models import PlatformAdmin, PlatformAdminRole
 from app.platform_auth.security import create_platform_access_token, verify_password as verify_platform_password
 
 router = APIRouter(prefix="/global/ecosystem-session", tags=["Ecosystem Unified Session"])
+logger = logging.getLogger(__name__)
 
 # In-memory synchronized session cache for fast sub-millisecond lookups across all origins
 _ECOSYSTEM_SESSION_STORE: Dict[str, Dict[str, Any]] = {}
