@@ -162,6 +162,10 @@ def main() -> None:
 
     if not args.skip_migrate:
         _run_step(
+            "Reconciling database migration version pointer (Runbook RB-03)",
+            [python, "-m", "scripts.reconcile_alembic_version"],
+        )
+        _run_step(
             "Applying database migrations (alembic upgrade head)",
             _get_alembic_command(python),
         )
