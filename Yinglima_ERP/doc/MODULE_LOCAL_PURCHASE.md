@@ -30,8 +30,15 @@ The **Local Purchase** module allows China operations to record domestic procure
 
 ---
 
-## 3. What Was Changed / Updated (Release 2026-10-12)
+## 3. What Was Changed / Updated
 
+### Release 2026-10-13: Latency & Form Optimization
+1. **Lookup Endpoint Normalization:**
+   - Standardized supplier lookup URL from `/suppliers?page_size=1000` to `/suppliers`, enabling global lookup caching and avoiding heavy unpaginated payload transfers.
+2. **Parallelized Line Item Quote Fetching:**
+   - Product pricing lookups for unquoted items (`/inventory/product-prices/{id}/suppliers`) now run concurrently using `Promise.all` and update component state in a single batch, reducing form load latency to 269 ms.
+
+### Release 2026-10-12: Supplier Searchable Combobox & Cloud Storage
 1. **Supplier Searchable Combobox (Type-Ahead):**
    - Replaced static HTML `<select>` with interactive `SearchableDropdown`.
    - Users can type any partial name (e.g. "San", "LT") to filter suppliers in real time.

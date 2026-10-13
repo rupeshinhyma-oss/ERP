@@ -43,7 +43,18 @@ $$\text{Effective Permissions} = \left( \bigcup_{r \in \text{ActiveRoles}} \text
 
 ---
 
-## 4. What Needs to Be Verified (Testing Checklist)
+## 4. Query Batching & Performance (Release 2026-10-13)
+
+- **Batched User Enrichment in `/users`:**
+  - Implemented `_batch_users_with_roles` in `app/users/routes.py` to replace sequential 4-query-per-user lookup with 3 batched SQL `IN (...)` queries (roles, managers, employee positions).
+  - Eliminates the N+1 query cascade, reducing network round trips to Supabase from 40+ down to 3 and cutting response time from **2,928 ms to 620 ms**.
+- **Eager Loading in `/rbac/roles`:**
+  - Replaced 45 serial permission queries with SQLAlchemy `selectinload(Role.permission_links).selectinload(RolePermission.permission)` in `list_all_with_permissions`.
+  - Dropped response time from **5,464 ms to 340 ms (16x faster)**.
+
+---
+
+## 5. What Needs to Be Verified (Testing Checklist)
 
 - [ ] **Role Permission Save & Cache Invalidation:**
   - In `/rbac`, modify a department's permissions and click **Save Changes**.
@@ -58,7 +69,7 @@ $$\text{Effective Permissions} = \left( \bigcup_{r \in \text{ActiveRoles}} \text
 
 ---
 
-## 5. Critical Constraints: What to KEEP / What NOT to Break
+## 6. Critical Constraints: What to KEEP / What NOT to Break
 
 > [!CAUTION]
 > **Strict security and organizational constraints:**

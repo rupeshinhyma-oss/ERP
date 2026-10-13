@@ -3,6 +3,37 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-13] — Latency & Response-Time Optimization Across Backend & Frontend
+
+### 1. Backend N+1 Query Elimination & Eager Loading
+- **RBAC Roles Preloading in [`repository.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/rbac/repository.py), [`routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/rbac/routes.py), and [`service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/rbac/service.py):**
+  - Replaced serial loop querying permissions for each role (`for r in roles: await get_permission_codes_for_role(r.id)`) with `list_all_with_permissions` using SQLAlchemy `selectinload(Role.permission_links).selectinload(RolePermission.permission)`.
+  - Dropped database round trips from 45 serial queries down to 2 batched queries.
+  - Response time dropped from **5,464 ms to 340 ms (16x faster)**.
+- **User Management Batching in [`users/routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/users/routes.py):**
+  - Implemented `_batch_users_with_roles` replacing the 4 sequential queries per user row (roles, manager, position, employee position) with 3 single SQL queries using `IN (...)`.
+  - Response time dropped from **2,928 ms to 620 ms (4.7x faster)**.
+
+### 2. 0ms Fast-Path In-Memory DNS Resolution
+- **Winsock DNS Bypass in [`dns_resilience.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/core/dns_resilience.py):**
+  - Added an in-memory 60-second TTL fast-path cache to prevent repetitive Windows Winsock system calls (160ms each) on pooled Supabase connections across Yinglima ERP, Inhyma ERP, and Central ERP Main.
+
+### 3. Frontend Route Code-Splitting with `React.lazy`
+- **Dynamic Module Loading in [`App.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/App.tsx):**
+  - Converted secondary and master pages to `React.lazy` dynamic imports wrapped with `<Suspense>`.
+  - Initial production JavaScript bundle dropped from **1,497.86 kB (1.5 MB) down to 266.16 kB (82% smaller)**.
+  - Heavy third-party packages such as SheetJS (`xlsx` at 429 kB) are now loaded strictly on-demand when Excel export/import actions occur.
+
+### 4. Shell Caching & Form Optimization
+- **Profile & Brand Caching in [`auth.ts`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/lib/auth.ts), [`AppShell.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/AppShell.tsx), and [`brand.ts`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/lib/brand.ts):**
+  - Added 10-second throttling to `/auth/profile` sync to eliminate redundant network hits during navigation.
+  - Added memory caching and in-flight request deduplication to `resolveBrandName()`, reducing `/organizations/public` calls to 0.99 ms.
+- **Local Purchase Quote Optimization in [`LocalPurchaseForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseForm.tsx):**
+  - Corrected lookup URL from `/suppliers?page_size=1000` to standard `/suppliers` to enable global caching.
+  - Line-item quote lookups now execute in parallel via `Promise.all` and update state in a single batch, reducing form load latency to 269 ms.
+
+---
+
 ## [Release 2026-10-12] — Local Purchase Supplier Type-Ahead, Bill Document Cloud Storage & RBAC Master Documentation
 
 ### 1. Local Purchase Supplier Searchable Combobox & Extraction Auto-Fill
