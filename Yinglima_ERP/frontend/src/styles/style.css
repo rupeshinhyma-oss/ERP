@@ -349,27 +349,7 @@ svg {
   z-index: 500;
 }
 
-.topbar-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  width: 320px;
-  max-width: 40vw;
-  color: var(--color-muted);
-}
 
-.topbar-search input {
-  border: none;
-  background: transparent;
-  outline: none;
-  font-size: 13.5px;
-  width: 100%;
-  color: var(--color-text);
-}
 
 .topbar-spacer {
   flex: 1;
@@ -468,28 +448,6 @@ svg {
   box-sizing: border-box;
 }
 
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-muted);
-  font-size: 12px;
-  margin-bottom: 2px;
-}
-
-.breadcrumb a {
-  color: var(--color-muted);
-}
-
-.breadcrumb .sep {
-  opacity: 0.6;
-}
-
-.breadcrumb .current {
-  color: var(--color-text);
-  font-weight: 600;
-}
-
 .page-header {
   display: flex;
   align-items: flex-start;
@@ -499,16 +457,14 @@ svg {
   flex-wrap: wrap;
 }
 
-.page-header h1 {
-  font-size: 19px;
+/* Module page heading -- the single place to change heading size/weight for every page. */
+.page-header h1,
+.page-title {
+  font-size: 22px;
   font-weight: 700;
-  margin: 0 0 2px;
+  color: #0f172a;
+  margin: 0;
   letter-spacing: -0.01em;
-}
-
-.page-header .page-subtitle {
-  color: var(--color-muted);
-  font-size: 12.5px;
 }
 
 .page-header-actions {
@@ -1773,9 +1729,6 @@ td .cell-secondary {
     margin-left: 72px;
   }
 
-  .topbar-search {
-    width: auto;
-  }
 }
 
 /* ==========================================================================

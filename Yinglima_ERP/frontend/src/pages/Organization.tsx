@@ -12,7 +12,6 @@
 
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can } from "@/components/ui";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
@@ -183,14 +182,9 @@ export function OrganizationPage() {
   return (
     <AppShell activeKey="organization">
       <main className="page">
-        <Breadcrumb trail={["Settings", "ERP Settings"]} />
         <div className="page-header">
           <div>
             <h1>ERP Settings</h1>
-            <div className="page-subtitle">
-              Your company's profile, used throughout the ERP and shown as the sidebar's brand
-              name.
-            </div>
           </div>
           {!editing && (
             <div className="page-header-actions">

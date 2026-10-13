@@ -10,7 +10,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
@@ -166,22 +165,16 @@ export function LocalPurchasesPage() {
   return (
     <AppShell activeKey="local-purchases">
       <main className="page" style={{ width: "100%", padding: "16px 24px" }}>
-        {/* Header Breadcrumb */}
-        <Breadcrumb trail={["Purchase", "Local Purchase"]} />
-
         {/* Page Header Bar */}
         <div className="page-header" style={{ marginBottom: "16px" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#0f172a" }}>
+              <h1 className="page-title">
                 Local Purchases
               </h1>
               <span className="badge badge-info" style={{ fontSize: "12px", padding: "3px 8px", fontWeight: 600 }}>
                 {total} Records
               </span>
-            </div>
-            <div className="page-subtitle" style={{ marginTop: "4px", color: "#64748b", fontSize: "13px" }}>
-              Domestic vendor procurement, factory invoices, landing costs & bill extractions
             </div>
           </div>
 

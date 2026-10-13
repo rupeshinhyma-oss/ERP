@@ -18,7 +18,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
@@ -172,6 +171,23 @@ function StatusPill({ value }: { value?: string | null }) {
             ? "No"
             : value;
   return <span className={`badge ${cls}`}>{label}</span>;
+}
+
+function getMediaBadge(url: string) {
+  const lower = url.toLowerCase();
+  if (lower.includes("youtube.com") || lower.includes("youtu.be")) {
+    return { icon: "▶️", label: "YouTube Video", bg: "#fef2f2", border: "#fecaca", text: "#b91c1c" };
+  }
+  if (lower.includes("drive.google.com")) {
+    return { icon: "📁", label: "Google Drive", bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" };
+  }
+  if (lower.includes("onedrive") || lower.includes("sharepoint.com")) {
+    return { icon: "📂", label: "OneDrive", bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d" };
+  }
+  if (lower.includes("vimeo.com")) {
+    return { icon: "🎬", label: "Vimeo", bg: "#faf5ff", border: "#e9d5ff", text: "#7e22ce" };
+  }
+  return { icon: "🎥", label: "Video Link", bg: "#f8fafc", border: "#cbd5e1", text: "#334155" };
 }
 
 function extractSubscriberNumber(val: string | undefined | null): string {
@@ -1477,7 +1493,7 @@ export function SuppliersPage() {
         secondary_website: supplier.secondary_website || "",
         supplier_grade: supplier.supplier_grade || "",
         current_status: supplier.current_status || "",
-        potential: supplier.potential || "",
+        potential: supplier.potential ? supplier.potential.toLowerCase() : "",
         potential_reason: supplier.potential_reason || "",
         secondary_products_description: supplier.secondary_products_description || "",
         visited_factory_office: String(supplier.visited_factory_office),
@@ -2065,15 +2081,10 @@ export function SuppliersPage() {
     return (
       <AppShell activeKey="suppliers" pageClassName="page-suppliers">
         <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
-          <Breadcrumb trail={["Supplier Profiles", "Import Suppliers"]} />
-
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>Import Suppliers</h1>
-              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                Upload bulk supplier accounts, contacts, and sourcing capabilities from Excel (.xlsx, .xls) or CSV.
-              </div>
+              <h1 className="page-title">Import Suppliers</h1>
             </div>
             <button
               type="button"
@@ -2445,12 +2456,9 @@ export function SuppliersPage() {
           {/* Header Bar with Back Button */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+              <h1 className="page-title">
                 {modalMode === "quick" ? "Add Supplier (Quick)" : (currentSupplierId ? "Edit Supplier" : "Add Supplier")}
               </h1>
-              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
-                {modalMode === "quick" ? "Fill primary supplier details for quick creation." : "Complete the supplier details below."}
-              </div>
             </div>
             <button
               type="button"
@@ -3037,10 +3045,10 @@ export function SuppliersPage() {
                         <option value="new" disabled={lockNewStatus}>New</option>
                         <option value="existing">Existing</option>
                       </SelectField>
-                      <SelectField id="potential" label="Potential (Yes / No)" value={form.potential} onChange={(v) => setField("potential", v)}>
+                      <SelectField id="potential" label="Potential (Yes / No)" value={form.potential ? form.potential.toLowerCase() : ""} onChange={(v) => setField("potential", v.toLowerCase())}>
                         <option value="">Select Potential</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
                       </SelectField>
                     </div>
 
@@ -3864,13 +3872,9 @@ export function SuppliersPage() {
         </main>
       ) : (
         <main className="page">
-          <Breadcrumb trail={["Supplier Profiles"]} />
-          <div className="page-header">
+          <div className="page-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
             <div>
-              <h1>Supplier Profiles</h1>
-              <div className="page-subtitle">
-                Supplier directory, contacts, product categories, and sourcing status.
-              </div>
+              <h1 className="page-title">Supplier Profiles</h1>
             </div>
             <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <button
@@ -4761,73 +4765,328 @@ export function SuppliersPage() {
         }}
       />
 
-      {drawerSupplier && (
-        <SideDrawer
-          open={Boolean(drawerSupplier)}
-          title={`Supplier Detail #${drawerSupplier.company_name}`}
-          subtitle={`Supplier Type: ${drawerSupplier.supplier_type || "—"} | Status: ${drawerSupplier.is_active ? "Active" : "Inactive"}`}
-          onClose={handleCloseDrawer}
-          onEdit={
-            canUpdate
-              ? () => {
-                const id = drawerSupplier.id;
-                handleCloseDrawer();
-                void handleRowEdit(id);
-              }
-              : undefined
-          }
-          editLabel="✏️ Edit Supplier"
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <DetailFieldGrid
-              fields={[
-                { label: "Company Name", value: drawerSupplier.company_name, fullWidth: true },
-                { label: "Supplier Type", value: drawerSupplier.supplier_type || "—" },
-                { label: "Brand Description", value: drawerSupplier.brand_description || "—" },
-                { label: "Country", value: resolver.get("countries", drawerSupplier.country_id) || "—" },
-                { label: "Province / State", value: resolver.get("states", drawerSupplier.state_id) || "—" },
-                { label: "City", value: resolver.get("cities", drawerSupplier.city_id) || "—" },
-                { label: "Product Categories", value: chipList(drawerSupplier.category_ids, "categories"), fullWidth: true },
-                { label: "Sub-Categories", value: chipList(drawerSupplier.sub_category_ids, "subCategories"), fullWidth: true },
-                { label: "Products Supplied", value: chipList(drawerSupplier.product_ids, "products"), fullWidth: true },
-                { label: "Secondary Products", value: drawerSupplier.secondary_products_description || "—", fullWidth: true },
-                { label: "Address", value: drawerSupplier.address || "—", fullWidth: true },
-              ]}
-            />
+      {drawerSupplier && (() => {
+        const visitMediaRaw = drawerSupplier.visit_media || [];
+        const photoUrls = visitMediaRaw.filter((u) => !u.startsWith("http") || u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) || u.includes("/storage/v1/object/public/"));
+        const videoUrls = visitMediaRaw.filter((u) => u.startsWith("http") && !u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) && !u.includes("/storage/v1/object/public/"));
 
-            <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a" }}>
-                Primary Contact Information
-              </h4>
-              <DetailFieldGrid
-                fields={[
-                  {
-                    label: "Full Name",
-                    value: `${drawerSupplier.contact_salutation || ""} ${drawerSupplier.contact_full_name || ""}`.trim() || "—",
-                  },
-                  { label: "Designation", value: drawerSupplier.contact_designation || "—" },
-                  { label: "Calling Number", value: drawerSupplier.contact_calling_number || "—" },
-                  { label: "WhatsApp Number", value: drawerSupplier.contact_whatsapp_number || "—" },
-                  { label: "WeChat Number", value: drawerSupplier.contact_wechat_number || "—" },
-                  { label: "Email Addresses", value: drawerSupplier.emails && drawerSupplier.emails.length ? drawerSupplier.emails.join(", ") : "—", fullWidth: true },
-                  { label: "Primary Website", value: drawerSupplier.primary_website || "—" },
-                  { label: "Secondary Website", value: drawerSupplier.secondary_website || "—" },
-                ]}
-              />
+        return (
+          <SideDrawer
+            open={Boolean(drawerSupplier)}
+            title={`Supplier Detail #${drawerSupplier.company_name}`}
+            subtitle={`Supplier Type: ${drawerSupplier.supplier_type || "—"} | Status: ${drawerSupplier.is_active ? "Active" : "Inactive"}`}
+            onClose={handleCloseDrawer}
+            cardStyle={{ maxWidth: "720px", width: "100%" }}
+            onEdit={
+              canUpdate
+                ? () => {
+                  const id = drawerSupplier.id;
+                  handleCloseDrawer();
+                  void handleRowEdit(id);
+                }
+                : undefined
+            }
+            editLabel="✏️ Edit Supplier"
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* CARD 1: Company Profile & Classification */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  🏢 Company Profile &amp; Classification
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    { label: "Company Name", value: drawerSupplier.company_name, fullWidth: true },
+                    { label: "Supplier Type", value: drawerSupplier.supplier_type ? drawerSupplier.supplier_type.toUpperCase() : "—" },
+                    { label: "Brand Description", value: drawerSupplier.brand_description || "—" },
+                    { label: "Tax ID / GST Number", value: drawerSupplier.tax_id_number || "—" },
+                    { label: "Town", value: drawerSupplier.town || "—" },
+                    { label: "Country", value: resolver.get("countries", drawerSupplier.country_id) || "—" },
+                    { label: "Province / State", value: resolver.get("states", drawerSupplier.state_id) || "—" },
+                    { label: "City", value: resolver.get("cities", drawerSupplier.city_id) || "—" },
+                    { label: "Address", value: drawerSupplier.address || "—", fullWidth: true },
+                    { label: "Product Categories", value: chipList(drawerSupplier.category_ids, "categories"), fullWidth: true },
+                    { label: "Sub-Categories", value: chipList(drawerSupplier.sub_category_ids, "subCategories"), fullWidth: true },
+                    { label: "Products Supplied", value: chipList(drawerSupplier.product_ids, "products"), fullWidth: true },
+                    { label: "Secondary Products", value: drawerSupplier.secondary_products_description || "—", fullWidth: true },
+                  ]}
+                />
+              </div>
+
+              {/* CARD 2: Primary Contact & Websites */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  👤 Primary Contact Information
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    {
+                      label: "Contact Person",
+                      value: `${drawerSupplier.contact_salutation || ""} ${drawerSupplier.contact_full_name || ""}`.trim() || "—",
+                    },
+                    { label: "Designation", value: drawerSupplier.contact_designation || "—" },
+                    {
+                      label: "Calling Number",
+                      value: drawerSupplier.contact_calling_number ? (
+                        <a href={`tel:${drawerSupplier.contact_calling_number}`} style={{ color: "#0061f2", textDecoration: "none", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                          📞 {drawerSupplier.contact_calling_number}
+                        </a>
+                      ) : "—",
+                    },
+                    {
+                      label: "WhatsApp Number",
+                      value: drawerSupplier.contact_whatsapp_number ? (
+                        <a
+                          href={`https://wa.me/${drawerSupplier.contact_whatsapp_number.replace(/[^0-9]/g, "")}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#16a34a", textDecoration: "none", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}
+                        >
+                          💬 {drawerSupplier.contact_whatsapp_number} ↗
+                        </a>
+                      ) : "—",
+                    },
+                    {
+                      label: "WeChat Number",
+                      value: drawerSupplier.contact_wechat_number ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#059669", fontWeight: 500 }}>
+                          🗨️ {drawerSupplier.contact_wechat_number}
+                        </span>
+                      ) : "—",
+                    },
+                    {
+                      label: "Email Addresses",
+                      value: drawerSupplier.emails && drawerSupplier.emails.length ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                          {drawerSupplier.emails.map((em) => (
+                            <a
+                              key={em}
+                              href={`mailto:${em}`}
+                              style={{
+                                color: "#2563eb",
+                                background: "#eff6ff",
+                                border: "1px solid #bfdbfe",
+                                borderRadius: "4px",
+                                padding: "2px 8px",
+                                fontSize: "12.5px",
+                                fontWeight: 500,
+                                textDecoration: "none",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              ✉️ {em}
+                            </a>
+                          ))}
+                        </div>
+                      ) : "—",
+                      fullWidth: true,
+                    },
+                    {
+                      label: "Primary Website",
+                      value: drawerSupplier.primary_website ? (
+                        <a
+                          href={drawerSupplier.primary_website.startsWith("http") ? drawerSupplier.primary_website : `https://${drawerSupplier.primary_website}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#0284c7", textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "4px" }}
+                        >
+                          🌐 {drawerSupplier.primary_website.replace(/^https?:\/\/(www\.)?/, "")} ↗
+                        </a>
+                      ) : "—",
+                    },
+                    {
+                      label: "Secondary Website",
+                      value: drawerSupplier.secondary_website ? (
+                        <a
+                          href={drawerSupplier.secondary_website.startsWith("http") ? drawerSupplier.secondary_website : `https://${drawerSupplier.secondary_website}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#0284c7", textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "4px" }}
+                        >
+                          🌐 {drawerSupplier.secondary_website.replace(/^https?:\/\/(www\.)?/, "")} ↗
+                        </a>
+                      ) : "—",
+                    },
+                  ]}
+                />
+              </div>
+
+              {/* CARD 3: Factory Visit & Media */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  🏭 Factory Visit &amp; Inspection Media
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    {
+                      label: "Visited Factory / Office",
+                      value: drawerSupplier.visited_factory_office ? (
+                        <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: 600 }}>
+                          ✓ Yes, Visited
+                        </span>
+                      ) : (
+                        <span style={{ background: "#f1f5f9", color: "#64748b", padding: "2px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: 600 }}>
+                          No
+                        </span>
+                      ),
+                    },
+                    {
+                      label: "Visit Remarks",
+                      value: drawerSupplier.visit_remarks || "—",
+                    },
+                    {
+                      label: "Factory Video / Inspection Folder Links",
+                      value: videoUrls.length > 0 ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                          {videoUrls.map((url, idx) => {
+                            const meta = getMediaBadge(url);
+                            return (
+                              <a
+                                key={idx}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  background: meta.bg,
+                                  border: `1px solid ${meta.border}`,
+                                  color: meta.text,
+                                  borderRadius: "6px",
+                                  padding: "4px 10px",
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                  textDecoration: "none",
+                                }}
+                              >
+                                <span>{meta.icon}</span>
+                                <span>{meta.label}</span>
+                                <span style={{ fontSize: "11px", opacity: 0.8 }}>↗</span>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      ) : "—",
+                      fullWidth: true,
+                    },
+                    ...(photoUrls.length > 0
+                      ? [
+                        {
+                          label: "Factory Photos / Media Attachments",
+                          value: (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+                              {photoUrls.map((pUrl, pIdx) => (
+                                <a
+                                  key={pIdx}
+                                  href={pUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: "inline-block",
+                                    width: "68px",
+                                    height: "68px",
+                                    borderRadius: "6px",
+                                    overflow: "hidden",
+                                    border: "1px solid #cbd5e1",
+                                  }}
+                                >
+                                  <img src={pUrl} alt={`Visit attachment ${pIdx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                </a>
+                              ))}
+                            </div>
+                          ),
+                          fullWidth: true,
+                        },
+                      ]
+                      : []),
+                  ]}
+                />
+              </div>
+
+              {/* CARD 4: Pipeline Status & Evaluation */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  📊 Pipeline Status &amp; Commercial Evaluation
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    { label: "Supplier Grade", value: drawerSupplier.supplier_grade ? `Grade ${drawerSupplier.supplier_grade.toUpperCase()}` : "—" },
+                    { label: "Current Status", value: <StatusPill value={drawerSupplier.current_status} /> },
+                    {
+                      label: "Potential (Yes / No)",
+                      value: drawerSupplier.potential ? (
+                        <span
+                          style={{
+                            background: drawerSupplier.potential.toLowerCase() === "yes" ? "#dcfce7" : "#fee2e2",
+                            color: drawerSupplier.potential.toLowerCase() === "yes" ? "#166534" : "#991b1b",
+                            padding: "2px 8px",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {drawerSupplier.potential.toUpperCase()}
+                        </span>
+                      ) : "—",
+                    },
+                    { label: "Reason for Potential Status", value: drawerSupplier.potential_reason || "—", fullWidth: true },
+                    { label: "Overall Remarks / Key Strengths", value: drawerSupplier.overall_remarks || "—", fullWidth: true },
+                  ]}
+                />
+              </div>
+
+              {/* CARD 5: Additional Contacts */}
+              {drawerSupplier.contacts && drawerSupplier.contacts.length > 0 && (
+                <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                  <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                    👥 Additional Contacts ({drawerSupplier.contacts.length})
+                  </h4>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {drawerSupplier.contacts.map((c, i) => (
+                      <div key={c.id || i} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 16px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
+                          <div>
+                            <span style={{ fontWeight: 700, color: "#0f172a", fontSize: "13.5px" }}>
+                              {c.salutation ? `${c.salutation} ` : ""}{c.person_name}
+                            </span>
+                            {c.designation && <span style={{ color: "#64748b", fontSize: "12.5px", marginLeft: "6px" }}>• {c.designation}</span>}
+                          </div>
+                          {c.handling_territory && (
+                            <span style={{ fontSize: "11px", fontWeight: 600, background: "#e0f2fe", color: "#0369a1", padding: "1px 6px", borderRadius: "4px" }}>
+                              📍 {c.handling_territory}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", fontSize: "12.5px", color: "#334155" }}>
+                          {c.calling_number && (
+                            <a href={`tel:${c.calling_number}`} style={{ color: "#0061f2", textDecoration: "none", fontWeight: 500 }}>
+                              📞 {c.calling_number}
+                            </a>
+                          )}
+                          {c.whatsapp_number && (
+                            <a href={`https://wa.me/${c.whatsapp_number.replace(/[^0-9]/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ color: "#16a34a", textDecoration: "none", fontWeight: 500 }}>
+                              💬 {c.whatsapp_number}
+                            </a>
+                          )}
+                          {c.wechat_number && <span>🗨️ {c.wechat_number}</span>}
+                          {c.email && (
+                            <a href={`mailto:${c.email}`} style={{ color: "#2563eb", textDecoration: "none", fontWeight: 500 }}>
+                              ✉️ {c.email}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-
-            <DetailFieldGrid
-              fields={[
-                { label: "Supplier Grade", value: drawerSupplier.supplier_grade || "—" },
-                { label: "Current Status", value: <StatusPill value={drawerSupplier.current_status} /> },
-                { label: "Potential", value: drawerSupplier.potential || "—" },
-                { label: "Visited Factory/Office", value: drawerSupplier.visited_factory_office ? "Yes" : "No" },
-                { label: "Overall Remarks", value: drawerSupplier.overall_remarks || "—", fullWidth: true },
-              ]}
-            />
-          </div>
-        </SideDrawer>
-      )}
+          </SideDrawer>
+        );
+      })()}
 
       <TrashConflictModal
         isOpen={Boolean(trashConflict)}

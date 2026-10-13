@@ -8,7 +8,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Modal, TableMessageRow } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { apiGet, toQueryString } from "@/lib/api";
@@ -281,14 +280,9 @@ export function AuditPage() {
   return (
     <AppShell activeKey="audit" pageClassName="page-audit">
       <main className="page">
-        <Breadcrumb trail={["Audit Log"]} />
         <div className="page-header">
           <div>
             <h1>Audit Log</h1>
-            <div className="page-subtitle">
-              A read-only trail of every create, update, delete, login, import, and export
-              action.
-            </div>
           </div>
         </div>
         <Banner error={error} />

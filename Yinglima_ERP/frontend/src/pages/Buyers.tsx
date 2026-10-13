@@ -21,7 +21,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption } from "@/components/SearchableDropdown";
@@ -1476,15 +1475,10 @@ export function BuyersPage() {
     return (
       <AppShell activeKey="buyers">
         <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
-          <Breadcrumb trail={["Buyer Profiles", "Import Buyers"]} />
-
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>Import Buyers</h1>
-              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                Upload bulk client accounts and contact profiles from Excel (.xlsx, .xls) or CSV.
-              </div>
+              <h1 className="page-title">Import Buyers</h1>
             </div>
             <button
               type="button"
@@ -1854,17 +1848,12 @@ export function BuyersPage() {
     return (
       <AppShell activeKey="buyers">
         <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
-          <Breadcrumb trail={["Buyer Profiles", modalMode === "create" ? "Add Buyer" : "Edit Buyer"]} />
-
           {/* Form Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+              <h1 className="page-title">
                 {modalMode === "create" ? "Add Buyer (Client) Profile" : `Edit Buyer Profile: ${form.company_name}`}
               </h1>
-              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                Complete company profile details and manage contact persons.
-              </div>
             </div>
             <button
               type="button"
@@ -2616,15 +2605,10 @@ export function BuyersPage() {
   return (
     <AppShell activeKey="buyers">
       <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
-        <Breadcrumb trail={["Buyer Profiles"]} />
-
         {/* Page Header matching Supplier Master Top Header Bar */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: "12px" }}>
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#0F172A", margin: 0 }}>Buyer (Client) Master</h1>
-            <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
-              Manage client accounts, contact persons, potential ratings, and sales pipeline statuses.
-            </div>
+            <h1 className="page-title">Buyer Profiles</h1>
           </div>
 
           {/* Action Header Button Bar matching Supplier Master */}

@@ -27,7 +27,6 @@ import {
 } from "@/lib/nav";
 import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/brand";
 import { ICONS, IconBell, IconChevronDown, IconChevronRight } from "./icons";
-import { UniversalSearch } from "./UniversalSearch";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
 import { getEcosystemCookie, globalEcosystemLogout, initEcosystemSessionWatcher, isExplicitlyLoggedOut, setEcosystemCookie, verifyCentralEcosystemSession } from "@/lib/ecosystemSession";
@@ -731,7 +730,6 @@ function Topbar() {
 
   return (
     <header className="topbar">
-      <UniversalSearch />
       <div className="topbar-spacer" />
       <div className="topbar-actions" ref={popoverRef} style={{ position: "relative", display: "flex", alignItems: "center", gap: "10px" }}>
         <EcosystemSwitcher currentKey="yinglima" />

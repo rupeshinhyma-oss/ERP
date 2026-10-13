@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
 import { Banner, Modal, TableMessageRow } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
@@ -959,13 +958,9 @@ export function UsersPage() {
   return (
     <AppShell activeKey="users" pageClassName="page-users">
       <main className="page">
-        <Breadcrumb trail={["System", "User Accounts & Passwords"]} />
         <div className="page-header">
           <div>
             <h1>User Accounts &amp; Passwords</h1>
-            <div className="page-subtitle">
-              Viewing users provisioned for this ERP application. User accounts, access provisioning, and active/disabled status are governed centrally from the ERP_Main Global Control Panel.
-            </div>
           </div>
           <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <span

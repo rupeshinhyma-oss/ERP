@@ -31,8 +31,6 @@ export function CitiesPage() {
       liveModule="cities"
       entityName="city"
       heading="City Master"
-      subtitle="Administrative cities, prefectures, and districts."
-      breadcrumbTrail={["Master Data", "Cities"]}
       newButtonLabel="+ ADD NEW CITY"
       searchPlaceholder="Search city name or Sr. No..."
       hideQuickAdd={true}

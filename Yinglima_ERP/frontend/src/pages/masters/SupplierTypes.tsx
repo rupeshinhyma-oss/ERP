@@ -17,8 +17,6 @@ export function SupplierTypesPage() {
       bulkActionPermission="suppliertype.bulk_action"
       entityName="supplier type"
       heading="Supplier Types"
-      subtitle="Manufacturer, Dealer / Trader, Agent, Importer, Service Provider, etc."
-      breadcrumbTrail={["Master Data", "Supplier Types"]}
       newButtonLabel="+ New Supplier Type"
       hideQuickAdd
       searchPlaceholder="Search name or Sr. No..."

@@ -15,22 +15,25 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, useLocation } from "react-router-dom";
+import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
-import { ItemPopoverCell } from "@/components/ItemPopoverCell";
+import { TrashConflictModal, type TrashConflictInfo } from "@/components/TrashConflictModal";
+import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
   SearchableDropdownMultiPanel,
   type DropdownOption,
 } from "@/components/SearchableDropdown";
-import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteField, autoTitleCase } from "@/components/fields";
-import { useLookup } from "@/lib/lookups";
+import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteField, VideoTagInput, autoTitleCase } from "@/components/fields";
+import { useLookup, useLookupNames } from "@/lib/lookups";
+import { useBodyScrollLock } from "@/lib/hooks";
 import { useLiveModule } from "@/lib/live/useLive";
+import { handleFormEnterKeyNavigation } from "@/lib/formUtils";
 
 function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return "";
@@ -61,7 +64,7 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { createNameResolver } from "@/lib/nameResolver";
-import { useAuth, useSrNoJump, usePendingGuard, useModalHistorySync } from "@/lib/hooks";
+import { useAuth, useSrNoJump, isSrNoQuery, usePendingGuard, useModalHistorySync } from "@/lib/hooks";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type {
@@ -69,6 +72,8 @@ import type {
   ImportSummary,
   PaginationMeta,
   Product,
+  ProductCategory,
+  ProductSubCategory,
   Supplier,
   SupplierContact,
 } from "@/types";
@@ -105,29 +110,6 @@ const SUPPLIER_IMPORT_HEADERS: ImportHeader[] = [
   { key: "Visit Remarks", label: "Visit Remarks" },
   { key: "Overall Remarks", label: "Overall Remarks" },
   { key: "Status", label: "Status" },
-];
-
-export interface SupplierTableColumn {
-  idx: number;
-  key: string;
-  label: string;
-  sortable: boolean;
-  align?: "left" | "center" | "right";
-  width?: string;
-  minWidth?: string;
-}
-
-export const SUPPLIER_TABLE_COLUMNS: SupplierTableColumn[] = [
-  { idx: 0, key: "checkbox", label: "Checkbox", sortable: false, align: "center", width: "45px" },
-  { idx: 1, key: "company_name", label: "Company Name", sortable: true, align: "left", minWidth: "220px" },
-  { idx: 2, key: "product_category", label: "Product Category", sortable: true, align: "left", minWidth: "150px" },
-  { idx: 3, key: "product_sub_category", label: "Product Sub Category", sortable: false, align: "left", minWidth: "160px" },
-  { idx: 4, key: "city_state", label: "City / State", sortable: false, align: "left", minWidth: "140px" },
-  { idx: 5, key: "grade", label: "Grade", sortable: false, align: "left", minWidth: "80px" },
-  { idx: 6, key: "type", label: "Type", sortable: true, align: "left", minWidth: "100px" },
-  { idx: 7, key: "current_status", label: "Current Status", sortable: true, align: "left", minWidth: "120px" },
-  { idx: 8, key: "potential", label: "Potential", sortable: true, align: "left", minWidth: "100px" },
-  { idx: 9, key: "action", label: "Action", sortable: false, align: "center", width: "65px" },
 ];
 
 type ModalTab = "first" | "second" | "contacts" | "continue";
@@ -189,6 +171,23 @@ function StatusPill({ value }: { value?: string | null }) {
             ? "No"
             : value;
   return <span className={`badge ${cls}`}>{label}</span>;
+}
+
+function getMediaBadge(url: string) {
+  const lower = url.toLowerCase();
+  if (lower.includes("youtube.com") || lower.includes("youtu.be")) {
+    return { icon: "▶️", label: "YouTube Video", bg: "#fef2f2", border: "#fecaca", text: "#b91c1c" };
+  }
+  if (lower.includes("drive.google.com")) {
+    return { icon: "📁", label: "Google Drive", bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" };
+  }
+  if (lower.includes("onedrive") || lower.includes("sharepoint.com")) {
+    return { icon: "📂", label: "OneDrive", bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d" };
+  }
+  if (lower.includes("vimeo.com")) {
+    return { icon: "🎬", label: "Vimeo", bg: "#faf5ff", border: "#e9d5ff", text: "#7e22ce" };
+  }
+  return { icon: "🎥", label: "Video Link", bg: "#f8fafc", border: "#cbd5e1", text: "#334155" };
 }
 
 function extractSubscriberNumber(val: string | undefined | null): string {
@@ -256,6 +255,14 @@ function SupplierSkeletonRows({
                 content = (
                   <div
                     className="skeleton-line"
+                    style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 2:
+                content = (
+                  <div
+                    className="skeleton-line"
                     style={{
                       width: nameWidths[rowIndex % nameWidths.length],
                       height: "15px",
@@ -264,39 +271,33 @@ function SupplierSkeletonRows({
                   />
                 );
                 break;
-              case 2:
-                content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: catWidths[rowIndex % catWidths.length], height: "14px", borderRadius: "4px" }}
-                  />
-                );
-                break;
               case 3:
                 content = (
-                  <div
-                    className="skeleton-line"
-                    style={{ width: "70px", height: "14px", borderRadius: "4px" }}
-                  />
+                  <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+                    <div
+                      className="skeleton-line"
+                      style={{
+                        width: catWidths[rowIndex % catWidths.length],
+                        height: "20px",
+                        borderRadius: "10px",
+                      }}
+                    />
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "32px", height: "20px", borderRadius: "10px" }}
+                    />
+                  </div>
                 );
                 break;
               case 4:
                 content = (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-                    <div className="skeleton-line" style={{ width: "65px", height: "13px", borderRadius: "3px" }} />
-                    <div className="skeleton-line" style={{ width: "48px", height: "11px", borderRadius: "3px" }} />
-                  </div>
-                );
-                break;
-              case 5:
-                content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "24px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "60px", height: "14px", borderRadius: "4px" }}
                   />
                 );
                 break;
-              case 6:
+              case 5:
                 content = (
                   <div
                     className="skeleton-line"
@@ -304,11 +305,19 @@ function SupplierSkeletonRows({
                   />
                 );
                 break;
+              case 6:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "70px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
               case 7:
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "45px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "48px", height: "14px", borderRadius: "4px" }}
                   />
                 );
                 break;
@@ -316,7 +325,7 @@ function SupplierSkeletonRows({
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "35px", height: "14px", borderRadius: "4px" }}
+                    style={{ width: "85px", height: "14px", borderRadius: "4px" }}
                   />
                 );
                 break;
@@ -324,7 +333,47 @@ function SupplierSkeletonRows({
                 content = (
                   <div
                     className="skeleton-line"
-                    style={{ width: "28px", height: "28px", borderRadius: "4px", margin: "0 auto" }}
+                    style={{ width: "50px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 10:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "75px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 11:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "60px", height: "20px", borderRadius: "12px" }}
+                  />
+                );
+                break;
+              case 12:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "42px", height: "22px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 13:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "50px", height: "20px", borderRadius: "12px" }}
+                  />
+                );
+                break;
+              case 14:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "32px", height: "26px", borderRadius: "4px", margin: "0 auto" }}
                   />
                 );
                 break;
@@ -338,9 +387,10 @@ function SupplierSkeletonRows({
                 style={{
                   padding: "10px 12px",
                   verticalAlign: "middle",
-                  width: colIdx === 0 ? "45px" : colIdx === 9 ? "65px" : undefined,
-                  minWidth: colIdx === 0 ? "45px" : colIdx === 9 ? "65px" : undefined,
-                  textAlign: colIdx === 0 || colIdx === 9 ? "center" : "left",
+                  width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                  minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                  maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
+                  textAlign: colIdx === 0 || colIdx === 1 || colIdx === 14 ? "center" : "left",
                   ...getFreezeStyle(colIdx, false),
                 }}
               >
@@ -354,8 +404,7 @@ function SupplierSkeletonRows({
   );
 }
 
-export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } = {}) {
-  const location = useLocation();
+export function SuppliersPage() {
   const { hasPermission } = useAuth();
   const canCreate = hasPermission("supplier.create");
   const canUpdate = hasPermission("supplier.update");
@@ -365,13 +414,14 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const canBulkAction = hasPermission("supplier.bulk_action");
   const canEditGrade = hasPermission("supplier.grade_edit");
   const canEditPotential = hasPermission("supplier.potential_edit");
+  const canEditCurrentStatus = hasPermission("supplier.currentstatus") || hasPermission("supplier.update");
 
   const [rows, setRows] = useState<Supplier[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(50);
   const [reloadCounter, setReloadCounter] = useState(0);
   const [namesVersion, setNamesVersion] = useState(0);
 
@@ -422,6 +472,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const [isImportPageOpen, setIsImportPageOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [importMode, setImportMode] = useState<"create" | "update">("create");
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [wizardPending, setWizardPending] = useState<{
     file: File;
@@ -434,36 +485,59 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerSupplier, setDrawerSupplier] = useState<Supplier | null>(null);
-  const [pinnedCols] = useState<Record<number, "left" | "right">>(() => {
-    const saved = localStorage.getItem("suppliers_pinned_cols_v2");
+  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
+    const saved = localStorage.getItem("suppliers_pinned_cols");
     if (saved !== null) {
       try {
-        const parsed = JSON.parse(saved);
-        const valid: Record<number, "left" | "right"> = {};
-        for (const k of Object.keys(parsed)) {
-          const num = Number(k);
-          if (num >= 0 && num < 10) valid[num] = parsed[k];
-        }
-        return valid;
+        return JSON.parse(saved);
       } catch {
         // fallback
       }
     }
-    return { 0: "left", 1: "left" };
+    return { 0: "left", 1: "left", 2: "left" };
   });
 
   useEffect(() => {
-    localStorage.setItem("suppliers_pinned_cols_v2", JSON.stringify(pinnedCols));
+    localStorage.setItem("suppliers_pinned_cols", JSON.stringify(pinnedCols));
   }, [pinnedCols]);
 
   const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
   const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
+  const [pinMenuOpen, setPinMenuOpen] = useState(false);
+  const pinMenuRef = useRef<HTMLDivElement>(null);
 
   const tableRef = useRef<HTMLTableElement>(null);
 
+  // Close popup menu when clicking outside anywhere on screen
+  useEffect(() => {
+    if (!pinMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
+        setPinMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [pinMenuOpen]);
+
+  const togglePin = useCallback((colIdx: number) => {
+    setPinnedCols((prev) => {
+      const next = { ...prev };
+      if (next[colIdx]) {
+        delete next[colIdx];
+      } else {
+        if (colIdx >= 13) {
+          next[colIdx] = "right";
+        } else {
+          next[colIdx] = "left";
+        }
+      }
+      return next;
+    });
+  }, []);
 
   const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: 10 }, (_, i) => i);
+    const allIndices = Array.from({ length: 15 }, (_, i) => i);
     const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
     const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
     const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
@@ -506,11 +580,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
 
     updateOffsets();
 
-    if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => updateOffsets());
-      ro.observe(tableEl);
-      return () => ro.disconnect();
-    }
+    const ro = new ResizeObserver(() => updateOffsets());
+    ro.observe(tableEl);
+    return () => ro.disconnect();
   }, [pinnedCols, rows, loading, displayOrder]);
 
   const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
@@ -564,6 +636,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
 
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
+  const [trashConflict, setTrashConflict] = useState<TrashConflictInfo | null>(null);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkSupplierId = searchParams.get("id");
@@ -579,6 +652,18 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+
+  const handleOpenDrawer = useCallback(async (supplier: Supplier) => {
+    setDrawerSupplier(supplier);
+    try {
+      const { data } = await apiGet<Supplier>(`/suppliers/${supplier.id}`);
+      if (data) {
+        setDrawerSupplier(data);
+      }
+    } catch (err) {
+      console.error("Failed to load full supplier detail for drawer:", err);
+    }
+  }, []);
 
   // Sync browser back arrow with modal & drawer so it closes them instead of
   // navigating back to Dashboard.
@@ -636,6 +721,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const [saving, setSaving] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const existingSuppliers = useLookup<Supplier>("/suppliers", 500);
+  const categoriesLookup = useLookup<ProductCategory>("/masters/product-categories", 500);
+  const subCategoriesLookup = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
+  const categoryNamesFallback = useLookupNames("/masters/product-categories");
+  const subCategoryNamesFallback = useLookupNames("/masters/product-sub-categories");
+  const productsLookup = useLookup<Product>("/masters/products", 500);
 
   async function resolveCountryPhoneCode(countryId: string | null): Promise<string> {
     if (!countryId) return "+86";
@@ -778,6 +868,21 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const [contactSameCallingWechat, setContactSameCallingWechat] = useState(false);
   const [drawerError, setDrawerError] = useState<unknown>(null);
   const [contactSubmitting, setContactSubmitting] = useState(false);
+
+  // Lock background scroll when contact drawer is active
+  useBodyScrollLock(contactFormOpen);
+
+  // Close contact drawer on Escape key
+  useEffect(() => {
+    if (!contactFormOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setContactFormOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [contactFormOpen]);
 
   useEffect(() => {
     if (!contactCountryId) {
@@ -975,7 +1080,12 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         "/suppliers" + toQueryString({ search: term, page: 1, page_size: 20 }),
         { signal }
       );
-      return data.map((d) => ({ value: d.company_name, label: d.company_name }));
+      return (data || []).map((d) => ({
+        value: d.company_name,
+        label: d.company_name,
+        sublabel: d.supplier_type || "Supplier",
+        group: "Existing Similar Suppliers",
+      }));
     },
     []
   );
@@ -1046,35 +1156,56 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       let valA: string | number = "";
       let valB: string | number = "";
       switch (sortColIndex) {
-        case 1:
+        case 1: {
+          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+          return sortDirection === "asc" ? tA - tB : tB - tA;
+        }
+        case 2:
           valA = a.company_name || "";
           valB = b.company_name || "";
           break;
-        case 2:
-          valA = (a.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ") || (a as any).category_name || "";
-          valB = (b.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ") || (b as any).category_name || "";
-          break;
         case 3:
-          valA = (a.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ") || (a as any).sub_category_name || "";
-          valB = (b.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ") || (b as any).sub_category_name || "";
+          valA = (a.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ");
+          valB = (b.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ");
           break;
         case 4:
-          valA = `${resolver.get("cities", a.city_id) || (a as any).city_name || a.town || ""}, ${resolver.get("states", a.state_id) || (a as any).state_name || ""}`;
-          valB = `${resolver.get("cities", b.city_id) || (b as any).city_name || b.town || ""}, ${resolver.get("states", b.state_id) || (b as any).state_name || ""}`;
+          valA = (a.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ");
+          valB = (b.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ");
           break;
         case 5:
-          valA = a.supplier_grade || "";
-          valB = b.supplier_grade || "";
+          valA = (a.product_ids || []).map((id) => resolver.get("products", id) || "").filter(Boolean).join(", ");
+          valB = (b.product_ids || []).map((id) => resolver.get("products", id) || "").filter(Boolean).join(", ");
           break;
         case 6:
+          valA = a.secondary_products_description || "";
+          valB = b.secondary_products_description || "";
+          break;
+        case 7:
+          valA = resolver.get("countries", a.country_id) || "";
+          valB = resolver.get("countries", b.country_id) || "";
+          break;
+        case 8:
+          valA = `${resolver.get("cities", a.city_id) || ""}, ${resolver.get("states", a.state_id) || ""}`;
+          valB = `${resolver.get("cities", b.city_id) || ""}, ${resolver.get("states", b.state_id) || ""}`;
+          break;
+        case 9:
+          valA = a.brand_description || "";
+          valB = b.brand_description || "";
+          break;
+        case 10:
           valA = a.supplier_type || "";
           valB = b.supplier_type || "";
           break;
-        case 7:
+        case 11:
           valA = a.current_status || "";
           valB = b.current_status || "";
           break;
-        case 8:
+        case 12:
+          valA = a.supplier_grade || "";
+          valB = b.supplier_grade || "";
+          break;
+        case 13:
           valA = a.potential || "";
           valB = b.potential || "";
           break;
@@ -1090,14 +1221,25 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     return list;
   }, [rows, sortColIndex, sortDirection, resolver, namesVersion]);
 
-  /* --- Search debounce --- */
+  /* --- Search debounce with Sr. No. jump --- */
   useEffect(() => {
     const timer = setTimeout(() => {
       const raw = searchInput.trim();
+      if (raw && isSrNoQuery(raw)) {
+        const srNo = parseInt(raw, 10);
+        if (srNo >= 1) {
+          setCurrentPage(Math.ceil(srNo / pageSize));
+          setEffectiveSearch("");
+          srNoJump.request(srNo);
+          return;
+        }
+      }
+      srNoJump.clear();
       setCurrentPage(1);
       setEffectiveSearch(raw);
     }, 300);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput, pageSize]);
 
   /* --- List load --- */
@@ -1126,17 +1268,13 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       try {
         const { data, meta } = await apiGet<Supplier[]>("/suppliers" + toQueryString(params));
         if (cancelled) return;
-        if (data && data.length > 0) {
-          setRows(data);
-          setPagination(meta?.pagination);
-        } else {
-          setRows([]);
-          setPagination({ current_page: currentPage, page_size: pageSize, total_records: 0, total_pages: 1, has_next: false, has_previous: currentPage > 1 });
-        }
+        const items = data || [];
+        // Immediately render rows to the user without delay
+        setRows(items);
+        setPagination(meta?.pagination);
         setError(null);
         setLoading(false);
 
-        const items = data || [];
         if (items.length) {
           // Resolve every related name concurrently in background
           void Promise.all([
@@ -1155,12 +1293,8 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       } catch (err) {
         if (cancelled) return;
         setRows([]);
-        setPagination({ current_page: currentPage, page_size: pageSize, total_records: 0, total_pages: 1, has_next: false, has_previous: currentPage > 1 });
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        setError(err);
+        setLoading(false);
       }
     })();
     return () => {
@@ -1187,26 +1321,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   ]);
 
   useEffect(() => {
-    if (!loading && srNoJump?.applyTo) srNoJump.applyTo(tableBodyRef.current);
+    if (!loading) srNoJump.applyTo(tableBodyRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, rows]);
 
   const reload = () => setReloadCounter((n) => n + 1);
-
-  /* --- bfcache restoration handler --- */
-  useEffect(() => {
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) {
-        // Page was restored from Back-Forward Cache (bfcache).
-        // Trigger a fresh list reload so table data is refreshed and loading skeleton is cleared.
-        reload();
-      }
-    };
-    window.addEventListener("pageshow", handlePageShow);
-    return () => {
-      window.removeEventListener("pageshow", handlePageShow);
-    };
-  }, []);
 
   /**
    * Live sync (Phase 9): Suppliers list receives real-time updates from
@@ -1274,6 +1393,18 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     }
   }, [liveConnectionStatus]);
 
+  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details", icon = "📍") {
+    return (
+      <TextPopoverCell
+        text={text}
+        maxLen={maxLen}
+        title={modalTitle}
+        icon={icon}
+        maxWidth="150px"
+        emptyText="—"
+      />
+    );
+  }
 
   function chipList(
     ids: string[] | undefined,
@@ -1282,12 +1413,39 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     icon = "🏷️"
   ) {
     if (!ids || !ids.length) return <span className="muted">—</span>;
-    const names = ids.map((id) => resolver.get(tableKey, id) || id);
-    const hasUnresolved = names.some((n) => !n || n === "…");
+    const resolvedNames = ids.map((id) => {
+      const fromResolver = resolver.get(tableKey, id);
+      if (fromResolver) return fromResolver;
+      if (tableKey === "categories") {
+        const fb = categoryNamesFallback.items.find((c) => c.id === id)?.name || categoriesLookup.items.find((c) => c.id === id)?.name;
+        if (fb) {
+          resolver.set(tableKey, id, fb);
+          return fb;
+        }
+      }
+      if (tableKey === "subCategories") {
+        const fb = subCategoryNamesFallback.items.find((sc) => sc.id === id)?.name || subCategoriesLookup.items.find((sc) => sc.id === id)?.name;
+        if (fb) {
+          resolver.set(tableKey, id, fb);
+          return fb;
+        }
+      }
+      if (tableKey === "products") {
+        const fb = productsLookup.items.find((p) => p.id === id)?.product_name;
+        if (fb) {
+          resolver.set(tableKey, id, fb);
+          return fb;
+        }
+      }
+      return null;
+    });
+
+    const hasUnresolved = resolvedNames.some((n) => !n);
     if (hasUnresolved) {
       void resolver.resolve(tableKey, ids).then(() => setNamesVersion((n) => n + 1));
     }
-    const cleanNames = names.filter(Boolean);
+
+    const cleanNames = resolvedNames.map((n, idx) => n || ids[idx]).filter(Boolean);
 
     return (
       <ItemPopoverCell
@@ -1335,13 +1493,13 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         secondary_website: supplier.secondary_website || "",
         supplier_grade: supplier.supplier_grade || "",
         current_status: supplier.current_status || "",
-        potential: supplier.potential || "",
+        potential: supplier.potential ? supplier.potential.toLowerCase() : "",
         potential_reason: supplier.potential_reason || "",
         secondary_products_description: supplier.secondary_products_description || "",
         visited_factory_office: String(supplier.visited_factory_office),
         visit_remarks: supplier.visit_remarks || "",
         visit_media_input: (supplier.visit_media || []).filter((u) => !u.startsWith("http") || u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) || u.includes("/storage/v1/object/public/")).join(", "),
-        visit_video_url: (supplier.visit_media || []).find((u) => u.startsWith("http") && !u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) && !u.includes("/storage/v1/object/public/")) || "",
+        visit_video_url: (supplier.visit_media || []).filter((u) => u.startsWith("http") && !u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) && !u.includes("/storage/v1/object/public/")).join(", "),
         overall_remarks: supplier.overall_remarks || "",
         is_active: String(supplier.is_active),
       });
@@ -1393,16 +1551,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     setError(null);
     setAlertPopup(null);
     setValidationErrors({});
-    if (location.pathname.includes("/add")) {
-      window.history.replaceState(null, "", "/purchase/suppliers");
-    }
   }
-
-  useEffect(() => {
-    if (defaultAdd || location.pathname.includes("/suppliers/add")) {
-      openModal(null, "full");
-    }
-  }, [defaultAdd, location.pathname]);
 
   function buildPayload() {
     const emails = form.emails || [];
@@ -1413,8 +1562,10 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         .map((v) => v.trim())
         .filter(Boolean)
       : [];
-    const visitVideo = isVisited && form.visit_video_url ? form.visit_video_url.trim() : "";
-    const visitMedia = visitVideo ? [...visitPhotos, visitVideo] : visitPhotos;
+    const videoLinks = isVisited && form.visit_video_url
+      ? form.visit_video_url.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    const visitMedia = [...visitPhotos, ...videoLinks];
 
     return {
       company_name: form.company_name.trim(),
@@ -1432,7 +1583,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       contact_whatsapp_number: normalizePhoneValue(form.contact_whatsapp_number),
       contact_wechat_number: normalizePhoneValue(form.contact_wechat_number),
       emails,
-      tax_id_number: form.tax_id_number.trim().toUpperCase(),
+      tax_id_number: form.tax_id_number.trim() || null,
       address: form.address.trim() || null,
       town: form.town.trim() || null,
       primary_website: form.primary_website.trim() || null,
@@ -1539,9 +1690,16 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     const initialErrors: Record<string, string> = {};
     if (!form.company_name.trim()) {
       initialErrors.company_name = "Company Name is required.";
-    }
-    if (!form.tax_id_number.trim()) {
-      initialErrors.tax_id_number = "GST number is required.";
+    } else {
+      const cleanTyped = form.company_name.trim().toLowerCase().replace(/[\s-]/g, "");
+      const localDuplicate = existingSuppliers.items.find((s) => {
+        if (currentSupplierId && String(s.id).toLowerCase() === String(currentSupplierId).toLowerCase()) return false;
+        const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
+        return sName === cleanTyped;
+      });
+      if (localDuplicate) {
+        initialErrors.company_name = `Supplier "${localDuplicate.company_name}" already exists in Supplier Master. Cannot save duplicate.`;
+      }
     }
     if (!formCountryId) {
       initialErrors["field-country"] = "Country is required.";
@@ -1552,9 +1710,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     if (!formCityId && !formCityCustomText.trim()) {
       initialErrors["field-city"] = "City is required.";
     }
-    if (!form.contact_calling_number.trim()) {
-      initialErrors["field-calling-number"] = "Calling number is required.";
-    } else {
+    if (form.contact_calling_number) {
       const callingErr = validatePhoneNumber(form.contact_calling_number, "Calling number");
       if (callingErr) {
         initialErrors["field-calling-number"] = callingErr;
@@ -1564,6 +1720,26 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       const whatsappErr = validatePhoneNumber(form.contact_whatsapp_number, "WhatsApp number");
       if (whatsappErr) {
         initialErrors["field-whatsapp-number"] = whatsappErr;
+      }
+    }
+
+    // Check full database via server search if not already caught locally
+    if (!initialErrors.company_name && form.company_name.trim()) {
+      try {
+        const { data: searchResults } = await apiGet<Supplier[]>(
+          "/suppliers" + toQueryString({ search: form.company_name.trim(), page: 1, page_size: 10 })
+        );
+        const cleanTyped = form.company_name.trim().toLowerCase().replace(/[\s-]/g, "");
+        const serverDuplicate = (searchResults || []).find((s) => {
+          if (currentSupplierId && String(s.id).toLowerCase() === String(currentSupplierId).toLowerCase()) return false;
+          const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
+          return sName === cleanTyped;
+        });
+        if (serverDuplicate) {
+          initialErrors.company_name = `Supplier "${serverDuplicate.company_name}" already exists in Supplier Master. Cannot save duplicate.`;
+        }
+      } catch {
+        // Fallback to backend POST/PATCH validation
       }
     }
 
@@ -1646,7 +1822,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         setModalTab(nextAction);
       }
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.details?.in_trash) {
+        setTrashConflict(err.details);
+        return false;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       const lower = msg.toLowerCase();
@@ -1660,13 +1840,16 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         focusAndScrollToField("field-calling-number");
         return false;
       }
-      if (lower.includes("company_name") || lower.includes("company name")) {
+      if (
+        lower.includes("company_name") ||
+        lower.includes("company name") ||
+        lower.includes("supplier '") ||
+        lower.includes("already exists in supplier master") ||
+        lower.includes("already exists in the trash")
+      ) {
         setValidationErrors((prev) => ({ ...prev, company_name: msg }));
         focusAndScrollToField("company_name");
         return false;
-      }
-      if (lower.includes("gst number")) {
-        setValidationErrors((prev) => ({ ...prev, tax_id_number: msg }));
       }
       const title = lower.includes("duplicate") || lower.includes("already exists")
         ? "Duplicate Supplier Warning"
@@ -1731,8 +1914,8 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     setContactFormOpen(true);
   }
 
-  async function handleContactSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleContactSubmit(e?: React.FormEvent) {
+    if (e) e.preventDefault();
     setDrawerError(null);
 
     if (!currentSupplierId) return;
@@ -1791,6 +1974,18 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     }
   }
 
+  async function handleRowDelete(id: string) {
+    if (!confirm("Delete this supplier?")) return;
+    await guardRowAction(`delete:${id}`, async () => {
+      try {
+        await apiDelete(`/suppliers/${id}`);
+        setRows((prev) => prev.filter((r) => r.id !== id));
+        setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
+      } catch (err) {
+        setError(err);
+      }
+    });
+  }
 
   async function handleBulkDelete() {
     if (!selectedIds.length) return;
@@ -1885,16 +2080,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   if (isImportPageOpen) {
     return (
       <AppShell activeKey="suppliers" pageClassName="page-suppliers">
-        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
-          <Breadcrumb trail={["Purchase", "Suppliers", "Import Suppliers"]} />
-
+        <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>Import Suppliers</h1>
-              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                Upload bulk supplier accounts, contacts, and sourcing capabilities from Excel (.xlsx, .xls) or CSV.
-              </div>
+              <h1 className="page-title">Import Suppliers</h1>
             </div>
             <button
               type="button"
@@ -1940,6 +2130,102 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
               padding: "28px 36px",
             }}
           >
+            {/* Import Mode Selection */}
+            <div style={{ marginBottom: "26px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                Select Import Mode
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", maxWidth: "800px" }}>
+                {/* Mode 1: Add New */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("create")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("create"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "create" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>➕</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "create" ? "#1d4ed8" : "#1e293b" }}>
+                      Add New Records Only
+                    </strong>
+                    {importMode === "create" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Upload only brand new supplier accounts. Any rows with duplicate supplier names or contact numbers will be safely skipped.
+                  </div>
+                </div>
+
+                {/* Mode 2: Update / Modify */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("update")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("update"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "update" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>✏️</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "update" ? "#1d4ed8" : "#1e293b" }}>
+                      Update / Modify Existing Records
+                    </strong>
+                    {importMode === "update" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Update existing suppliers matching supplier names. <strong>Zero Data Loss:</strong> Blank cells in your file are ignored and will never erase existing fields.
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Info Callout */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  maxWidth: "800px",
+                  background: importMode === "create" ? "#f8fafc" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span>{importMode === "create" ? "ℹ️" : "🛡️"}</span>
+                <span>
+                  {importMode === "create"
+                    ? "Strict creation mode: Existing database records remain untouched. Any duplicate rows will be reported."
+                    : "Safe non-destructive update: Only columns with values in your uploaded file will update matching records. Empty columns are kept intact."}
+                </span>
+              </div>
+            </div>
+
             {/* Import File Section */}
             <div style={{ marginBottom: "24px" }}>
               <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
@@ -2122,7 +2408,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
                 }}
               >
-                {importLoading ? "Importing..." : "Import"}
+                {importLoading
+                  ? "Importing..."
+                  : importMode === "update"
+                  ? "Proceed with Update"
+                  : "Import"}
               </button>
             </div>
           </div>
@@ -2136,6 +2426,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
               apiBase="/suppliers"
               entityName="supplier"
               importHeaders={SUPPLIER_IMPORT_HEADERS}
+              initialMode={importMode}
               onClose={() => setWizardPending(null)}
               onComplete={(summary) => {
                 setWizardPending(null);
@@ -2156,6 +2447,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     );
   }
 
+  const startSrNo = (currentPage - 1) * pageSize + 1;
 
   return (
     <AppShell activeKey="suppliers" pageClassName="page-suppliers">
@@ -2164,12 +2456,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
           {/* Header Bar with Back Button */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+              <h1 className="page-title">
                 {modalMode === "quick" ? "Add Supplier (Quick)" : (currentSupplierId ? "Edit Supplier" : "Add Supplier")}
               </h1>
-              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
-                {modalMode === "quick" ? "Fill primary supplier details for quick creation." : "Complete the supplier details below."}
-              </div>
             </div>
             <button
               type="button"
@@ -2256,7 +2545,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
             )}
             {/* TAB 1: PROFILE FORM (SAME ORIGINAL DATA & FIELDS) */}
             {(editTab === "profile" || modalMode === "quick") && (
-              <form onSubmit={handleSubmit} noValidate>
+              <form onSubmit={handleSubmit} onKeyDown={handleFormEnterKeyNavigation} noValidate>
                 {/* SECTION 1: General & Primary Contact Info (First Data Form) */}
                 <div style={{ marginBottom: "24px" }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
@@ -2310,24 +2599,38 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                         return (
                           <>
                             {exact && (
-                              <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
-                                <span>⚠️</span> Supplier "{exact.company_name}" already exists!
+                              <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px", background: "#fef2f2", padding: "6px 10px", borderRadius: "6px", border: "1px solid #fecaca" }}>
+                                <span>⛔</span> Supplier "{exact.company_name}" already exists in Supplier Master! Cannot save duplicate.
                               </div>
                             )}
                             {matches.length > 0 && !exact && (
-                              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#ffffff", border: "1px solid #cbd5e0", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", maxHeight: "160px", overflowY: "auto", marginTop: "2px" }}>
-                                <div style={{ padding: "6px 12px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
-                                  Existing Similar Suppliers:
-                                </div>
-                                {matches.map((s) => (
-                                  <div
+                              <div style={{ marginTop: "6px", fontSize: "12px", color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0", padding: "6px 10px", borderRadius: "6px", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                <span style={{ fontWeight: 600, color: "#0f172a" }}>ℹ️ Similar in Master:</span>
+                                {matches.slice(0, 4).map((s) => (
+                                  <button
                                     key={s.id}
-                                    style={{ padding: "8px 12px", fontSize: "12.5px", cursor: "pointer", borderBottom: "1px solid #f8fafc", display: "flex", justifyContent: "space-between", background: "#fff" }}
+                                    type="button"
                                     onClick={() => setField("company_name", s.company_name)}
+                                    style={{
+                                      background: "#ffffff",
+                                      border: "1px solid #cbd5e1",
+                                      borderRadius: "4px",
+                                      padding: "2px 8px",
+                                      fontSize: "11.5px",
+                                      cursor: "pointer",
+                                      color: "#1e293b",
+                                      fontWeight: 500,
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                    title="Click to select this existing supplier"
                                   >
-                                    <span style={{ fontWeight: 600, color: "#1e293b" }}>{s.company_name}</span>
-                                    <span style={{ color: "#64748b", fontSize: "11.5px" }}>{s.supplier_type || "Supplier"}</span>
-                                  </div>
+                                    <span>{s.company_name}</span>
+                                    {s.supplier_type && (
+                                      <span style={{ fontSize: "10.5px", color: "#64748b" }}>({s.supplier_type})</span>
+                                    )}
+                                  </button>
                                 ))}
                               </div>
                             )}
@@ -2339,10 +2642,93 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category (multiple)</label>
                       <SearchableDropdownMultiPanel
                         values={formCategoryIds}
-                        onChange={setFormCategoryIds}
+                        onChange={(newCatIds) => {
+                          setFormCategoryIds(newCatIds);
+                          // Auto-prune any subCategoryIds that no longer belong to selected categories
+                          if (newCatIds.length === 0) {
+                            setFormSubCategoryIds([]);
+                          } else {
+                            setFormSubCategoryIds((prevSubIds) => {
+                              const validCategorySubIds = subCategoriesLookup.items
+                                .filter((sc) => newCatIds.includes(sc.category_id))
+                                .map((sc) => sc.id);
+                              return prevSubIds.filter((id) => validCategorySubIds.includes(id));
+                            });
+                          }
+                        }}
                         placeholder="-- Select Categories --"
                         fetchOptions={searchFetcher("/masters/product-categories")}
                         fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 1.5: Key Strength Sub-Category + Products Supplied (2 columns) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Key Strength Sub-Category (multiple)</label>
+                      <SearchableDropdownMultiPanel
+                        values={formSubCategoryIds}
+                        onChange={setFormSubCategoryIds}
+                        disabled={formCategoryIds.length === 0}
+                        placeholder={formCategoryIds.length > 0 ? "-- Select Sub-Categories --" : "-- Please select Category first --"}
+                        fetchOptions={async (query, signal) => {
+                          if (formCategoryIds.length === 0) {
+                            return [];
+                          }
+                          const q = query.trim().toLowerCase();
+                          let items = subCategoriesLookup.items;
+                          if (items.length === 0) {
+                            try {
+                              const { data } = await apiGet<{ id: string; name: string; code?: string; category_id: string }[]>(
+                                "/masters/product-sub-categories?page=1&page_size=500&sort_order=asc&status=active",
+                                { signal }
+                              );
+                              if (data) items = data as ProductSubCategory[];
+                            } catch {
+                              // fallback
+                            }
+                          }
+                          items = items.filter((sc) => formCategoryIds.includes(sc.category_id));
+                          items = [...items].sort((a, b) => {
+                            const idxA = formCategoryIds.indexOf(a.category_id);
+                            const idxB = formCategoryIds.indexOf(b.category_id);
+                            if (idxA !== idxB) return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                            return a.name.localeCompare(b.name);
+                          });
+                          if (q) {
+                            items = items.filter(
+                              (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
+                            );
+                          }
+                          const catMap = new Map<string, string>();
+                          if (categoriesLookup.items.length > 0) {
+                            categoriesLookup.items.forEach((c) => catMap.set(c.id, c.name));
+                          } else {
+                            try {
+                              const { data: cats } = await apiGet<any[]>("/masters/product-categories?page=1&page_size=500", { signal });
+                              if (cats) cats.forEach((c) => catMap.set(c.id, c.name));
+                            } catch {
+                              // fallback
+                            }
+                          }
+                          return items.map((sc) => ({
+                            value: sc.id,
+                            label: sc.name,
+                            group: catMap.get(sc.category_id) || "Other Categories",
+                          }));
+                        }}
+                        fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
+                      />
+                    </div>
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Products Supplied (multiple)</label>
+                      <SearchableDropdownMultiPanel
+                        values={formProductIds}
+                        onChange={setFormProductIds}
+                        placeholder="-- Select Products Supplied --"
+                        fetchOptions={productFetcher}
+                        fetchLabelForValue={fetchProductLabel}
                       />
                     </div>
                   </div>
@@ -2362,20 +2748,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                       />
                     </div>
                     <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
-                  </div>
-                  {/* GST Number is mandatory and must be unique (Add Supplier spec) */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
-                    <TextField
-                      id="tax_id_number"
-                      label="GST Number"
-                      required
-                      maxLength={100}
-                      placeholder="e.g. 27ABCDE1234F1Z5"
-                      value={form.tax_id_number}
-                      onChange={(v) => setField("tax_id_number", v.toUpperCase())}
-                      hasError={Boolean(validationErrors.tax_id_number)}
-                      errorMessage={validationErrors.tax_id_number}
-                    />
                   </div>
 
 
@@ -2531,11 +2903,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
 
                     <PhoneGroupField
                       id="field-calling-number"
-                      label={
-                        <>
-                          Calling Number <span style={{ color: "#ef4444" }}>*</span>
-                        </>
-                      }
+                      label="Calling Number"
                       defaultPrefix={formCountryPhoneCode}
                       value={form.contact_calling_number}
                       hasError={Boolean(validationErrors["field-calling-number"] || callingNumberError)}
@@ -2661,6 +3029,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                       2. Supplier Profile &amp; Verification Details
                     </h3>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "18px" }}>
+                      <TextField id="tax_id_number" label="Tax ID Number" maxLength={100} value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
                       <TextField id="address" label="Address" maxLength={500} value={form.address} onChange={(v) => setField("address", v)} />
                       <TextField id="town" label="Town" maxLength={150} value={form.town} onChange={(v) => setField("town", v)} />
                       <WebsiteField id="primary_website" label="Primary Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />
@@ -2676,10 +3045,10 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                         <option value="new" disabled={lockNewStatus}>New</option>
                         <option value="existing">Existing</option>
                       </SelectField>
-                      <SelectField id="potential" label="Potential (Yes / No)" value={form.potential} onChange={(v) => setField("potential", v)}>
+                      <SelectField id="potential" label="Potential (Yes / No)" value={form.potential ? form.potential.toLowerCase() : ""} onChange={(v) => setField("potential", v.toLowerCase())}>
                         <option value="">Select Potential</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
                       </SelectField>
                     </div>
 
@@ -2811,10 +3180,10 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                         </div>
 
                         <div>
-                          <TextField
+                          <VideoTagInput
                             id="visit_video_url"
                             label="Factory Video / Inspection Folder Link (Optional)"
-                            placeholder="https://... (e.g. OneDrive, SharePoint, Google Drive, or Video URL)"
+                            placeholder="Paste YouTube, Drive or OneDrive links and press Enter or comma..."
                             value={form.visit_video_url}
                             onChange={(v) => setField("visit_video_url", v)}
                           />
@@ -2942,72 +3311,87 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                 </div>
 
                 {/* RIGHT SIDE DRAWER MODAL FOR ADD/EDIT CONTACT */}
-                {contactFormOpen && (
-                  <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", justifyContent: "flex-end" }}>
-                    {/* Dark Backdrop Overlay */}
+                {contactFormOpen &&
+                  createPortal(
                     <div
-                      onClick={() => setContactFormOpen(false)}
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label={contactForm.id ? "Edit Contact Person" : "Add New Contact"}
                       style={{
-                        position: "absolute",
+                        position: "fixed",
                         inset: 0,
-                        background: "rgba(15, 23, 42, 0.45)",
-                        backdropFilter: "blur(2px)",
-                        transition: "opacity 0.2s ease",
-                      }}
-                    />
-
-                    {/* Side Drawer Panel */}
-                    <div
-                      style={{
-                        position: "relative",
-                        width: "460px",
-                        maxWidth: "92vw",
-                        height: "100%",
-                        background: "#ffffff",
-                        boxShadow: "-8px 0 30px rgba(0, 0, 0, 0.18)",
+                        zIndex: 99999,
                         display: "flex",
-                        flexDirection: "column",
-                        zIndex: 10000,
+                        justifyContent: "flex-end",
                       }}
                     >
-                      {/* Drawer Header */}
+                      {/* Dark Backdrop Overlay with smooth fade */}
+                      <div
+                        onClick={() => setContactFormOpen(false)}
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background: "rgba(15, 23, 42, 0.45)",
+                          backdropFilter: "blur(2px)",
+                          animation: "backdropFadeIn 0.2s ease forwards",
+                        }}
+                      />
+
+                      {/* Side Drawer Panel with smooth slide-in */}
                       <div
                         style={{
-                          padding: "18px 24px",
-                          borderBottom: "1px solid #e2e8f0",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
+                          position: "relative",
+                          width: "460px",
+                          maxWidth: "92vw",
+                          height: "100%",
                           background: "#ffffff",
+                          boxShadow: "-8px 0 30px rgba(0, 0, 0, 0.18)",
+                          display: "flex",
+                          flexDirection: "column",
+                          zIndex: 100000,
+                          animation: "slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards",
                         }}
                       >
-                        <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
-                          {contactForm.id ? "Edit Contact Person" : "Add New Contact"}
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={() => setContactFormOpen(false)}
+                        {/* Drawer Header */}
+                        <div
                           style={{
-                            background: "none",
-                            border: "none",
-                            fontSize: "20px",
-                            color: "#64748b",
-                            cursor: "pointer",
-                            padding: "4px 8px",
-                            borderRadius: "4px",
-                            lineHeight: 1,
+                            padding: "18px 24px",
+                            borderBottom: "1px solid #e2e8f0",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            background: "#ffffff",
                           }}
                         >
-                          ✕
-                        </button>
-                      </div>
+                          <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                            {contactForm.id ? "Edit Contact Person" : "Add New Contact"}
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={() => setContactFormOpen(false)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              fontSize: "20px",
+                              color: "#64748b",
+                              cursor: "pointer",
+                              padding: "4px 8px",
+                              borderRadius: "4px",
+                              lineHeight: 1,
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
 
-                      {/* Drawer Form Content (Scrollable) */}
-                      <form
-                        autoComplete="none"
-                        onSubmit={(e) => { void handleContactSubmit(e); }}
-                        style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}
-                      >
+                        {/* Drawer Form Content (Scrollable) */}
+                        <form
+                          id="supplier-contact-drawer-form"
+                          autoComplete="none"
+                          onSubmit={(e) => { void handleContactSubmit(e); }}
+                          onKeyDown={handleFormEnterKeyNavigation}
+                          style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}
+                        >
                         {Boolean(drawerError) && (
                           <div style={{ marginBottom: "6px" }}>
                             <Banner error={drawerError} />
@@ -3326,9 +3710,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                           Cancel
                         </button>
                         <button
-                          type="button"
+                          type="submit"
+                          form="supplier-contact-drawer-form"
                           disabled={contactSubmitting}
-                          onClick={(e) => { void handleContactSubmit(e); }}
                           style={{
                             flex: 1,
                             padding: "11px",
@@ -3347,7 +3731,8 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                         </button>
                       </div>
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
 
                 {/* CONTACTS LIST TABLE */}
@@ -3487,17 +3872,16 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         </main>
       ) : (
         <main className="page">
-          <Breadcrumb trail={["Purchase", "Suppliers"]} />
-          <div className="page-header">
+          <div className="page-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
             <div>
-              <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Suppliers</h1>
+              <h1 className="page-title">Supplier Profiles</h1>
             </div>
             <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <button
                 type="button"
                 className="btn"
                 style={{
-                  background: filterOpen ? "#0061f2" : "#556987",
+                  background: filterOpen ? "#0061f2" : "#475569",
                   color: "#ffffff",
                   padding: "8px 14px",
                   borderRadius: "6px",
@@ -3515,6 +3899,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
                 </svg>
               </button>
+              {canCreate && (
+                <button className="btn btn-quick-add" onClick={() => openModal(null, "quick")}>
+                  + QUICK ADD
+                </button>
+              )}
               {canCreate && (
                 <button className="btn btn-add-new" onClick={() => openModal(null, "full")}>
                   + ADD NEW
@@ -3587,6 +3976,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                     onChange={(v) => {
                       setCurrentPage(1);
                       setCategoryFilter(v);
+                      if (v !== categoryFilter) {
+                        setSubCategoryFilter(null);
+                      }
                     }}
                     placeholder="Filter: Product Category"
                     fetchOptions={searchFetcher("/masters/product-categories")}
@@ -3594,15 +3986,22 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Key Strength Sub Category</label>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: categoryFilter ? "#475569" : "#94a3b8", marginBottom: "4px", display: "block" }}>Key Strength Sub Category</label>
                   <SearchableDropdown
                     value={subCategoryFilter}
+                    disabled={!categoryFilter}
                     onChange={(v) => {
                       setCurrentPage(1);
                       setSubCategoryFilter(v);
                     }}
-                    placeholder="Filter: Sub Category"
-                    fetchOptions={searchFetcher("/masters/product-sub-categories")}
+                    placeholder={categoryFilter ? "Filter: Sub Category" : "Select Category first"}
+                    fetchOptions={
+                      categoryFilter
+                        ? searchFetcher("/masters/product-sub-categories", (): Record<string, string> => ({
+                            category_id: categoryFilter,
+                          }))
+                        : async () => []
+                    }
                     fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                   />
                 </div>
@@ -3635,35 +4034,43 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Province / State</label>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: countryFilter ? "#475569" : "#94a3b8", marginBottom: "4px", display: "block" }}>Province / State</label>
                   <SearchableDropdown
                     value={stateFilter}
+                    disabled={!countryFilter}
                     onChange={(v) => {
                       setStateFilter(v);
                       setCityFilter(null);
                       setCurrentPage(1);
                     }}
-                    placeholder="Filter: Province"
-                    fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
-                      countryFilter ? { country_id: countryFilter } : {}
-                    )}
+                    placeholder={countryFilter ? "Filter: Province / State" : "Select Country first"}
+                    fetchOptions={
+                      countryFilter
+                        ? searchFetcher("/masters/states", (): Record<string, string> => ({
+                            country_id: countryFilter,
+                          }))
+                        : async () => []
+                    }
                     fetchLabelForValue={fetchNameLabel("/masters/states")}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>City</label>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: stateFilter ? "#475569" : "#94a3b8", marginBottom: "4px", display: "block" }}>City</label>
                   <SearchableDropdown
                     value={cityFilter}
+                    disabled={!stateFilter}
                     onChange={(v) => {
                       setCityFilter(v);
                       setCurrentPage(1);
                     }}
-                    placeholder="Filter: City"
-                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
-                      if (stateFilter) return { state_id: stateFilter };
-                      if (countryFilter) return { country_id: countryFilter };
-                      return {};
-                    })}
+                    placeholder={stateFilter ? "Filter: City" : (countryFilter ? "Select Province first" : "Select Country first")}
+                    fetchOptions={
+                      stateFilter
+                        ? searchFetcher("/masters/cities", (): Record<string, string> => ({
+                            state_id: stateFilter,
+                          }))
+                        : async () => []
+                    }
                     fetchLabelForValue={fetchNameLabel("/masters/cities")}
                   />
                 </div>
@@ -3814,15 +4221,96 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   </select>
                   <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
                 </div>
+
+                <div ref={pinMenuRef} style={{ position: "relative" }}>
+
+
+                  <button
+                    type="button"
+                    onClick={() => setPinMenuOpen((v) => !v)}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
+                      cursor: "pointer",
+                      color: "#0f172a",
+                      fontWeight: 600,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    📌 Freeze Columns ({Object.keys(pinnedCols).length})
+                  </button>
+                  {pinMenuOpen && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: 0,
+                        top: "38px",
+                        zIndex: 100,
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                        padding: "12px",
+                        minWidth: "220px",
+                        display: "flex",
+                        flexDirection: "column",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                        Toggle Frozen Columns
+                      </div>
+                      <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
+                        {[
+                          "Checkbox", "Sr. No.", "Company Name", "Product Category",
+                          "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
+                          "Country", "City, Province", "Brand", "Supplier Type",
+                          "Current Status", "Grade", "Potential", "Action"
+                        ].map((label, idx) => {
+                          const isPinned = Boolean(pinnedCols[idx]);
+                          return (
+                            <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                              <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
+                        <button
+                          type="button"
+                          onClick={() => setPinnedCols({})}
+                          style={{
+                            width: "100%",
+                            padding: "6px 8px",
+                            fontSize: "12px",
+                            borderRadius: "4px",
+                            border: "1px solid #e2e8f0",
+                            background: "#f8fafc",
+                            cursor: "pointer",
+                            color: "#dc2626",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Clear All Freezes
+                        </button>
+                      </div>
+                    </div>
+
+                  )}
+                </div>
               </div>
 
               <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
                 <input
                   type="text"
-                  placeholder="Search..."
+                  placeholder="Search company, country, contact, city, phone..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  style={{ width: "240px", padding: "6px 30px 6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
                 />
                 {searchInput && (
                   <button
@@ -3851,28 +4339,18 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
 
             <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
               <table ref={tableRef} style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+
                 <thead>
                   <tr>
                     {displayOrder.map((idx) => {
-                      const colDef = SUPPLIER_TABLE_COLUMNS[idx] || SUPPLIER_TABLE_COLUMNS.find((c) => c.idx === idx);
-                      if (!colDef) return null;
                       if (idx === 0) {
                         return (
-                          <th
-                            key="col-0"
-                            style={{
-                              width: "45px",
-                              minWidth: "45px",
-                              maxWidth: "50px",
-                              textAlign: "center",
-                              ...getFreezeStyle(0, true),
-                            }}
-                          >
+                          <th key="col-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, true) }}>
                             <input
                               type="checkbox"
-                              checked={sortedRows.length > 0 && sortedRows.every((r) => selectedIds.includes(r.id))}
+                              checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
                               onChange={(e) => {
-                                if (e.target.checked) setSelectedIds(sortedRows.map((r) => r.id));
+                                if (e.target.checked) setSelectedIds(rows.map((r) => r.id));
                                 else setSelectedIds([]);
                               }}
                               style={{ cursor: "pointer", width: "16px", height: "16px" }}
@@ -3880,29 +4358,41 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                           </th>
                         );
                       }
-
-                      const isAction = idx === 9;
+                      const label = [
+                        "Checkbox", "Sr. No.", "Company Name", "Product Category",
+                        "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
+                        "Country", "City, Province", "Brand", "Supplier Type",
+                        "Current Status", "Grade", "Potential", "Action"
+                      ][idx];
+                      const isPinned = Boolean(pinnedCols[idx]);
+                      const isSrNo = idx === 1;
+                      const isAction = idx === 14;
                       const isSorted = sortColIndex === idx;
-
                       return (
                         <th
-                          key={`col-${idx}-${colDef.label}`}
+                          key={`col-${idx}-${label}`}
                           style={{
-                            textAlign: colDef.align || "left",
-                            width: colDef.width,
-                            minWidth: colDef.minWidth,
+                            height: "auto",
+                            minHeight: "36px",
+                            whiteSpace: "normal",
+                            verticalAlign: "middle",
+                            padding: "6px 8px",
+                            ...(isSrNo
+                              ? { width: "75px", minWidth: "75px", maxWidth: "85px", textAlign: "center" }
+                              : isAction
+                              ? { textAlign: "center" }
+                              : idx === 2
+                              ? { width: "290px", minWidth: "200px", maxWidth: "290px" }
+                              : idx === 11
+                              ? { width: "105px", minWidth: "95px", maxWidth: "115px" }
+                              : {}),
                             ...getFreezeStyle(idx, true),
                           }}
                         >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: isAction ? "center" : "space-between",
-                              gap: "4px",
-                            }}
-                          >
-                            {colDef.sortable ? (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: isAction ? "center" : "space-between", gap: "4px" }}>
+                            {isAction ? (
+                              <span>{label}</span>
+                            ) : (
                               <div
                                 onClick={() => handleHeaderSort(idx)}
                                 style={{
@@ -3911,18 +4401,18 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                                   gap: "5px",
                                   cursor: "pointer",
                                   userSelect: "none",
-                                  flex: 1,
+                                  flex: isSrNo ? undefined : 1,
                                   minWidth: 0,
                                   padding: "2px 0",
                                 }}
                                 title={
                                   isSorted
-                                    ? `Sorted by ${colDef.label} (${sortDirection === "asc" ? "Ascending" : "Descending"})`
-                                    : `Click to sort by ${colDef.label}`
+                                    ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                                    : `Click to sort by ${label} (Ascending)`
                                 }
                               >
-                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {colDef.label}
+                                <span style={{ whiteSpace: "normal", wordBreak: "normal", lineHeight: 1.25 }}>
+                                  {label}
                                 </span>
                                 {isSorted ? (
                                   <span
@@ -3947,7 +4437,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                                     style={{
                                       fontSize: "10px",
                                       color: "#94a3b8",
-                                      opacity: 0.6,
+                                      opacity: 0.45,
                                       lineHeight: 1,
                                       flexShrink: 0,
                                     }}
@@ -3956,9 +4446,18 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                                   </span>
                                 )}
                               </div>
-                            ) : (
-                              <span>{colDef.label}</span>
                             )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePin(idx);
+                              }}
+                              style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3, padding: "0 2px", flexShrink: 0 }}
+                              title={isPinned ? "Unfreeze column" : "Freeze column"}
+                            >
+                              📌
+                            </button>
                           </div>
                         </th>
                       );
@@ -3969,15 +4468,15 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   {loading ? (
                     <SupplierSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : sortedRows.length === 0 ? (
-                    <TableMessageRow colSpan={10}>No suppliers found.</TableMessageRow>
+                    <TableMessageRow colSpan={15}>No suppliers found.</TableMessageRow>
                   ) : (
-                    sortedRows.map((s) => (
+                    sortedRows.map((s, index) => (
                       <tr key={s.id}>
                         {displayOrder.map((idx) => {
                           switch (idx) {
                             case 0:
                               return (
-                                <td key="cell-0" style={{ width: "45px", minWidth: "45px", maxWidth: "50px", textAlign: "center", ...getFreezeStyle(0, false) }}>
+                                <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, false) }}>
                                   <input
                                     type="checkbox"
                                     className="row-select"
@@ -3992,72 +4491,128 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                               );
                             case 1:
                               return (
-                                <td key="cell-1" style={getFreezeStyle(1, false)}>
+                                <td key="cell-1" className="cell-srno" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...getFreezeStyle(1, false) }}>
+                                  {startSrNo + index}
+                                </td>
+                              );
+                            case 2:
+                              return (
+                                <td
+                                  key="cell-2"
+                                  style={{
+                                    width: "290px",
+                                    minWidth: "200px",
+                                    maxWidth: "290px",
+                                    whiteSpace: "normal",
+                                    height: "auto",
+                                    verticalAlign: "middle",
+                                    ...getFreezeStyle(2, false),
+                                  }}
+                                >
                                   <a
                                     href="#"
+                                    title={s.company_name}
                                     onClick={(e) => {
                                       e.preventDefault();
-                                      setDrawerSupplier(s);
+                                      void handleOpenDrawer(s);
                                     }}
-                                    style={{ color: "#0061f2", fontWeight: 500, textDecoration: "none" }}
+                                    style={{
+                                      display: "-webkit-box",
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: "vertical",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      wordBreak: "break-word",
+                                      lineHeight: "1.35",
+                                      maxHeight: "2.7em",
+                                      fontWeight: 600,
+                                      color: "#0061f2",
+                                      textDecoration: "none",
+                                    }}
                                   >
                                     {s.company_name}
                                   </a>
                                 </td>
                               );
-                            case 2: {
-                              const catNames = (s.category_ids || [])
-                                .map((id) => resolver.get("categories", id) || "")
-                                .filter(Boolean);
-                              if (catNames.length === 0 && (s as any).category_name) {
-                                catNames.push((s as any).category_name);
-                              }
-                              return (
-                                <td key="cell-2" style={getFreezeStyle(2, false)}>
-                                  {catNames.length > 0 ? (
-                                    <span>{catNames.join(", ")}</span>
-                                  ) : (
-                                    <span style={{ color: "#64748b" }}>-</span>
-                                  )}
-                                </td>
-                              );
-                            }
-                            case 3: {
-                              const subCatNames = (s.sub_category_ids || [])
-                                .map((id) => resolver.get("subCategories", id) || "")
-                                .filter(Boolean);
-                              if (subCatNames.length === 0 && (s as any).sub_category_name) {
-                                subCatNames.push((s as any).sub_category_name);
-                              }
-                              return (
-                                <td key="cell-3" style={getFreezeStyle(3, false)}>
-                                  {subCatNames.length > 0 ? (
-                                    <span>{subCatNames.join(", ")}</span>
-                                  ) : (
-                                    <span style={{ color: "#64748b" }}>-</span>
-                                  )}
-                                </td>
-                              );
-                            }
-                            case 4: {
-                              const city = resolver.get("cities", s.city_id) || (s as any).city_name || s.town || "";
-                              const state = resolver.get("states", s.state_id) || (s as any).state_name || "";
-                              return (
-                                <td key="cell-4" style={getFreezeStyle(4, false)}>
-                                  {city || state ? (
-                                    <div style={{ lineHeight: 1.35 }}>
-                                      <div style={{ fontWeight: 500, color: "#1e293b" }}>{city || "—"}</div>
-                                      <div style={{ fontSize: "12px", color: "#64748b" }}>{state || "—"}</div>
-                                    </div>
-                                  ) : (
-                                    <span style={{ color: "#64748b" }}>-</span>
-                                  )}
-                                </td>
-                              );
-                            }
+                            case 3:
+                              return <td key="cell-3" style={getFreezeStyle(3, false)}>{chipList(s.category_ids, "categories", "Product Categories")}</td>;
+                            case 4:
+                              return <td key="cell-4" style={getFreezeStyle(4, false)}>{chipList(s.sub_category_ids, "subCategories", "Sub-Categories")}</td>;
                             case 5:
+                              return <td key="cell-5" style={getFreezeStyle(5, false)}>{chipList(s.product_ids, "products", "Products Supplied")}</td>;
+                            case 6:
+                              return <td key="cell-6" style={getFreezeStyle(6, false)}>{renderTruncatedText(s.secondary_products_description, 20, "Secondary Products")}</td>;
+                            case 7:
+                              return <td key="cell-7" style={getFreezeStyle(7, false)}>{resolver.get("countries", s.country_id) || "…"}</td>;
+                            case 8:
                               return (
-                                <td key="cell-5" style={getFreezeStyle(5, false)}>
+                                <td key="cell-8" style={getFreezeStyle(8, false)}>
+                                  {resolver.get("cities", s.city_id) || "…"},{" "}
+                                  {resolver.get("states", s.state_id) || "…"}
+                                </td>
+                              );
+                            case 9:
+                              return <td key="cell-9" style={getFreezeStyle(9, false)}>{renderTruncatedText(s.brand_description, 20, "Brand Description")}</td>;
+                            case 10:
+                              return (
+                                <td key="cell-10" style={getFreezeStyle(10, false)}>
+                                  {s.supplier_type ? s.supplier_type : <span className="muted">—</span>}
+                                </td>
+                              );
+                            case 11: {
+                              const currStatus = (s.current_status || "").toLowerCase();
+                              const isExisting = currStatus === "existing";
+                              const isNew = currStatus === "new";
+                              const statusBg = isExisting ? "#dcfce7" : isNew ? "#fef9c3" : "#f8fafc";
+                              const statusColor = isExisting ? "#15803d" : isNew ? "#854d0e" : "#64748b";
+
+                              return (
+                                <td key="cell-11" style={{ width: "115px", minWidth: "105px", maxWidth: "125px", ...getFreezeStyle(11, false) }}>
+                                  {canEditCurrentStatus ? (
+                                    <select
+                                      className="inline-select"
+                                      value={currStatus}
+                                      onChange={(e) =>
+                                        handleInlineUpdate(s.id, `/suppliers/${s.id}/current-status`, {
+                                          current_status: e.target.value || null,
+                                        })
+                                      }
+                                      style={{
+                                        padding: "3px 6px",
+                                        borderRadius: "4px",
+                                        fontSize: "12px",
+                                        fontWeight: 600,
+                                        border: "1px solid #cbd5e1",
+                                        background: statusBg,
+                                        color: statusColor,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      <option value="">SELECT</option>
+                                      {!isExisting && <option value="new">NEW</option>}
+                                      <option value="existing">EXISTING</option>
+                                    </select>
+                                  ) : (
+                                    <span
+                                      style={{
+                                        padding: "3px 8px",
+                                        borderRadius: "12px",
+                                        fontSize: "11.5px",
+                                        fontWeight: 600,
+                                        background: statusBg,
+                                        color: statusColor,
+                                        display: "inline-block",
+                                      }}
+                                    >
+                                      {s.current_status ? s.current_status.toUpperCase() : "SELECT"}
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            }
+                            case 12:
+                              return (
+                                <td key="cell-12" style={getFreezeStyle(12, false)}>
                                   {canEditGrade ? (
                                     <select
                                       className="inline-select"
@@ -4067,57 +4622,20 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                                           supplier_grade: e.target.value || null,
                                         })
                                       }
-                                      style={{
-                                        border: "1px solid #cbd5e1",
-                                        borderRadius: "4px",
-                                        padding: "2px 6px",
-                                        fontSize: "13px",
-                                        background: "#ffffff",
-                                      }}
                                     >
-                                      <option value="">-</option>
+                                      <option value="">Select</option>
                                       <option value="A">A</option>
                                       <option value="B">B</option>
                                       <option value="C">C</option>
                                     </select>
                                   ) : (
-                                    <span>{s.supplier_grade || "-"}</span>
+                                    <span>{s.supplier_grade || "—"}</span>
                                   )}
                                 </td>
                               );
-                            case 6:
+                            case 13:
                               return (
-                                <td key="cell-6" style={getFreezeStyle(6, false)}>
-                                  {s.supplier_type ? (
-                                    <span>{s.supplier_type}</span>
-                                  ) : (
-                                    <span style={{ color: "#64748b" }}>-</span>
-                                  )}
-                                </td>
-                              );
-                            case 7: {
-                              const formatStatus = (val?: string | null) => {
-                                if (!val) return "-";
-                                if (val.toLowerCase() === "existing") return "Existing";
-                                if (val.toLowerCase() === "new") return "New";
-                                return val;
-                              };
-                              return (
-                                <td key="cell-7" style={getFreezeStyle(7, false)}>
-                                  <span>{formatStatus(s.current_status)}</span>
-                                </td>
-                              );
-                            }
-                            case 8: {
-                              const formatPotential = (val?: string | null) => {
-                                if (!val) return "-";
-                                const lower = val.toLowerCase();
-                                if (lower === "yes") return "Yes";
-                                if (lower === "no") return "No";
-                                return val;
-                              };
-                              return (
-                                <td key="cell-8" style={getFreezeStyle(8, false)}>
+                                <td key="cell-13" style={getFreezeStyle(13, false)}>
                                   {canEditPotential ? (
                                     <select
                                       className="inline-select"
@@ -4127,27 +4645,19 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                                           potential: e.target.value || null,
                                         })
                                       }
-                                      style={{
-                                        border: "1px solid #cbd5e1",
-                                        borderRadius: "4px",
-                                        padding: "2px 6px",
-                                        fontSize: "13px",
-                                        background: "#ffffff",
-                                      }}
                                     >
-                                      <option value="">-</option>
+                                      <option value="">Select</option>
                                       <option value="yes">Yes</option>
                                       <option value="no">No</option>
                                     </select>
                                   ) : (
-                                    <span>{formatPotential(s.potential)}</span>
+                                    <span>{s.potential ? s.potential.toUpperCase() : "—"}</span>
                                   )}
                                 </td>
                               );
-                            }
-                            case 9:
+                            case 14:
                               return (
-                                <td key="cell-9" className="actions" style={{ textAlign: "center", width: "65px", ...getFreezeStyle(9, false) }}>
+                                <td key="cell-14" className="actions" style={{ textAlign: "center", ...getFreezeStyle(14, false) }}>
                                   <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
                                     {canUpdate && (
                                       <button
@@ -4156,16 +4666,13 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                                         style={{
                                           background: "#0061f2",
                                           color: "#ffffff",
-                                          padding: "6px",
+                                          padding: "6px 9px",
                                           borderRadius: "4px",
                                           border: "none",
                                           cursor: "pointer",
                                           display: "inline-flex",
                                           alignItems: "center",
                                           justifyContent: "center",
-                                          width: "28px",
-                                          height: "28px",
-                                          boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                                         }}
                                         onClick={() => handleRowEdit(s.id)}
                                         title="Edit Supplier"
@@ -4176,6 +4683,46 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                                         </svg>
                                       </button>
                                     )}
+                                    {canDelete && (() => {
+                                      const isEligibleForDelete =
+                                        (!s.current_status || s.current_status.toLowerCase() === "new") &&
+                                        (!s.potential || s.potential.toLowerCase() === "no");
+                                      return (
+                                        <button
+                                          type="button"
+                                          className="btn"
+                                          disabled={!isEligibleForDelete || isRowActionPending(`delete:${s.id}`)}
+                                          style={{
+                                            background: isEligibleForDelete ? "#ef4444" : "#94a3b8",
+                                            color: "#ffffff",
+                                            padding: "6px 9px",
+                                            borderRadius: "4px",
+                                            border: "none",
+                                            cursor: !isEligibleForDelete ? "not-allowed" : (isRowActionPending(`delete:${s.id}`) ? "default" : "pointer"),
+                                            opacity: !isEligibleForDelete ? 0.45 : (isRowActionPending(`delete:${s.id}`) ? 0.6 : 1),
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                          }}
+                                          onClick={() => {
+                                            if (!isEligibleForDelete) return;
+                                            void handleRowDelete(s.id);
+                                          }}
+                                          title={
+                                            !isEligibleForDelete
+                                              ? "Cannot delete Existing or Potential suppliers; set to Inactive instead."
+                                              : "Delete Supplier"
+                                          }
+                                        >
+                                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="3 6 5 6 21 6" />
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                            <line x1="10" y1="11" x2="10" y2="17" />
+                                            <line x1="14" y1="11" x2="14" y2="17" />
+                                          </svg>
+                                        </button>
+                                      );
+                                    })()}
                                   </div>
                                 </td>
                               );
@@ -4218,73 +4765,339 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         }}
       />
 
-      {drawerSupplier && (
-        <SideDrawer
-          open={Boolean(drawerSupplier)}
-          title={`Supplier Detail #${drawerSupplier.company_name}`}
-          subtitle={`Supplier Type: ${drawerSupplier.supplier_type || "—"} | Status: ${drawerSupplier.is_active ? "Active" : "Inactive"}`}
-          onClose={handleCloseDrawer}
-          onEdit={
-            canUpdate
-              ? () => {
-                const id = drawerSupplier.id;
-                handleCloseDrawer();
-                void handleRowEdit(id);
-              }
-              : undefined
-          }
-          editLabel="✏️ Edit Supplier"
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <DetailFieldGrid
-              fields={[
-                { label: "Company Name", value: drawerSupplier.company_name, fullWidth: true },
-                { label: "Supplier Type", value: drawerSupplier.supplier_type || "—" },
-                { label: "Brand Description", value: drawerSupplier.brand_description || "—" },
-                { label: "Country", value: resolver.get("countries", drawerSupplier.country_id) || "—" },
-                { label: "Province / State", value: resolver.get("states", drawerSupplier.state_id) || "—" },
-                { label: "City", value: resolver.get("cities", drawerSupplier.city_id) || "—" },
-                { label: "Product Categories", value: chipList(drawerSupplier.category_ids, "categories"), fullWidth: true },
-                { label: "Sub-Categories", value: chipList(drawerSupplier.sub_category_ids, "subCategories"), fullWidth: true },
-                { label: "Products Supplied", value: chipList(drawerSupplier.product_ids, "products"), fullWidth: true },
-                { label: "Secondary Products", value: drawerSupplier.secondary_products_description || "—", fullWidth: true },
-                { label: "Address", value: drawerSupplier.address || "—", fullWidth: true },
-              ]}
-            />
+      {drawerSupplier && (() => {
+        const visitMediaRaw = drawerSupplier.visit_media || [];
+        const photoUrls = visitMediaRaw.filter((u) => !u.startsWith("http") || u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) || u.includes("/storage/v1/object/public/"));
+        const videoUrls = visitMediaRaw.filter((u) => u.startsWith("http") && !u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) && !u.includes("/storage/v1/object/public/"));
 
-            <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a" }}>
-                Primary Contact Information
-              </h4>
-              <DetailFieldGrid
-                fields={[
-                  {
-                    label: "Full Name",
-                    value: `${drawerSupplier.contact_salutation || ""} ${drawerSupplier.contact_full_name || ""}`.trim() || "—",
-                  },
-                  { label: "Designation", value: drawerSupplier.contact_designation || "—" },
-                  { label: "Calling Number", value: drawerSupplier.contact_calling_number || "—" },
-                  { label: "WhatsApp Number", value: drawerSupplier.contact_whatsapp_number || "—" },
-                  { label: "WeChat Number", value: drawerSupplier.contact_wechat_number || "—" },
-                  { label: "Email Addresses", value: drawerSupplier.emails && drawerSupplier.emails.length ? drawerSupplier.emails.join(", ") : "—", fullWidth: true },
-                  { label: "Primary Website", value: drawerSupplier.primary_website || "—" },
-                  { label: "Secondary Website", value: drawerSupplier.secondary_website || "—" },
-                ]}
-              />
+        return (
+          <SideDrawer
+            open={Boolean(drawerSupplier)}
+            title={`Supplier Detail #${drawerSupplier.company_name}`}
+            subtitle={`Supplier Type: ${drawerSupplier.supplier_type || "—"} | Status: ${drawerSupplier.is_active ? "Active" : "Inactive"}`}
+            onClose={handleCloseDrawer}
+            cardStyle={{ maxWidth: "720px", width: "100%" }}
+            onEdit={
+              canUpdate
+                ? () => {
+                  const id = drawerSupplier.id;
+                  handleCloseDrawer();
+                  void handleRowEdit(id);
+                }
+                : undefined
+            }
+            editLabel="✏️ Edit Supplier"
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* CARD 1: Company Profile & Classification */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  🏢 Company Profile &amp; Classification
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    { label: "Company Name", value: drawerSupplier.company_name, fullWidth: true },
+                    { label: "Supplier Type", value: drawerSupplier.supplier_type ? drawerSupplier.supplier_type.toUpperCase() : "—" },
+                    { label: "Brand Description", value: drawerSupplier.brand_description || "—" },
+                    { label: "Tax ID / GST Number", value: drawerSupplier.tax_id_number || "—" },
+                    { label: "Town", value: drawerSupplier.town || "—" },
+                    { label: "Country", value: resolver.get("countries", drawerSupplier.country_id) || "—" },
+                    { label: "Province / State", value: resolver.get("states", drawerSupplier.state_id) || "—" },
+                    { label: "City", value: resolver.get("cities", drawerSupplier.city_id) || "—" },
+                    { label: "Address", value: drawerSupplier.address || "—", fullWidth: true },
+                    { label: "Product Categories", value: chipList(drawerSupplier.category_ids, "categories"), fullWidth: true },
+                    { label: "Sub-Categories", value: chipList(drawerSupplier.sub_category_ids, "subCategories"), fullWidth: true },
+                    { label: "Products Supplied", value: chipList(drawerSupplier.product_ids, "products"), fullWidth: true },
+                    { label: "Secondary Products", value: drawerSupplier.secondary_products_description || "—", fullWidth: true },
+                  ]}
+                />
+              </div>
+
+              {/* CARD 2: Primary Contact & Websites */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  👤 Primary Contact Information
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    {
+                      label: "Contact Person",
+                      value: `${drawerSupplier.contact_salutation || ""} ${drawerSupplier.contact_full_name || ""}`.trim() || "—",
+                    },
+                    { label: "Designation", value: drawerSupplier.contact_designation || "—" },
+                    {
+                      label: "Calling Number",
+                      value: drawerSupplier.contact_calling_number ? (
+                        <a href={`tel:${drawerSupplier.contact_calling_number}`} style={{ color: "#0061f2", textDecoration: "none", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                          📞 {drawerSupplier.contact_calling_number}
+                        </a>
+                      ) : "—",
+                    },
+                    {
+                      label: "WhatsApp Number",
+                      value: drawerSupplier.contact_whatsapp_number ? (
+                        <a
+                          href={`https://wa.me/${drawerSupplier.contact_whatsapp_number.replace(/[^0-9]/g, "")}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#16a34a", textDecoration: "none", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "4px" }}
+                        >
+                          💬 {drawerSupplier.contact_whatsapp_number} ↗
+                        </a>
+                      ) : "—",
+                    },
+                    {
+                      label: "WeChat Number",
+                      value: drawerSupplier.contact_wechat_number ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#059669", fontWeight: 500 }}>
+                          🗨️ {drawerSupplier.contact_wechat_number}
+                        </span>
+                      ) : "—",
+                    },
+                    {
+                      label: "Email Addresses",
+                      value: drawerSupplier.emails && drawerSupplier.emails.length ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                          {drawerSupplier.emails.map((em) => (
+                            <a
+                              key={em}
+                              href={`mailto:${em}`}
+                              style={{
+                                color: "#2563eb",
+                                background: "#eff6ff",
+                                border: "1px solid #bfdbfe",
+                                borderRadius: "4px",
+                                padding: "2px 8px",
+                                fontSize: "12.5px",
+                                fontWeight: 500,
+                                textDecoration: "none",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              ✉️ {em}
+                            </a>
+                          ))}
+                        </div>
+                      ) : "—",
+                      fullWidth: true,
+                    },
+                    {
+                      label: "Primary Website",
+                      value: drawerSupplier.primary_website ? (
+                        <a
+                          href={drawerSupplier.primary_website.startsWith("http") ? drawerSupplier.primary_website : `https://${drawerSupplier.primary_website}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#0284c7", textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "4px" }}
+                        >
+                          🌐 {drawerSupplier.primary_website.replace(/^https?:\/\/(www\.)?/, "")} ↗
+                        </a>
+                      ) : "—",
+                    },
+                    {
+                      label: "Secondary Website",
+                      value: drawerSupplier.secondary_website ? (
+                        <a
+                          href={drawerSupplier.secondary_website.startsWith("http") ? drawerSupplier.secondary_website : `https://${drawerSupplier.secondary_website}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#0284c7", textDecoration: "none", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "4px" }}
+                        >
+                          🌐 {drawerSupplier.secondary_website.replace(/^https?:\/\/(www\.)?/, "")} ↗
+                        </a>
+                      ) : "—",
+                    },
+                  ]}
+                />
+              </div>
+
+              {/* CARD 3: Factory Visit & Media */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  🏭 Factory Visit &amp; Inspection Media
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    {
+                      label: "Visited Factory / Office",
+                      value: drawerSupplier.visited_factory_office ? (
+                        <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: 600 }}>
+                          ✓ Yes, Visited
+                        </span>
+                      ) : (
+                        <span style={{ background: "#f1f5f9", color: "#64748b", padding: "2px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: 600 }}>
+                          No
+                        </span>
+                      ),
+                    },
+                    {
+                      label: "Visit Remarks",
+                      value: drawerSupplier.visit_remarks || "—",
+                    },
+                    {
+                      label: "Factory Video / Inspection Folder Links",
+                      value: videoUrls.length > 0 ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                          {videoUrls.map((url, idx) => {
+                            const meta = getMediaBadge(url);
+                            return (
+                              <a
+                                key={idx}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  background: meta.bg,
+                                  border: `1px solid ${meta.border}`,
+                                  color: meta.text,
+                                  borderRadius: "6px",
+                                  padding: "4px 10px",
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                  textDecoration: "none",
+                                }}
+                              >
+                                <span>{meta.icon}</span>
+                                <span>{meta.label}</span>
+                                <span style={{ fontSize: "11px", opacity: 0.8 }}>↗</span>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      ) : "—",
+                      fullWidth: true,
+                    },
+                    ...(photoUrls.length > 0
+                      ? [
+                        {
+                          label: "Factory Photos / Media Attachments",
+                          value: (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+                              {photoUrls.map((pUrl, pIdx) => (
+                                <a
+                                  key={pIdx}
+                                  href={pUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: "inline-block",
+                                    width: "68px",
+                                    height: "68px",
+                                    borderRadius: "6px",
+                                    overflow: "hidden",
+                                    border: "1px solid #cbd5e1",
+                                  }}
+                                >
+                                  <img src={pUrl} alt={`Visit attachment ${pIdx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                </a>
+                              ))}
+                            </div>
+                          ),
+                          fullWidth: true,
+                        },
+                      ]
+                      : []),
+                  ]}
+                />
+              </div>
+
+              {/* CARD 4: Pipeline Status & Evaluation */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  📊 Pipeline Status &amp; Commercial Evaluation
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    { label: "Supplier Grade", value: drawerSupplier.supplier_grade ? `Grade ${drawerSupplier.supplier_grade.toUpperCase()}` : "—" },
+                    { label: "Current Status", value: <StatusPill value={drawerSupplier.current_status} /> },
+                    {
+                      label: "Potential (Yes / No)",
+                      value: drawerSupplier.potential ? (
+                        <span
+                          style={{
+                            background: drawerSupplier.potential.toLowerCase() === "yes" ? "#dcfce7" : "#fee2e2",
+                            color: drawerSupplier.potential.toLowerCase() === "yes" ? "#166534" : "#991b1b",
+                            padding: "2px 8px",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {drawerSupplier.potential.toUpperCase()}
+                        </span>
+                      ) : "—",
+                    },
+                    { label: "Reason for Potential Status", value: drawerSupplier.potential_reason || "—", fullWidth: true },
+                    { label: "Overall Remarks / Key Strengths", value: drawerSupplier.overall_remarks || "—", fullWidth: true },
+                  ]}
+                />
+              </div>
+
+              {/* CARD 5: Additional Contacts */}
+              {drawerSupplier.contacts && drawerSupplier.contacts.length > 0 && (
+                <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+                  <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                    👥 Additional Contacts ({drawerSupplier.contacts.length})
+                  </h4>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {drawerSupplier.contacts.map((c, i) => (
+                      <div key={c.id || i} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 16px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
+                          <div>
+                            <span style={{ fontWeight: 700, color: "#0f172a", fontSize: "13.5px" }}>
+                              {c.salutation ? `${c.salutation} ` : ""}{c.person_name}
+                            </span>
+                            {c.designation && <span style={{ color: "#64748b", fontSize: "12.5px", marginLeft: "6px" }}>• {c.designation}</span>}
+                          </div>
+                          {c.handling_territory && (
+                            <span style={{ fontSize: "11px", fontWeight: 600, background: "#e0f2fe", color: "#0369a1", padding: "1px 6px", borderRadius: "4px" }}>
+                              📍 {c.handling_territory}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", fontSize: "12.5px", color: "#334155" }}>
+                          {c.calling_number && (
+                            <a href={`tel:${c.calling_number}`} style={{ color: "#0061f2", textDecoration: "none", fontWeight: 500 }}>
+                              📞 {c.calling_number}
+                            </a>
+                          )}
+                          {c.whatsapp_number && (
+                            <a href={`https://wa.me/${c.whatsapp_number.replace(/[^0-9]/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ color: "#16a34a", textDecoration: "none", fontWeight: 500 }}>
+                              💬 {c.whatsapp_number}
+                            </a>
+                          )}
+                          {c.wechat_number && <span>🗨️ {c.wechat_number}</span>}
+                          {c.email && (
+                            <a href={`mailto:${c.email}`} style={{ color: "#2563eb", textDecoration: "none", fontWeight: 500 }}>
+                              ✉️ {c.email}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
+          </SideDrawer>
+        );
+      })()}
 
-            <DetailFieldGrid
-              fields={[
-                { label: "Supplier Grade", value: drawerSupplier.supplier_grade || "—" },
-                { label: "Current Status", value: <StatusPill value={drawerSupplier.current_status} /> },
-                { label: "Potential", value: drawerSupplier.potential || "—" },
-                { label: "Visited Factory/Office", value: drawerSupplier.visited_factory_office ? "Yes" : "No" },
-                { label: "Overall Remarks", value: drawerSupplier.overall_remarks || "—", fullWidth: true },
-              ]}
-            />
-          </div>
-        </SideDrawer>
-      )}
+      <TrashConflictModal
+        isOpen={Boolean(trashConflict)}
+        conflictInfo={trashConflict}
+        onClose={() => setTrashConflict(null)}
+        onRestored={async () => {
+          setTrashConflict(null);
+          closeModal();
+          reload();
+        }}
+      />
     </AppShell>
   );
 }

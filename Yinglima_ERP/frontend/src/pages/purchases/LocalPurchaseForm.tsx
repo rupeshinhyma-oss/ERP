@@ -15,7 +15,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPatch, apiPost, apiPostMultipart, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
@@ -966,11 +965,10 @@ export function LocalPurchaseFormPage() {
     <AppShell activeKey="local-purchases">
       <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
         <form onSubmit={handleSubmit} noValidate>
-          {/* Header Breadcrumb & Back Navigation */}
+          {/* Header & Back Navigation */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
-              <Breadcrumb trail={["Purchase", "Local Purchase", isEdit ? "Edit Purchase" : "Add Purchase"]} />
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0f172a", margin: "4px 0 0 0" }}>
+              <h1 className="page-title">
                 {isEdit ? `Edit Local Purchase: ${invoiceNo || "Invoice"}` : "New Local Purchase Order"}
               </h1>
             </div>

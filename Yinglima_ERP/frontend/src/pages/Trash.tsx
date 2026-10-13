@@ -261,10 +261,7 @@ export function TrashPage() {
         {/* Page Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
           <div>
-            <h1 style={{ color: "#0f172a", fontWeight: 700, fontSize: "22px", margin: 0 }}>Trash</h1>
-            <p style={{ color: "#64748b", fontSize: "13.5px", margin: "4px 0 0 0" }}>
-              View and manage soft-deleted items across all modules. Permanently delete or restore records to the database.
-            </p>
+            <h1 className="page-title">Trash</h1>
           </div>
           {items.length > 0 && (
             <button

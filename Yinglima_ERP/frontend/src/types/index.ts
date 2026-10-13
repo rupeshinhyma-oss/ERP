@@ -577,23 +577,4 @@ export type SheetRow = Record<string, unknown>;
 
 /** target field key -> source sheet column name (or null for "don't import"). */
 export type ColumnMapping = Record<string, string | null>;
-
-/* ------------------------------------------------------------------ */
-/* Universal search                                                   */
-/* ------------------------------------------------------------------ */
-
-export interface SearchResultItem {
-  category: string;
-  id: string;
-  title: string;
-  subtitle?: string | null;
-  target_url: string;
-  icon: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface UniversalSearchResponse {
-  query: string;
-  total_hits: number;
-  results: SearchResultItem[];
-}
+
