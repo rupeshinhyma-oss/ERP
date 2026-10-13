@@ -52,7 +52,7 @@ export function LocalPurchasesPage() {
 
   // Lookups
   const supplierLookup = useLookup<{ id: string; company_name: string }>(
-    "/suppliers?page_size=1000",
+    "/suppliers",
     500
   );
 

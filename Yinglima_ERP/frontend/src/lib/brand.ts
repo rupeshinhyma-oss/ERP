@@ -37,34 +37,57 @@ export function setBrandName(name: string): void {
   listeners.forEach((listener) => listener(cleanName));
 }
 
+let lastBrandResolvedTime = 0;
+let inFlightBrandPromise: Promise<string> | null = null;
+
 export function invalidateBrandNameCache(): void {
   sessionStorage.removeItem(CACHE_KEY);
   localStorage.removeItem(CACHE_KEY);
   localStorage.removeItem("erp_brand_name");
+  lastBrandResolvedTime = 0;
+  inFlightBrandPromise = null;
 }
 
-export async function resolveBrandName(): Promise<string> {
-  try {
-    const { data } = await apiGet<{ company_name?: string }>("/organizations/public");
-    if (data?.company_name) {
-      const name = data.company_name.trim();
-      setBrandName(name);
-      return name;
-    }
-  } catch {
+export async function resolveBrandName(force = false): Promise<string> {
+  const cached = getCachedBrandName();
+  if (!force && cached && cached !== DEFAULT_BRAND_NAME && Date.now() - lastBrandResolvedTime < 120000) {
+    return cached;
+  }
+
+  if (inFlightBrandPromise) {
+    return inFlightBrandPromise;
+  }
+
+  inFlightBrandPromise = (async () => {
     try {
-      const { data } = await apiGet<Organization>("/organizations");
+      const { data } = await apiGet<{ company_name?: string }>("/organizations/public");
       if (data?.company_name) {
         const name = data.company_name.trim();
         setBrandName(name);
+        lastBrandResolvedTime = Date.now();
         return name;
       }
     } catch {
-      // Non-blocking fallback to cached or default
+      try {
+        const { data } = await apiGet<Organization>("/organizations");
+        if (data?.company_name) {
+          const name = data.company_name.trim();
+          setBrandName(name);
+          lastBrandResolvedTime = Date.now();
+          return name;
+        }
+      } catch {
+        // Non-blocking fallback to cached or default
+      }
+    } finally {
+      inFlightBrandPromise = null;
     }
-  }
 
-  const fallback = getCachedBrandName();
-  setBrandName(fallback);
-  return fallback;
+    const fallback = getCachedBrandName();
+    setBrandName(fallback);
+    lastBrandResolvedTime = Date.now();
+    return fallback;
+  })();
+
+  return inFlightBrandPromise;
 }

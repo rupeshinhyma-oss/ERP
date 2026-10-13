@@ -56,6 +56,23 @@ def install_dns_resilience() -> None:
 
         host_lower = host.strip().lower()
 
+        # 0. Fast-path: if resolved within the last 60 seconds, serve from in-memory cache (0ms DNS latency)
+        cached_entry = _RESOLVED_CACHE.get(host_lower)
+        if cached_entry:
+            cached_res, cached_time = cached_entry
+            if time.time() - cached_time < 60.0:
+                target_port = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else 0
+                return [
+                    (
+                        item[0],
+                        item[1],
+                        item[2],
+                        item[3],
+                        (item[4][0], target_port) if len(item) > 4 and len(item[4]) >= 2 else item[4],
+                    )
+                    for item in cached_res
+                ]
+
         # 1. Attempt standard resolution with up to 2 retries on gaierror
         last_error: Exception | None = None
         for attempt in range(3):

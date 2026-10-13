@@ -124,6 +124,75 @@ async def _user_with_roles(
     return UserWithRoles(**user_dict)
 
 
+async def _batch_users_with_roles(
+    users: list[User], db: AsyncSession
+) -> list[dict]:
+    """Batch-load roles, managers, and positions for a page of users in 3 batched queries instead of N*4 queries."""
+    if not users:
+        return []
+
+    from sqlalchemy import select
+    from app.rbac.models import UserRole, Role
+    from app.org_structure.models import EmployeePositionAssignment, Position, OrgRecordStatus
+
+    user_ids = [u.id for u in users]
+
+    # 1. Batch fetch roles for all users in one query
+    roles_stmt = (
+        select(UserRole.user_id, Role.name)
+        .join(Role, Role.id == UserRole.role_id)
+        .where(UserRole.user_id.in_(user_ids))
+    )
+    roles_res = await db.execute(roles_stmt)
+    roles_by_user: dict[uuid.UUID, list[str]] = {}
+    for uid, rname in roles_res.all():
+        roles_by_user.setdefault(uid, []).append(rname)
+
+    # 2. Batch fetch managers for all users in one query
+    manager_ids = {u.manager_id for u in users if u.manager_id}
+    mgr_map: dict[uuid.UUID, str] = {}
+    if manager_ids:
+        mgr_stmt = select(User.id, User.full_name).where(User.id.in_(manager_ids))
+        mgr_res = await db.execute(mgr_stmt)
+        mgr_map = dict(mgr_res.all())
+
+    # 3. Batch fetch positions for all users in one query
+    pos_map: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
+    try:
+        pos_stmt = (
+            select(
+                EmployeePositionAssignment.employee_id,
+                Position.id,
+                Position.name,
+                EmployeePositionAssignment.is_primary,
+            )
+            .join(Position, EmployeePositionAssignment.position_id == Position.id)
+            .where(
+                EmployeePositionAssignment.employee_id.in_(user_ids),
+                EmployeePositionAssignment.status == OrgRecordStatus.ACTIVE,
+            )
+        )
+        pos_res = await db.execute(pos_stmt)
+        # Sort so primary positions override fallback ones
+        for emp_id, pid, pname, is_pri in sorted(pos_res.all(), key=lambda row: 1 if row[3] else 0):
+            pos_map[emp_id] = (pid, pname)
+    except Exception:
+        pass
+
+    items = []
+    for u in users:
+        user_dict = UserRead.model_validate(u).model_dump()
+        user_dict["roles"] = roles_by_user.get(u.id) or ["user"]
+        user_dict["employee_name"] = u.full_name
+        user_dict["manager_name"] = mgr_map.get(u.manager_id) if u.manager_id else None
+        pos_info = pos_map.get(u.id)
+        user_dict["position_id"] = pos_info[0] if pos_info else None
+        user_dict["position_name"] = pos_info[1] if pos_info else None
+        items.append(UserWithRoles(**user_dict).model_dump(mode="json"))
+
+    return items
+
+
 async def _record_user_action(
     *,
     audit_service: AuditService,
@@ -221,10 +290,7 @@ async def list_users(
         query=query,
         status=status,
     )
-    items = []
-    for u in users:
-        u_with_roles = await _user_with_roles(u, rbac_service, db=db)
-        items.append(u_with_roles.model_dump(mode="json"))
+    items = await _batch_users_with_roles(users, db=db)
     data = {
         "items": items,
         "total": total,

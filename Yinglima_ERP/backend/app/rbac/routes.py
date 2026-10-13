@@ -107,8 +107,14 @@ async def list_roles(
     _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
 ) -> dict:
     """List every role, with each role's granted permission codes expanded."""
-    roles = await rbac_service.list_roles()
-    data = [(await _role_with_permissions(r, rbac_service)).model_dump(mode="json") for r in roles]
+    roles = await rbac_service.list_roles_with_permissions()
+    data = [
+        RoleWithPermissions(
+            **RoleRead.model_validate(r).model_dump(),
+            permissions=sorted(link.permission.code for link in r.permission_links if link.permission),
+        ).model_dump(mode="json")
+        for r in roles
+    ]
     return build_success_response(data=data, request_id=request.state.request_id)
 
 

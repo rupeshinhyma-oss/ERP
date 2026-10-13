@@ -99,7 +99,7 @@ export function LocalPurchaseFormPage() {
 
   // Lookups
   const supplierLookup = useLookup<{ id: string; company_name: string; supplier_type?: string }>(
-    "/suppliers?page_size=1000",
+    "/suppliers",
     500
   );
   const hsnLookup = useLookup<{ id: string; code: string }>("/masters/hsn", 500);
@@ -211,41 +211,49 @@ export function LocalPurchaseFormPage() {
 
     // Auto-update existing lines that have unit_rate === 0 if quotes exist for this supplier
     if (supId && items.length > 0) {
-      const pendingItems = items.filter((it) => it.product_id && (!it.unit_rate || Number(it.unit_rate) <= 0));
-      if (pendingItems.length > 0) {
-        for (let i = 0; i < items.length; i++) {
-          const it = items[i];
-          if (it.product_id && (!it.unit_rate || Number(it.unit_rate) <= 0)) {
+      const pendingIndices = items
+        .map((it, idx) => ({ it, idx }))
+        .filter(({ it }) => it.product_id && (!it.unit_rate || Number(it.unit_rate) <= 0));
+
+      if (pendingIndices.length > 0) {
+        // Fetch all quotes in parallel
+        const quoteResults = await Promise.all(
+          pendingIndices.map(async ({ it, idx }) => {
             try {
               const res = await apiGet<Array<{ supplier_id: string; unit_price?: number | null; moq?: number | null }>>(
                 `/inventory/product-prices/${it.product_id}/suppliers`
               );
               const quotes = Array.isArray(res.data) ? res.data : [];
               const match = quotes.find((q) => q.supplier_id === supId);
-              if (match && match.unit_price != null && Number(match.unit_price) > 0) {
-                setItems((prev) => {
-                  const next = [...prev];
-                  if (next[i]) {
-                    const newQty =
-                      (next[i].quantity === "" || !next[i].quantity || Number(next[i].quantity) <= 0) &&
-                      match.moq &&
-                      Number(match.moq) > 0
-                        ? Number(match.moq)
-                        : next[i].quantity;
-                    next[i] = {
-                      ...next[i],
-                      unit_rate: Number(match.unit_price),
-                      quantity: newQty,
-                    };
-                  }
-                  return next;
-                });
-              }
+              return { idx, match };
             } catch {
-              // quiet
+              return { idx, match: undefined };
+            }
+          })
+        );
+
+        setItems((prev) => {
+          const next = [...prev];
+          let changed = false;
+          for (const { idx, match } of quoteResults) {
+            if (match && match.unit_price != null && Number(match.unit_price) > 0 && next[idx]) {
+              const current = next[idx];
+              const newQty =
+                (current.quantity === "" || !current.quantity || Number(current.quantity) <= 0) &&
+                match.moq &&
+                Number(match.moq) > 0
+                  ? Number(match.moq)
+                  : current.quantity;
+              next[idx] = {
+                ...current,
+                unit_rate: Number(match.unit_price),
+                quantity: newQty,
+              };
+              changed = true;
             }
           }
-        }
+          return changed ? next : prev;
+        });
       }
     }
   };

@@ -999,10 +999,13 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const loggedIn = Auth.isLoggedIn();
 
   useEffect(() => {
-    if (!loggedIn) return;
+    if (!loggedIn || !Auth.shouldSyncProfile()) return;
     apiGet<Profile>("/auth/profile")
       .then((res) => {
-        if (res && res.data) Auth.updateProfile(res.data);
+        if (res && res.data) {
+          Auth.updateProfile(res.data);
+          Auth.markProfileSynced();
+        }
       })
       .catch(() => {
         /* profile refresh fallback */
