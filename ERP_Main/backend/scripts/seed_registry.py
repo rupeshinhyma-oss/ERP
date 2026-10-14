@@ -142,7 +142,9 @@ async def seed() -> None:
                 base_url=yinglima_url,
             ),
         )
-        if not yinglima_is_new:
+        # Config comes from the environment ONLY when it is explicitly set; a local run with no value must
+        # never overwrite the live registry (local and hosted runs share one database).
+        if not yinglima_is_new and os.environ.get("YINGLIMA_FRONTEND_URL", "").strip():
             await service.update_metadata(
                 yinglima.id,
                 ErpInstanceUpdate(base_url=yinglima_url),
@@ -164,19 +166,10 @@ async def seed() -> None:
                 base_url=inhyma_url,
             ),
         )
-        if not inhyma_is_new:
-            await service.update_metadata(
-                inhyma.id,
-                ErpInstanceUpdate(
-                    description=(
-                        "Independent ERP for Inhyma's own operations. A complete, independently-tested "
-                        f"application running at {inhyma_url}."
-                    ),
-                    base_url=inhyma_url,
-                ),
-            )
-            await service.change_status(inhyma.id, ErpStatus.ACTIVE)
-            print("Updated inhyma's description, base_url, and ACTIVE status.")
+        # Never re-activate or re-describe an existing ERP: an operator may have suspended or edited it on purpose.
+        if not inhyma_is_new and os.environ.get("INHYMA_FRONTEND_URL", "").strip():
+            await service.update_metadata(inhyma.id, ErpInstanceUpdate(base_url=inhyma_url))
+            print("Updated inhyma's base_url from INHYMA_FRONTEND_URL.")
         await _declare_modules(service, inhyma.id, _SHARED_MODULES + _INHYMA_ONLY_MODULES)
 
         await db.commit()

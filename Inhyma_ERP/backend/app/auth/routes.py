@@ -405,12 +405,17 @@ async def sso_handover_login(
     user = (await db.execute(stmt)).scalars().first()
     if user:
         if user.deleted_at is not None or not user.is_active or not user.can_login:
-            from app.users.models import UserStatus
-            user.deleted_at = None
-            user.is_active = True
-            user.status = UserStatus.ACTIVE
-            await db.flush()
+            # This ERP's own database is the truth for this account.  Signing in through the control plane must never
+            # silently un-delete or re-enable it; an administrator restores it from the Users screen (or ERP_Main
+            # pushes the restore through the access-sync channel).
+            raise UnauthorizedException(
+                "This account was deleted or disabled in this ERP. Ask an administrator to restore it."
+            )
     else:
+        import os as _os
+
+        if _os.environ.get("SSO_HANDOVER_AUTO_PROVISION", "true").strip().lower() in {"0", "false", "no"}:
+            raise UnauthorizedException("No account exists for you in this ERP.")
         # Auto-provision minimal local user on confirmed central handover
         from app.api.v1.internal_users import _system_actor_id
         from app.users.repository import UserRepository
