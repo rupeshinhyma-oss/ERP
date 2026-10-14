@@ -1,33 +1,33 @@
 """
-DNS Resilience & Fallback Patch for Python Sockets on Windows / Cloud WAN.
+DNS resilience patch for Python sockets -- WINDOWS ONLY by default.
 
-Addresses [Errno 11001] getaddrinfo failed caused by:
-1. Windows Winsock WSAHOST_NOT_FOUND on short TTL (60s) AWS ELB CNAME chains (e.g. Supabase poolers).
-2. Transient UDP packet drops during Wi-Fi or broadband DNS resolution.
-3. Lack of retries in asyncio's loop.create_connection / loop.getaddrinfo.
+Why it exists: Windows Winsock sometimes raises ``[Errno 11001] getaddrinfo failed`` for short-TTL CNAME chains
+(e.g. Supabase poolers) or after transient UDP loss.  On those machines we retry and fall back to the last resolved
+addresses.
 
-When installed:
-- Performs standard socket.getaddrinfo resolution.
-- Caches successful resolution tuples in memory with rolling updates.
-- If getaddrinfo raises socket.gaierror:
-  - Immediately retries up to 2 times with a 100ms pause.
-  - If still failing, falls back to the last known resolved IPs for that hostname.
-  - If it's a known Supabase pooler host and no cache exists yet, falls back to pre-seeded AWS pooler IPs.
+Why it is now limited: on Linux hosts (Render, Docker, AWS) the resolver is fine and this patch only did harm.  The
+previous version cached results by hostname alone, so a lookup that asked for IPv6 could be served to a later lookup
+that asked for IPv4.  Render has no outbound IPv6, so ERP-to-ERP calls (e.g. the SSO session check) then failed with
+"control plane not reachable".  The cache key now includes family/type/proto/flags, and the patch only installs on
+Windows unless ``DNS_RESILIENCE_FORCE=1`` is set.  ``DNS_RESILIENCE_DISABLE=1`` switches it off everywhere.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import socket
+import sys
 import time
 from typing import Any
 
 logger = logging.getLogger("app.core.dns_resilience")
 
-# In-memory DNS cache: host -> (result_tuples, timestamp)
-_RESOLVED_CACHE: dict[str, tuple[list[Any], float]] = {}
+_CACHE_TTL_SECONDS = 60.0
+# (host, family, type, proto, flags) -> (result_tuples, timestamp)
+_RESOLVED_CACHE: dict[tuple[str, int, int, int, int], tuple[list[Any], float]] = {}
 
-# Known fallback IPs for Supabase poolers in ap-south-1
+# Known fallback IPs for Supabase poolers in ap-south-1 (IPv4 only, used only when DNS fails and nothing is cached).
 _PRESEEDED_FALLBACKS: dict[str, list[str]] = {
     "aws-0-ap-south-1.pooler.supabase.com": ["3.111.105.85", "65.0.195.55"],
 }
@@ -36,100 +36,71 @@ _ORIG_GETADDRINFO = socket.getaddrinfo
 _PATCHED = False
 
 
+def _should_install() -> bool:
+    if os.environ.get("DNS_RESILIENCE_DISABLE", "").strip().lower() in {"1", "true", "yes"}:
+        return False
+    if os.environ.get("DNS_RESILIENCE_FORCE", "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    return sys.platform.startswith("win")
+
+
+def _with_port(entries: list[Any], port: Any) -> list[Any]:
+    """Copy cached results, replacing only the port and keeping every other field (incl. IPv6 flow/scope)."""
+    try:
+        target_port = int(port) if port is not None and str(port).isdigit() else 0
+    except (TypeError, ValueError):
+        target_port = 0
+    out = []
+    for item in entries:
+        sockaddr = item[4]
+        if isinstance(sockaddr, tuple) and len(sockaddr) >= 2:
+            sockaddr = (sockaddr[0], target_port, *sockaddr[2:])
+        out.append((item[0], item[1], item[2], item[3], sockaddr))
+    return out
+
+
 def install_dns_resilience() -> None:
-    """Idempotently install the resilient DNS resolver into socket.getaddrinfo."""
+    """Idempotently install the resilient resolver (no-op on non-Windows hosts)."""
     global _PATCHED
-    if _PATCHED:
+    if _PATCHED or not _should_install():
         return
 
-    def resilient_getaddrinfo(
-        host: Any,
-        port: Any,
-        family: int = 0,
-        type: int = 0,
-        proto: int = 0,
-        flags: int = 0,
-    ) -> list[Any]:
-        # Only intercept string hosts (not numeric IPs or None)
+    def resilient_getaddrinfo(host: Any, port: Any, family: int = 0, type: int = 0, proto: int = 0, flags: int = 0):
         if not isinstance(host, str) or not host:
             return _ORIG_GETADDRINFO(host, port, family, type, proto, flags)
 
-        host_lower = host.strip().lower()
+        key = (host.strip().lower(), family, type, proto, flags)
+        hit = _RESOLVED_CACHE.get(key)
+        if hit and time.time() - hit[1] < _CACHE_TTL_SECONDS:
+            return _with_port(hit[0], port)
 
-        # 0. Fast-path: if resolved within the last 60 seconds, serve from in-memory cache (0ms DNS latency)
-        cached_entry = _RESOLVED_CACHE.get(host_lower)
-        if cached_entry:
-            cached_res, cached_time = cached_entry
-            if time.time() - cached_time < 60.0:
-                target_port = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else 0
-                return [
-                    (
-                        item[0],
-                        item[1],
-                        item[2],
-                        item[3],
-                        (item[4][0], target_port) if len(item) > 4 and len(item[4]) >= 2 else item[4],
-                    )
-                    for item in cached_res
-                ]
-
-        # 1. Attempt standard resolution with up to 2 retries on gaierror
         last_error: Exception | None = None
         for attempt in range(3):
             try:
                 res = _ORIG_GETADDRINFO(host, port, family, type, proto, flags)
                 if res:
-                    _RESOLVED_CACHE[host_lower] = (res, time.time())
+                    _RESOLVED_CACHE[key] = (res, time.time())
                 return res
             except socket.gaierror as exc:
                 last_error = exc
                 if attempt < 2:
                     time.sleep(0.1)
 
-        # 2. If standard resolution failed, check the memory cache
-        cached_entry = _RESOLVED_CACHE.get(host_lower)
-        if cached_entry:
-            cached_res, _ = cached_entry
-            target_port = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else 0
-            adapted_res = [
-                (
-                    item[0],
-                    item[1],
-                    item[2],
-                    item[3],
-                    (item[4][0], target_port) if len(item) > 4 and len(item[4]) >= 2 else item[4],
-                )
-                for item in cached_res
-            ]
-            logger.warning(
-                "DNS lookup failed for %s (%s); utilizing cached DNS resolution (%s)",
-                host,
-                last_error,
-                [r[4][0] for r in adapted_res if len(r) > 4 and len(r[4]) >= 1],
-            )
-            return adapted_res
+        stale = _RESOLVED_CACHE.get(key)
+        if stale:
+            logger.warning("DNS lookup failed for %s (%s); using last known addresses", host, last_error)
+            return _with_port(stale[0], port)
 
-        # 3. Check preseeded fallbacks for known Supabase poolers
-        fallback_ips = _PRESEEDED_FALLBACKS.get(host_lower)
-        if fallback_ips:
-            target_port = int(port) if isinstance(port, (int, str)) and str(port).isdigit() else 0
-            synthetic_res = [
-                (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, target_port))
-                for ip in fallback_ips
-            ]
-            logger.warning(
-                "DNS lookup failed for %s (%s); utilizing preseeded fallback IP (%s)",
-                host,
-                last_error,
-                fallback_ips,
-            )
-            return synthetic_res
+        fallback_ips = _PRESEEDED_FALLBACKS.get(key[0])
+        if fallback_ips and family in (0, socket.AF_INET):
+            logger.warning("DNS lookup failed for %s (%s); using preseeded fallback IPs", host, last_error)
+            p = int(port) if port is not None and str(port).isdigit() else 0
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, p)) for ip in fallback_ips]
 
-        # Re-raise original error if no fallback is possible
         if last_error:
             raise last_error
         return _ORIG_GETADDRINFO(host, port, family, type, proto, flags)
 
-    socket.getaddrinfo = resilient_getaddrinfo
+    setattr(socket, "getaddrinfo", resilient_getaddrinfo)
     _PATCHED = True
-    logger.info("DNS resilience and fallback handler installed successfully.")
+    logger.info("DNS resilience handler installed (platform=%s).", sys.platform)

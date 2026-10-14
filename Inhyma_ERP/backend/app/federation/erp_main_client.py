@@ -94,34 +94,137 @@ class EcosystemSessionUnavailable(EcosystemSessionError):
     """ERP_Main could not be reached or answered with an error: a TEMPORARY problem, safe to retry (HTTP 503 here)."""
 
 
-async def verify_ecosystem_session(session_id: str) -> dict[str, Any]:
+_LAST_GOOD_SESSIONS: dict[str, tuple[float, dict[str, Any]]] = {}
+VERIFY_DIAGNOSTICS: dict[str, Any] = {"ok": None, "at": None, "url": None, "status": None, "error": None, "attempts": 0}
+
+
+def _is_local_url(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+
+
+def erp_main_api_base_urls() -> list[str]:
+    """Every base URL worth trying for ERP_Main, best first (configured URL, then ones derived from the issuer/JWKS)."""
+    candidates: list[str] = []
+    configured = (settings.ERP_MAIN_API_BASE_URL or "").strip().rstrip("/")
+    derived: list[str] = []
+    issuer = (getattr(settings, "ERP_MAIN_ISSUER", "") or "").strip().rstrip("/")
+    if issuer:
+        derived.append(issuer if issuer.endswith("/api/v1") else f"{issuer}/api/v1")
+    jwks = (getattr(settings, "ERP_MAIN_JWKS_URL", "") or "").strip()
+    if "/api/v1/" in jwks:
+        derived.append(jwks.split("/api/v1/")[0] + "/api/v1")
+    explicit = (getattr(settings, "ERP_MAIN_URL", "") or "").strip().rstrip("/")
+    if explicit:
+        derived.insert(0, explicit if explicit.endswith("/api/v1") else f"{explicit}/api/v1")
+    production = getattr(settings, "is_production", False)
+    # In production a localhost default is never a real ERP_Main: try the other candidates first.
+    ordered = ([configured] if configured and not (production and _is_local_url(configured) and derived) else []) + derived
+    if configured and configured not in ordered:
+        ordered.append(configured)
+    for url in ordered:
+        if url and url not in candidates:
+            candidates.append(url)
+    return candidates
+
+
+def _client_for_erp_main(timeout: Any) -> httpx.AsyncClient:
+    # Force IPv4: hosted platforms such as Render have no outbound IPv6, and a stray AAAA answer must never make the
+    # control plane look "unreachable".
+    try:
+        transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0", retries=1)
+        return httpx.AsyncClient(timeout=timeout, transport=transport)
+    except Exception:
+        return httpx.AsyncClient(timeout=timeout)
+
+
+async def verify_ecosystem_session(
+    session_id: str, *, budget_seconds: float | None = None, allow_stale: bool = True
+) -> dict[str, Any]:
     """
     Ask ERP_Main whether a central ecosystem session is currently valid.
 
-    ERP_Main re-checks the user's status and ERP memberships on every call, so
-    the answer reflects access changes made centrally a moment ago.  Fails
-    CLOSED: any network problem, non-200, or malformed reply raises
-    `EcosystemSessionError` -- callers must deny access, never assume active.
+    ERP_Main re-checks the user's status and ERP memberships on every call, so the answer reflects access changes
+    made centrally a moment ago.
+
+    Reliability rules (a hosted free-tier ERP_Main may be asleep, restarting or briefly erroring):
+      * several base URLs are tried, and temporary problems (network error, 502/503/504, 429) are retried with growing
+        pauses until the time budget is used up -- a sleeping ERP_Main gets time to wake up;
+      * a definite answer (200, or a 4xx such as 404) is final and never retried;
+      * if ERP_Main stays unreachable, a session that THIS ERP verified as active within the last
+        ``SSO_HANDOVER_STALE_OK_SECONDS`` is accepted (marked ``_from_cache``) -- sign-in keeps working through a
+        short outage, while a session never verified before still fails CLOSED;
+      * the reason for the latest failure is kept in ``VERIFY_DIAGNOSTICS`` (see GET /health/federation).
     """
+    import asyncio
+    import time as _time
     from urllib.parse import quote
 
-    url = f"{settings.ERP_MAIN_API_BASE_URL.rstrip('/')}/global/ecosystem-session/{quote(session_id, safe='')}"
-    try:
-        async with httpx.AsyncClient(timeout=settings.SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS) as http_client:
-            response = await http_client.get(url)
-    except httpx.HTTPError as exc:
-        raise EcosystemSessionUnavailable(f"Could not reach ERP_Main to verify the session: {exc}") from exc
+    budget = float(budget_seconds if budget_seconds is not None else settings.SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS)
+    deadline = _time.monotonic() + max(budget, 1.0)
+    bases = erp_main_api_base_urls()
+    sid_q = quote(session_id, safe="")
+    last_error = "ERP_Main is not configured."
+    attempts = 0
+    pause = 0.6
 
-    if response.status_code != 200:
-        raise EcosystemSessionUnavailable(f"ERP_Main session verification failed with status {response.status_code}.")
-    try:
-        body = response.json()
-    except ValueError as exc:
-        raise EcosystemSessionUnavailable("ERP_Main returned a non-JSON session verification reply.") from exc
-    data = body.get("data", body) if isinstance(body, dict) else None
-    if not isinstance(data, dict):
-        raise EcosystemSessionUnavailable("ERP_Main returned an unexpected session verification reply.")
-    return data
+    while bases and _time.monotonic() < deadline:
+        retryable_seen = False
+        for base in bases:
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0.5:
+                break
+            attempts += 1
+            url = f"{base}/global/ecosystem-session/{sid_q}"
+            per_try = httpx.Timeout(connect=min(8.0, remaining), read=min(15.0, remaining), write=5.0, pool=5.0)
+            try:
+                async with _client_for_erp_main(per_try) as http_client:
+                    response = await http_client.get(url)
+            except httpx.HTTPError as exc:
+                retryable_seen = True
+                last_error = f"{base}: {type(exc).__name__}: {exc}"[:300]
+                VERIFY_DIAGNOSTICS.update(ok=False, at=_time.time(), url=base, status=None, error=last_error, attempts=attempts)
+                continue
+            code = response.status_code
+            if code == 200:
+                try:
+                    body = response.json()
+                except ValueError:
+                    retryable_seen = True
+                    last_error = f"{base}: non-JSON reply"
+                    continue
+                data = body.get("data", body) if isinstance(body, dict) else None
+                if not isinstance(data, dict):
+                    last_error = f"{base}: unexpected reply shape"
+                    continue
+                VERIFY_DIAGNOSTICS.update(ok=True, at=_time.time(), url=base, status=200, error=None, attempts=attempts)
+                if data.get("active") is True:
+                    if len(_LAST_GOOD_SESSIONS) > 2000:
+                        _LAST_GOOD_SESSIONS.clear()
+                    _LAST_GOOD_SESSIONS[session_id] = (_time.monotonic(), dict(data))
+                elif data.get("revoked") is True:
+                    _LAST_GOOD_SESSIONS.pop(session_id, None)
+                return data
+            last_error = f"{base}: HTTP {code}"
+            VERIFY_DIAGNOSTICS.update(ok=False, at=_time.time(), url=base, status=code, error=last_error, attempts=attempts)
+            if code in (429, 500, 502, 503, 504):
+                retryable_seen = True
+            # any other code (e.g. 404 = wrong base URL) is a definite answer: try the next candidate only
+        if not retryable_seen:
+            break
+        await asyncio.sleep(min(pause, max(deadline - _time.monotonic(), 0)))
+        pause = min(pause * 2, 5.0)
+
+    if allow_stale:
+        hit = _LAST_GOOD_SESSIONS.get(session_id)
+        stale_ok = float(getattr(settings, "SSO_HANDOVER_STALE_OK_SECONDS", 900.0))
+        if hit is not None and (_time.monotonic() - hit[0]) <= stale_ok:
+            data = dict(hit[1])
+            data["_from_cache"] = True
+            return data
+    raise EcosystemSessionUnavailable(f"Could not reach ERP_Main to verify the session ({last_error}).")
 
 
 async def push_password_to_erp_main(email: str | None, new_password: str) -> bool:
@@ -235,7 +338,7 @@ async def central_session_state(session_id: str) -> str:
         return hit[1]
     state, ttl = "unknown", _SESSION_STATE_UNREACHABLE_TTL_SECONDS
     try:
-        data = await verify_ecosystem_session(sid)
+        data = await verify_ecosystem_session(sid, budget_seconds=4.0, allow_stale=False)
         if data.get("active") is True:
             state, ttl = "active", _SESSION_STATE_TTL_SECONDS
         elif data.get("revoked") is True:

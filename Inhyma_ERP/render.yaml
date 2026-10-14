@@ -33,6 +33,18 @@ services:
         generateValue: true
       - key: ERP_MAIN_SERVICE_CREDENTIAL
         sync: false
+      - key: ERP_MAIN_URL
+        sync: false   # public ERP_Main backend URL, e.g. https://erp-main-backend.onrender.com  (REQUIRED on Render)
+      - key: ERP_MAIN_API_BASE_URL
+        sync: false   # e.g. https://erp-main-backend.onrender.com/api/v1
+      - key: ERP_MAIN_ISSUER
+        sync: false
+      - key: ERP_MAIN_JWKS_URL
+        sync: false
+      - key: PEER_ERP_ENDPOINTS
+        sync: false
+      - key: SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS
+        value: 40   # lets a sleeping free-tier ERP_Main wake up
       - key: AUTH_USE_SECURE_COOKIES
         value: true
 

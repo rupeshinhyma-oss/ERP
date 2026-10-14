@@ -213,7 +213,7 @@ async def test_central_session_state_is_cached_and_fails_open(monkeypatch):
     erp_main_client._SESSION_STATE_CACHE.clear()
     calls = []
 
-    async def _verify(sid):
+    async def _verify(sid, **_kw):
         calls.append(sid)
         if len(calls) == 1:
             return {"active": True}
