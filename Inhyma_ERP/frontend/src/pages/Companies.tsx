@@ -14,7 +14,7 @@
  * results, not the full related tables.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -1392,150 +1392,21 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerCompany, setDrawerCompany] = useState<Company | null>(null);
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
-    const saved = localStorage.getItem("companies_pinned_cols");
-    if (saved !== null) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        // fallback
-      }
-    }
-    return { 0: "left" };
-  });
-
-  useEffect(() => {
-    localStorage.setItem("companies_pinned_cols", JSON.stringify(pinnedCols));
-  }, [pinnedCols]);
-
-  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
-  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
-  const [pinMenuOpen, setPinMenuOpen] = useState(false);
-  const pinMenuRef = useRef<HTMLDivElement>(null);
-
-  const tableRef = useRef<HTMLTableElement>(null);
-
-  // Close popup menu when clicking outside anywhere on screen
-  useEffect(() => {
-    if (!pinMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
-        setPinMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [pinMenuOpen]);
-
-  const togglePin = useCallback((colIdx: number) => {
-    setPinnedCols((prev) => {
-      const next = { ...prev };
-      if (next[colIdx]) {
-        delete next[colIdx];
-      } else {
-        if (colIdx >= 14) {
-          next[colIdx] = "right";
-        } else {
-          next[colIdx] = "left";
-        }
-      }
-      return next;
-    });
+  const displayOrder = useMemo(() => {
+    return Array.from({ length: COMPANY_TABLE_COLUMNS.length }, (_, i) => i);
   }, []);
 
-  const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: COMPANY_TABLE_COLUMNS.length }, (_, i) => i);
-    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
-    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
-    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
-    return [...lefts, ...unpinned, ...rights];
-  }, [pinnedCols]);
-
-  useLayoutEffect(() => {
-    if (!tableRef.current) return;
-    const tableEl = tableRef.current;
-
-    const updateOffsets = () => {
-      const ths = tableEl.querySelectorAll("thead th");
-      if (!ths.length) return;
-
-      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-      let accumLeft = 0;
-      const nextLefts: Record<number, number> = {};
-      for (const idx of lefts) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextLefts[idx] = accumLeft;
-          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
-      let accumRight = 0;
-      const nextRights: Record<number, number> = {};
-      for (const idx of rights) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextRights[idx] = accumRight;
-          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      setColLeftOffsets(nextLefts);
-      setColRightOffsets(nextRights);
-    };
-
-    updateOffsets();
-
-    const ro = new ResizeObserver(() => updateOffsets());
-    ro.observe(tableEl);
-    return () => ro.disconnect();
-  }, [pinnedCols, rows, loading, displayOrder]);
-
-  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
-    const dir = pinnedCols[colIdx];
-    const headerTopStyle: React.CSSProperties = isHeader
+  const getFreezeStyle = useCallback((_colIdx: number, isHeader = false): React.CSSProperties => {
+    return isHeader
       ? {
-        position: "sticky",
-        top: 0,
-        zIndex: dir ? 30 : 15,
-        backgroundColor: "#f8fafc",
-        boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
-      }
+          position: "sticky",
+          top: 0,
+          zIndex: 15,
+          backgroundColor: "#f8fafc",
+          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
+        }
       : {};
-
-    if (!dir) return headerTopStyle;
-
-    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
-
-    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
-    const isFirstRight = dir === "right" && colIdx === rights[0];
-
-    if (dir === "left") {
-      const left = colLeftOffsets[colIdx] ?? 0;
-      return {
-        ...headerTopStyle,
-        position: "sticky",
-        left: `${left}px`,
-        zIndex: isHeader ? 35 : 10,
-        backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
-      };
-    }
-
-    const right = colRightOffsets[colIdx] ?? 0;
-    return {
-      ...headerTopStyle,
-      position: "sticky",
-      right: `${right}px`,
-      zIndex: isHeader ? 35 : 10,
-      backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
-    };
-  }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
+  }, []);
 
 
 
@@ -2495,6 +2366,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   );
 
   // companyNameFetcher removed
+  const tableRef = useRef<HTMLTableElement>(null);
 
 
   const fetchNameLabel = useCallback(
@@ -3198,13 +3070,13 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   if (isImportPageOpen) {
     return (
       <AppShell activeKey="companies" pageClassName="page-suppliers">
-        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+        <main className="page">
           <Breadcrumb trail={["Company Profiles", "Import Companies"]} />
 
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>Import Companies</h1>
+              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>Import Companies</h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
                 Upload bulk supplier accounts, contacts, and sourcing capabilities from Excel (.xlsx, .xls) or CSV.
               </div>
@@ -3525,11 +3397,11 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   return (
     <AppShell activeKey="companies" pageClassName="page-suppliers">
       {modalOpen ? (
-        <main className="page" style={{ width: "100%", padding: "20px 24px" }}>
+        <main className="page">
           {/* Header Bar with Back Button */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
                 {currentCompanyId ? "Edit Company" : "Add New Company"}
               </h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
@@ -5755,7 +5627,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
             <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <button
                 type="button"
-                className="btn"
+                className="btn btn-filter-toggle"
                 style={{
                   background: "#556987",
                   color: "#ffffff",
@@ -6358,82 +6230,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   </select>
                   <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
                 </div>
-
-                <div ref={pinMenuRef} style={{ position: "relative" }}>
-
-
-                  <button
-                    type="button"
-                    onClick={() => setPinMenuOpen((v) => !v)}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
-                      cursor: "pointer",
-                      color: "#0f172a",
-                      fontWeight: 600,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    📌 Freeze Columns ({Object.keys(pinnedCols).length})
-                  </button>
-                  {pinMenuOpen && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        right: 0,
-                        top: "38px",
-                        zIndex: 100,
-                        background: "#ffffff",
-                        border: "1px solid #cbd5e1",
-                        borderRadius: "8px",
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                        padding: "12px",
-                        minWidth: "220px",
-                        display: "flex",
-                        flexDirection: "column",
-                      }}
-                    >
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                        Toggle Frozen Columns
-                      </div>
-                      <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
-                        {COMPANY_TABLE_COLUMNS.map((label, idx) => {
-                          const isPinned = Boolean(pinnedCols[idx]);
-                          return (
-                            <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                              <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
-                            </label>
-                          );
-                        })}
-                      </div>
-                      <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
-                        <button
-                          type="button"
-                          onClick={() => setPinnedCols({})}
-                          style={{
-                            width: "100%",
-                            padding: "6px 8px",
-                            fontSize: "12px",
-                            borderRadius: "4px",
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
-                            cursor: "pointer",
-                            color: "#dc2626",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Clear All Freezes
-                        </button>
-                      </div>
-                    </div>
-
-                  )}
-                </div>
               </div>
 
               <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
@@ -6491,7 +6287,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                         );
                       }
                       const label = COMPANY_TABLE_COLUMNS[idx];
-                      const isPinned = Boolean(pinnedCols[idx]);
                       const isAction = idx === 14;
                       const isSrNo = idx === 1;
                       const isSorted = sortColIndex === idx;
@@ -6565,17 +6360,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                                 )}
                               </div>
                             )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                togglePin(idx);
-                              }}
-                              style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3, padding: "0 2px", flexShrink: 0 }}
-                              title={isPinned ? "Unfreeze column" : "Freeze column"}
-                            >
-                              📌
-                            </button>
                           </div>
                         </th>
                       );

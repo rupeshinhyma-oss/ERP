@@ -30,8 +30,6 @@ export function CompanyListPage() {
       bulkActionPermission="organizationlist.bulk_action"
       entityName="organization"
       heading="Organization List"
-      subtitle="Manage group operating entities, companies (e.g. Inhyma, FNB Solution), and their branches."
-      breadcrumbTrail={["Master Data", "Organization List"]}
       newButtonLabel="+ ADD NEW ORGANIZATION"
       searchPlaceholder="Search organization name or Sr. No..."
       hideQuickAdd={true}

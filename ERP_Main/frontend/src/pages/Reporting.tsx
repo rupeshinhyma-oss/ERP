@@ -293,7 +293,6 @@ export function Reporting() {
     <AppShell
       activeKey="reporting"
       pageTitle="Global Reports, Projections & Operations"
-      breadcrumbs={["Reporting & Search", "Reports & Exports"]}
       actions={
         <div style={{ display: "flex", gap: "8px" }}>
           {activeTab === "buyers" && (

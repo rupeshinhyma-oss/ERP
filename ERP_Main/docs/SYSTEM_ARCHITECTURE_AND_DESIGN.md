@@ -101,19 +101,11 @@ flowchart TD
 - **Bounded Exponential Backoff & Leases:** Tasks are reclaimed and retried with distributed worker leases (`claimed_by`, `lease_expires_at`) preventing duplicate execution.
 - **Fail-Closed Verification:** Spoke login verification calls ERP_Main's live database state, ensuring that even during synchronization delays, revoked users cannot access spoke ERPs.
 
-### 2.7 Global Sign-Out Everywhere Fanout & Administrative Token Revocation
-- **Global Session Invalidation (`POST /api/v1/auth/sign-out-everywhere`):**
-  - Allows users and security administrators to instantly terminate all active sessions across all connected ERP platforms in a single operation.
-  - Revokes central ecosystem cookies (`ihm_ecosystem_session` cleared; `ihm_ecosystem_logged_out=<session_id>` set).
-  - Deletes all database session records in `global_sessions` for the target identity.
-- **Cross-Spoke Fanout Protocol (`fanout_signout_to_spokes`):**
-  - Asynchronously dispatches internal HTTP calls to every registered spoke ERP's token revocation endpoint (`POST /api/v1/auth/internal/revoke-user-tokens`).
-  - Authenticated via secure service keys (`X-Service-Key`).
-  - Spokes immediately blacklist existing JWT tokens, increment local token revocation epochs, and push WebSocket force-logout events (`FORCE_LOGOUT`, code `4001`) to all connected client browsers.
-- **Administrative Token Revocation Boundary (`admin_tokens_revoked_before`):**
-  - Prevents stale JWT access when a platform admin's permissions are altered or revoked.
-  - Modifying admin roles or revoking access updates `platform_admins.admin_tokens_revoked_before = datetime.now(timezone.utc)`.
-  - The security dependency in `platform_auth/dependencies.py` and `platform_authz/dependencies.py` evaluates token issue timestamp (`iat`): if `iat < admin_tokens_revoked_before`, the request fails immediately with HTTP `401 Unauthorized: Admin tokens have been revoked. Please sign in again.`.
+### 2.7 Sign-Out: One Session at a Time, "Sign Out Everywhere" on Request
+- **Normal sign-out is per session.** Every login has its own session id (see 2.11). Logging out ends that session in the dashboard and in the ERPs it used; other logins of the same account (another device, another browser) and other people are untouched.
+- **Sign out everywhere is an explicit, separate action:** `POST /api/v1/global/auth/sign-out-everywhere` and `POST /api/v1/global/user-auth/sign-out-everywhere`. It revokes every `global_sessions` row of the account, stamps `platform_admins.tokens_revoked_before = now` (this also ends admin tokens issued before sessions existed) and force-logs the person out of all of their ERPs (`POST /api/v1/internal/users/{email}/logout`, which revokes all local sessions, invalidates in-flight access tokens and pushes a `FORCE_LOGOUT` (code `4001`) over the live WebSocket).
+- **Admin token boundary:** an admin token with a `sid` is valid only while that session is live; a token without one is valid until `iat <= tokens_revoked_before`. The dependencies in `platform_auth/dependencies.py` (`admin_session_is_live`) and `platform_authz/dependencies.py` enforce this on every request, so a disabled admin or ended session fails immediately with `401`.
+- Earlier versions of this section named routes and a column that do not exist in the code (`/auth/sign-out-everywhere`, `/auth/internal/revoke-user-tokens`, `admin_tokens_revoked_before`); the real names are used above.
 
 ### 2.8 Spoke Multi-Identifier Resolution & Safe Identity Linking
 - **Distributed Identity Disambiguation:** In distributed ERP environments, spoke user tables may have independent internal primary keys, legacy integer IDs, or separate UUID sequences.
@@ -135,6 +127,16 @@ flowchart TD
 - **Watcher Polling Loop Stabilization:** Removed redundant invocation of `clearEcosystemCookie()` inside periodic session verification, stopping perpetual 60-second expiration renewal loops.
 - **Server Restart Resilience & DB Persistence:** `PlatformAdmin` logins automatically ensure a mirrored `GlobalUser` row, persisting sessions to `global_sessions` in the database so administrative sessions survive server restarts and multi-worker reload.
 - **Accurate Not-Found Disambiguation:** `GET /global/ecosystem-session/{session_id}` distinguishes unknown sessions (`notFound: True, revoked: False`) from genuinely revoked sessions (`revoked: True`), protecting in-flight tokens and handover tickets from premature invalidation.
+
+### 2.11 Session-Scoped Login & Logout (one login = one session id)
+**Rule:** every login gets its own session id (`sid`), carried by every token of that login. Signing out revokes that one `sid`.
+
+1. **Opening a session.** Dashboard logins create a `global_sessions` row (platform admins through their mirrored Global User row, so sessions survive restarts and several workers). An ERP login verifies the password locally and then asks ERP_Main `POST /internal/sessions/open`; ERP_Main answers only if the person may use that ERP. The browser stores the `sid` in `localStorage` and the shared cookie.
+2. **Switching ERPs** (handover) re-uses the clicking login's `sid`. The target ERP verifies it with ERP_Main (active, same email, ERP allowed) and issues its own tokens carrying that same `sid`. Arriving at the dashboard from an ERP uses `exchange`, which now mints a token bound to that `sid` as well.
+3. **Signing out.** The browser calls `POST /global/ecosystem-session/{sid}/revoke` and the ERP's own `/auth/logout`; the ERP's logout also reports the `sid` to ERP_Main server-to-server, so the result does not depend on the browser reaching ERP_Main. ERP_Main revokes the session and tells the person's ERPs (`POST /internal/sessions/{sid}/revoke`).
+4. **Per-request enforcement.** Every request checks its token's `sid`: ERP_Main against `global_sessions` (revoked/expired), each ERP against its revocation store (cache + `token_blacklist`) and, for central sessions, against ERP_Main at most every 45 seconds (fail-open).
+5. **Fallbacks** (ERP_Main down at login, lost messages, workers, older tokens, stale browser state) are listed in `API_DESIGN_AND_ENDPOINTS.md` 1.4.
+6. **Browser rules.** A fresh handover ticket always replaces any saved session; cookie auto-sign-in goes through the same verified exchange (no stored passwords); signing out one login never removes another login's shared cookie; a failed automatic sign-in leaves a visible reason on the login page. Every page that needs the handover shares one exchange (single-flight), temporary failures are retried with growing waits, and the ERP switcher validates the switch before navigating (see `API_DESIGN_AND_ENDPOINTS.md` 1.4).
 
 ---
 

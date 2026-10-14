@@ -35,6 +35,28 @@ class PlatformAuthService:
         self.repository = repository
         self.audit = audit
 
+    async def login_with_session(
+        self, *, email: str, password: str, ip: str | None = None, user_agent: str | None = None
+    ) -> tuple[PlatformAdmin, str, datetime, str]:
+        """
+        Verify credentials, open ONE new central session for this login, and issue a token bound to it.
+
+        Returns (admin, token, expires_at, session_id).  Two logins of the same admin get two different session ids,
+        so signing out of one never signs out the other.
+        """
+        from app.global_auth.session_ops import open_admin_session
+
+        admin = await self._authenticate(email=email, password=password)
+        session_id = await open_admin_session(self.repository.db, admin, ip=ip, user_agent=user_agent)
+        issued = create_platform_access_token(admin.id, role=admin.role.value, session_id=session_id)
+        await self.audit.record(
+            event_type=AuditEventType.PLATFORM_ADMIN_LOGIN_SUCCEEDED,
+            actor_type=AuditActorType.HUMAN_ADMIN,
+            actor_id=admin.id,
+            actor_label=admin.email,
+        )
+        return admin, issued.token, issued.expires_at, session_id
+
     async def login(self, *, email: str, password: str) -> tuple[PlatformAdmin, str, datetime]:
         """
         Verify credentials and issue a session token.
@@ -44,6 +66,18 @@ class PlatformAuthService:
         enumerate valid admin emails by observing which failure they got
         -- the same pattern Yinglima's own login endpoint follows.
         """
+        admin = await self._authenticate(email=email, password=password)
+        issued = create_platform_access_token(admin.id, role=admin.role.value)
+        await self.audit.record(
+            event_type=AuditEventType.PLATFORM_ADMIN_LOGIN_SUCCEEDED,
+            actor_type=AuditActorType.HUMAN_ADMIN,
+            actor_id=admin.id,
+            actor_label=admin.email,
+        )
+        return admin, issued.token, issued.expires_at
+
+    async def _authenticate(self, *, email: str, password: str) -> PlatformAdmin:
+        """Check the credentials (identical error for unknown admin and wrong password) and return the admin."""
         admin = await self.repository.get_by_email(email)
         if admin is None or not admin.is_active or not verify_password(password, admin.password_hash):
             await self.audit.record(
@@ -61,15 +95,7 @@ class PlatformAuthService:
             # never actually reaching the audit log before this fix.
             await self.repository.db.commit()
             raise UnauthorizedException("Invalid email or password.")
-
-        issued = create_platform_access_token(admin.id, role=admin.role.value)
-        await self.audit.record(
-            event_type=AuditEventType.PLATFORM_ADMIN_LOGIN_SUCCEEDED,
-            actor_type=AuditActorType.HUMAN_ADMIN,
-            actor_id=admin.id,
-            actor_label=admin.email,
-        )
-        return admin, issued.token, issued.expires_at
+        return admin
 
     async def create_admin(self, payload: PlatformAdminCreate, *, created_by: PlatformAdmin) -> PlatformAdmin:
         """Create a new platform admin. Caller must already be an authenticated SUPER_ADMIN."""

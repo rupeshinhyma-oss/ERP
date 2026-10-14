@@ -550,15 +550,6 @@ export function DiscountPaymentsPage({
     appliedDateRange,
   ]);
 
-  // Active filter count
-  const activeFiltersCount = useMemo(() => {
-    let cnt = 0;
-    if (appliedWarehouse && appliedWarehouse !== "All.") cnt++;
-    if (appliedSalesPerson && appliedSalesPerson !== "All.") cnt++;
-    if (appliedDispatch && appliedDispatch !== "All") cnt++;
-    if (appliedDateRange) cnt++;
-    return cnt;
-  }, [appliedWarehouse, appliedSalesPerson, appliedDispatch, appliedDateRange]);
 
   // Top KPI Metrics
   const metrics = useMemo(() => {
@@ -683,7 +674,7 @@ export function DiscountPaymentsPage({
 
   return (
     <AppShell activeKey="discount-payments">
-      <main className="page" style={{ padding: "16px 24px", maxWidth: "100%", background: "#f8fafc" }}>
+      <main className="page">
         {/* Breadcrumb */}
         <div style={{ marginBottom: "12px" }}>
           <Breadcrumb trail={["SALE", "Discount Payments"]} />
@@ -708,6 +699,7 @@ export function DiscountPaymentsPage({
             {/* Filter Toggle Button */}
             <button
               type="button"
+              className="btn btn-filter-toggle"
               data-testid="btn-toggle-filter"
               aria-label="Filter"
               title="Toggle Filter Panel"
@@ -716,45 +708,27 @@ export function DiscountPaymentsPage({
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: "#475569",
+                background: "#556987",
                 color: "#ffffff",
                 border: "none",
-                borderRadius: "4px",
+                borderRadius: "6px",
+                padding: "8px 14px",
                 cursor: "pointer",
-                height: "36px",
-                width: "38px",
-                padding: 0,
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                position: "relative",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
             >
               <svg
-                width="15"
-                height="15"
+                width="16"
+                height="16"
                 viewBox="0 0 24 24"
-                fill="currentColor"
-                stroke="none"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFiltersCount > 0 && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "-4px",
-                    right: "-4px",
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    borderRadius: "10px",
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    padding: "1px 5px",
-                    lineHeight: 1,
-                  }}
-                >
-                  {activeFiltersCount}
-                </span>
-              )}
             </button>
           </div>
         </div>

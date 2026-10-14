@@ -48,7 +48,7 @@ from app.global_users.models import GlobalUser
 from app.global_users.repository import GlobalUserRepository
 from app.platform_auth.models import PlatformAdmin
 from app.platform_auth.repository import PlatformAdminRepository
-from app.platform_auth.dependencies import admin_token_was_signed_out
+from app.platform_auth.dependencies import admin_session_is_live
 from app.platform_auth.security import InvalidPlatformTokenError, decode_platform_access_token
 from app.platform_authz.repository import (
     PlatformPermissionRepository,
@@ -139,7 +139,7 @@ async def _resolve_principal(credentials: HTTPAuthorizationCredentials, db: Asyn
         payload = decode_platform_access_token(token)
         admin_id = uuid.UUID(payload["sub"])
         admin = await PlatformAdminRepository(db).get_by_id(admin_id)
-        if admin is not None and admin.is_active and not admin_token_was_signed_out(admin, payload):
+        if admin is not None and admin.is_active and await admin_session_is_live(db, admin, payload):
             return AuthorizedPrincipal(platform_admin=admin)
     except (InvalidPlatformTokenError, KeyError, ValueError):
         pass

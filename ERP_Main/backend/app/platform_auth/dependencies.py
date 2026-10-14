@@ -54,6 +54,22 @@ def admin_token_was_signed_out(admin, payload: dict) -> bool:
     return issued_at <= int(cutoff.timestamp())
 
 
+async def admin_session_is_live(db: AsyncSession, admin, payload: dict) -> bool:
+    """
+    Is this admin token still allowed?
+
+    * Token with a `sid`: it is valid only while THAT session is live (not revoked, not expired).  Another login of
+      the same admin has a different `sid` and is completely unaffected.
+    * Older token without a `sid`: fall back to the account-wide sign-out marker (`tokens_revoked_before`).
+    """
+    sid = payload.get("sid")
+    if sid:
+        from app.global_auth.session_ops import session_is_live
+
+        return await session_is_live(db, sid)
+    return not admin_token_was_signed_out(admin, payload)
+
+
 async def require_platform_admin(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
     db: AsyncSession = Depends(get_db_session),
@@ -78,7 +94,7 @@ async def require_platform_admin(
     admin = await PlatformAdminRepository(db).get_by_id(admin_id)
     if admin is None or not admin.is_active:
         raise UnauthorizedException("This platform admin account no longer exists or is inactive.")
-    if admin_token_was_signed_out(admin, payload):
+    if not await admin_session_is_live(db, admin, payload):
         raise UnauthorizedException("This session was signed out. Please sign in again.")
     return admin
 

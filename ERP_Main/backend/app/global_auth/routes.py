@@ -117,7 +117,7 @@ async def get_me(
     )
 
 
-@router.post("/logout", summary="Global logout (revokes the current session)")
+@router.post("/logout", summary="Global logout (ends THIS login everywhere it was used)")
 async def logout(
     request: Request,
     user_and_session: tuple[GlobalUser, uuid.UUID] = Depends(require_global_user),
@@ -125,17 +125,29 @@ async def logout(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """
-    Sign the person out EVERYWHERE: all their dashboard sessions and every connected ERP they can use.
+    Sign out THIS session: the dashboard session, plus the tokens of every ERP that this login used.
+    The same person logged in elsewhere (another browser or device) is not signed out; use `sign-out-everywhere`.
     """
-    from app.global_auth.ecosystem_session import sign_out_everywhere
+    from app.global_auth.ecosystem_session import sign_out_session
 
     user, session_id = user_and_session
     await service.logout(session_id, global_user_id=user.id)
-    if user.primary_email:
-        # every dashboard session of this person (all browsers/devices) + every ERP they can use
-        await sign_out_everywhere(db, user.primary_email)
-    return build_success_response({"status": "logged_out"}, request_id=_request_id(request))
+    summary = await sign_out_session(db, str(session_id))
+    return build_success_response({"status": "logged_out", **summary}, request_id=_request_id(request))
 
+
+@router.post("/sign-out-everywhere", summary="End EVERY login of this account, on every device")
+async def sign_out_everywhere_route(
+    request: Request,
+    user_and_session: tuple[GlobalUser, uuid.UUID] = Depends(require_global_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Explicit security action: all sessions of this person, dashboard and ERPs, on every device."""
+    from app.global_auth.ecosystem_session import sign_out_everywhere
+
+    user, _session_id = user_and_session
+    summary = await sign_out_everywhere(db, user.primary_email)
+    return build_success_response({"status": "signed_out_everywhere", **summary}, request_id=_request_id(request))
 
 
 @router.get("/sessions", summary="List the authenticated Global User's own sessions")

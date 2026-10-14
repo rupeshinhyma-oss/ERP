@@ -32,29 +32,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  background-color: #5b6b82;
+  background-color: #556987;
   color: #ffffff;
-  border: 1px solid #5b6b82;
+  border: none;
   border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 600;
+  padding: 8px 14px;
   cursor: pointer;
   transition: all 0.15s ease;
-  position: relative;
-  height: 38px;
-  min-width: 38px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .stock-btn-filter:hover {
   background-color: #475569;
-  border-color: #475569;
 }
 
 .stock-btn-filter.active {
-  background-color: #475569;
-  box-shadow: 0 0 0 2px rgba(91, 107, 130, 0.35);
+  background-color: #556987;
 }
 
 .stock-filter-badge {
@@ -355,38 +348,14 @@
   text-align: center;
 }
 
-/* Frozen columns */
-.col-freeze-1 {
-  position: sticky !important;
-  left: 0;
-  z-index: 2;
-  background-color: #ffffff;
-}
-
-.col-freeze-2 {
-  position: sticky !important;
-  left: 65px;
-  z-index: 2;
-  background-color: #ffffff;
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
-  border-right: 2px solid #cbd5e1 !important;
-}
-
-.stock-table th.col-freeze-1 {
-  z-index: 10;
-  background-color: #f1f5f9;
-}
-
+/* Frozen columns removed per user request */
+.col-freeze-1,
+.col-freeze-2,
+.stock-table th.col-freeze-1,
 .stock-table th.col-freeze-2 {
-  z-index: 10;
-  background-color: #f1f5f9;
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
-  border-right: 2px solid #cbd5e1 !important;
-}
-
-.stock-table tr:hover td.col-freeze-1,
-.stock-table tr:hover td.col-freeze-2 {
-  background-color: #f8fafc;
+  position: static !important;
+  box-shadow: none !important;
+  border-right: none !important;
 }
 
 .product-link {

@@ -26,9 +26,15 @@ import {
   PAGE_TITLES,
   DEFAULT_BRAND_NAME,
 } from "@/lib/nav";
-import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/brand";
+import {
+  getCachedBrandLogo,
+  getCachedBrandName,
+  resolveBrandInfo,
+  resolveImageUrl,
+  subscribeBrandLogo,
+  subscribeBrandName,
+} from "@/lib/brand";
 import { ICONS, IconBell, IconChevronDown, IconChevronRight } from "./icons";
-import { UniversalSearch } from "./UniversalSearch";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
 import { getEcosystemCookie, globalEcosystemLogout, initEcosystemSessionWatcher, isExplicitlyLoggedOut, setEcosystemCookie, verifyCentralEcosystemSession } from "@/lib/ecosystemSession";
@@ -845,12 +851,14 @@ function ForcePasswordChangeModal({ onDone }: { onDone: () => void }) {
 
 function Sidebar({
   activeKey,
-  brandName: _brandName,
+  brandName,
+  brandLogo,
   collapsed,
   onToggleSidebar,
 }: {
   activeKey: string;
   brandName: string;
+  brandLogo?: string | null;
   collapsed: boolean;
   onToggleSidebar: () => void;
 }) {
@@ -975,8 +983,17 @@ function Sidebar({
         }}
       >
         {!collapsed && (
-          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
-            <img src="/logo.png" alt="IHM Logo" style={{ height: "38px", width: "auto", objectFit: "contain" }} />
+          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer", maxHeight: "44px" }}>
+            <img
+              src={resolveImageUrl(brandLogo) || "/logo.png"}
+              alt={`${brandName || "ERP"} Logo`}
+              onError={(e) => {
+                if (e.currentTarget.src !== window.location.origin + "/logo.png") {
+                  e.currentTarget.src = "/logo.png";
+                }
+              }}
+              style={{ maxHeight: "38px", maxWidth: "160px", width: "auto", objectFit: "contain" }}
+            />
           </Link>
         )}
         <button
@@ -1181,7 +1198,6 @@ function Topbar() {
 
   return (
     <header className="topbar">
-      <UniversalSearch />
       <div className="topbar-spacer" />
       <div className="topbar-actions" ref={popoverRef} style={{ position: "relative", display: "flex", alignItems: "center", gap: "10px" }}>
         <EcosystemSwitcher currentKey="inhyma" />
@@ -1433,6 +1449,7 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const location = useLocation();
   const navigate = useNavigate();
   const [brandName, setBrandName] = useState(() => getCachedBrandName());
+  const [brandLogo, setBrandLogo] = useState<string | null>(() => getCachedBrandLogo());
   const [passwordModalDismissed, setPasswordModalDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem("erp_sidebar_collapsed") === "true"
@@ -1460,12 +1477,16 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   }, [loggedIn]);
 
   useEffect(() => subscribeBrandName(setBrandName), []);
+  useEffect(() => subscribeBrandLogo(setBrandLogo), []);
 
   useEffect(() => {
     let cancelled = false;
     if (!loggedIn) return;
-    resolveBrandName().then((name) => {
-      if (!cancelled) setBrandName(name);
+    resolveBrandInfo().then((info) => {
+      if (!cancelled) {
+        setBrandName(info.name);
+        setBrandLogo(info.logoUrl);
+      }
     });
     return () => {
       cancelled = true;
@@ -1578,7 +1599,7 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     <div
       className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${pageClassName || ""}`.trim()}
     >
-      <Sidebar activeKey={activeKey} brandName={brandName} collapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
+      <Sidebar activeKey={activeKey} brandName={brandName} brandLogo={brandLogo} collapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
       <div className="main-column">
         <Topbar />
         {children}

@@ -60,6 +60,8 @@
 49. [SALE: Proforma Invoices (Extended Commercial Terms, Address Routing, Approvals Workflow)](#49-sale-proforma-invoices-extended-commercial-terms-address-routing-approvals-workflow)
 50. [COMPANIES: Advanced Specification Fields (Monthly Turnover, Potential Analysis, Direct Import from China)](#50-companies-advanced-specification-fields-monthly-turnover-potential-analysis-direct-import-from-china)
 51. [SUPPLIERS: Mandatory Calling Number Validation & Contact Phone Rules](#51-suppliers-mandatory-calling-number-validation--contact-phone-rules)
+52. [HRMS: HRMS All-Employee Attendance Calendar & Payroll Excel Export QA Verification](#52-hrms-hrms-all-employee-attendance-calendar--payroll-excel-export-qa-verification)
+53. [GLOBAL UI STANDARD: Universal Filter Toggle Button & Collapsible Panel Specification](#53-global-ui-standard-universal-filter-toggle-button--collapsible-panel-specification)
 
 ---
 
@@ -2466,4 +2468,56 @@ Checklist to execute:
 - [ ] Verify draft unapproved payroll cannot be exported or viewed by non-admin/non-HR employees.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, and CRM Phase 1 Foundation).*
+
+## 53. GLOBAL UI STANDARD: Universal Filter Toggle Button & Collapsible Panel Specification
+
+### Overview & Visual Benchmark
+- **Benchmark Source:** [Companies.tsx](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Companies.tsx#L5628) header filter toggle button.
+- **Design Philosophy:** Complete visual and behavioral uniformity across all modules in Inhyma. All filter toggle buttons share identical colors, dimensions, borders, shadows, icons, and lifecycle behavior.
+
+### Key Visual & Functional Specifications
+1. **Design Tokens & Palette:**
+   - **Default Background:** `#556987` (solid slate/navy).
+   - **Hover Background:** `#475569`.
+   - **Active/Toggled State:** Permanently `#556987`. It never turns bright blue (`#0284c7` or `#0061f2`) when active or open.
+   - **Color / Fill:** `#ffffff`.
+   - **Border:** `none`.
+   - **Border Radius:** `6px`.
+   - **Padding:** `8px 14px`.
+   - **Box Shadow:** `0 2px 4px rgba(0, 0, 0, 0.1)`.
+   - **Display:** `inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease`.
+2. **Dimension Standardization (Auto Box-Sizing):**
+   - Removed all hardcoded square constraints (`width: 38px`, `height: 38px`, `height: 35px`, `min-width: 36px`, etc.).
+   - Standardized box model: `width: auto !important; height: auto !important; min-width: unset !important; min-height: unset !important;`.
+3. **Funnel Icon Standardization:**
+   - Universal 16×16px SVG funnel polygon:
+     ```html
+     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+     </svg>
+     ```
+4. **Clean Surface (Zero Badge Invariant):**
+   - Buttons do NOT contain red notification badges, count pills (`activeFilterCount`), or indicator dots. The button preserves an identical visual footprint regardless of active filter count.
+5. **Initial State (Collapsed / Off Invariant):**
+   - Filter panels and drawers across all modules are strictly **off by default** (`useState(false)`). The user must explicitly click the funnel button to reveal filter fields.
+
+### Modules Covered by Universal Standard
+- **Contact:** `Companies.tsx`, `Suppliers.tsx`, `AgentsPage.tsx`, `FollowUpsPage.tsx`, `IndustrialZonesPage.tsx`, `LeadsPage.tsx`.
+- **Inventory:** `ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx`, `ProductReorderPage.tsx`, `PriceListPage.tsx`, `masters/Products.tsx`.
+- **Sales & Commercial:** `sales/SaleProcessList.tsx`, `sales/DiscountPaymentsPage.tsx`, `ProformaInvoicesPage.tsx`, `DeletedOrdersPage.tsx`.
+- **Tasks & Engineering:** `technicalTasks/TechnicalTasksPage.tsx`.
+- **Generic Masters:** `components/MasterPage.tsx` (applies to Brands, Categories, UOM, Taxes, Warehouses, Call Types, Buyer Types, etc.).
+
+### Test Cases
+- [ ] Verify navigating to any module page (e.g. `/product-stock`, `/stock-adjustment`, `/stock-transfer`, `/deleted-orders`, `/sales/process`, `/price-list`) renders the funnel filter button in `#556987`.
+- [ ] Verify the filter button has rectangular padding (`8px 14px`) and is not forced into a square shape (e.g. 38x38px).
+- [ ] Verify hovering over the filter button darkens the background to `#475569`.
+- [ ] Verify clicking the filter button expands the filter drawer/panel and the button retains its `#556987` color (does NOT change to blue/cyan).
+- [ ] Verify clicking the filter button again collapses the filter panel smoothly.
+- [ ] Verify on a fresh page load or browser refresh, all filter panels start collapsed/off.
+- [ ] Verify the filter button has no red number badge or indicator dot attached to it.
+- [ ] Verify applying filters (date ranges, warehouse, sales person, status) updates the grid correctly.
+- [ ] Verify clicking 'Reset Filters' clears inputs and restores all grid records.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Universal Filter Button UI Standardization Across All Modules, Session-Scoped Tokens, Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, and CRM Phase 1 Foundation).*

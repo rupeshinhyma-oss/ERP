@@ -22,7 +22,7 @@ from app.auth import routes as auth_routes
 from app.auth.routes import SsoHandoverRequest, sso_handover_login
 from app.core.config import settings
 from app.core.exceptions import ForbiddenException, UnauthorizedException
-from app.federation.erp_main_client import EcosystemSessionError
+from app.federation.erp_main_client import EcosystemSessionError, EcosystemSessionUnavailable
 from app.users import routes as user_routes
 from app.users.models import User, UserStatus
 from app.users.schemas import UserUpdate
@@ -149,6 +149,22 @@ async def test_erp_main_unreachable_fails_closed_and_issues_no_session(monkeypat
             payload=SsoHandoverRequest(email=EMAIL, sso_token=_token(), target_erp=ERP_KEY),
             request=_request(), db=db, auth_service=auth, rbac_service=rbac, context=MagicMock(), audit_service=audit,
         )
+    auth.issue_session_for_federated_user.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_temporarily_unreachable_control_plane_is_a_retryable_503_not_a_401(monkeypatch):
+    """'ERP_Main is down for a moment' must not look like 'your session ended': the browser retries a 503, but a 401 sends the person to the login page."""
+    from app.core.exceptions import ServiceUnavailableException
+
+    monkeypatch.setattr(auth_routes, "verify_ecosystem_session", AsyncMock(side_effect=EcosystemSessionUnavailable("down")))
+    db, auth, rbac, audit = _deps(_user())
+    with pytest.raises(ServiceUnavailableException) as err:
+        await sso_handover_login(
+            payload=SsoHandoverRequest(email=EMAIL, sso_token=_token(), target_erp=ERP_KEY),
+            request=_request(), db=db, auth_service=auth, rbac_service=rbac, context=MagicMock(), audit_service=audit,
+        )
+    assert err.value.status_code == 503
     auth.issue_session_for_federated_user.assert_not_called()
 
 

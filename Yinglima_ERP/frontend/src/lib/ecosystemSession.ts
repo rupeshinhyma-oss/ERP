@@ -192,13 +192,19 @@ export function clearEcosystemCookie(sessionId?: string): void {
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.setItem("ihm_explicit_logout", "true");
     }
-    clearCookieEverywhere(COOKIE_NAME);
 
-    // Write logout marker with the revoked session ID so tabs recognize THAT session was revoked
+    // The shared cookie describes ONE login.  Remove it only if it is THIS login's: another login in the same
+    // browser (another person, another tab) keeps its own cookie, so signing one out never disturbs the other.
+    const current = getRawEcosystemCookie();
+    const belongsToThisLogin = !sessionId || !current?.session_id || current.session_id === sessionId;
+    if (belongsToThisLogin) {
+      clearCookieEverywhere(COOKIE_NAME);
+      localStorage.removeItem(LOCAL_STORAGE_KEY);
+    }
+
+    // Marker with the exact session id that was signed out: other sessions are never mistaken for revoked.
     const logoutVal = encodeURIComponent(sessionId || "true");
     setCookieEverywhere(LOGOUT_COOKIE_NAME, logoutVal, 60);
-
-    localStorage.removeItem(LOCAL_STORAGE_KEY);
   } catch (err) {
     console.warn("Could not clear ecosystem session cookie:", err);
   }
@@ -367,8 +373,8 @@ export function initEcosystemSessionWatcher(
   const handleMessage = (msg: MessageEvent) => {
     if (msg.data?.type === "LOGOUT") {
       const targetSessionId = msg.data?.session_id;
-      // Only revoke if global or targeting this exact session
-      if (!targetSessionId || !currentSessionId || targetSessionId === currentSessionId) {
+      // Only THIS login's tab reacts: a sign-out of another session (or one without a session id) is ignored.
+      if (targetSessionId && currentSessionId && targetSessionId === currentSessionId) {
         if (typeof sessionStorage !== "undefined") {
           sessionStorage.setItem("ihm_explicit_logout", "true");
         }
@@ -410,7 +416,23 @@ export function initEcosystemSessionWatcher(
   document.addEventListener("visibilitychange", checkRevocation);
 
   // Poll every 2.5s for fast synchronization across localhost origins
-  const intervalId = setInterval(checkRevocation, 2500);
+  // Poll gently: every 30 s while the tab is visible, every 2 min while hidden.  Returning to the tab or regaining
+  // focus checks immediately (listeners above), and an ERP's own 401 also signs the person out, so a longer interval
+  // costs the person nothing -- but it is ~12x lighter on the server for every open tab.
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const scheduleNext = () => {
+    if (stopped) return;
+    const delay = document.visibilityState === "hidden" ? 120_000 : 30_000;
+    timerId = setTimeout(async () => {
+      await checkRevocation();
+      scheduleNext();
+    }, delay);
+  };
+  // Check once right away -- a tab opened after its session ended must not keep looking signed-in -- then on the
+  // gentle schedule above.
+  void checkRevocation();
+  scheduleNext();
 
   const cleanup = () => {
     if (ch) {
@@ -418,7 +440,8 @@ export function initEcosystemSessionWatcher(
     }
     window.removeEventListener("focus", handleFocus);
     document.removeEventListener("visibilitychange", checkRevocation);
-    clearInterval(intervalId);
+    stopped = true;
+    if (timerId) clearTimeout(timerId);
     if (activeWatcherCleanup === cleanup) {
       activeWatcherCleanup = null;
     }

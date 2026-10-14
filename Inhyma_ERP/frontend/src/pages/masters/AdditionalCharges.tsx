@@ -27,8 +27,6 @@ export function AdditionalChargesPage() {
       liveModule="additional_charges"
       entityName="additional charge"
       heading="Additional Charges"
-      subtitle="Manage freight, transport, packing & forwarding, and other additional charge rates."
-      breadcrumbTrail={["Settings", "Masters", "Additional Charges"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search Name, HSN or Sr. No..."
       hideQuickAdd={true}

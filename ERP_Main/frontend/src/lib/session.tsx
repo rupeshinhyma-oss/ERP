@@ -185,12 +185,15 @@ export function GlobalSessionProvider({ children }: { children: React.ReactNode 
           const adminTokens = (res as { data?: TokenPair })?.data || res;
 
           if (adminTokens?.access_token) {
+            // The admin token already belongs to ONE central session (adminTokens.session_id).  Reuse that exact id so
+            // the id kept in the browser, the id inside the token and the id sent to the ERPs are all the same login.
             const ecosystem = await establishCentralEcosystemSession({
               email,
               password,
               source_erp: "control-plane",
+              existing_session_id: adminTokens.session_id || undefined,
             });
-            const unifiedSessionId = ecosystem?.session_id || `ihm-sess-${Date.now()}`;
+            const unifiedSessionId = ecosystem?.session_id || adminTokens.session_id || `ihm-sess-${Date.now()}`;
 
             Auth.setSession(adminTokens.access_token, undefined, "platform_admin", adminTokens.expires_at, unifiedSessionId);
 

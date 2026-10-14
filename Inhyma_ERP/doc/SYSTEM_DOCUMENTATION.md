@@ -901,7 +901,12 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Routing:** React Router v6 with `ProtectedRoute` guards and deep-link redirect preservation.
 - **Error Boundaries:** Multi-layer error boundary protection with an application-level root boundary in `main.tsx` and a route-keyed boundary (`ErrorBoundary key={location.pathname}`) in `App.tsx` ensuring crashed page states do not leak across navigation transitions.
 - **Component Design System:** Predefined accessible UI tokens in `frontend/src/components/ui.tsx` and `fields.tsx` (including interactive `TextField` with automatic password visibility eye toggle `showPasswordToggle`).
-- **Universal Inward Dropdown Chevron Styling:** To prevent browser-native chevron overlap and provide clean visual balance, native selects (`select:not([multiple])`) across all modules utilize custom SVG arrows positioned inward (`right: 14px; padding-right: 34px;`), matched by `SelectField`'s animated SVG chevron with dynamic 180° flip transition upon focus/open.
+- **Universal Filter Button & Panel Standard (Companies Benchmark):** All module page headers utilize a uniform filter toggle button matching the [Companies.tsx](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Companies.tsx#L5628) reference.
+  - **Color Palette:** Solid `#556987` background, `#475569` on hover, and permanently locked to `#556987` when active or open (never switching to bright-blue or accent states).
+  - **Geometry & Padding:** `padding: 8px 14px; border-radius: 6px; border: none; box-shadow: 0 2px 4px rgba(0,0,0,0.1);`. Hardcoded fixed dimensions (`38px x 38px`, `min-width: 36px`, etc.) are removed to prevent distorted square buttons.
+  - **Funnel Icon:** Embedded 16×16px SVG funnel icon (`polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"`).
+  - **Clean Surface:** No internal counter badges or notification dots on the button, guaranteeing an identical rectangular footprint across all modules.
+  - **Initial State Invariant:** All filter panels and drawers initialize collapsed (`useState(false)`), ensuring clean page loads.
 - **Hooks Architecture:** Custom hooks for asynchronous state management: `useAuth`, `usePendingGuard`, `useToast`, `usePagination`.
 
 ---

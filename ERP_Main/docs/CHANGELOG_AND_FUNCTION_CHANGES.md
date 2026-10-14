@@ -3,6 +3,22 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-14] — Session-Scoped Login & Logout (one login = one session id)
+
+### Why
+Signing out of one login used to sign the whole *person* out (every device, every ERP). Two logins of one admin account therefore logged each other out. A normal logout now ends exactly one login; "sign out everywhere" is a separate explicit action.
+
+### Changes
+- **New** `global_auth/session_ops.py`: `open_admin_session`, `session_is_live`, `parse_session_id`. Platform admin tokens now carry a `sid` claim and are valid only while that `global_sessions` row is live (`platform_auth/dependencies.py::admin_session_is_live`, also used by `platform_authz`). Older admin tokens without a `sid` keep working (checked against `tokens_revoked_before`).
+- `PlatformAuthService.login_with_session` opens one session per admin login; `PlatformLoginResponse` gains `session_id`.
+- `ecosystem_session.py`: new `sign_out_session` and `fanout_session_revoke`; `POST /global/ecosystem-session/{sid}/revoke` and the logout routes revoke only that session. `exchange` now binds the admin dashboard token to the verified session. A revocation recorded by another worker is honoured (database check on re-validation). `sign_out_everywhere` is kept for the explicit action.
+- **New routes:** `POST /global/auth/sign-out-everywhere`, `POST /global/user-auth/sign-out-everywhere`, `POST /internal/sessions/open`, `POST /internal/sessions/{sid}/signout` (`global_users/session_internal.py`), `POST /global/auth/logout` (per session).
+- `HttpErpProvisioningAdapter.revoke_session` calls each ERP's `POST /internal/sessions/{sid}/revoke`.
+- **Frontend:** a fresh handover ticket always replaces a saved session (fixes the target ERP showing its login page after switching); cookie auto-sign-in uses the verified exchange; `clearEcosystemCookie` only removes the cookie of the session being signed out; cross-tab LOGOUT ignores other sessions; the admin login uses the session id it was given; failed automatic sign-in shows a reason (`ihm_login_notice`) and retries once on a transient error.
+- **Reliability hardening (browser):** one shared handover exchange per arrival (was three concurrent requests whose redirects aborted each other, causing a flash of the login page); retry with 0.7/2.5/6 s waits for temporary failures only; clear per-status messages (`ihm_login_notice`); a "Signing you in..." state; the ERP switcher validates before navigating (`planSwitch`) and wakes peer services; the session watcher checks immediately on open, then every 30 s visible / 2 min hidden (was every 2.5 s).
+- **Tests:** `test_session_scoped_signout.py` replaces `test_sign_out_everywhere.py`; `test_central_signout_fanout.py` and `test_global_users.py` updated; frontend `ssoHandoverSession.test.ts`.
+- **Docs:** `API_DESIGN_AND_ENDPOINTS.md` section 1 and `SYSTEM_ARCHITECTURE_AND_DESIGN.md` 2.7 / 2.11 rewritten; they previously named routes and a column that do not exist in the code.
+
 ## [Release 2026-10-10] — Cross-Ecosystem Single Sign-Out (SLO), M2M Spoke Revocation & Fast Cookie Synchronizer
 
 ### 1. Cross-Ecosystem Single Sign-Out (SLO) Fan-Out Architecture

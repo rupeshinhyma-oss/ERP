@@ -24,7 +24,7 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { IconFilter, IconTrash, IconPlus } from "@/components/icons";
+import { IconTrash, IconPlus } from "@/components/icons";
 
 export interface AgentItem {
   id: string;
@@ -120,7 +120,7 @@ export function AgentsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Filter states
-  const [showFilters, setShowFilters] = useState<boolean>(true);
+  const [showFilters, setShowFilters] = useState<boolean>(false);
   const [filterDraft, setFilterDraft] = useState<FilterState>(INITIAL_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -557,50 +557,39 @@ export function AgentsPage() {
 
   return (
     <AppShell activeKey="agents">
-      <main
-        className="page"
-        style={{
-          background: "#f4f6f9",
-          minHeight: "calc(100vh - 60px)",
-          padding: "20px 28px",
-          color: "#1e293b",
-        }}
-      >
+      <main className="page">
         {/* Breadcrumb */}
-        <div style={{ marginBottom: "16px" }}>
+        <div style={{ marginBottom: "12px" }}>
           <Breadcrumb trail={["Contact", "Agents"]} />
         </div>
 
         {/* Page Title & Action Controls */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "16px",
-          }}
-        >
+        <div className="page-header">
           <h1 style={{ fontSize: "20px", fontWeight: 700, margin: 0, color: "#1e293b" }}>
             Agents
           </h1>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <button
+              className="btn-filter-toggle"
               onClick={() => setShowFilters(!showFilters)}
               style={{
-                background: showFilters ? "#475569" : "#64748b",
-                color: "#fff",
+                background: "#556987",
+                color: "#ffffff",
                 border: "none",
-                borderRadius: "4px",
-                padding: "8px 12px",
+                borderRadius: "6px",
+                padding: "8px 14px",
                 cursor: "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
               title="Toggle Filters"
             >
-              <IconFilter style={{ width: "16px", height: "16px" }} />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
             </button>
 
             <button

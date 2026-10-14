@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
 import type { PaginationMeta } from "@/types";
@@ -272,8 +271,8 @@ export function ProductReorderPage() {
   const [items, setItems] = useState<ProductReorderItem[]>(INITIAL_REORDER_ITEMS);
   const [loading, setLoading] = useState(false);
 
-  // Filter panel collapse toggle
-  const [showFilterPanel, setShowFilterPanel] = useState(true);
+  // Filter panel collapse toggle (default OFF)
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
 
   // Form input filter states
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -293,10 +292,9 @@ export function ProductReorderPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [warehouseFilter, setWarehouseFilter] = useState("Mumbai"); // As seen in screenshot!
 
-  // Pagination & Frozen column settings
+  // Pagination settings
   const [currentPage, setCurrentPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
-  const [freezeColumns] = useState(true);
 
   // Side Drawer Breakup state (for Physical SOs or Transit/Ordered POs)
   const [activeBreakup, setActiveBreakup] = useState<ActiveBreakupState | null>(null);
@@ -530,16 +528,6 @@ export function ProductReorderPage() {
     });
   }, [items, searchTerm, appliedCategory, appliedSubCategory, appliedBrand, appliedShortfall, appliedReorder]);
 
-  // Active filter count for badge
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (appliedCategory !== "All") count++;
-    if (appliedSubCategory !== "All") count++;
-    if (appliedBrand !== "All") count++;
-    if (appliedShortfall !== "All") count++;
-    if (appliedReorder !== "All") count++;
-    return count;
-  }, [appliedCategory, appliedSubCategory, appliedBrand, appliedShortfall, appliedReorder]);
 
   // Pagination slice
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
@@ -670,52 +658,72 @@ export function ProductReorderPage() {
 
   return (
     <AppShell activeKey="reports-re-order">
-      <div className="page-product-reorder">
-        <Breadcrumb trail={["Reports", "Re-Order"]} />
-
+      <main className="page page-product-reorder">
         {/* Page Header */}
-        <div className="reorder-header">
-          <h1 className="reorder-header-title">Product Re-Order</h1>
-          <div className="reorder-header-actions">
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Product Re-Order</h1>
+          </div>
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <button
               type="button"
-              className={`reorder-btn-filter ${showFilterPanel ? "active" : ""}`}
+              className="btn btn-filter-toggle"
               onClick={() => setShowFilterPanel(!showFilterPanel)}
               title="Toggle filter panel"
               aria-label="Toggle filter panel"
+              style={{
+                background: "#556987",
+                color: "#ffffff",
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFilterCount > 0 && <span className="reorder-filter-badge">{activeFilterCount}</span>}
             </button>
 
             <button
               type="button"
               className="btn reorder-btn-export"
               style={{
-                background: "#5c6f84",
+                background: "#059669",
                 color: "#ffffff",
                 padding: "8px 16px",
-                borderRadius: "4px",
+                borderRadius: "6px",
                 fontWeight: 600,
                 fontSize: "13px",
                 border: "none",
                 cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                transition: "all 0.15s ease",
               }}
               onClick={handleExportCSV}
               title="Export to CSV"
             >
-              Export
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Export</span>
             </button>
           </div>
         </div>
 
-        {/* Collapsible Filter Panel matching Screenshot 1, 2, 3 */}
+        {/* Collapsible Filter Panel */}
         {showFilterPanel && (
           <div className="reorder-filter-panel">
-            {/* Row 1: Category, Sub Category, Brand, Short Fall */}
-            <div className="reorder-filter-row-1">
+            <div className="reorder-filter-grid">
               <div className="reorder-filter-field">
                 <label htmlFor="reorder-filter-category">Category</label>
                 <select
@@ -767,7 +775,6 @@ export function ProductReorderPage() {
                 </select>
               </div>
 
-              {/* Short Fall dropdown: exact options from Screenshot 2: All, 0, Greater Than 0 */}
               <div className="reorder-filter-field">
                 <label htmlFor="reorder-filter-shortfall">Short Fall</label>
                 <select
@@ -781,95 +788,117 @@ export function ProductReorderPage() {
                   <option value="Greater Than 0">Greater Than 0</option>
                 </select>
               </div>
+
+              <div className="reorder-filter-field">
+                <label htmlFor="reorder-filter-reorder">Re-Order</label>
+                <select
+                  id="reorder-filter-reorder"
+                  className="reorder-filter-select"
+                  value={reorderFilter}
+                  onChange={(e) => setReorderFilter(e.target.value)}
+                >
+                  <option value="All">All</option>
+                  <option value="0">0</option>
+                  <option value="Greater Than 0">Greater Than 0</option>
+                </select>
+              </div>
             </div>
 
-            {/* Row 2: Re-Order dropdown (from Screenshot 3) + Reset and Search buttons */}
-            <div className="reorder-filter-row-2">
-              <div className="reorder-filter-row-2-left">
-                <div className="reorder-filter-field">
-                  <label htmlFor="reorder-filter-reorder">Re-Order</label>
-                  <select
-                    id="reorder-filter-reorder"
-                    className="reorder-filter-select"
-                    value={reorderFilter}
-                    onChange={(e) => setReorderFilter(e.target.value)}
-                  >
-                    <option value="All">All</option>
-                    <option value="0">0</option>
-                    <option value="Greater Than 0">Greater Than 0</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="reorder-filter-actions">
-                <button type="button" className="reorder-btn-reset" onClick={handleResetFilters}>
-                  Reset
-                </button>
-                <button type="button" className="reorder-btn-search" onClick={handleApplyFilters}>
-                  Search
-                </button>
-              </div>
+            <div className="reorder-filter-actions">
+              <button type="button" className="reorder-btn-reset" onClick={handleResetFilters}>
+                Reset
+              </button>
+              <button type="button" className="reorder-btn-search" onClick={handleApplyFilters}>
+                Search
+              </button>
             </div>
           </div>
         )}
 
-        {/* Search Row + Warehouse Dropdown (from Screenshot 1) */}
-        <div className="reorder-search-bar-row">
-          <div className="reorder-search-input-wrap">
-            <span className="reorder-search-icon">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-            </span>
-            <input
-              type="text"
-              className="reorder-search-input"
-              placeholder="Search products by name, code, brand, sub-category..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                className="reorder-search-clear"
-                onClick={() => setSearchTerm("")}
-                title="Clear search"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-
-          <div className="reorder-warehouse-select-wrap">
-            <select
-              className="reorder-warehouse-select"
-              value={warehouseFilter}
-              onChange={(e) => setWarehouseFilter(e.target.value)}
-              title="Filter / highlight warehouse"
-            >
-              <option value="All">All Warehouses</option>
-              <option value="Mumbai">Mumbai</option>
-              <option value="Ahmedabad">Ahmedabad</option>
-              <option value="Indore">Indore</option>
-            </select>
-          </div>
-        </div>
-
         {/* Main Data Table Card */}
         <div className="reorder-card">
+          {/* Card Top Toolbar: Items/Page + Warehouse Selector + Search */}
+          <div className="reorder-toolbar">
+            <div className="reorder-toolbar-left">
+              <select
+                value={perPage}
+                onChange={(e) => {
+                  setPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                aria-label="Items per page"
+                className="reorder-perpage-select"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <span className="reorder-perpage-label">Items/Page</span>
+              <span className="reorder-toolbar-divider">|</span>
+              <span className="reorder-total-count">
+                Total: <strong>{filteredItems.length}</strong> items
+              </span>
+            </div>
+
+            <div className="reorder-toolbar-right">
+              <div className="reorder-warehouse-select-wrap">
+                <select
+                  className="reorder-warehouse-select"
+                  value={warehouseFilter}
+                  onChange={(e) => {
+                    setWarehouseFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  title="Filter / highlight warehouse"
+                >
+                  <option value="All">All Warehouses</option>
+                  <option value="Mumbai">Mumbai</option>
+                  <option value="Ahmedabad">Ahmedabad</option>
+                  <option value="Indore">Indore</option>
+                </select>
+              </div>
+
+              <div className="reorder-search-input-wrap">
+                <span className="reorder-search-icon">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  className="reorder-search-input"
+                  placeholder="Search products by name, code, brand, sub-category..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    className="reorder-search-clear"
+                    onClick={() => setSearchTerm("")}
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* 16-Column Table matching Screenshot 1 & 2 */}
           <div className="reorder-table-scroll">
             <table className="reorder-table">
               <thead>
                 <tr>
-                  <th style={{ width: "55px", minWidth: "55px", textAlign: "center" }} className="col-freeze-1">
+                  <th style={{ width: "55px", minWidth: "55px", textAlign: "center" }}>
                     Sr. No.
                   </th>
-                  <th style={{ minWidth: "240px", textAlign: "left" }} className="col-freeze-2">
+                  <th style={{ minWidth: "240px", textAlign: "left" }}>
                     Product Name (As Per Tally)
                   </th>
                   <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
@@ -878,7 +907,7 @@ export function ProductReorderPage() {
                   <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
                     Mumbai Transit
                   </th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                  <th className="th-grey th-group-end" style={{ minWidth: "85px", textAlign: "center" }}>
                     Mumbai Ordered
                   </th>
                   <th className="th-pink" style={{ minWidth: "85px", textAlign: "center" }}>
@@ -887,7 +916,7 @@ export function ProductReorderPage() {
                   <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>
                     Ahmedabad Transit
                   </th>
-                  <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>
+                  <th className="th-grey th-group-end" style={{ minWidth: "90px", textAlign: "center" }}>
                     Ahmedabad Ordered
                   </th>
                   <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
@@ -896,22 +925,22 @@ export function ProductReorderPage() {
                   <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
                     Indore Transit
                   </th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                  <th className="th-grey th-group-end" style={{ minWidth: "85px", textAlign: "center" }}>
                     Indore Ordered
                   </th>
                   <th style={{ minWidth: "85px", textAlign: "center" }}>
                     Total Qty
                   </th>
-                  <th style={{ minWidth: "80px", textAlign: "center" }}>
+                  <th style={{ minWidth: "85px", textAlign: "center" }}>
                     Re-Order
                   </th>
-                  <th style={{ minWidth: "80px", textAlign: "center" }}>
+                  <th style={{ minWidth: "85px", textAlign: "center" }}>
                     Short Fall
                   </th>
-                  <th style={{ minWidth: "75px", textAlign: "center" }}>
+                  <th style={{ minWidth: "80px", textAlign: "center" }}>
                     MOQ
                   </th>
-                  <th style={{ minWidth: "110px", textAlign: "center" }}>
+                  <th style={{ minWidth: "120px", textAlign: "center" }}>
                     Order To Be Place
                   </th>
                 </tr>
@@ -932,12 +961,12 @@ export function ProductReorderPage() {
                 ) : (
                   paginatedItems.map((item, idx) => (
                     <tr key={item.id}>
-                      <td className={`td-center ${freezeColumns ? "col-freeze-1" : ""}`}>
+                      <td className="td-center">
                         {(currentPage - 1) * perPage + idx + 1}
                       </td>
 
                       {/* Product Name (As Per Tally) Link */}
-                      <td className={freezeColumns ? "col-freeze-2" : ""}>
+                      <td>
                         <a
                           href="#view-product"
                           className="reorder-product-link"
@@ -1562,7 +1591,7 @@ export function ProductReorderPage() {
             </div>
           </div>
         )}
-      </div>
+      </main>
     </AppShell>
   );
 }

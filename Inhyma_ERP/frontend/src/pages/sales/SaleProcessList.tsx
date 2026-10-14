@@ -395,38 +395,6 @@ export function SaleProcessListPage() {
     },
   ], [metrics, isTestMode]);
 
-  // Filter count for active filter badge
-  const activeFiltersCount = useMemo(() => {
-    let cnt = 0;
-    if (orderDateFrom) cnt++;
-    if (orderDateTo) cnt++;
-    if (invoiceDateFrom) cnt++;
-    if (invoiceDateTo) cnt++;
-    if (expDateFrom) cnt++;
-    if (expDateTo) cnt++;
-    if (stateFilter) cnt++;
-    if (dispatchFilter) cnt++;
-    if (warehouseFilter) cnt++;
-    if (salesPersonFilter) cnt++;
-    if (companyFilter) cnt++;
-    if (thirdPartyFilter) cnt++;
-    if (poFilter) cnt++;
-    return cnt;
-  }, [
-    orderDateFrom,
-    orderDateTo,
-    invoiceDateFrom,
-    invoiceDateTo,
-    expDateFrom,
-    expDateTo,
-    stateFilter,
-    dispatchFilter,
-    warehouseFilter,
-    salesPersonFilter,
-    companyFilter,
-    thirdPartyFilter,
-    poFilter,
-  ]);
 
   const handleResetFilters = () => {
     setOrderDateFrom("");
@@ -775,7 +743,7 @@ export function SaleProcessListPage() {
 
   return (
     <AppShell activeKey="sales-process">
-      <main className="page" style={{ padding: "16px 24px", maxWidth: "100%", background: "#f8fafc" }}>
+      <main className="page">
         <Breadcrumb trail={["Sale", "Sale Process"]} />
 
         {/* Page Header & Top Actions */}
@@ -840,6 +808,7 @@ export function SaleProcessListPage() {
             {/* Filter Toggle Button */}
             <button
               type="button"
+              className="btn btn-filter-toggle"
               data-testid="btn-toggle-filter"
               aria-label="Filter"
               title="Toggle Filter Panel"
@@ -848,40 +817,18 @@ export function SaleProcessListPage() {
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: "#ffffff",
-                color: filterOpen || activeFiltersCount > 0 ? "#0061f2" : "#475569",
-                border: "1px solid #cbd5e1",
+                background: "#556987",
+                color: "#ffffff",
+                border: "none",
                 borderRadius: "6px",
+                padding: "8px 14px",
                 cursor: "pointer",
-                height: "36px",
-                width: "36px",
-                minWidth: "36px",
-                padding: 0,
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                position: "relative",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFiltersCount > 0 && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "-4px",
-                    right: "-4px",
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    borderRadius: "10px",
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    padding: "1px 5px",
-                    lineHeight: 1,
-                  }}
-                >
-                  {activeFiltersCount}
-                </span>
-              )}
             </button>
 
             {/* + ADD NEW Button */}

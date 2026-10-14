@@ -26,8 +26,6 @@ export function CompanySectorsPage() {
       liveModule="company_sectors"
       entityName="company sector"
       heading="Company Sectors"
-      subtitle="Manage business sectors, industry verticals, and trade domains."
-      breadcrumbTrail={["Settings", "Masters", "Company Sectors"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search Name or Sr. No..."
       hideQuickAdd={true}

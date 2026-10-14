@@ -90,6 +90,10 @@ class EcosystemSessionError(Exception):
     """Raised when ERP_Main cannot confirm a central ecosystem session (unreachable, error, or malformed reply)."""
 
 
+class EcosystemSessionUnavailable(EcosystemSessionError):
+    """ERP_Main could not be reached or answered with an error: a TEMPORARY problem, safe to retry (HTTP 503 here)."""
+
+
 async def verify_ecosystem_session(session_id: str) -> dict[str, Any]:
     """
     Ask ERP_Main whether a central ecosystem session is currently valid.
@@ -106,17 +110,17 @@ async def verify_ecosystem_session(session_id: str) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=settings.SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS) as http_client:
             response = await http_client.get(url)
     except httpx.HTTPError as exc:
-        raise EcosystemSessionError(f"Could not reach ERP_Main to verify the session: {exc}") from exc
+        raise EcosystemSessionUnavailable(f"Could not reach ERP_Main to verify the session: {exc}") from exc
 
     if response.status_code != 200:
-        raise EcosystemSessionError(f"ERP_Main session verification failed with status {response.status_code}.")
+        raise EcosystemSessionUnavailable(f"ERP_Main session verification failed with status {response.status_code}.")
     try:
         body = response.json()
     except ValueError as exc:
-        raise EcosystemSessionError("ERP_Main returned a non-JSON session verification reply.") from exc
+        raise EcosystemSessionUnavailable("ERP_Main returned a non-JSON session verification reply.") from exc
     data = body.get("data", body) if isinstance(body, dict) else None
     if not isinstance(data, dict):
-        raise EcosystemSessionError("ERP_Main returned an unexpected session verification reply.")
+        raise EcosystemSessionUnavailable("ERP_Main returned an unexpected session verification reply.")
     return data
 
 
@@ -144,23 +148,102 @@ async def push_password_to_erp_main(email: str | None, new_password: str) -> boo
         return False
 
 
-async def push_signout_to_erp_main(email: str | None) -> bool:
+# --- Per-session (one login = one session id) -------------------------------------------------------------------
+_SESSION_STATE_CACHE: dict[str, tuple[float, str]] = {}
+_SESSION_STATE_TTL_SECONDS = 45.0           # a session known to be active is not re-checked for this long
+_SESSION_STATE_UNREACHABLE_TTL_SECONDS = 15.0
+
+
+def _central_configured() -> bool:
+    try:
+        return bool(settings.get_expected_erp_main_credentials()) and bool(settings.ERP_MAIN_API_BASE_URL)
+    except Exception:
+        return False
+
+
+def _service_headers() -> dict[str, str] | None:
+    creds = settings.get_expected_erp_main_credentials()
+    if not creds:
+        return None
+    return {"Authorization": f"Bearer {creds[0]}", "X-ERP-Key": settings.ERP_KEY}
+
+
+async def open_central_session(email: str | None) -> dict[str, Any] | None:
     """
-    Tell ERP_Main that this person signed out of THIS ERP, so it signs them out of everything: the dashboard on
-    every device and every other ERP they can use.  Server-to-server, so it works even if the browser's own call
-    to ERP_Main never happens.  Best effort: never raises, returns False if ERP_Main cannot be reached.
+    This ERP has just verified a person's password.  Ask ERP_Main to open ONE central session for this login; its id
+    goes into every token of the login, so a later sign-out ends exactly this login everywhere.
+
+    Never raises.  Returns None when ERP_Main cannot be reached, refuses (e.g. no access grant for this ERP) or no
+    service credential is configured -- the caller then issues a clearly labelled local-only session, so a central
+    problem never blocks a legitimate login.
     """
     try:
-        creds = settings.get_expected_erp_main_credentials()
-        if not creds or not email:
+        headers = _service_headers()
+        if not headers or not email:
+            return None
+        url = f"{settings.ERP_MAIN_API_BASE_URL.rstrip('/')}/internal/sessions/open"
+        # Short on purpose: a slow or sleeping ERP_Main must never make a LOGIN hang; the login then simply falls back
+        # to a local-only session.
+        timeout = httpx.Timeout(connect=1.5, read=3.0, write=3.0, pool=3.0)
+        async with httpx.AsyncClient(timeout=timeout) as http_client:
+            response = await http_client.post(url, json={"email": email}, headers=headers)
+        if response.status_code != 200:
+            return None
+        body = response.json()
+        data = body.get("data", body) if isinstance(body, dict) else None
+        return data if isinstance(data, dict) and data.get("session_id") else None
+    except Exception:
+        return None
+
+
+async def push_session_signout_to_erp_main(session_id: str) -> bool:
+    """
+    A person signed out of THIS ERP.  Tell ERP_Main so it ends THIS session (dashboard + the other ERPs it used).
+    Server-to-server, so it works even if the browser never reaches ERP_Main.  Best effort: never raises.
+    """
+    try:
+        headers = _service_headers()
+        sid = (session_id or "").strip()
+        if not headers or not sid or sid.startswith("loc-"):
             return False
-        url = f"{settings.ERP_MAIN_API_BASE_URL.rstrip('/')}/internal/users/signout"
+        from urllib.parse import quote
+
+        url = f"{settings.ERP_MAIN_API_BASE_URL.rstrip('/')}/internal/sessions/{quote(sid, safe='')}/signout"
         async with httpx.AsyncClient(timeout=10.0) as http_client:
-            response = await http_client.post(
-                url,
-                json={"email": email},
-                headers={"Authorization": f"Bearer {creds[0]}", "X-ERP-Key": settings.ERP_KEY},
-            )
+            response = await http_client.post(url, headers=headers)
         return response.status_code == 200
     except Exception:
         return False
+
+
+async def central_session_state(session_id: str) -> str:
+    """
+    "active" | "revoked" | "unknown" for a central session id.  Never raises.
+
+    Safety net behind ERP_Main's push: even if a sign-out message is lost, this ERP notices within ~45 seconds.
+    Cached; and fail-OPEN ("unknown") when ERP_Main is unreachable, not configured, or does not know the session,
+    so an ERP_Main outage never logs everybody out.
+    """
+    import time as _time
+
+    sid = (session_id or "").strip()
+    if not sid or sid.startswith("loc-") or sid.startswith("ihm-sess-") or not _central_configured():
+        return "unknown"
+    now = _time.monotonic()
+    hit = _SESSION_STATE_CACHE.get(sid)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    state, ttl = "unknown", _SESSION_STATE_UNREACHABLE_TTL_SECONDS
+    try:
+        data = await verify_ecosystem_session(sid)
+        if data.get("active") is True:
+            state, ttl = "active", _SESSION_STATE_TTL_SECONDS
+        elif data.get("revoked") is True:
+            state, ttl = "revoked", _SESSION_STATE_TTL_SECONDS
+    except EcosystemSessionError:
+        pass
+    if len(_SESSION_STATE_CACHE) > 5000:
+        for k in [k for k, (exp, _) in _SESSION_STATE_CACHE.items() if exp <= now][:2500] or list(_SESSION_STATE_CACHE)[:2500]:
+            _SESSION_STATE_CACHE.pop(k, None)
+    _SESSION_STATE_CACHE[sid] = (now + ttl, state)
+    return state

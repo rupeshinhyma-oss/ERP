@@ -26,26 +26,24 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background-color: #4b6584;
+  background-color: #556987;
   color: #ffffff;
-  border: 1px solid #4b6584;
-  border-radius: 4px;
-  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
-  height: 36px;
-  min-width: 36px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .deleted-orders-btn-filter:hover {
-  background-color: #3b526d;
+  background-color: #475569;
 }
 
 .deleted-orders-btn-filter.active {
-  background-color: #3b526d;
-  box-shadow: 0 0 0 2px rgba(75, 101, 132, 0.35);
+  background-color: #556987;
 }
 
 .deleted-orders-filter-badge {

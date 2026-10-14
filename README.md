@@ -23,6 +23,7 @@ The ecosystem comprises three autonomous systems:
    - Autonomous Production Planning & Distribution ERP (India Domestic Distribution)
    - FastAPI Backend (Port `8002`), React + TypeScript SPA Frontend (Port `5174`)
    - Complete visual uniqueness across all 39 sidebar routes with dedicated SVG icons.
+   - Standardized universal UI design system: uniform header filter toggle buttons across all modules (`#556987`, 8×14px, badge-less, default collapsed state).
    - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
    - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, escalations, holds), Master Data, Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker.
 
@@ -79,14 +80,14 @@ The platform implements an enterprise-grade, distributed user management and ide
 flowchart TD
     subgraph ControlPlane["Central Control Plane (ERP_Main)"]
         GU["Global Users Directory<br/>(/access/users)"]
-        PA["Platform Admins<br/>(admin_tokens_revoked_before)"]
-        SOE["Global Sign-Out Everywhere<br/>(/auth/sign-out-everywhere)"]
+        PA["Platform Admins<br/>(per-session tokens: sid)"]
+        SOE["Per-Session Sign-Out<br/>(/global/ecosystem-session/{sid}/revoke)"]
         PWS["Central Password Federation<br/>(/auth/internal/sync-password)"]
     end
 
     subgraph Spoke1["Inhyma_ERP (India Spoke)"]
         INH_U["Local Users & HR Profiles"]
-        INH_REV["Inbound Token Revocation<br/>(/auth/internal/revoke-user-tokens)"]
+        INH_REV["Inbound Session Revocation<br/>(/internal/sessions/{sid}/revoke)"]
         INH_PW["Outbound Password Sync"]
     end
 
@@ -114,8 +115,9 @@ flowchart TD
    - **Autonomous Spoke Users (`users`):** Local tenant directories preserving departmental hierarchies, employee profiles, and operational permissions.
 2. **Bi-Directional Password Synchronization:**
    - Passwords changed centrally or locally on any spoke automatically propagate across all active ecosystem accounts without credential drift.
-3. **Global Sign-Out Everywhere Fanout:**
-   - Single-click session termination: invalidates central sessions, clears ecosystem cookies, and fans out concurrent token revocation signals (`POST /api/v1/auth/internal/revoke-user-tokens`) to all spoke ERPs, pushing instant WebSocket `FORCE_LOGOUT` events.
+3. **Session-Scoped Login & Logout:**
+   - Every login has its own session id, carried by all of that login's tokens (dashboard and each ERP). Logging out anywhere ends *that* session in the dashboard and the ERPs it used; other logins of the same account and other people are unaffected. "Sign out everywhere" is a separate, explicit action (`POST /api/v1/global/auth/sign-out-everywhere`, `/global/user-auth/sign-out-everywhere`).
+   - Built-in fallbacks: a login still works if ERP_Main is down (clearly labelled local session), and ERPs re-check central sessions themselves so a lost sign-out message cannot leave a session alive (about 45 s). See `ERP_Main/docs/API_DESIGN_AND_ENDPOINTS.md` section 1.
 4. **Multi-Identifier Spoke Resolution:**
    - Spoke synchronization and revocation endpoints resolve users safely across `id`, `user_id`, `email`, or `username`, eliminating distributed primary key collision issues.
 5. **Platform Role Preservation:**

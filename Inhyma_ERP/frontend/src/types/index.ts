@@ -57,6 +57,10 @@ export interface TokenPair {
   access_token: string;
   refresh_token: string;
   user?: Profile;
+  /** The login (session) these tokens belong to. Signing out ends exactly this session. */
+  session_id?: string | null;
+  /** "central": ERP_Main knows this session (switching ERPs works). "local": this ERP only (fallback). */
+  session_mode?: "central" | "local" | null;
 }
 
 export interface Profile {
@@ -496,6 +500,8 @@ export interface Organization {
   country?: string | null;
   postal_code?: string | null;
   business_hours?: string | null;
+  logo_url?: string | null;
+  logo_data?: string | null;
 }
 
 /** The 16 editable organization fields, in form order. */

@@ -24,7 +24,7 @@
  *  - SideDrawer for comprehensive product details.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -638,61 +638,16 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     }
   };
 
-  // Dynamic Column Freezing (matches Company Profiles: Checkbox, Sr. No., Product Name)
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
-    const saved = localStorage.getItem("product_master_pinned_cols_v3");
-    if (saved !== null) {
-      try {
-        return JSON.parse(saved);
-      } catch { }
-    }
-    return { 0: "left", 1: "left", 2: "left" };
-  });
-
-  useEffect(() => {
-    localStorage.setItem("product_master_pinned_cols_v3", JSON.stringify(pinnedCols));
-  }, [pinnedCols]);
-
-  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
-  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
-  const [pinMenuOpen, setPinMenuOpen] = useState(false);
-  const pinMenuRef = useRef<HTMLDivElement>(null);
+  // Dynamic Column Freezing removed per user request
+  const displayOrder = useMemo(() => Array.from({ length: 13 }, (_, i) => i), []);
   const tableRef = useRef<HTMLTableElement>(null);
 
   useEffect(() => {
-    if (!pinMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
-        setPinMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [pinMenuOpen]);
-
-  const togglePin = useCallback((colIdx: number) => {
-    setPinnedCols((prev) => {
-      const next = { ...prev };
-      if (next[colIdx]) {
-        delete next[colIdx];
-      } else {
-        if (colIdx >= 12) {
-          next[colIdx] = "right";
-        } else {
-          next[colIdx] = "left";
-        }
-      }
-      return next;
-    });
+    try {
+      localStorage.removeItem("product_master_pinned_cols_v3");
+    } catch { }
   }, []);
 
-  const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: 13 }, (_, i) => i);
-    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
-    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
-    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
-    return [...lefts, ...unpinned, ...rights];
-  }, [pinnedCols]);
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -1037,104 +992,17 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     return sortedProducts.slice(start, start + perPage);
   }, [sortedProducts, currentPage, perPage]);
 
-  // Column Offset calculation using ResizeObserver
-  useLayoutEffect(() => {
-    if (!tableRef.current) return;
-    const tableEl = tableRef.current;
-
-    const updateOffsets = () => {
-      const ths = tableEl.querySelectorAll("thead th");
-      if (!ths.length) return;
-
-      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-      let accumLeft = 0;
-      const nextLefts: Record<number, number> = {};
-      for (const idx of lefts) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextLefts[idx] = accumLeft;
-          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
-      let accumRight = 0;
-      const nextRights: Record<number, number> = {};
-      for (const idx of rights) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextRights[idx] = accumRight;
-          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      setColLeftOffsets((prev) => {
-        const isSame =
-          Object.keys(nextLefts).length === Object.keys(prev).length &&
-          Object.keys(nextLefts).every((k) => prev[Number(k)] === nextLefts[Number(k)]);
-        return isSame ? prev : nextLefts;
-      });
-      setColRightOffsets((prev) => {
-        const isSame =
-          Object.keys(nextRights).length === Object.keys(prev).length &&
-          Object.keys(nextRights).every((k) => prev[Number(k)] === nextRights[Number(k)]);
-        return isSame ? prev : nextRights;
-      });
-    };
-
-    updateOffsets();
-
-    if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => updateOffsets());
-      ro.observe(tableEl);
-      return () => ro.disconnect();
-    }
-  }, [pinnedCols, products, loading, displayOrder]);
-
-  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
-    const dir = pinnedCols[colIdx];
-    const headerTopStyle: React.CSSProperties = isHeader
+  const getFreezeStyle = useCallback((_colIdx: number, isHeader = false): React.CSSProperties => {
+    return isHeader
       ? {
         position: "sticky",
         top: 0,
-        zIndex: dir ? 30 : 15,
+        zIndex: 15,
         backgroundColor: "#f1f5f9",
         boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
       }
       : {};
-
-    if (!dir) return headerTopStyle;
-
-    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
-
-    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
-    const isFirstRight = dir === "right" && colIdx === rights[0];
-
-    if (dir === "left") {
-      const left = colLeftOffsets[colIdx] ?? 0;
-      return {
-        ...headerTopStyle,
-        position: "sticky",
-        left: `${left}px`,
-        zIndex: isHeader ? 35 : 10,
-        backgroundColor: isHeader ? "#f1f5f9" : "#ffffff",
-        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
-      };
-    }
-
-    const right = colRightOffsets[colIdx] ?? 0;
-    return {
-      ...headerTopStyle,
-      position: "sticky",
-      right: `${right}px`,
-      zIndex: isHeader ? 35 : 10,
-      backgroundColor: isHeader ? "#f1f5f9" : "#ffffff",
-      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
-    };
-  }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
+  }, []);
 
   const totalPages = Math.ceil(sortedProducts.length / perPage) || 1;
 
@@ -2296,20 +2164,17 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
           <>
             {/* 1. Header with Title and Action Buttons */}
             <div className="page-header">
-          <div>
-            <h1>Product Master</h1>
-            <div className="page-subtitle">
-              Catalog of products, pricing, specifications, and packaging configurations.
-            </div>
-          </div>
+              <div>
+                <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Product Master</h1>
+              </div>
 
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
-              className="btn"
+              className="btn btn-filter-toggle"
               style={{
-                background: showFilterPanel ? "#0061f2" : "#475569",
+                background: "#556987",
                 color: "#ffffff",
                 padding: "8px 14px",
                 borderRadius: "6px",
@@ -2622,105 +2487,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                 </select>
                 <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
               </div>
-
-              {/* Dynamic Freeze Columns Dropdown Menu */}
-              <div ref={pinMenuRef} style={{ position: "relative" }}>
-                <button
-                  type="button"
-                  onClick={() => setPinMenuOpen((v) => !v)}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                    background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
-                    cursor: "pointer",
-                    color: "#0f172a",
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  📌 Freeze Columns ({Object.keys(pinnedCols).length})
-                </button>
-                {pinMenuOpen && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: "38px",
-                      zIndex: 100,
-                      background: "#ffffff",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "8px",
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                      padding: "12px",
-                      minWidth: "240px",
-                      display: "flex",
-                      flexDirection: "column",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: 700,
-                        color: "#475569",
-                        marginBottom: "8px",
-                        borderBottom: "1px solid #f1f5f9",
-                        paddingBottom: "6px",
-                      }}
-                    >
-                      Toggle Frozen Columns
-                    </div>
-                    <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
-                      {PRODUCT_COLUMN_LABELS.map((label, idx) => {
-                        if (!label) return null;
-                        const isPinned = Boolean(pinnedCols[idx]);
-                        return (
-                          <label
-                            key={label}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              fontSize: "13px",
-                              cursor: "pointer",
-                              padding: "4px 0",
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isPinned}
-                              onChange={() => togglePin(idx)}
-                            />{" "}
-                            {label}
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
-                      <button
-                        type="button"
-                        onClick={() => setPinnedCols({})}
-                        style={{
-                          width: "100%",
-                          padding: "6px 8px",
-                          fontSize: "12px",
-                          borderRadius: "4px",
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                          cursor: "pointer",
-                          color: "#dc2626",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Clear All Freezes
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
 
             {/* Search Input with Clear Button */}
@@ -2798,7 +2564,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                     }
 
                     const label = PRODUCT_COLUMN_LABELS[idx];
-                    const isPinned = Boolean(pinnedCols[idx]);
                     const isSrNo = idx === 1;
                     const isAction = idx === 12;
                     const isSorted = sortColIndex === idx;
@@ -2877,25 +2642,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                               )}
                             </div>
                           )}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              togglePin(idx);
-                            }}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                              fontSize: "11px",
-                              opacity: isPinned ? 1 : 0.3,
-                              padding: "0 2px",
-                              flexShrink: 0,
-                            }}
-                            title={isPinned ? "Unfreeze column" : "Freeze column"}
-                          >
-                            📌
-                          </button>
                         </div>
                       </th>
                     );

@@ -53,6 +53,14 @@ class AdminPermissionSet(set):
         return True
 
 
+LOCAL_SESSION_PREFIX = "loc-"
+
+
+def new_local_session_id() -> str:
+    """Fallback session id when ERP_Main could not be reached at login: valid in THIS ERP only."""
+    return f"{LOCAL_SESSION_PREFIX}{uuid.uuid4().hex}"
+
+
 @dataclass
 class CurrentUser:
     """
@@ -69,6 +77,7 @@ class CurrentUser:
     access_token_jti: str = ""
     must_change_password: bool = False
     is_super_admin: bool = False
+    session_id: str = ""  # the login (session) this request belongs to; "" for an older token without one
 
     @property
     def is_admin(self) -> bool:
@@ -133,9 +142,15 @@ class AuthService:
         return perms
 
     # --- Login --------------------------------------------------------------
-    async def login(self, *, identifier: str, password: str, context: LoginContext) -> tuple[User, str, str]:
+    async def login(
+        self, *, identifier: str, password: str, context: LoginContext, session_resolver=None
+    ) -> tuple[User, str, str]:
         """
         Verify credentials and, on success, issue a new access/refresh token pair.
+
+        `session_resolver(user)` is awaited only AFTER the credentials are verified; it returns the central session id
+        to put in the tokens (or None).  Any failure there is swallowed on purpose: a central problem must never
+        block a legitimate login, the tokens then carry a clearly labelled local-only session id instead.
         """
         await self._check_rate_limit(identifier)
 
@@ -199,7 +214,13 @@ class AuthService:
         # Clear any prior force-logout timestamp upon successful login
         await self.cache.delete(CacheBackend.build_key("auth_force_logout", str(user.id)))
 
-        access_token, refresh_token = await self._issue_token_pair(user, context)
+        central_session_id: str | None = None
+        if session_resolver is not None:
+            try:
+                central_session_id = await session_resolver(user)
+            except Exception:
+                central_session_id = None
+        access_token, refresh_token = await self._issue_token_pair(user, context, session_id=central_session_id)
         return user, access_token, refresh_token
 
     async def _register_failed_attempt(self, user: User) -> None:
@@ -210,11 +231,14 @@ class AuthService:
             user.status = UserStatus.LOCKED
         await self.user_repository.update(user)
 
-    async def _issue_token_pair(self, user: User, context: LoginContext) -> tuple[str, str]:
-        """Issue a fresh access + refresh token pair and persist the new session row."""
+    async def _issue_token_pair(
+        self, user: User, context: LoginContext, session_id: str | None = None
+    ) -> tuple[str, str]:
+        """Issue a fresh access + refresh token pair (both bound to ONE session id) and persist the session row."""
+        sid = session_id or new_local_session_id()
         permissions = await self.get_user_effective_permissions(user.id, force_refresh=True)
-        access = create_access_token(user.id, permissions=list(permissions))
-        refresh = create_refresh_token(user.id)
+        access = create_access_token(user.id, permissions=list(permissions), session_id=sid)
+        refresh = create_refresh_token(user.id, session_id=sid)
 
         await self.session_repository.create(
             user_id=user.id,
@@ -228,7 +252,9 @@ class AuthService:
         return access.token, refresh.token
 
     # --- Federated (SSO) login (Multi-ERP Platform, Phase 4) -------------------
-    async def issue_session_for_federated_user(self, user: User, context: LoginContext) -> tuple[str, str]:
+    async def issue_session_for_federated_user(
+        self, user: User, context: LoginContext, session_id: str | None = None
+    ) -> tuple[str, str]:
         """
         Establish an existing-shape local session for a user resolved via federation (Phase 4 Step 27).
 
@@ -248,7 +274,7 @@ class AuthService:
         """
         if not user.can_login:
             raise UnauthorizedException("This account is not active. Please contact an administrator.")
-        return await self._issue_token_pair(user, context)
+        return await self._issue_token_pair(user, context, session_id=session_id)
 
     # --- Refresh --------------------------------------------------------------
     async def refresh(self, *, refresh_token: str, context: LoginContext) -> tuple[str, str]:
@@ -261,6 +287,9 @@ class AuthService:
         jti = payload["jti"]
         if await self.token_blacklist_repository.is_blacklisted(jti):
             raise UnauthorizedException("This refresh token has been revoked.")
+        sid = payload.get("sid")
+        if sid:
+            await self._ensure_session_active(str(sid))
 
         session = await self.session_repository.get_by_refresh_jti(jti)
         if session is None or not session.is_active:
@@ -281,7 +310,7 @@ class AuthService:
         )
         session.last_used_at = datetime.now(timezone.utc)
 
-        access_token, new_refresh_token = await self._issue_token_pair(user, context)
+        access_token, new_refresh_token = await self._issue_token_pair(user, context, session_id=str(sid) if sid else None)
         return access_token, new_refresh_token
 
     # --- Logout -----------------------------------------------------------------
@@ -324,6 +353,58 @@ class AuthService:
         except Exception:
             pass
         return revoked_count
+
+    # --- Per-session revocation (one login = one session id) -----------------------
+    @staticmethod
+    def _sid_key(sid: str) -> str:
+        return f"sid:{sid}"
+
+    async def session_is_revoked(self, sid: str) -> bool:
+        """Has this exact session id been signed out here?  (cached; the answer is also stored durably)"""
+        cache_key = CacheBackend.build_key("session_revoked", sid)
+        cached = await self.cache.get(cache_key)
+        if cached is not None:
+            return str(cached) == "1"
+        revoked = await self.token_blacklist_repository.is_blacklisted(self._sid_key(sid))
+        await self.cache.set(cache_key, 1 if revoked else 0, ttl_seconds=3600 if revoked else 5)
+        return revoked
+
+    async def revoke_session(self, sid: str, *, reason: str = "session_signed_out") -> None:
+        """
+        End ONE login: every access and refresh token carrying this session id stops working in this ERP, and the
+        live connections of that session are closed.  Other sessions of the same person are untouched.
+        """
+        if not sid:
+            return
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES) + timedelta(days=1)
+        )
+        await self.token_blacklist_repository.blacklist(
+            jti=self._sid_key(sid), token_type="session", user_id=None, expires_at=expires_at, reason=reason
+        )
+        await self.cache.set(CacheBackend.build_key("session_revoked", sid), 1, ttl_seconds=3600)
+        try:
+            from app.events.manager import connection_manager
+
+            await connection_manager.disconnect_session(sid)
+        except Exception:
+            pass
+
+    async def _ensure_session_active(self, sid: str) -> None:
+        """
+        Reject a token whose session was signed out.  Two independent safety nets, so a lost message can never leave
+        a signed-out session alive: (1) ERP_Main pushes the revoke here; (2) for central sessions this ERP also asks
+        ERP_Main now and then (cached ~45s, fail-open if ERP_Main is unreachable).
+        """
+        if await self.session_is_revoked(sid):
+            raise UnauthorizedException("This session was signed out. Please log in again.")
+        if sid.startswith(LOCAL_SESSION_PREFIX):
+            return
+        from app.federation.erp_main_client import central_session_state
+
+        if await central_session_state(sid) == "revoked":
+            await self.revoke_session(sid, reason="central_session_revoked")
+            raise UnauthorizedException("This session was signed out. Please log in again.")
 
     # --- Sessions -----------------------------------------------------------------
     async def list_sessions(self, user_id: uuid.UUID) -> list[Session]:
@@ -423,6 +504,10 @@ class AuthService:
         if await self.token_blacklist_repository.is_blacklisted(payload["jti"]):
             raise UnauthorizedException("This access token has been revoked.")
 
+        token_sid = payload.get("sid")
+        if token_sid:
+            await self._ensure_session_active(str(token_sid))
+
         user_id = uuid.UUID(payload["sub"])
 
         # Check if user was force-logged-out after this token was issued
@@ -464,4 +549,5 @@ class AuthService:
             access_token_jti=payload["jti"],
             must_change_password=user.must_change_password,
             is_super_admin=is_super,
+            session_id=str(token_sid or ""),
         )

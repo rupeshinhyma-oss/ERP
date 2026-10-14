@@ -103,8 +103,6 @@ export function BillingCompaniesPage() {
       liveModule="billing_companies"
       entityName="Billing Company"
       heading="Billing Companies"
-      subtitle="Manage corporate billing entities, tax registrations, invoices, and banking details."
-      breadcrumbTrail={["Settings", "Masters", "Billing Company"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search..."
       hideQuickAdd={true}

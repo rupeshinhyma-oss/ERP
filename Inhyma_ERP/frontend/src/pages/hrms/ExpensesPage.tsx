@@ -486,12 +486,9 @@ export function ExpensesPage() {
         {/* Page Header */}
         <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "20px" }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "var(--color-text, #0f172a)" }}>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
               Expense Management
             </h1>
-            <div className="page-subtitle" style={{ color: "var(--color-muted, #64748b)", fontSize: "14px", marginTop: "4px" }}>
-              Track employee expense claims, reimbursements, and receipts.
-            </div>
           </div>
 
           <div>

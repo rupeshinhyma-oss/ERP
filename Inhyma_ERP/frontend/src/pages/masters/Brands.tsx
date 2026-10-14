@@ -18,7 +18,6 @@ export function BrandsPage() {
       liveModule="brands"
       entityName="brand"
       heading="Brands"
-      subtitle="Product brand names, referenced by the Product master."
       breadcrumbTrail={["Master Data", "Brands"]}
       newButtonLabel="+ New Brand"
       hideQuickAdd

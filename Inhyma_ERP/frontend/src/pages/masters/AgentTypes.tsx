@@ -25,8 +25,6 @@ export function AgentTypesPage() {
       liveModule="agent_types"
       entityName="agent type"
       heading="Agent Types"
-      subtitle="Configure agent classifications, roles, and partnership tiers."
-      breadcrumbTrail={["Settings", "Masters", "Agent Types"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search Name or Sr. No..."
       hideQuickAdd={true}

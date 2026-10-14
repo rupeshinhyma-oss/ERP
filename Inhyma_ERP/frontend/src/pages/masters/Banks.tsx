@@ -29,8 +29,6 @@ export function BanksPage() {
       liveModule="banks"
       entityName="Bank"
       heading="Bank"
-      subtitle="Manage corporate bank accounts, account numbers, IFSC codes, branches, and holder details."
-      breadcrumbTrail={["Settings", "Masters", "Bank"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search..."
       hideQuickAdd={true}

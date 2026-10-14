@@ -564,10 +564,10 @@ export function ProductStockSkeletonRows({ count = 8 }: { count?: number }) {
     <>
       {Array.from({ length: count }).map((_, idx) => (
         <tr key={`prod-sk-${idx}`} className="skeleton-row" data-testid="stock-skeleton-row">
-          <td className="td-center col-freeze-1">
+          <td className="td-center">
             <div className="skeleton-line" style={{ width: "22px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
           </td>
-          <td className="col-freeze-2">
+          <td>
             <div className="skeleton-line" style={{ width: nameWidths[idx % nameWidths.length], height: "14px", borderRadius: "4px" }} />
           </td>
           <td className="td-center">
@@ -750,6 +750,15 @@ export function ProductStockPage({
       ? "goods-expected"
       : "stock");
   const [activeTab, setActiveTab] = useState<"stock" | "goods-expected">(initialTab);
+
+  const isTransactionReport =
+    location.pathname.startsWith("/reports/stock-transactions") ||
+    location.pathname.startsWith("/transaction_report") ||
+    location.pathname.startsWith("/transaction-report") ||
+    location.pathname.startsWith("/stock-transactions");
+  const activeNavKey = isTransactionReport ? "reports-stock-transactions" : "product-stock";
+  const stockTabLabel = isTransactionReport ? "Stock Transactions" : "Product Stock";
+  const pageHeading = activeTab === "goods-expected" ? "Goods Expected Date Report (Marketing)" : stockTabLabel;
 
   const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
@@ -1073,15 +1082,6 @@ export function ProductStockPage({
     });
   }, [items, searchTerm, appliedCategory, appliedSubCategory, appliedBrand, appliedNegativeStock]);
 
-  // Active filter count for badge
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (appliedCategory !== "All") count++;
-    if (appliedSubCategory !== "All") count++;
-    if (appliedBrand !== "All") count++;
-    if (appliedNegativeStock !== "Select") count++;
-    return count;
-  }, [appliedCategory, appliedSubCategory, appliedBrand, appliedNegativeStock]);
 
   // Totals calculations
   const totalPhysical = useMemo(() => {
@@ -1142,16 +1142,16 @@ export function ProductStockPage({
   }, [filteredItems]);
 
   return (
-    <AppShell activeKey="reports-stock-transactions">
+    <AppShell activeKey={activeNavKey}>
       <main className="page">
         {/* Breadcrumb Trail */}
-        <Breadcrumb trail={["Reports", activeTab === "goods-expected" ? "Goods Expected Report" : "Stock Transactions"]} />
+        <Breadcrumb trail={[isTransactionReport ? "Reports" : "Inventory", activeTab === "goods-expected" ? "Goods Expected Report" : stockTabLabel]} />
 
         {/* Top Page Header */}
         <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
-              {activeTab === "goods-expected" ? "Goods Expected Date Report (Marketing)" : "Product Stock Transactions"}
+              {pageHeading}
             </h1>
           </div>
 
@@ -1161,27 +1161,26 @@ export function ProductStockPage({
                 {/* Filter Toggle Button matching Screenshot 1 */}
                 <button
                   type="button"
-                  className="btn stock-btn-filter"
+                  className="btn btn-filter-toggle"
                   style={{
-                    background: "#4b6584",
+                    background: "#556987",
                     color: "#ffffff",
-                    padding: "8px 12px",
-                    borderRadius: "4px",
+                    padding: "8px 14px",
+                    borderRadius: "6px",
                     border: "none",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     cursor: "pointer",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
                   }}
                   onClick={() => setShowFilterPanel((prev) => !prev)}
                   title="Filter stock list"
                   aria-label="Filter"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
                   </svg>
-                  {activeFilterCount > 0 && <span className="stock-filter-badge">{activeFilterCount}</span>}
                 </button>
 
                 {/* Export Button */}
@@ -1264,7 +1263,7 @@ export function ProductStockPage({
             }}
           >
             <span>📊</span>
-            <span>Product Stock Transactions</span>
+            <span>{stockTabLabel}</span>
           </button>
           <button
             type="button"
@@ -1473,8 +1472,8 @@ export function ProductStockPage({
             <table className="stock-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th className="col-freeze-1" style={{ width: "55px", minWidth: "55px", textAlign: "center" }}>Sr. No.</th>
-                  <th className="col-freeze-2" style={{ minWidth: "220px", textAlign: "left" }}>Product Name (As Per Tally)</th>
+                  <th style={{ width: "55px", minWidth: "55px", textAlign: "center" }}>Sr. No.</th>
+                  <th style={{ minWidth: "220px", textAlign: "left" }}>Product Name (As Per Tally)</th>
                   <th style={{ width: "110px", textAlign: "center" }}>Product Code</th>
                   <th style={{ width: "95px", textAlign: "center" }}>Brand</th>
                   <th style={{ minWidth: "150px", textAlign: "left" }}>Sub Category</th>
@@ -1502,8 +1501,8 @@ export function ProductStockPage({
                 ) : (
                   paginatedItems.map((item) => (
                     <tr key={item.id}>
-                      <td className="td-center col-freeze-1">{item.sr_no}</td>
-                      <td className="col-freeze-2">
+                      <td className="td-center">{item.sr_no}</td>
+                      <td>
                         <a
                           href="#view-product"
                           className="product-link"

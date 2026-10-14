@@ -34,7 +34,6 @@ export function SubCategoriesPage() {
       liveModule="subcategories"
       entityName="sub-category"
       heading="Product Sub-Categories"
-      subtitle="Belongs to a category; names are unique within their category."
       breadcrumbTrail={["Master Data", "Sub-Categories"]}
       newButtonLabel="+ New Sub-Category"
       hideQuickAdd

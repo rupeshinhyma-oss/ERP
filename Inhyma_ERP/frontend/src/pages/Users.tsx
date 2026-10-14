@@ -18,7 +18,6 @@ import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
 import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
-import { createSsoHandoverUrl, getEcosystemErps } from "@/lib/ssoBridge";
 import { friendlyPermissionLabel, groupPermissionsByModule, MODULE_NAMES } from "@/lib/permissionLabels";
 import type {
   BulkPermissionOverrideItem,
@@ -953,9 +952,6 @@ export function UsersPage() {
   }
 
   const canManage = hasPermission("user.action") || isSuperAdmin;
-  const controlPlane = getEcosystemErps().find((e) => e.key === "control-plane");
-  const controlPlaneHost = controlPlane?.hostUrl || "http://localhost:5170/dashboard";
-  const centralUsersUrl = createSsoHandoverUrl(controlPlaneHost, "/access/users");
 
   return (
     <AppShell activeKey="users" pageClassName="page-users">
@@ -964,49 +960,6 @@ export function UsersPage() {
         <div className="page-header">
           <div>
             <h1>User Accounts &amp; Passwords</h1>
-            <div className="page-subtitle">
-              Viewing users provisioned for Inhyma ERP. User accounts, access provisioning, and active/disabled status are governed centrally from the ERP_Main Global Control Panel.
-            </div>
-          </div>
-          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "6px 12px",
-                background: "#f1f5f9",
-                color: "#475569",
-                borderRadius: "6px",
-                fontSize: "12px",
-                fontWeight: 500,
-                border: "1px solid #e2e8f0",
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
-              </svg>
-              <span>User accounts &amp; status managed centrally via <strong>ERP_Main</strong></span>
-            </span>
-            <a
-              href={centralUsersUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-secondary"
-              style={{
-                fontSize: "12px",
-                padding: "7px 12px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                textDecoration: "none",
-              }}
-              title="Open Global Control Panel to add, enable, or disable users"
-            >
-              <span>Open Central Dashboard ↗</span>
-            </a>
           </div>
         </div>
         <Banner error={error} />

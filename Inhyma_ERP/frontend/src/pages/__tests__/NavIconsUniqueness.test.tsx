@@ -58,7 +58,6 @@ describe("Sidebar Navigation Icons Uniqueness", () => {
     expect(findItem("hrms-attendance")?.icon).toBe("userCheck");
     expect(findItem("hrms-expenses")?.icon).toBe("receipt");
     expect(findItem("hrms-setup")?.icon).toBe("userCog");
-    expect(findItem("effective-permissions")?.icon).toBe("key");
     expect(findItem("masters-group")?.icon).toBe("database");
   });
 });

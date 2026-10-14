@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { Pagination } from "@/components/Pagination";
@@ -591,15 +590,6 @@ export function StockAdjustmentPage({
     has_next: currentPage < totalPages,
   }), [currentPage, totalPages, filteredItems.length, perPage]);
 
-  // Active filter badge count
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (appliedDateRange !== "08/21/2026 - 09/19/2026" && appliedDateRange !== "") count++;
-    if (appliedType !== "All") count++;
-    if (appliedPurpose !== "All") count++;
-    if (appliedWarehouse !== "All") count++;
-    return count;
-  }, [appliedDateRange, appliedType, appliedPurpose, appliedWarehouse]);
 
   // Handle saving new adjustment
   const handleCreateAdjustment = (e: React.FormEvent) => {
@@ -647,25 +637,19 @@ export function StockAdjustmentPage({
   return (
     <AppShell activeKey="stock-adjustment">
       <main className="page">
-        {/* Breadcrumb Trail */}
-        <Breadcrumb trail={["Inventory", "Stock Adjustment"]} />
-
         {/* Top Page Header */}
         <div className="page-header">
           <div>
-            <h1>Stock Adjustment</h1>
-            <div className="page-subtitle">
-              Manage inventory adjustments, physical count reconciliation, and discrepancies.
-            </div>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Stock Adjustment</h1>
           </div>
 
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
-              className="btn adjustment-btn-filter"
+              className="btn btn-filter-toggle"
               style={{
-                background: showFilterPanel ? "#0061f2" : "#475569",
+                background: "#556987",
                 color: "#ffffff",
                 padding: "8px 14px",
                 borderRadius: "6px",
@@ -683,7 +667,6 @@ export function StockAdjustmentPage({
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFilterCount > 0 && <span className="adjustment-filter-badge">{activeFilterCount}</span>}
             </button>
 
             {/* Add New Button with dropdown */}
@@ -951,25 +934,6 @@ export function StockAdjustmentPage({
                 </select>
                 <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
               </div>
-
-              <button
-                type="button"
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "13px",
-                  background: "#ffffff",
-                  cursor: "pointer",
-                  color: "#0f172a",
-                  fontWeight: 600,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                📌 Freeze Columns (2)
-              </button>
             </div>
 
             <div className="adjustment-search-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
@@ -1006,64 +970,43 @@ export function StockAdjustmentPage({
             <table className="adjustment-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th className="sortable" style={{ position: "sticky", left: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Adjustment Date</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.8 }} title="Freeze column">📌</button>
+                  <th className="sortable">
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                      <span>Adjustment Date</span>
+                      <span className="sort-icon">⇅</span>
                     </div>
                   </th>
                   <th className="sortable">
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Client / Inv. No.</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                      <span>Client / Inv. No.</span>
+                      <span className="sort-icon">⇅</span>
                     </div>
                   </th>
                   <th className="sortable">
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Warehouse</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                      <span>Warehouse</span>
+                      <span className="sort-icon">⇅</span>
                     </div>
                   </th>
                   <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>Type</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
+                    <span>Type</span>
                   </th>
                   <th className="sortable">
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Purpose</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                      <span>Purpose</span>
+                      <span className="sort-icon">⇅</span>
                     </div>
                   </th>
                   <th className="sortable" style={{ textAlign: "right" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Total</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                      <span>Total</span>
+                      <span className="sort-icon">⇅</span>
                     </div>
                   </th>
                   <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>Created By</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
+                    <span>Created By</span>
                   </th>
-                  <th style={{ textAlign: "center", width: "60px", position: "sticky", right: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
+                  <th style={{ textAlign: "center", width: "60px" }}>
                     <span>Action</span>
                   </th>
                 </tr>

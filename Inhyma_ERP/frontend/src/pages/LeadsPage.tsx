@@ -1274,9 +1274,9 @@ export function LeadsPage() {
             <button
               type="button"
               id="btn-filter-leads"
-              className="btn"
+              className="btn btn-filter-toggle"
               style={{
-                background: showFilterPanel ? "#0061f2" : "#475569",
+                background: "#556987",
                 color: "#ffffff",
                 padding: "8px 14px",
                 borderRadius: "6px",

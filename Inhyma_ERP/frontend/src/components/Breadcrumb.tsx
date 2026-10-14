@@ -12,7 +12,7 @@ export function Breadcrumb({ trail }: { trail: string[] }) {
   // Prevent duplicate Dashboard if passed in trail since Dashboard link is already root
   const normalizedTrail = trail[0]?.toLowerCase() === "dashboard" ? trail.slice(1) : trail;
   return (
-    <div className="breadcrumb">
+    <div className="breadcrumb" style={{ display: "none" }}>
       <Link to="/dashboard">Dashboard</Link>
       {normalizedTrail.map((segment, index) => (
         <span key={`${segment}-${index}`}>

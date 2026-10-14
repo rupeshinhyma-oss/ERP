@@ -747,7 +747,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   if (isFormOpen) {
     return (
       <AppShell activeKey="local-purchases">
-        <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
+        <main className="page">
           <div style={{ marginBottom: "12px" }}>
             <Breadcrumb trail={["Purchase", "Local Purchase", editingOrderId ? "Edit Local Purchase" : "Add Local Purchase"]} />
           </div>
@@ -1424,7 +1424,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   // ==========================================
   return (
     <AppShell activeKey="local-purchases">
-      <main className="page" style={{ padding: "16px 24px 60px", maxWidth: "100%", background: "#f8fafc" }}>
+      <main className="page">
         {pageError && (
           <div role="alert" style={{ padding: "12px 16px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "16px" }}>
             ⚠️ {pageError}
@@ -1443,10 +1443,10 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
             {/* Toggle Filter Button */}
             <button
               type="button"
-              className="btn"
+              className="btn btn-filter-toggle"
               data-testid="btn-filter-toggle"
               style={{
-                background: isFilterOpen ? "#0061f2" : "#556987",
+                background: "#556987",
                 color: "#ffffff",
                 padding: "8px 14px",
                 borderRadius: "6px",

@@ -720,36 +720,22 @@ export function TechnicianOperationsPage() {
 
   return (
     <AppShell activeKey="technician-operations">
-      <div className="container-fluid" style={{ padding: "20px 24px", maxWidth: "1600px" }}>
+      <main className="page">
         {/* Breadcrumb Navigation */}
         <Breadcrumb trail={["Technical Tasks", "Technician Ops & Wallet"]} />
 
         {/* Global Notifications */}
         <Banner error={error} success={success} />
 
-        {/* Page Header */}
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "16px",
-            marginBottom: "20px",
-            paddingBottom: "16px",
-            borderBottom: "1px solid var(--border-color, #e2e8f0)",
-          }}
-        >
+        {/* Page Header (Exact Match to TechnicalTasksPage.tsx & Companies.tsx) */}
+        <div className="page-header">
           <div>
-            <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 700, color: "var(--text-color, #1e293b)" }}>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
               Technician Gatepass &amp; Wallet Management
             </h1>
-            <p style={{ margin: "4px 0 0", fontSize: "14px", color: "var(--text-muted, #64748b)" }}>
-              Track field spare parts gatepasses, reconcile partial returns with Sales Orders, manage technician cash wallets, and track machine warranty lifecycles.
-            </p>
           </div>
 
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             {currentTab === "gatepasses" && (
               <button
                 type="button"
@@ -2930,7 +2916,7 @@ export function TechnicianOperationsPage() {
             </div>
           </form>
         </Modal>
-      </div>
+      </main>
     </AppShell>
   );
 }

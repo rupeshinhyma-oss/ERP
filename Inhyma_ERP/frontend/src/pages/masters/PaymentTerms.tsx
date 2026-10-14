@@ -25,8 +25,6 @@ export function PaymentTermsPage() {
       liveModule="payment_terms"
       entityName="Payment Term"
       heading="Payment Terms"
-      subtitle="Configure credit limits, advance payment rules, and settlement cycles."
-      breadcrumbTrail={["Settings", "Masters", "Payment Terms"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search..."
       hideQuickAdd={true}

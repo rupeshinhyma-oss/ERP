@@ -29,8 +29,6 @@ export function DistrictsPage() {
       liveModule="districts"
       entityName="district"
       heading="District Master"
-      subtitle="Administrative districts and divisions."
-      breadcrumbTrail={["Master Data", "Districts"]}
       newButtonLabel="+ ADD NEW DISTRICT"
       searchPlaceholder="Search district name or Sr. No..."
       hideQuickAdd={true}

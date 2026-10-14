@@ -3,6 +3,62 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-14] — Universal Filter Button UI Standardization Across All Modules
+
+### 1. Unified Visual & Behavioral Filter Standard (Companies Benchmark)
+- **Reference Benchmark:** Standardized all module filter toggle buttons across Inhyma to strictly match the styling, dimensions, and interaction pattern of the [Companies](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Companies.tsx#L5628) filter toggle button.
+- **Color Palette & State Invariance:**
+  - Standard background: `#556987` (solid slate/navy).
+  - Hover background: `#475569`.
+  - Active/Open state: `#556987` (retains the exact base color when active or panel is expanded, preventing unintended bright-blue or accent state switches).
+  - Text & Icon color: `#ffffff`.
+- **Dimensions & Box Model:**
+  - Padding: `8px 14px`.
+  - Border radius: `6px`.
+  - Border: `none`.
+  - Box Shadow: `0 2px 4px rgba(0, 0, 0, 0.1)`.
+  - Display: `inline-flex; align-items: center; justify-content: center; cursor: pointer`.
+  - Auto-sizing: Removed all hardcoded `width`, `height`, `min-width`, and `min-height` constraints (such as `38px x 38px`, `38px x 35px`, or `min-width: 36px`) across all module stylesheets, preventing awkward squarish distortion.
+- **Icon Standard:**
+  - Embedded 16×16px SVG funnel icon (`viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"` with `<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />`).
+- **Clean Badge-Less Surface:**
+  - Removed internal counter badges (`activeFilterCount`, `reorder-filter-badge`, `stock-filter-badge`, etc.) and indicator dots from the filter toggle buttons, maintaining an identical, clean rectangular footprint matching Companies.
+- **Default State Invariant:**
+  - All filter drawers and collapsible panels remain strictly **off by default** (`useState(false)`) across all pages, ensuring clean initial view loads.
+
+### 2. Stylesheets & Module Scope
+- **Global & Module Stylesheets Updated:**
+  - `style.css`: Enforced universal `.btn-filter-toggle`, `.btn-filter`, `.tech-btn-filter`, `.reorder-btn-filter`, `.stock-btn-filter`, `.transfer-btn-filter`, `.adjustment-btn-filter`, `.deleted-orders-btn-filter` with `!important` color, auto dimensions, and `.active` state locks.
+  - `deletedOrders.css`: Standardized `.deleted-orders-btn-filter` (`#556987`, padding `8px 14px`, removed `36px` dimensions).
+  - `productReorder.css`: Standardized `.reorder-btn-filter` (`#556987`, padding `8px 14px`, removed `38px` dimensions).
+  - `productStock.css`: Standardized `.stock-btn-filter` (`#556987`, padding `8px 14px`, removed `38px` dimensions).
+  - `stockAdjustment.css`: Standardized `.adjustment-btn-filter` (`#556987`, padding `8px 14px`, removed `38px` dimensions).
+  - `stockTransfer.css`: Standardized `.transfer-btn-filter` (`#556987`, padding `8px 14px`, removed `38px` dimensions).
+  - `technicalTasks.css`: Standardized `.page-technical-tasks .tech-btn-filter` (`#556987`, padding `8px 14px`, removed `38px x 35px` dimensions).
+- **Modules Verified & Harmonized:**
+  - Contact: `Companies.tsx`, `Suppliers.tsx`, `AgentsPage.tsx`, `FollowUpsPage.tsx`, `IndustrialZonesPage.tsx`, `LeadsPage.tsx`.
+  - Inventory: `ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx`, `ProductReorderPage.tsx`, `PriceListPage.tsx`, `masters/Products.tsx`.
+  - Sales & Orders: `sales/SaleProcessList.tsx`, `sales/DiscountPaymentsPage.tsx`, `ProformaInvoicesPage.tsx`, `DeletedOrdersPage.tsx`.
+  - Tasks & Engineering: `technicalTasks/TechnicalTasksPage.tsx`.
+  - Core Masters: `components/MasterPage.tsx` (all generic master catalogs).
+- **TypeScript & Build Integrity:**
+  - Removed unused filter counter declarations (`activeFilterCount` / `activeFiltersCount`) across 7 files to adhere strictly to `noUnusedLocals` in `tsconfig.json`.
+  - Wired in-memory date range filtering (`appliedOrderDateRange`, `appliedExpDeliveryDateRange`) into `DeletedOrdersPage.tsx`.
+  - Full Vite build verification passed with 0 errors; 25/25 unit & integration tests passing.
+
+---
+
+## [Release 2026-10-14] — Session-Scoped Tokens (one login = one session id)
+
+- Access and refresh tokens carry a `sid` claim (`auth/security.py`). `AuthService._issue_token_pair` binds both tokens to one session id; refresh keeps it. `TokenResponse` gains `session_id` and `session_mode` (`"central"` or `"local"`).
+- **Login** opens the login's central session via ERP_Main (`federation/erp_main_client.open_central_session`) only *after* the password is verified. If ERP_Main cannot be reached or refuses, the login still succeeds with a local session id `loc-<uuid>`.
+- **SSO handover** issues tokens carrying the verified central `sid`.
+- **Per-session revocation:** `AuthService.revoke_session` stores `sid:<sid>` in `token_blacklist` (cached), closes that session's WebSockets (`ConnectionManager.disconnect_session`). `verify_access_token` and `refresh` reject a revoked `sid` and, for central sessions, ask ERP_Main at most every 45 s (`central_session_state`, fail-open) so a lost message cannot leave a session alive.
+- **New endpoint:** `POST /api/v1/internal/sessions/{sid}/revoke` (service credential). `POST /auth/logout` now revokes the token's session and reports it to ERP_Main (`push_session_signout_to_erp_main`); it no longer signs the person out of their other logins.
+- **Frontend:** the login page uses the session id from the login reply; a fresh handover always replaces a saved session; no stored default-admin login; scoped cookie clearing; visible reason when an automatic sign-in fails.
+- **Reliability hardening:** when ERP_Main cannot be reached during a handover the ERP now answers **503** (`EcosystemSessionUnavailable`) instead of 401, so the browser retries instead of treating it as "session ended"; the login's central call uses short timeouts (connect 1.5 s, read 3 s) so a login never hangs. Browser: one shared handover exchange per arrival, retries 0.7/2.5/6 s, per-status messages, "Signing you in..." state, a switcher that validates before navigating (and no longer declares hooks after an early return), and a watcher that checks immediately then every 30 s / 2 min (was 2.5 s).
+- **Tests:** `test_session_scoped_tokens.py`; frontend `ssoHandoverSession.test.ts`.
+
 ## [Release 2026-10-10] — Cross-Ecosystem Single Sign-Out (SLO), M2M Force Logout API & WebSocket Disconnect
 
 ### 1. Internal Machine-to-Machine Force-Logout API

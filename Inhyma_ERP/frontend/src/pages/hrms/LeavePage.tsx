@@ -1034,12 +1034,9 @@ export function LeavePage() {
         <Breadcrumb trail={["HRMS", "Leave"]} />
 
         <div className="page-header" style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", flexWrap: "wrap", gap: 12 }}>
             <div>
-              <h1>Leave</h1>
-              <div className="page-subtitle">
-                Manage employee leave requests and balances
-              </div>
+              <h1 style={{ margin: 0 }}>Leave</h1>
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

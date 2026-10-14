@@ -25,8 +25,6 @@ export function CallTypesPage() {
       liveModule="call_types"
       entityName="Call Type"
       heading="Call Types"
-      subtitle="Configure telecalling interaction types, client follow-up classifications, and inquiry logs."
-      breadcrumbTrail={["Settings", "Masters", "Call Types"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search..."
       hideQuickAdd={true}

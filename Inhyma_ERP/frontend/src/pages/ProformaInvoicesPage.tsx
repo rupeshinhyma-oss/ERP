@@ -315,16 +315,6 @@ export function ProformaInvoicesPage({
   const productSearchSeq = useRef(0);
   const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
 
-  const activeFiltersCount = useMemo(() => {
-    let count = 0;
-    if (appliedDateRange.trim()) count++;
-    if (appliedExpDateRange.trim()) count++;
-    if (appliedWarehouse && appliedWarehouse !== "All") count++;
-    if (appliedSalesPerson && appliedSalesPerson !== "All") count++;
-    if (appliedLeadSource && appliedLeadSource !== "All") count++;
-    return count;
-  }, [appliedDateRange, appliedExpDateRange, appliedWarehouse, appliedSalesPerson, appliedLeadSource]);
-
   const loadProformas = async () => {
     setLoading(true);
     setErrorMessage(null);
@@ -796,13 +786,13 @@ export function ProformaInvoicesPage({
   if (isFormOpen) {
     return (
       <AppShell activeKey="proforma">
-        <main className="page" style={{ maxWidth: "1350px", margin: "0 auto", padding: "16px 24px 60px" }}>
+        <main className="page">
           <Breadcrumb trail={["Sale", "Proforma", editingId ? "Edit" : "Add"]} />
 
           {/* Page Header matching legacy screenshot */}
           <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
-              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a", margin: 0 }}>{editingId ? "Edit Proforma Invoice" : "Add Proforma Invoice"}</h1>
+              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>{editingId ? "Edit Proforma Invoice" : "Add Proforma Invoice"}</h1>
             </div>
             <div className="page-header-actions">
               <button
@@ -1431,7 +1421,7 @@ export function ProformaInvoicesPage({
             <button
               type="button"
               data-testid="btn-toggle-filter"
-              className={`btn-filter ${filterOpen ? "active" : ""}`}
+              className="btn btn-filter-toggle"
               onClick={() => setFilterOpen(!filterOpen)}
               aria-label="Filter"
               title="Toggle Filter Panel"
@@ -1439,41 +1429,18 @@ export function ProformaInvoicesPage({
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: filterOpen || activeFiltersCount > 0 ? "#5b6b82" : "#ffffff",
-                color: filterOpen || activeFiltersCount > 0 ? "#ffffff" : "#475569",
-                border: "1px solid #cbd5e1",
+                background: "#556987",
+                color: "#ffffff",
+                border: "none",
                 borderRadius: "6px",
+                padding: "8px 14px",
                 cursor: "pointer",
-                height: "38px",
-                width: "38px",
-                minWidth: "38px",
-                padding: 0,
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                transition: "all 0.15s ease",
-                position: "relative",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFiltersCount > 0 && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "-4px",
-                    right: "-4px",
-                    backgroundColor: "#ef4444",
-                    color: "#ffffff",
-                    borderRadius: "10px",
-                    fontSize: "10px",
-                    fontWeight: 800,
-                    padding: "1px 5px",
-                    lineHeight: "1",
-                  }}
-                >
-                  {activeFiltersCount}
-                </span>
-              )}
             </button>
 
             <button type="button" className="btn btn-add-new" onClick={handleOpenCreate}>

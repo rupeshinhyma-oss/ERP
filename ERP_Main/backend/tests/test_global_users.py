@@ -64,7 +64,10 @@ async def test_list_global_users(admin_client):
     resp = await admin_client.get("/api/v1/global/users")
     assert resp.status_code == 200
     emails = {u["primary_email"] for u in resp.json()["data"]}
-    assert emails == {"a@example.com", "b@example.com"}
+    # Logging in as a platform admin opens that admin's session, which is persisted under a mirrored Global User
+    # row (so sessions survive restarts / several workers).  That row belongs to the signed-in admin, not to this test.
+    admin_email = (await admin_client.get("/api/v1/global/auth/me")).json()["data"]["email"]
+    assert emails - {admin_email} == {"a@example.com", "b@example.com"}
 
 
 @pytest.mark.asyncio

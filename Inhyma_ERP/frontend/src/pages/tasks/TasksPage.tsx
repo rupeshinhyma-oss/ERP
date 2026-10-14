@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { useAuth } from "@/lib/hooks";
@@ -1321,16 +1320,10 @@ export const TasksPage: React.FC = () => {
   return (
     <AppShell activeKey="tasks" pageClassName="page-tasks">
       <main className="page">
-        {/* Breadcrumb matching ERP standard */}
-        <Breadcrumb trail={["Dashboard", "Work Management", "Tasks"]} />
-
         {/* Page Header */}
-        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+        <div className="page-header">
           <div>
-            <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 700, color: "#0f172a" }}>Tasks</h1>
-            <div className="page-subtitle" style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-              Manage team tasks, subtasks and escalations.
-            </div>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Tasks</h1>
           </div>
           <div className="page-header-actions">
             <button

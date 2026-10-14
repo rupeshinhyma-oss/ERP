@@ -1039,23 +1039,18 @@ export function SiteVisitPage() {
 
   return (
     <AppShell activeKey="hrms-site-visit">
-      <main className="page" style={{ padding: "20px 24px", maxWidth: "1280px", margin: "0 auto" }}>
+      <main className="page">
         <Breadcrumb trail={["HRMS", "Site Visits & Live Tracking"]} />
 
         {/* Top Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px", marginBottom: "16px" }}>
+        <div className="page-header">
           <div>
-            <h1 aria-label="Site Visit & Live Tracking" style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#0f172a" }}>
+            <h1 aria-label="Site Visit & Live Tracking" style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
               {activeTab === "site-visits" ? "Site Visits" : "Live Tracking"}
             </h1>
-            <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-              {activeTab === "site-visits"
-                ? "Schedule and monitor employee customer visits"
-                : "Track your movement while travelling."}
-            </div>
           </div>
 
-          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
             {/* Location Simulator Toggle for Admin/Dev */}
             {canManageVisits && (
               <button

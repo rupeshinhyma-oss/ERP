@@ -34,28 +34,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  background-color: #5b6b82;
+  background-color: #556987;
   color: #ffffff;
-  border: 1px solid #5b6b82;
+  border: none;
   border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 600;
+  padding: 8px 14px;
   cursor: pointer;
   transition: all 0.15s ease;
-  position: relative;
-  height: 38px;
-  min-width: 38px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .transfer-btn-filter:hover {
   background-color: #475569;
-  border-color: #475569;
 }
 
 .transfer-btn-filter.active {
-  background-color: #334155;
+  background-color: #556987;
 }
 
 .transfer-btn-add {

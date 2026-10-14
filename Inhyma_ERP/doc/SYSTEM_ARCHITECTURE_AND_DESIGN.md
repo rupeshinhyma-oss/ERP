@@ -193,3 +193,21 @@ To achieve complete decoupling between infrastructure routing and organizational
 2. **Production HTTPS Origin Protection & Mixed Content Elimination:**
    - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts), `isLocalhost()` guards prevent fallback to insecure `http://localhost:*` URLs when served on HTTPS domains (Render, custom domains).
 
+---
+
+## 7. Frontend UI Standard: Universal Filter Control Architecture
+
+To ensure consistent ergonomics, styling, and predictable state across all ERP modules:
+
+1. **Benchmark Reference ([`Companies.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Companies.tsx#L5628)):**
+   - Header filter toggle buttons across all 20+ modules conform to the exact visual specification of the Companies page filter.
+2. **Design Tokens & Constraints:**
+   - **Color:** `#556987` solid background (hover `#475569`), invariant across active/open states (never changes to primary blue).
+   - **Geometry:** `padding: 8px 14px; border-radius: 6px; border: none; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);`.
+   - **Dimensions:** Auto width and height (`width: auto; height: auto; min-width: unset`). Removed fixed square dimensions (`38px x 38px`, `min-width: 36px`, etc.).
+   - **Iconography:** 16×16px SVG funnel polygon (`points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"`).
+   - **Clean Button Model:** Counter badges and notification dots inside buttons are eliminated to preserve uniform dimensions.
+3. **State Invariant:**
+   - All filter panels, cards, and drawers are initialized closed (`useState(false)`). Filter panels only expand upon explicit user interaction.
+
+

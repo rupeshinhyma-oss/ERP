@@ -35,6 +35,7 @@ from app.global_audit.repository import GlobalAuditRepository
 from app.global_audit.service import GlobalAuditService
 from app.global_auth.models import GlobalSession, GlobalUserCredential
 from app.global_auth.security import create_global_access_token, hash_password, verify_password
+from app.global_auth.session_ops import ensure_admin_mirror_user, parse_session_id
 from app.global_users.models import GlobalUser, GlobalUserStatus
 from app.platform_auth.models import PlatformAdmin, PlatformAdminRole
 from app.platform_auth.security import create_platform_access_token, verify_password as verify_platform_password
@@ -556,7 +557,28 @@ async def exchange_ecosystem_session(
         admin = await _active_platform_admin(db, email)
         if admin is None:
             raise _unauthorized()
-        issued = create_platform_access_token(admin.id, role=admin.role.value)
+        # Bind the admin token to THIS central session, so signing out of that session ends exactly this token
+        # (and nobody else's).  A session that lives only in memory gets a persisted row on the admin's mirror user.
+        admin_sid = parse_session_id(payload.session_id)
+        if admin_sid is None:
+            raise _unauthorized()
+        admin_row = await db.scalar(select(GlobalSession).where(GlobalSession.id == admin_sid))
+        if admin_row is None:
+            mirror = await ensure_admin_mirror_user(db, admin)
+            db.add(
+                GlobalSession(
+                    id=admin_sid,
+                    global_user_id=mirror.id,
+                    expires_at=now + timedelta(hours=settings.GLOBAL_SESSION_MAX_LIFETIME_HOURS),
+                    last_activity_at=now,
+                    ip_address=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                )
+            )
+            await db.flush()
+        elif admin_row.revoked_at is not None:
+            raise _unauthorized()
+        issued = create_platform_access_token(admin.id, role=admin.role.value, session_id=str(admin_sid))
         principal = "platform_admin"
     else:
         user = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == email))
@@ -646,6 +668,97 @@ async def fanout_spoke_logout(db: AsyncSession, user_email: str) -> None:
         logging.getLogger(__name__).warning("Failed to fan-out ecosystem logout for %s: %s", clean_email, exc)
 
 
+async def _erps_for_email(db: AsyncSession, clean_email: str) -> List[ErpInstance]:
+    """The ERPs this person may use: every ACTIVE ERP for an admin, otherwise the ones with an ACTIVE membership."""
+    admin = await _active_platform_admin(db, clean_email)
+    if admin is not None:
+        return list((await db.execute(select(ErpInstance).where(ErpInstance.status == ErpStatus.ACTIVE))).scalars().all())
+    user = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == clean_email))
+    if user is None:
+        return []
+    stmt = (
+        select(ErpInstance)
+        .join(ErpMembership, ErpMembership.erp_instance_id == ErpInstance.id)
+        .where(
+            ErpMembership.global_user_id == user.id,
+            ErpMembership.status == ErpMembershipStatus.ACTIVE,
+            ErpInstance.status == ErpStatus.ACTIVE,
+        )
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def fanout_session_revoke(db: AsyncSession, user_email: Optional[str], session_id: str) -> int:
+    """
+    Tell the ERPs that ONE session ended.  Returns how many ERPs acknowledged.
+
+    Targets: the ERPs the owner may use (admin: all; user: the ticked ERP Access Grants).  If the owner cannot be
+    resolved (the central row is gone), every ACTIVE ERP is told -- harmless and idempotent -- so a sign-out is
+    never lost.
+    """
+    from app.identity_linking.adapters.http_adapter import HttpErpProvisioningAdapter
+
+    clean_email = (user_email or "").strip().lower()
+    try:
+        if clean_email:
+            erps = await _erps_for_email(db, clean_email)
+        else:
+            erps = list((await db.execute(select(ErpInstance).where(ErpInstance.status == ErpStatus.ACTIVE))).scalars().all())
+        adapter = HttpErpProvisioningAdapter()
+        acknowledged = 0
+        for erp in erps:
+            try:
+                if await adapter.revoke_session(erp, session_id):
+                    acknowledged += 1
+            except Exception:
+                pass
+        return acknowledged
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not fan out revoke of session %s: %s", session_id, exc)
+        return 0
+
+
+async def sign_out_session(db: AsyncSession, session_id: str, *, now: Optional[datetime] = None) -> dict:
+    """
+    Sign out ONE login: revoke exactly this session id, everywhere it was used.
+
+    * the central row (dashboard + admin tokens bound to this sid) and the cached copy;
+    * the ERPs' tokens that carry this sid.
+    Any other session of the same account (another browser, another device) and every other person are untouched.
+    Idempotent: signing out an already ended or unknown session is not an error.
+    """
+    sid = (session_id or "").strip()
+    stamp = now or datetime.now(timezone.utc)
+    summary = {"session_id": sid, "revoked": False, "erps_notified": 0}
+    if not sid:
+        return summary
+    owner = await _session_owner_email(db, sid)
+    cached = _ECOSYSTEM_SESSION_STORE.get(sid)
+    if cached is not None:
+        cached["revoked_at"] = stamp.isoformat()
+        cached["active"] = False
+        summary["revoked"] = True
+    sid_uuid = None
+    try:
+        sid_uuid = uuid.UUID(sid)
+    except ValueError:
+        pass
+    if sid_uuid is not None:
+        try:
+            row = await db.scalar(select(GlobalSession).where(GlobalSession.id == sid_uuid))
+            if row is not None and row.revoked_at is None:
+                row.revoked_at = stamp
+                await db.commit()
+                summary["revoked"] = True
+            elif row is not None:
+                summary["revoked"] = True
+        except Exception:
+            await db.rollback()
+            logging.getLogger(__name__).exception("Could not revoke central session %s", sid)
+        summary["erps_notified"] = await fanout_session_revoke(db, owner, sid)
+    return summary
+
+
 async def sign_out_everywhere(db: AsyncSession, user_email: str, *, now: Optional[datetime] = None) -> dict:
     """
     Sign a person out of EVERYTHING: the ERP_Main dashboard on every browser/device, plus every ERP they can use.
@@ -711,9 +824,8 @@ async def revoke_ecosystem_session(
     except Exception:
         await db.rollback()
 
-    # 3. Sign the person out of EVERYTHING (all devices + every ERP they can use + admin tokens)
-    if user_email:
-        await sign_out_everywhere(db, user_email, now=now)
+    # 3. Sign out THIS session everywhere it was used (not the person's other logins)
+    await sign_out_session(db, session_id, now=now)
 
     # 4. Audit revocation
     try:

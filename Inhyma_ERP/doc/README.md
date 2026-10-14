@@ -22,6 +22,8 @@ Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distr
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of all functional updates, migrations, and bug fixes.
+  - Release October 14, 2026: Universal Filter Button UI standardization across all modules (matching Companies `#556987`, 8x14px, badge-less, default collapsed state).
+  - Release October 14, 2026 (Part 1): Session-Scoped Tokens (`sid` claim, central session binding, per-session revocation via `/api/v1/internal/sessions/{sid}/revoke`).
   - Release October 10, 2026 (Part 2): Spoke multi-identifier resolution (`erp-01` / `inhyma`), super administrator unrestricted ecosystem access, watcher infinite loop prevention, and graceful SSO switching fallbacks.
   - Release October 10, 2026: Production HTTPS mixed content elimination (`isLocalhost()`), Supabase PgBouncer statement cache auto-disable (`_statement_cache_must_be_disabled`), bi-directional password sync federation (`push_password_to_erp_main`), fail-closed SSO central session verification, and central identity locks.
   - Release October 6, 2026: Local & Import Purchase modules, costing engines, Proforma Invoices commercial terms, database workflow rules engine, company advanced specs, supplier mandatory calling number, and Alembic sync fix.

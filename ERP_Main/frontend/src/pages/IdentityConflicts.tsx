@@ -101,7 +101,6 @@ export function IdentityConflicts() {
     <AppShell
       activeKey="conflicts"
       pageTitle="Identity Linking Conflicts"
-      breadcrumbs={["Identity & Access", "Identity Conflicts"]}
     >
       <Banner error={error} />
 

@@ -29,10 +29,10 @@ describe("DeletedOrdersPage", () => {
     } as any);
   });
 
-  const renderComponent = async () => {
+  const renderComponent = async (defaultFilterOpen = false) => {
     const rendered = render(
       <BrowserRouter>
-        <DeletedOrdersPage />
+        <DeletedOrdersPage defaultFilterOpen={defaultFilterOpen} />
       </BrowserRouter>
     );
     await waitFor(() => {
@@ -89,7 +89,7 @@ describe("DeletedOrdersPage", () => {
   });
 
   it("filters orders by warehouse dropdown", async () => {
-    await renderComponent();
+    await renderComponent(true);
 
     const warehouseSelect = screen.getByLabelText("Warehouse");
     fireEvent.change(warehouseSelect, { target: { value: "Indore" } });

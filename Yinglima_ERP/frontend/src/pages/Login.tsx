@@ -1,4 +1,4 @@
-import { establishCentralEcosystemSession, getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
+import { establishCentralEcosystemSession, setEcosystemCookie } from "@/lib/ecosystemSession";
 /**
  * Sign-in page. Exact replica of INHYMA ERP Login Page.
  */
@@ -68,6 +68,13 @@ export function LoginPage() {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [signingIn, setSigningIn] = useState(() => {
+    try {
+      return sessionStorage.getItem("ihm_handover_pending") === "1";
+    } catch {
+      return false;
+    }
+  });
   const identifierRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -99,7 +106,18 @@ export function LoginPage() {
 
   useEffect(() => {
     identifierRef.current?.focus();
+    // If an automatic sign-in (switching ERPs) could not complete, say why instead of showing a bare login page.
+    try {
+      const notice = sessionStorage.getItem("ihm_login_notice");
+      if (notice) {
+        sessionStorage.removeItem("ihm_login_notice");
+        setError(new Error(notice));
+      }
+    } catch {
+      /* storage unavailable */
+    }
     processIncomingSsoHandover().then((result) => {
+      setSigningIn(false);
       if (result === "logged-in" || result === "already-logged-in") {
         navigate("/dashboard", { replace: true });
       }
@@ -108,6 +126,20 @@ export function LoginPage() {
 
   if (Auth.isLoggedIn()) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  if (signingIn) {
+    return (
+      <div
+        role="status"
+        style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", color: "#334155", fontFamily: "inherit" }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "18px", fontWeight: 600 }}>Signing you in…</div>
+          <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>Connecting to the ERP. This can take a few seconds.</div>
+        </div>
+      </div>
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -135,13 +167,21 @@ export function LoginPage() {
       }
 
       // 2. Ask ERP_Main who this person is and which ERPs they may use.
-      const existingSessionId = getEcosystemCookie()?.session_id;
-      const central = await establishCentralEcosystemSession({
-        email,
-        password,
-        source_erp: ERP_KEY,
-        existing_session_id: existingSessionId && !existingSessionId.startsWith("ihm-sess-") ? existingSessionId : undefined,
-      });
+      //    If the ERP already opened THIS login's central session (session_mode "central"), just read it: its id is
+      //    inside the tokens, so signing out later ends exactly this login.  Otherwise (ERP_Main was unreachable for
+      //    the ERP, or the local password did not match) fall back to proving identity with the password, as before.
+      //    Every password login is its own session: a session id of another login is never reused.
+      let central: Awaited<ReturnType<typeof establishCentralEcosystemSession>> = null;
+      if (tokens?.session_mode === "central" && tokens.session_id) {
+        central = await establishCentralEcosystemSession({
+          email,
+          source_erp: ERP_KEY,
+          existing_session_id: tokens.session_id,
+        });
+      }
+      if (!central) {
+        central = await establishCentralEcosystemSession({ email, password, source_erp: ERP_KEY });
+      }
 
       if (central) {
         const route = routeForCentralSession(ERP_KEY, central);
@@ -164,7 +204,10 @@ export function LoginPage() {
       }
       if (!tokens) throw localError ?? new Error("Invalid credentials.");
 
-      const sessionId = central?.session_id || `ihm-sess-${Date.now()}`;
+      const sessionId =
+        central?.session_id ||
+        (tokens.session_mode === "central" ? tokens.session_id : undefined) ||
+        `ihm-sess-${Date.now()}`;
       if (tokens.user) {
         Auth.setSession(tokens, tokens.user, sessionId);
       } else {
