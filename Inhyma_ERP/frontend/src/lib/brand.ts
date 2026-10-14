@@ -132,9 +132,17 @@ export function applyBrandFavicon(logoUrl: string | null, isGrayscale = false): 
 export function setBrandLogo(logo: string | null): void {
   const cleanLogo = (logo || "").trim() || null;
   if (cleanLogo) {
-    sessionStorage.setItem(LOGO_CACHE_KEY, cleanLogo);
-    localStorage.setItem(LOGO_CACHE_KEY, cleanLogo);
-    localStorage.setItem("erp_brand_logo", cleanLogo);
+    // A logo can be a large data: URI; browser storage has a small quota and throws when it is exceeded.  Caching is
+    // only an optimisation (the DB is the source of truth and is re-read on every login), so never let it break us.
+    try {
+      sessionStorage.setItem(LOGO_CACHE_KEY, cleanLogo);
+      localStorage.setItem(LOGO_CACHE_KEY, cleanLogo);
+      localStorage.setItem("erp_brand_logo", cleanLogo);
+    } catch {
+      sessionStorage.removeItem(LOGO_CACHE_KEY);
+      localStorage.removeItem(LOGO_CACHE_KEY);
+      localStorage.removeItem("erp_brand_logo");
+    }
   } else {
     sessionStorage.removeItem(LOGO_CACHE_KEY);
     localStorage.removeItem(LOGO_CACHE_KEY);
@@ -200,7 +208,7 @@ export async function resolveBrandInfo(): Promise<{ name: string; logoUrl: strin
         if (data.company_name) {
           setBrandName(data.company_name);
         }
-        const logo = data.logo_url || data.logo_data || null;
+        const logo = data.logo_data || data.logo_url || null;
         setBrandLogo(logo);
         return {
           name: data.company_name?.trim() || getCachedBrandName(),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
@@ -62,11 +63,18 @@ async def get_public_organization_branding(
     """Public endpoint returning company_name, logo_url, logo_data, and erp_id without requiring authentication."""
     try:
         organization = await organization_service.get_or_raise()
+        # The logo image stored IN THE DATABASE (logo_data) is the source of truth.  The stored logo_url is only a
+        # path to a file on whichever server handled the upload (it is lost on Render restarts and does not exist on
+        # another machine), so when the DB copy exists we always point clients at the DB-backed endpoint instead.
+        logo_url = organization.logo_url
+        if organization.logo_data and organization.logo_data.startswith("data:"):
+            version = hashlib.sha1(organization.logo_data.encode("utf-8")).hexdigest()[:12]
+            logo_url = f"/api/v1/organizations/logo?v={version}"
         return build_success_response(
             data={
                 "company_name": organization.company_name,
                 "legal_name": organization.legal_name,
-                "logo_url": organization.logo_url,
+                "logo_url": logo_url,
                 "logo_data": organization.logo_data,
                 "erp_id": settings.ERP_INSTANCE_ID,
             },
@@ -104,7 +112,8 @@ async def get_organization_logo_image(
         except Exception:
             pass
 
-    if organization.logo_url:
+    # Never redirect to ourselves (a client may have saved the DB-backed URL back into logo_url).
+    if organization.logo_url and not organization.logo_url.startswith("/api/v1/organizations/logo"):
         return RedirectResponse(url=organization.logo_url)
 
     raise HTTPException(status_code=404, detail="Logo not found.")

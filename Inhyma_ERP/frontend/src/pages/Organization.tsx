@@ -127,8 +127,8 @@ export function OrganizationPage() {
         setForm(fillForm(data));
         setMode("update");
         setEditing(false);
-        if (data.logo_url || data.logo_data) {
-          setBrandLogo(data.logo_url || data.logo_data || null);
+        if (data.logo_data || data.logo_url) {
+          setBrandLogo(data.logo_data || data.logo_url || null);
         }
       } catch (err) {
         if (cancelled) return;
@@ -204,7 +204,7 @@ export function OrganizationPage() {
         };
         setOrg(updatedOrg as Organization);
         setForm(fillForm(updatedOrg as Organization));
-        setBrandLogo(res.data.logo_url || res.data.logo_data || null);
+        setBrandLogo(res.data.logo_data || res.data.logo_url || null);
         setPendingLogoFile(null);
         setPendingLogoPreview(null);
         setSuccess("Company logo successfully uploaded and saved in database storage.");
@@ -274,7 +274,7 @@ export function OrganizationPage() {
               logo_url: uploadRes.data.logo_url,
               logo_data: uploadRes.data.logo_data,
             };
-            setBrandLogo(uploadRes.data.logo_url || uploadRes.data.logo_data || null);
+            setBrandLogo(uploadRes.data.logo_data || uploadRes.data.logo_url || null);
           }
           setPendingLogoFile(null);
           setPendingLogoPreview(null);
@@ -290,8 +290,8 @@ export function OrganizationPage() {
       if (data?.company_name) {
         setBrandName(data.company_name);
       }
-      if (data?.logo_url || data?.logo_data) {
-        setBrandLogo(data.logo_url || data.logo_data || null);
+      if (data?.logo_data || data?.logo_url) {
+        setBrandLogo(data.logo_data || data.logo_url || null);
       }
       setSuccess("Settings and branding saved successfully.");
       setEditing(false);
@@ -305,7 +305,7 @@ export function OrganizationPage() {
   const statusLabel =
     org?.status === "ACTIVE" ? "Active" : org?.status === "INACTIVE" ? "Inactive" : "—";
 
-  const activeLogoSrc = org?.logo_url || org?.logo_data ? resolveImageUrl(org.logo_url || org.logo_data) : null;
+  const activeLogoSrc = org?.logo_url || org?.logo_data ? resolveImageUrl(org.logo_data || org.logo_url) : null;
 
   return (
     <AppShell activeKey="organization">
@@ -562,7 +562,7 @@ export function OrganizationPage() {
                     <img
                       src={
                         pendingLogoPreview ||
-                        (org?.logo_url || org?.logo_data ? resolveImageUrl(org.logo_url || org.logo_data) : "/logo.png")
+                        (org?.logo_url || org?.logo_data ? resolveImageUrl(org.logo_data || org.logo_url) : "/logo.png")
                       }
                       alt="Logo Preview"
                       onError={(e) => {
