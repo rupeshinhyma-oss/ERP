@@ -166,7 +166,9 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/users/{id}/reset-password` | Administrative password reset and automatic fanout push to ERP_Main | `user.manage` |
 | `PATCH` | `/api/v1/users/{id}` | Update user attributes; email is locked to central control plane | `user.update` |
 | `POST` | `/api/v1/internal/users/{id}/deprovision` | Invalidate spoke sessions and soft-delete user upon ERP_Main deprovisioning | Internal Service Key |
-| `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and logo | Public |
+| `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and DB-backed versioned logo URL | Public |
+| `GET` | `/api/v1/organizations/logo` | Stream company logo binary directly from database (`logo_data`) with `?v={sha1}` version hash for immutable client caching | Public |
+| `GET` | `/api/v1/health/federation` | Cross-ERP sign-in and control plane diagnostics: live ERP_Main probes, latencies, base URLs tried, and validation problems (safe, no secrets) | Public |
 
 ## Session-scoped tokens and per-session revocation
 
@@ -175,4 +177,8 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 - `POST /api/v1/internal/sessions/{session_id}/revoke` (service credential: `Authorization: Bearer <credential>`): called by ERP_Main to end one session. Idempotent. All tokens of that session stop working and its live WebSockets are closed.
 - A token without `sid` (issued before this release) keeps working and can only be ended with the per-user force logout (`POST /api/v1/internal/users/{id-or-email}/logout`).
 - Safety net: the ERP asks ERP_Main about central sessions at most every 45 seconds and ends a revoked one itself; if ERP_Main is unreachable the session is kept (fail-open).
-- `POST /api/v1/auth/sso-handover`: `401` means the central session ended or does not match; `403` means no access to this ERP; **`503`** means ERP_Main could not be reached right now (retryable, the person's session is fine).
+- `POST /api/v1/auth/sso-handover`:
+  - `401 Unauthorized`: Returned when the central session ended, does not match, or when the user account is soft-deleted (`deleted_at IS NOT NULL`) or disabled (`is_active=False`) in this ERP's local database ("This account was deleted or disabled in this ERP. Ask an administrator to restore it.").
+  - `403 Forbidden`: Returned when the user has no permissions or organization access to this ERP.
+  - **`503 Service Unavailable`**: Returned when ERP_Main cannot be reached during handover verification after exhaustive candidate trials and the 40s wake-up budget (retryable by frontend).
+  - Stale session fallback: If ERP_Main remains unreachable, an active session verified within `SSO_HANDOVER_STALE_OK_SECONDS` (900s) is accepted from memory cache (`_from_cache: True`).

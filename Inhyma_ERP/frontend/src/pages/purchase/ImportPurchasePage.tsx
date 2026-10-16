@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { SortHeader } from "@/components/SortHeader";
 import { useToast } from "@/lib/toast";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, apiPut, errorMessage as apiErrorText } from "@/lib/api";
 import { DatePicker } from "@/components/DatePicker";
@@ -331,7 +332,12 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
   const handleSort = (field: keyof ImportPurchaseRecord) => {
     if (sortField === field) {
-      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+      if (sortOrder === "asc") {
+        setSortOrder("desc");
+      } else {
+        setSortField(null);
+        setSortOrder("asc");
+      }
     } else {
       setSortField(field);
       setSortOrder("asc");
@@ -1496,50 +1502,97 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                       style={{ cursor: "pointer", width: "16px", height: "16px" }}
                     />
                   </th>
-                  <th
-                    onClick={() => handleSort("consignment_no")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
-                  >
-                    Inv. / Con. No & Date <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "consignment_no" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
-                  </th>
-                  <th
-                    onClick={() => handleSort("supplier_name")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
-                  >
-                    Supplier <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "supplier_name" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
-                  </th>
-                  <th
-                    onClick={() => handleSort("warehouse")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
-                  >
-                    Warehouse <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "warehouse" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
-                  </th>
-                  <th
-                    onClick={() => handleSort("ordered_date")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
-                  >
-                    Ordered Date <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "ordered_date" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
+                    <SortHeader
+                      label="Inv. / Con. No & Date"
+                      isSorted={sortField === "consignment_no"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("consignment_no")}
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
-                    ETD Origin Date
+                    <SortHeader
+                      label="Supplier"
+                      isSorted={sortField === "supplier_name"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("supplier_name")}
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
-                    ETA Port Date
+                    <SortHeader
+                      label="Warehouse"
+                      isSorted={sortField === "warehouse"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("warehouse")}
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
-                    Arrival Date
+                    <SortHeader
+                      label="Ordered Date"
+                      isSorted={sortField === "ordered_date"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("ordered_date")}
+                    />
+                  </th>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
+                    <SortHeader
+                      label="ETD Origin Date"
+                      isSorted={sortField === "etd_origin_date"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("etd_origin_date")}
+                    />
+                  </th>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
+                    <SortHeader
+                      label="ETA Port Date"
+                      isSorted={sortField === "eta_port_date"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("eta_port_date")}
+                    />
+                  </th>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
+                    <SortHeader
+                      label="Arrival Date"
+                      isSorted={sortField === "arrival_date"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("arrival_date")}
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
-                    Inv. Total ($)
+                    <SortHeader
+                      label="Inv. Total ($)"
+                      isSorted={sortField === "invoice_total_usd"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("invoice_total_usd")}
+                      align="right"
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
-                    Inv. Total (₹)
+                    <SortHeader
+                      label="Inv. Total (₹)"
+                      isSorted={sortField === "invoice_total_inr"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("invoice_total_inr")}
+                      align="right"
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
-                    Total CBM
+                    <SortHeader
+                      label="Total CBM"
+                      isSorted={sortField === "total_cbm"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("total_cbm")}
+                      align="right"
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
-                    Total Exp
+                    <SortHeader
+                      label="Total Exp"
+                      isSorted={sortField === "total_expenses"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("total_expenses")}
+                      align="right"
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
                     % Loading Exp(VB)
@@ -1548,25 +1601,41 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                     Loading Exp(CB)(₹)
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "right" }}>
-                    Gross Total Landing(₹)
+                    <SortHeader
+                      label="Gross Total Landing(₹)"
+                      isSorted={sortField === "gross_total_landing"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("gross_total_landing")}
+                      align="right"
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
-                    Created By
+                    <SortHeader
+                      label="Created By"
+                      isSorted={sortField === "created_by"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("created_by")}
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
                     Invoice
                   </th>
-                  <th
-                    onClick={() => handleSort("updated_date")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", cursor: "pointer", userSelect: "none" }}
-                  >
-                    Updated Date <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "updated_date" ? (sortOrder === "asc" ? "▲" : "▼") : "⇅"}</span>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569" }}>
+                    <SortHeader
+                      label="Updated Date"
+                      isSorted={sortField === "updated_date"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("updated_date")}
+                    />
                   </th>
-                  <th
-                    onClick={() => handleSort("status")}
-                    style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "center", cursor: "pointer", userSelect: "none" }}
-                  >
-                    Status <span style={{ color: "#94a3b8", fontSize: "11px" }}>{sortField === "status" ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}</span>
+                  <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "center" }}>
+                    <SortHeader
+                      label="Status"
+                      isSorted={sortField === "status"}
+                      sortDirection={sortOrder}
+                      onSort={() => handleSort("status")}
+                      align="center"
+                    />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: 700, color: "#475569", textAlign: "center", width: "70px" }}>
                     Action

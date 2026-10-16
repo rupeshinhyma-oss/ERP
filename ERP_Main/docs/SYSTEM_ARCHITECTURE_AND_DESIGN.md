@@ -181,5 +181,32 @@ ERP_Main/
 
 2. **Decoupled Human-Facing Spoke Names:**
    - Display labels and company titles are never hardcoded.
-   - The topbar [`EcosystemSwitcher.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/EcosystemSwitcher.tsx) dynamically queries spoke `/organizations/public` endpoints to render the real company name as configured in that spoke's **ERP Settings -> Company Name**.
-   - User provisioning grant checkboxes in [`GlobalUsers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/pages/GlobalUsers.tsx) dynamically display `{erp.name || erp.display_name}`.
+   - The topbar `EcosystemSwitcher.tsx` dynamically queries spoke `/organizations/public` endpoints to render the real company name as configured in that spoke's **ERP Settings -> Company Name**.
+   - User provisioning grant checkboxes in `GlobalUsers.tsx` dynamically display `{erp.name || erp.display_name}`.
+
+---
+
+## 6. Idempotent Deployment & Control Plane First-Install Protection
+
+Automated deployment environments (Render, container boot hooks) execute database seeding on initial and subsequent deploy phases.
+
+1. **Bootstrap Force Reset Guard (`BOOTSTRAP_FORCE_RESET` in `backend/scripts/seed.py`):**
+   - The seed script verifies whether global users, platform admins, or registry nodes already exist.
+   - If existing records are detected, `seed.py` terminates safely without modifying live accounts, credentials, or permissions.
+   - Destructive re-initialization is strictly blocked unless `BOOTSTRAP_FORCE_RESET=true` is explicitly provided.
+2. **Registry Protection on Local Runs (`backend/scripts/seed_registry.py`):**
+   - When developers execute registry seeding locally, `seed_registry.py` preserves cloud production URLs (`https://inhyma-erp-backend.onrender.com`, etc.) unless override environment variables (`INHYMA_ERP_URL`, `YINGLIMA_ERP_URL`) are explicitly provided.
+   - Prevents local developer runs from overwriting production routing entries with `http://localhost`.
+
+---
+
+## 7. Platform-Gated Winsock DNS Resilience & Local Port Isolation
+
+In mixed multi-service development environments (running `ERP_Main` on `:8000`, `Yinglima_ERP` on `:8001`, and `Inhyma_ERP` on `:8002`):
+
+1. **Platform Gating (`sys.platform.startswith("win")`):**
+   - In `backend/app/core/dns_resilience.py`, DNS caching is applied exclusively on Windows host workstations to eliminate Winsock socket leaks (`WSAEADDRINUSE`).
+   - Linux production containers run unaffected with native kernel glibc resolvers.
+2. **Port-Sensitive 5-Tuple DNS Cache Key:**
+   - Caches `(host, port, family, type, proto)`, preserving exact port destinations and preventing localhost cross-port routing collisions.
+

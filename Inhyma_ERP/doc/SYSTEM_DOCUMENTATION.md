@@ -42,6 +42,7 @@
    - 8.22. [Purchase: Import Purchase Consignments & Customs Landing Matrix](#822-purchase-import-purchase-consignments--customs-landing-matrix)
    - 8.23. [Sales: Proforma Invoices (PI) & Extended Commercial Terms](#823-sales-proforma-invoices-pi--extended-commercial-terms)
    - 8.24. [Database-Driven Status Rules & Dynamic Workflow Engine](#824-database-driven-status-rules--dynamic-workflow-engine)
+   - 8.25. [Sales: Sales Order Execution, Gate Pass Logistics & Discount Ledger](#825-sales-sales-order-execution-gate-pass-logistics--discount-ledger)
 
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
@@ -367,8 +368,19 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Agent Types:** Multi-tier agent classifications and commission brackets.
 
 ### 8.5. Product Catalog & Dynamic Specification Builder
-- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`.
+- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`, `GET /masters/products/machine-spares/universal-view`, `GET /masters/products/package-dimensions`.
 - **Features:** Dynamic JSON specification builder allowing arbitrary technical specifications (e.g. Dimensions, Voltage, Speed, Material). Includes multi-image upload, supplier association, and ReportLab PDF datasheet generation.
+- **Master Multi-View Navigation Strip (`master-view-nav`):**
+  - **`📦 Product Master` (`catalog`):** Main product catalog grid featuring column pinning, inline stock inspection, and bulk activation/deactivation.
+  - **`⚙️ Machine-Spares Universal View` (`universal-view`):** Machine-wise spare parts breakdown showing all linked spare parts, codes, stock levels, and compatibility notes with a dedicated link modal (`/masters/products/machine-spares/universal-view`).
+  - **`📐 Dimensions & Weights Report` (`dimensions-report`):** Package-level breakdown for multi-box products, displaying Length, Width, Height, CBM, Net Weight, and Gross Weight with direct CSV and XLSX export triggers.
+- **Real-Time Duplicate Prevention Guard (`ProductNameSuggestions`):**
+  - Intercepts operator input in real-time, executing trigram/substring match queries against existing product catalog names to prevent creating duplicate SKU entries.
+- **Dimensional CBM Auto-Calculation:**
+  - Enforced read-only packaging unit CBM field computed dynamically from user millimeter inputs:
+    $$\text{CBM} = \frac{L \times W \times H}{1,000,000}$$
+- **Strict Zero-Stock Deletion Lock:**
+  - Product deletion is strictly blocked via `_check_zero_stock_or_raise` if any physical or virtual warehouse holds non-zero stock.
 
 ### 8.6. Supplier Directory & Tokenized Public Portal
 - **Endpoints:** `GET /suppliers`, `POST /suppliers`, `PATCH /suppliers/{id}`, `POST /suppliers/{id}/contacts`, `POST /suppliers/import`, `GET /suppliers/export`.
@@ -599,64 +611,56 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     - Task entity integrated into `/api/v1/search?q=` across task titles, descriptions, linked label names, and comment message bodies.
     - Surfaces directly in ERP topbar global search with `[ISSUE_TYPE]` badge and direct deep-link.
 
-### 8.16. Inventory: Product Stock Management
+### 8.16. Inventory: Product Stock Management (Inhyma Multi-Warehouse Matrix)
 - **Files:**
-  - Backend: `backend/app/inventory/routes.py`, `backend/app/inventory/schemas.py`, `backend/app/inventory/__init__.py`.
-  - Frontend: `frontend/src/pages/ProductStockPage.tsx`, `frontend/src/styles/productStock.css`, `frontend/src/lib/api.ts` (`InventoryApi`).
+  - Backend: `backend/app/inventory/models.py`, `backend/app/inventory/stock_service.py`, `backend/app/inventory/routes.py`, `backend/app/inventory/schemas.py`.
+  - Frontend: `frontend/src/pages/inventory/ProductStockPage.tsx`, `frontend/src/styles/productStock.css`, `frontend/src/components/SortHeader.tsx`.
 - **Endpoints:**
-  - `GET /api/v1/inventory/product-stock`: List stock items with pagination, warehouse filtering (`warehouse_id`), status filtering, and live debounced text search (`q`).
+  - `GET /api/v1/inventory/product-stock`: List stock items with 15-column warehouse breakdown, sorting (`sort_by`, `sort_dir`), category/brand filters, and debounced text search (`q`).
   - `GET /api/v1/inventory/product-stock/{id}`: Detailed product stock ledger breakdown.
-  - Legacy Aliases: `GET /api/v1/product-stock`, `GET /api/v1/product-stock/list`.
-- **Core Architecture & Inventory Calculations:**
-  - Real-time aggregation of physical inventory positions across all organizational warehouses and storage depots.
-  - Calculated Metrics:
-    $$\text{Available Quantity} = \text{On Hand Quantity} - \text{Reserved Quantity}$$
-    $$\text{Total Valuation} = \text{On Hand Quantity} \times \text{Unit Price}$$
-  - Supported Stock Statuses:
-    - `IN_STOCK`: $\text{Available Quantity} > \text{Reorder Level}$.
-    - `LOW_STOCK`: $0 < \text{Available Quantity} \le \text{Reorder Level}$.
-    - `OUT_OF_STOCK`: $\text{Available Quantity} \le 0$.
-- **Frontend User Experience & Layout:**
-  - **Multi-Warehouse Dropdown Selector:** Positioned in the page header filter bar. Allows filtering the inventory ledger by any designated warehouse (e.g., *Main Warehouse*, *Ahmedabad Depot*, *Mumbai Hub*) or displaying cumulative balances across *All Warehouses*.
-  - **Grouped 3,3,3 in 1 Summary Stat Cards:** Distinctive three-group dashboard widget accented with deep red/crimson gradient status badges matching the enterprise design system:
-    - **Group 1 (Catalog & SKUs):** Total Registered Products count, Active Stock Lines count, and Inactive/Discontinued SKUs.
-    - **Group 2 (Physical Volumes):** Cumulative On Hand Quantity, Reserved Stock (allocated to pending sales consignments), and Net Available Units ready for dispatch.
-    - **Group 3 (Financial Valuation & Critical Alerts):** Total Inventory Valuation (currency-formatted with dynamic conversion), Low Stock alert count, and Out of Stock SKU alerts.
-  - **Live Debounced Search:** Real-time search bar scanning product name, internal SKU code, category, HSN code, and warehouse location.
-  - **Master Product Stock Table:**
-    - Columns: `Sr No.`, `Product Name & Code`, `Category`, `Warehouse`, `On Hand Qty`, `Reserved Qty`, `Available Qty`, `Unit Price`, `Total Valuation`, `Status Badge`.
-    - Status Pills: Styled with rounded borders and high-contrast color badges (`#10b981` emerald green for in stock, `#f59e0b` amber for low stock, `#ef4444` red for out of stock).
-  - **Universal Spreadsheet Import & Export:** Built-in integration with the universal import wizard (`ImportWizard.tsx`) supporting `.csv` and `.xlsx` inventory spreadsheets with column auto-mapping and reconciliation.
+  - `GET /api/v1/sales/orders/by-product`: Used by physical warehouse `(i)` info popup to display reserved Sales Orders.
+  - `GET /api/v1/purchase/imports/by-product`: Used by transit warehouse `(i)` info popup to display arriving PO containers.
+- **Inhyma 15-Column Warehouse Matrix:**
+  1. Item Code
+  2. Product Name
+  3. Category
+  4. Sub Category
+  5. Brand
+  6. HSN Code
+  7. Packaging Unit CBM
+  8. Physical Warehouse 1: Mumbai
+  9. Physical Warehouse 2: Ahmedabad
+  10. Physical Warehouse 3: Indore
+  11. Transit Warehouse: Mumbai Transit
+  12. Ordered Warehouse: Mumbai Ordered
+  13. Total Stock: $\sum \text{Physical Warehouses} + \sum \text{Transit Warehouses} + \sum \text{Ordered Warehouses}$
+  14. Reorder Level (excluded from stock sums via `NON_WAREHOUSE_COLUMNS`)
+  15. Minimum Order Quantity (MOQ)
+- **Physical vs. Transit Business Invariants:**
+  - **Strict Physical Non-Negative Rule:** Physical warehouses (`is_physical(warehouse) == True`) strictly forbid negative stock. Any sales order or adjustment attempting to drive stock below zero throws `409 Conflict`.
+  - **Transit / Ordered Advance Booking Tolerance:** Virtual warehouses (`_transit`, `_ordered`) allow negative balances when goods are pre-allocated against incoming purchase orders.
+- **Database Integrity & Concurrency Architecture:**
+  - **Unique Index:** `uq_product_stocks_product_id` on `product_stocks(product_id)` guarantees one stock ledger row per product master record.
+  - **Advisory Locks:** `pg_advisory_xact_lock` serializes stock row initialization under high concurrent request bursts.
+  - **Nested Savepoint Recovery:** Recovers gracefully from race conditions using `begin_nested()` to handle duplicate key collisions.
+  - **Metadata Segregation:** `NON_WAREHOUSE_COLUMNS = {"reorder_level", "moq"}` prevents non-inventory integers from contaminating physical stock aggregation formulas.
+- **Container Inwarding via Stock Transfer (`Receive to Main WH`):**
+  - Endpoint `POST /inventory/stock-transfer/{id}/receive-to-main` atomically decrements the source transit warehouse column and increments the destination physical warehouse column when offloaded.
 
 ### 8.17. Inventory: Stock Adjustment & Order PDF Generation
 - **Files:**
-  - Backend: `backend/app/inventory/routes.py`, `backend/app/inventory/schemas.py`, `backend/app/inventory/__init__.py`.
-  - Frontend: `frontend/src/pages/StockAdjustmentPage.tsx`, `frontend/src/pages/AdjustmentOrderPdfPage.tsx`, `frontend/src/utils/stockAdjustmentPdf.ts`, `frontend/src/lib/api.ts` (`InventoryApi`).
+  - Backend: `backend/app/inventory/models.py`, `backend/app/inventory/routes.py`, `backend/app/inventory/stock_service.py`.
+  - Frontend: `frontend/src/pages/inventory/StockAdjustmentPage.tsx`, `frontend/src/pages/inventory/AddAdjustmentOrderPage.tsx`, `frontend/src/utils/stockAdjustmentPdf.ts`.
 - **Endpoints:**
-  - `GET /api/v1/inventory/stock-adjustment`: Paginated list of stock adjustment vouchers with search query, adjustment type filter (`IN` / `OUT`), purpose filter, and date range boundaries (`start_date`, `end_date`).
-  - `GET /api/v1/inventory/stock-adjustment/{id}`: Detailed adjustment voucher including complete multi-product line items breakdown.
-  - `POST /api/v1/inventory/stock-adjustment`: Create new adjustment voucher with line items and atomically update warehouse inventory balances.
-  - `DELETE /api/v1/inventory/stock-adjustment/{id}`: Soft-delete stock adjustment voucher and reverse the inventory adjustments in audit history.
-  - `GET /api/v1/adjustment/adjustment-order-pdf/{id}`: Direct PDF stream download / print view.
-  - Legacy Aliases: `GET /api/v1/adjustment/list`, `POST /api/v1/adjustment`, `DELETE /api/v1/adjustment/{id}`.
-- **Voucher Lifecycles & Reconciliation Purposes:**
-  - **Adjustment Types:**
-    - `Stock IN` (Green badge): Positive inventory adjustments reflecting incoming returns, found stock, assembly completion, or positive count variances.
-    - `Stock OUT` (Red badge): Negative inventory deductions reflecting client dispatch, split consignments, damage/scrap write-offs, or negative count variances.
-  - **Standardized Purposes:** `Return From Client`, `Split`, `Damage`, `Inventory Count Variance`, `Internal Transfer Correction`.
-- **Interactive Dual-Calendar Date Range Picker Popover:**
-  - Trigger: Calendar button displaying current active range label (e.g., `12-09-2026 - 19-09-2026`).
-  - Seven Quick-Select Presets: `Today`, `Yesterday`, `This Week`, `Last Week`, `This Month`, `Last Month`, `Custom Range`.
-  - Dual Side-by-Side Monthly Navigation: Renders current and next consecutive months side-by-side with synchronized previous/next month chevrons and year selector.
-  - Continuous Range Highlighting: Visual selection highlighting start date, end date, and continuous hover range gradient between selected bounds.
-  - Dedicated "Clear" button resets filters to all-time; "Apply" button commits selection and dispatches API query.
-- **3-Dots Action Popup (`ActionMenu`):**
-  - Triggered by clicking the row-level `⋮` action menu button on any adjustment table row.
-  - Features backdrop-click listener, keyboard `Escape` dismissal, and collision-aware viewport positioning.
-  - Menu Items:
-    - `Download PDF`: Instantly generates and downloads the official branded A4 Adjustment Order PDF using client-side `jsPDF` or redirects to `/adjustment/adjustment-order-pdf/:id`.
-    - `Delete`: Prompts confirmation modal, verifies permissions, soft-deletes the record, and triggers table refetch with toast alert.
-- **Slide-In SideDrawer (Left-Side Modal Animation):**
+  - `GET /api/v1/inventory/stock-adjustment`: Paginated list of server-authoritative stock adjustments with date range filters, client name search, and type filtering (`IN` / `OUT`).
+  - `POST /api/v1/inventory/stock-adjustment`: Atomically creates an adjustment voucher and updates target warehouse balances.
+  - `DELETE /api/v1/inventory/stock-adjustment/{id}`: Soft-deletes adjustment voucher and atomically reverses the inventory balance in the database.
+  - `GET /api/v1/adjustment/adjustment-order-pdf/{id}`: Generates branded PDF voucher.
+- **Server-Authoritative Real-Time Architecture:**
+  - **Zero In-Memory Fallbacks:** All adjustment entries and stock lookups execute against PostgreSQL tables; legacy client localStorage mocks are completely removed.
+  - **Atomic Stock Reversal:** Deleting an adjustment voucher executes an inverse delta (`move_stock(-sign * qty)`), immediately restoring warehouse inventory levels.
+  - **Indexed Date Column:** `adjustment_dt` (`Date` type) indexed for high-performance range queries.
+  - **Client Autocomplete:** Typeahead integration automatically extracts and validates client companies from the active buyer/company directory.
   - Smoothly animates into view from the left viewport edge (`side-drawer--left`) when clicking any table row.
   - **Header:** Displays Invoice/Reference number (e.g., `ADJ-2026-001`), adjustment type pill badge (`Stock IN` green / `Stock OUT` red), and close `✕` button.
   - **Metadata Fields Grid:**
@@ -863,6 +867,35 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     - `delete`: Deletion capability (`"admin"`, `"any"`, `False`).
     - `stock_in`: Boolean indicating if entering this status increments physical stock balances.
   - **Fail-Safe Fallbacks:** Built-in `FALLBACK_RULES` dictionary ensures API endpoints never crash with 503 if option lists are unseeded.
+
+### 8.25. Sales: Sales Order Execution, Gate Pass Logistics & Discount Ledger
+- **Files:** `backend/app/sales/service.py`, `backend/app/sales/routes.py`, `backend/app/sales/models.py`, `frontend/src/pages/sales/SaleProcessList.tsx`, `frontend/src/pages/sales/SaleProcessDetailModal.tsx`, `frontend/src/pages/sales/DiscountPaymentsPage.tsx`.
+- **Endpoints:**
+  - `GET /api/v1/sales/orders`: Paginated list of confirmed Sales Orders with status stages and filters.
+  - `POST /api/v1/sales/orders`: Create/convert confirmed sales order and validate physical inventory reserves.
+  - `PATCH /api/v1/sales/orders/{id}/status`: Advance SO stage (`sales_confirmed` ➔ `admin_approved` ➔ `account_confirmed` ➔ `gatepass_created` ➔ `dispatched` ➔ `lr_uploaded`).
+  - `POST /api/v1/sales/gate-pass`: Create dispatch Gate Pass with logistics metadata.
+  - `POST /api/v1/sales/orders/{id}/upload-lr`: Attach transporter LR document and multi-photo delivery proof.
+  - `GET /api/v1/sales/discount-payments`: List under-invoicing discount ledger entries.
+- **Physical Stock Deduction & Negative Protection Engine:**
+  - **Stock Deduction Trigger:** Upon transitioning to a status configured with `stock_out: True` (typically `sales_confirmed`), `_take_stock(order)` invokes `move_stock(warehouse, lines, -1)` and marks `order.stock_applied = True`.
+  - **Strict Physical Warehouse Negative Lock:**
+    ```python
+    if avail < qty:
+        raise ConflictException(f"Not enough stock of '{prod.product_name}' in {order.warehouse}. Available: {avail}, Requested: {qty}")
+    ```
+    Physical warehouses (`Mumbai`, `Ahmedabad`, `Indore`) strictly block saving if stock is insufficient. Virtual warehouses (`_transit`, `_ordered`) permit negative balances for advance pre-bookings.
+  - **Automatic Reversal on Cancellation or Deletion:**
+    When an order is cancelled or soft-deleted, `_release_stock(order)` immediately executes `move_stock(warehouse, lines, +1)` and resets `order.stock_applied = False`, returning quantities back to physical inventory.
+- **Gate Pass Logistics & LR Attachment Workflow:**
+  - **Gate Pass Form Parameters:**
+    - Transporter Name (default: `Not Sure`).
+    - Delivery Type: `Godown` / `Door` (default: `Godown`).
+    - Delivery Charges: `To Pay` / `Paid` (default: `To Pay`).
+    - Destination City / Area.
+  - **Proof of Delivery (LR Upload):** Transporter Lorry Receipt (LR) number with multi-photo attachment; marks order lifecycle as `Dispatched`.
+- **Discount Payment Ledger (Under-Invoicing Tracking):**
+  - Tracks cash discounts and under-invoiced amounts (`discount_amount`, `paid_discount`, `due_discount`) linked to each SO reference, providing accounts oversight and settlement controls.
 
 ---
 
@@ -1148,7 +1181,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Workflow Engine** | `POST` | `/api/v1/masters/workflow-rules` | Create or update database-driven workflow transition rule | `workflow.manage` |
 | **Federation** | `POST` | `/api/v1/federation/sso-handover` | Generate cross-ERP single sign-on handover ticket | Authenticated |
 | **Federation** | `POST` | `/api/v1/federation/token` | Exchange SSO ticket for local JWT session pair | Public (Ticket Validated) |
+| **Federation** | `GET` | `/api/v1/health/federation` | Run live diagnostics & latency ping against ERP_Main central registry | Super Admin / Authenticated |
 | **Organizations** | `GET` | `/api/v1/organizations/public` | Fetch public organization name and logo for login page | Public |
+| **Organizations** | `GET` | `/api/v1/organizations/logo` | Stream high-resolution database-persisted logo image with version hashing (`?v={sha1}`) | Public |
 
 ---
 
@@ -1293,4 +1328,77 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
   - Salary data and CTC structures are hidden from unauthorized roles.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, RBAC Scoping, Geofence Verification, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, Advanced Company Specs & Supplier Mandatory Phone Validation, CRM Phase 1 Foundation).*
+
+## 16. Central Ecosystem Federation, DB-Backed Inbound Email Deduplication & Bootstrap Seed Guards
+
+### 16.1. Resilient Central Federation & Spoke Survival Mechanics
+In a distributed multi-ERP enterprise mesh where `ERP_Main` serves as the central control plane, spoke ERP instances (`Inhyma_ERP`, `Yinglima_ERP`) communicate with central for single sign-on (SSO), federation, and tenant verification.
+
+1. **Multi-URL Base Discovery (`erp_main_api_base_urls()` in `app/core/config.py`):**
+   - In production cloud platforms (such as Render.com), services are often addressed via custom domains or direct `onrender.com` internal domains.
+   - The spoke resolves candidates across `ERP_MAIN_API_BASE_URL`, `ERP_MAIN_URL`, and fallback default URLs. Each candidate is tested sequentially during outbound calls.
+2. **Explicit IPv4 Outbound Binding (`0.0.0.0`):**
+   - Cloud containers frequently fail during inter-service HTTPS connections if HTTP client libraries attempt to connect via unrouted IPv6 addresses.
+   - All `httpx.AsyncClient` federation instances explicitly set `local_address="0.0.0.0"`, guaranteeing IPv4 socket routing across the public internet.
+3. **40-Second Cold-Start Sleeping Budget:**
+   - Free/Starter cloud tiers spin down during inactivity. Standard 5s or 10s HTTP timeouts prematurely kill user SSO requests before the sleeping upstream container boots.
+   - Outbound federation requests allocate a 40.0-second total timeout budget (`httpx.Timeout(40.0, connect=20.0)`), allowing sleeping instances to cold-boot cleanly.
+4. **900-Second Stale Session Fallback Tolerance (`_from_cache`):**
+   - If central is undergoing scheduled maintenance or experiencing temporary network partitions, spoke backends retain active verified sessions in local memory cache for up to 900 seconds (15 minutes).
+   - The user session is authenticated with `session["_from_cache"] = True`, preventing enterprise operational lockouts during transient central network blips.
+5. **Federation Health Diagnostic Endpoint (`GET /api/v1/health/federation`):**
+   - Provides live health and latency metrics against central endpoints without requiring a full SSO login attempt.
+   - Returns reachable candidate URL, latency in milliseconds, status code, and detailed fallback diagnosis.
+
+### 16.2. Platform-Gated Winsock DNS Resilience
+On Windows workstations and local developer environments, asynchronous DNS lookups in `asyncio` and `httpx` can trigger Winsock socket leaks (`WSAEADDRINUSE`) or silent lockups.
+- **Platform Gating (`sys.platform.startswith("win")`):**
+  - Winsock DNS caching is strictly restricted to Windows developer hosts.
+  - Production Linux containers run completely unaffected, allowing kernel glibc resolver handling.
+- **Port-Sensitive 5-Tuple DNS Cache:**
+  - Cache entries are keyed by `(host, port, family, type, proto)`.
+  - Automatically preserves specific port destinations, preventing cross-port collisions when testing multiple local dev instances on `localhost:8000`, `8001`, and `8002`.
+
+### 16.3. Persistent Database Inbound Email Deduplication
+To completely eliminate duplicate AI quotation extraction and redundant supplier emails across worker restarts:
+- **Relational Deduplication Table (`email_inbound_processed`):**
+  - Tracks every ingested email by unique compound constraints: `message_id`, `uid`, `inquiry_id`, `supplier_id`, and `processed_at`.
+  - Before invoking OpenAI or processing mail body attachments, worker checks `SELECT 1 FROM email_inbound_processed WHERE message_id = :mid`.
+- **Atomic Insertion Under Concurrency:**
+  - Ingestion commits a deduplication record in the same database transaction, preventing concurrent poller runs from double-billing AI extraction APIs.
+- **30-Minute Historical Baseline:**
+  - Inbound worker establishes a historical cutoff timestamp (`utcnow() - timedelta(minutes=30)`).
+  - Historical emails older than 30 minutes are stamped into the deduplication ledger without triggering repetitive quotes, ensuring newly started workers process only fresh inbound communications.
+
+### 16.4. Idempotent Deployment & First-Install Seed Protection
+Production database seeds (`backend/scripts/seed.py`) run during automated container build and start phases (e.g. `render.yaml`).
+- **First-Install Guard (`BOOTSTRAP_FORCE_RESET`):**
+  - If existing organization, user, or role records are detected in the database, `seed.py` immediately skips mutating live production accounts.
+  - Destructive re-seeding is strictly prohibited unless `BOOTSTRAP_FORCE_RESET=true` is explicitly injected into environment variables.
+- **Geography & Master Data Protection:**
+  - Countries, States, Districts, and Cities are verified for existing records before running bulk insert scripts.
+  - Prevents primary key collisions and protects user-customized city and district additions.
+- **Registry Host Safety (`seed_registry.py`):**
+  - When running in `ERP_Main`, `seed_registry.py` updates spoke registration URLs only if explicit environment variables (`INHYMA_ERP_URL`, `YINGLIMA_ERP_URL`) are populated.
+  - Prevents local developer runs from overwriting production cloud URLs in the central registry with `http://localhost`.
+
+### 16.5. SSO Handover Local Account Guards
+During federated single sign-on (`POST /api/v1/auth/sso-handover`):
+- **Disabled/Deleted Account Enforcement:**
+  - If a user exists in the spoke ERP but has `is_active=False` or `deleted_at IS NOT NULL`, the endpoint rejects handover with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
+  - Prevents deactivated or terminated employees from regaining access to spoke instances via central SSO credentials.
+- **Controlled Auto-Provisioning (`SSO_HANDOVER_AUTO_PROVISION`):**
+  - If a user does not exist locally and `SSO_HANDOVER_AUTO_PROVISION=false` (default in strict environments), access is cleanly rejected with `403 Forbidden` until an administrator creates the local role assignment.
+
+### 16.6. Database-Backed Organization Branding & Storage Quota Protection
+Enterprise logos and branding assets are stored directly in PostgreSQL with public streaming:
+- **Endpoint `GET /api/v1/organizations/logo?v={sha1}`:**
+  - Streams high-resolution PNG/JPEG binary data with long-term `Cache-Control: public, max-age=86400, immutable`.
+  - The query parameter `v` contains a SHA-1 hash of the image content, forcing immediate browser cache refresh upon logo replacement.
+- **Client Storage Quota Protections (`try/catch` in `brand.ts` and `Organization.tsx`):**
+  - Storing massive Base64 strings in browser `localStorage` causes `QuotaExceededError` crashes on mobile or restricted webview browsers.
+  - All brand caching operations are wrapped in graceful quota guards that safely degrade to in-memory state or remote streaming without throwing unhandled exceptions.
+
+---
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, HRMS Attendance Calendar & Payroll Excel Export Engine).*
+

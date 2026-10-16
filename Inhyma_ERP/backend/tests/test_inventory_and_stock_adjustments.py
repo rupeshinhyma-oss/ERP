@@ -206,7 +206,8 @@ async def test_product_reorder_listing_and_patch():
         )
         assert res["success"] is True
         items = res["data"]["items"]
-        assert len(items) >= 10
+        if not items:
+            pytest.skip("no products in this database - nothing to re-order")  # the list no longer invents sample rows
         # Verify 16 columns structure on items
         first_item = items[0]
         for field in [
@@ -245,4 +246,3 @@ async def test_product_reorder_listing_and_patch():
         assert patch_res["success"] is True
         assert patch_res["data"]["reorder_level"] == 12.0
         assert patch_res["data"]["minimum_order_quantity"] == 20.0
-

@@ -47,9 +47,14 @@ import {
   showsMonthlyTurnover,
   showsPotentialBusinessPerMonth,
   showsPotentialReason,
+  showsSector,
+  filterFieldVisibility,
+  computeCompanyAge,
   clearInapplicableCompanyFields,
   computeAge,
 } from "@/lib/companyFields";
+import { OpenLink } from "@/components/OpenLink";
+import { isValidEmail, toMailto, toSafeUrl } from "@/lib/links";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type {
@@ -160,6 +165,7 @@ const EMPTY_QUICK_FORM = {
   tax_id_number: "",
   area: "",
   state_id: "",
+  district_id: "",
   district: "",
   city_id: "",
   contact_salutation: "Mr",
@@ -205,6 +211,7 @@ const EMPTY_SUPPLIER_FORM = {
   products_interested: "",
   gst_registration_date: "",
   age_of_company: "",
+  sector: "",
   monthly_turnover: "",
   potential_business_per_month: "",
   direct_import_from_china: "",
@@ -237,9 +244,44 @@ const EMPTY_CONTACT_FORM = {
   email: "",
   birth_date: "",
   anniversary_date: "",
+  is_primary: "no", // spec: in the Add form, Primary is No by default
 };
 
 
+
+/** A web address shown as a clickable link (opens in a new tab); plain text when it is not a valid http(s) link. */
+function LinkValue({ value, text }: { value?: string | null; text?: string }) {
+  const href = toSafeUrl(value);
+  if (!value || !value.trim()) return <>{"—"}</>;
+  if (!href) return <span>{text || value}</span>;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "#0061f2", textDecoration: "none" }}>
+      {text || value}
+    </a>
+  );
+}
+
+function WhatsAppIcon({ size = 13, style }: { size?: number; style?: React.CSSProperties }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ verticalAlign: "middle", flexShrink: 0, display: "inline-block", ...style }}
+    >
+      <path
+        d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91C2.13 13.66 2.59 15.36 3.45 16.86L2.05 22L7.3 20.62C8.75 21.41 10.38 21.83 12.04 21.83C17.5 21.83 21.95 17.38 21.95 11.92C21.95 9.27 20.92 6.78 19.05 4.91C17.18 3.03 14.69 2 12.04 2Z"
+        fill="#25D366"
+      />
+      <path
+        d="M17.5 14.33C17.2 14.18 15.73 13.45 15.45 13.35C15.18 13.25 14.98 13.2 14.78 13.5C14.58 13.8 14.01 14.48 13.83 14.68C13.66 14.88 13.48 14.9 13.18 14.75C12.88 14.6 11.91 14.28 10.76 13.26C9.87 12.46 9.27 11.48 9.1 11.18C8.92 10.88 9.08 10.72 9.23 10.57C9.37 10.43 9.53 10.21 9.68 10.03C9.83 9.86 9.88 9.73 9.98 9.53C10.08 9.33 10.03 9.16 9.96 9.01C9.88 8.86 9.28 7.38 9.03 6.78C8.79 6.2 8.54 6.27 8.36 6.27C8.18 6.26 7.98 6.26 7.78 6.26C7.58 6.26 7.26 6.33 6.98 6.63C6.71 6.93 5.93 7.66 5.93 9.13C5.93 10.61 7 12.03 7.15 12.23C7.3 12.43 9.26 15.45 12.26 16.75C12.97 17.06 13.54 17.25 13.97 17.38C14.69 17.61 15.34 17.58 15.86 17.5C16.44 17.41 17.65 16.77 17.9 16.05C18.15 15.33 18.15 14.73 18.08 14.6C18 14.48 17.8 14.43 17.5 14.33Z"
+        fill="#FFFFFF"
+      />
+    </svg>
+  );
+}
 
 /** Positive-sounding values read as active; everything else is neutral. */
 function StatusPill({ value }: { value?: string | null }) {
@@ -797,6 +839,7 @@ export interface CompanyAutocompleteItem {
   tax_id_number?: string | null;
   area?: string | null;
   district?: string | null;
+  district_id?: string | null;
   city_id?: string | null;
   state_id?: string | null;
   contact_salutation?: string | null;
@@ -1285,57 +1328,85 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
 
   }, []);
 
-  // Cascading: state -> districts and cities
+  // Cascading: state -> districts
+  const [filterDistrictsFor, setFilterDistrictsFor] = useState<string>("");
   useEffect(() => {
     if (!stateFilter) {
       setFilterDistricts([]);
+      setFilterDistrictsFor("");
+      return;
+    }
+    let cancelled = false;
+    void apiGet<Array<{ id: string; name: string }>>(`/masters/districts/lookup?state_id=${stateFilter}`)
+      .then((res) => {
+        if (cancelled) return;
+        setFilterDistricts(res?.data ? [...res.data].sort((a, b) => a.name.localeCompare(b.name)) : []);
+        setFilterDistrictsFor(stateFilter);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFilterDistricts([]);
+        setFilterDistrictsFor(stateFilter);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stateFilter]);
+
+  // Cascading: district -> cities. Only the selected district's cities are offered (no "all cities of the state"
+  // fallback). A state that has no districts in the master falls back to its own cities so it is never a dead end.
+  useEffect(() => {
+    const districtPicked = Boolean(districtFilter) && districtFilter !== "blank";
+    if (!stateFilter || filterDistrictsFor !== stateFilter || (!districtPicked && filterDistricts.length > 0)) {
       setFilterCities([]);
       return;
     }
-    void apiGet<Array<{ id: string; name: string }>>(
-      `/masters/districts/lookup?state_id=${stateFilter}`
-    )
+    let cancelled = false;
+    const url = districtPicked
+      ? `/masters/cities/lookup?district_id=${districtFilter}&state_id=${stateFilter}`
+      : `/masters/cities/lookup?state_id=${stateFilter}`;
+    void apiGet<Array<{ id: string; name: string; district_id?: string }>>(url)
       .then((res) => {
-        if (res?.data) {
-          setFilterDistricts([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
-        }
+        if (!cancelled) setFilterCities(res?.data ? [...res.data].sort((a, b) => a.name.localeCompare(b.name)) : []);
       })
-      .catch(() => setFilterDistricts([]));
+      .catch(() => {
+        if (!cancelled) setFilterCities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stateFilter, districtFilter, filterDistrictsFor, filterDistricts.length]);
 
-    void apiGet<Array<{ id: string; name: string; district_id?: string }>>(
-      `/masters/cities?state_id=${stateFilter}&page_size=250&status=active`
-    )
-      .then((res) => {
-        if (res?.data) {
-          setFilterCities([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
-        }
-      })
-      .catch(() => setFilterCities([]));
-  }, [stateFilter]);
+  const availableCities = filterCities;
+  const districtFilterLocked = !stateFilter;
+  const cityFilterLocked =
+    !stateFilter || (filterDistricts.length > 0 && (!districtFilter || districtFilter === "blank"));
 
-  // Available cities filtered by selected district if present
-  const availableCities = useMemo(() => {
-    if (!districtFilter) return filterCities;
-    const matchedDist = filterDistricts.find(
-      (d) => d.name.toLowerCase() === districtFilter.toLowerCase() || d.id === districtFilter
-    );
-    if (!matchedDist) return filterCities;
-    const filtered = filterCities.filter(
-      (c: any) => c.district_id === matchedDist.id || c.district === districtFilter
-    );
-    return filtered.length > 0 ? filtered : filterCities;
-  }, [filterCities, districtFilter, filterDistricts]);
+  // Conditional filters (spec): shown only when their parent selection makes them relevant.
+  const filterVis = filterFieldVisibility({
+    businessType: companyTypeFilter,
+    potential: potentialFilter,
+    directImport: directImportFilter,
+  });
+  // A hidden filter must not keep filtering the list invisibly, so its value is cleared when it disappears.
+  useEffect(() => {
+    if (!filterVis.potentialPerMonth) setPotentialBusinessFilter("");
+    if (!filterVis.monthlyTurnover) setMonthlyTurnoverFilter("");
+    if (!filterVis.sector) setSectorFilter("");
+    if (!filterVis.directImport) setDirectImportFilter("");
+    if (!filterVis.monthlyImportVolume) setMonthlyImportVolumeFilter("");
+  }, [filterVis.potentialPerMonth, filterVis.monthlyTurnover, filterVis.sector, filterVis.directImport, filterVis.monthlyImportVolume]);
 
   // Available company categories adapted by Business Type (B2B -> Traditional, Non Traditional; B2C -> Corporate, SME)
   const availableCompanyCategories = useMemo(() => {
     const list = companyCategories.length > 0
       ? companyCategories
       : [
-          { id: "traditional", name: "Traditional", business_type: "B2B" },
-          { id: "non-traditional", name: "Non Traditional", business_type: "B2B" },
-          { id: "corporate", name: "Corporate", business_type: "B2C" },
-          { id: "sme", name: "SME", business_type: "B2C" },
-        ];
+        { id: "traditional", name: "Traditional", business_type: "B2B" },
+        { id: "non-traditional", name: "Non Traditional", business_type: "B2B" },
+        { id: "corporate", name: "Corporate", business_type: "B2C" },
+        { id: "sme", name: "SME", business_type: "B2C" },
+      ];
     if (companyTypeFilter === "B2B") {
       return list.filter((c) => c.business_type === "B2B");
     }
@@ -1399,12 +1470,12 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const getFreezeStyle = useCallback((_colIdx: number, isHeader = false): React.CSSProperties => {
     return isHeader
       ? {
-          position: "sticky",
-          top: 0,
-          zIndex: 15,
-          backgroundColor: "#f8fafc",
-          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
-        }
+        position: "sticky",
+        top: 0,
+        zIndex: 15,
+        backgroundColor: "#f8fafc",
+        boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
+      }
       : {};
   }, []);
 
@@ -1414,6 +1485,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
 
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
+  const [isContinuingFromQuick, setIsContinuingFromQuick] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkCompanyId = searchParams.get("id");
@@ -1563,32 +1635,54 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     }
   }, [quickDrawerOpen, profile, getLoggedInSalesPersonId, quickForm.sales_person_id]);
 
+  // Quick Add cascade: state -> districts, then district -> cities.
+  const [quickDistrictsFor, setQuickDistrictsFor] = useState<string>("");
   useEffect(() => {
     if (!quickForm.state_id) {
-      setQuickCities([]);
       setQuickDistricts([]);
+      setQuickDistrictsFor("");
       return;
     }
-    void apiGet<Array<{ id: string; name: string }>>(
-      `/masters/cities?state_id=${quickForm.state_id}&page_size=200&status=active`
-    )
+    let cancelled = false;
+    const stateId = quickForm.state_id;
+    void apiGet<Array<{ id: string; name: string }>>(`/masters/districts/lookup?state_id=${stateId}`)
       .then((res) => {
-        if (res?.data) {
-          setQuickCities([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
-        }
+        if (cancelled) return;
+        setQuickDistricts(res?.data ? [...res.data].sort((a, b) => a.name.localeCompare(b.name)) : []);
+        setQuickDistrictsFor(stateId);
       })
-      .catch(() => setQuickCities([]));
-
-    void apiGet<Array<{ id: string; name: string }>>(
-      `/masters/districts/lookup?state_id=${quickForm.state_id}`
-    )
-      .then((res) => {
-        if (res?.data) {
-          setQuickDistricts([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
-        }
-      })
-      .catch(() => setQuickDistricts([]));
+      .catch(() => {
+        if (cancelled) return;
+        setQuickDistricts([]);
+        setQuickDistrictsFor(stateId);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [quickForm.state_id]);
+
+  useEffect(() => {
+    const stateId = quickForm.state_id;
+    const districtId = quickForm.district_id;
+    if (!stateId || quickDistrictsFor !== stateId || (!districtId && quickDistricts.length > 0)) {
+      setQuickCities([]);
+      return;
+    }
+    let cancelled = false;
+    const url = districtId
+      ? `/masters/cities/lookup?district_id=${districtId}&state_id=${stateId}`
+      : `/masters/cities/lookup?state_id=${stateId}`;
+    void apiGet<Array<{ id: string; name: string }>>(url)
+      .then((res) => {
+        if (!cancelled) setQuickCities(res?.data ? [...res.data].sort((a, b) => a.name.localeCompare(b.name)) : []);
+      })
+      .catch(() => {
+        if (!cancelled) setQuickCities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [quickForm.state_id, quickForm.district_id, quickDistrictsFor, quickDistricts.length]);
 
   async function handleQuickCitySelectOrCustom(cityVal: string, cityLabel: string) {
     if (!cityVal) {
@@ -1606,11 +1700,17 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       setQuickAlert({ type: "info", message: "Please select State before adding a city." });
       return;
     }
+    if (quickDistricts.length > 0 && !quickForm.district_id) {
+      setQuickAlert({ type: "info", message: "Please select District before adding a city." });
+      return;
+    }
 
     try {
       const res = await apiPost<{ id: string; name: string }>("/masters/cities", {
         name: cityLabel,
         state_id: quickForm.state_id,
+        // The new city joins the selected district, so it shows up under that district everywhere.
+        ...(quickForm.district_id ? { district_id: quickForm.district_id } : {}),
         country_id: defaultIndiaId,
       });
       if (res?.data?.id) {
@@ -1717,6 +1817,10 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     setQuickErrors({});
     setQuickAlert(null);
 
+    // Set once the company exists on the server, so a later failure (e.g. while opening the full form) is not
+    // reported as "failed to create" on a drawer that is already closed.
+    let createdCompany: Company | null = null;
+
     try {
       const payload: Record<string, any> = {
         company_name: quickForm.company_name.trim(),
@@ -1724,6 +1828,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         tax_id_number: quickForm.tax_id_number.trim().toUpperCase() || null,
         area: quickForm.area.trim() || null,
         state_id: quickForm.state_id || null,
+        district_id: quickForm.district_id || null,
         district: quickForm.district.trim() || null,
         city_id: quickForm.city_id || null,
         contact_salutation: quickForm.contact_salutation || null,
@@ -1734,35 +1839,50 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         contact_whatsapp_number: quickForm.contact_whatsapp_number.trim() || null,
         primary_website: quickForm.primary_website.trim() || null,
         sales_person_id: quickForm.sales_person_id || null,
+        country_id: defaultIndiaId || null,
       };
 
       const { data } = await apiPost<Company>("/companies", payload);
+      createdCompany = data;
 
       setReloadCounter((c) => c + 1);
 
       if (exitAfterSave) {
         setQuickDrawerOpen(false);
+        setQuickForm({ ...EMPTY_QUICK_FORM, sales_person_id: getLoggedInSalesPersonId() });
         setAlertPopup({
           title: "Company Added",
           message: `Company "${data.company_name}" created successfully.`,
         });
       } else {
-        setQuickAlert({
+        setQuickDrawerOpen(false);
+        setQuickForm({ ...EMPTY_QUICK_FORM, sales_person_id: getLoggedInSalesPersonId() });
+        if (quickDistricts.length > 0) {
+          setFormDistricts(quickDistricts);
+          setFormDistrictsFor(quickForm.state_id);
+        }
+        if (quickCities.length > 0) {
+          setFormCities(quickCities);
+        }
+        setIsContinuingFromQuick(true);
+        await openModal(data, "full");
+        setFormAlert({
           type: "success",
-          message: `Company "${data.company_name}" created successfully. Add next company below:`,
+          message: `Company "${data.company_name}" created. You can now complete the remaining profile fields and contacts below:`,
         });
-        setQuickForm((prev) => ({
-          ...EMPTY_QUICK_FORM,
-          sales_person_id: prev.sales_person_id,
-        }));
-        setTimeout(() => {
-          const el = document.getElementById("quick_company_name");
-          if (el) el.focus();
-        }, 60);
       }
     } catch (err: any) {
       const detail = err?.detail || err?.message || "Failed to create company.";
-      setQuickAlert({ type: "error", message: detail });
+      if (createdCompany) {
+        // The company WAS saved; only opening the full form failed. The drawer is already closed, so say so on the
+        // list page instead of silently dropping the user back there.
+        setAlertPopup({
+          title: "Company Created",
+          message: `Company "${createdCompany.company_name}" was created, but the full form could not be opened (${detail}). Open it from the list to continue.`,
+        });
+      } else {
+        setQuickAlert({ type: "error", message: detail });
+      }
     } finally {
       setQuickSaving(false);
     }
@@ -1808,11 +1928,11 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     const list = companyCategories.length > 0
       ? companyCategories
       : [
-          { id: "traditional", name: "Traditional", business_type: "B2B" },
-          { id: "non-traditional", name: "Non Traditional", business_type: "B2B" },
-          { id: "corporate", name: "Corporate", business_type: "B2C" },
-          { id: "sme", name: "SME", business_type: "B2C" },
-        ];
+        { id: "traditional", name: "Traditional", business_type: "B2B" },
+        { id: "non-traditional", name: "Non Traditional", business_type: "B2B" },
+        { id: "corporate", name: "Corporate", business_type: "B2C" },
+        { id: "sme", name: "SME", business_type: "B2C" },
+      ];
     if (form.company_type === "B2B") {
       return list.filter((c) => c.business_type === "B2B");
     }
@@ -1823,6 +1943,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   }, [companyCategories, form.company_type]);
   const [formDistricts, setFormDistricts] = useState<Array<{ id: string; name: string }>>([]);
   const [formCities, setFormCities] = useState<Array<{ id: string; name: string }>>([]);
+  const [formDistrictsFor, setFormDistrictsFor] = useState<string>("");
   const [gstFetching, setGstFetching] = useState(false);
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
 
@@ -1840,49 +1961,87 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     if (!form.state_id) {
       setFormDistricts([]);
       setFormCities([]);
+      setFormDistrictsFor("");
       return;
     }
-    void apiGet<Array<{ id: string; name: string }>>(
-      `/masters/districts/lookup?state_id=${form.state_id}`
-    )
+    let cancelled = false;
+    const stateId = form.state_id;
+    void apiGet<Array<{ id: string; name: string }>>(`/masters/districts/lookup?state_id=${stateId}`)
       .then((res) => {
-        if (res?.data) {
-          const sorted = [...res.data].sort((a, b) => a.name.localeCompare(b.name));
-          setFormDistricts(sorted);
-          if (form.district && !form.district_id) {
-            const m = sorted.find(
-              (d) => d.name.toLowerCase() === form.district.toLowerCase() || d.id === form.district
-            );
-            if (m) {
-              setForm((p) => ({ ...p, district_id: m.id, district: m.name }));
-            }
-          }
-        } else {
-          setFormDistricts([]);
+        if (cancelled) return;
+        const sorted = res?.data ? [...res.data].sort((a, b) => a.name.localeCompare(b.name)) : [];
+        setFormDistricts(sorted);
+        setFormDistrictsFor(stateId);
+        // Older rows only carry the district NAME: map it to the master id once.
+        if (form.district && !form.district_id) {
+          const m = sorted.find((d) => d.name.toLowerCase() === form.district.toLowerCase() || d.id === form.district);
+          if (m) setForm((p) => ({ ...p, district_id: m.id, district: m.name }));
         }
       })
-      .catch(() => setFormDistricts([]));
+      .catch(() => {
+        if (cancelled) return;
+        setFormDistricts([]);
+        setFormDistrictsFor(stateId);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [form.state_id]);
 
-  // Full Form Cascading: When form.district_id changes -> Fetch cities for that district
+  // Full Form Cascading: district -> cities. A state with no districts in the master falls back to its cities.
   useEffect(() => {
     const distId = form.district_id;
-    if (!distId || !form.state_id) {
+    const stateId = form.state_id;
+    if (!stateId || formDistrictsFor !== stateId || (!distId && formDistricts.length > 0)) {
       setFormCities([]);
       return;
     }
-    void apiGet<Array<{ id: string; name: string }>>(
-      `/masters/cities/lookup?district_id=${distId}&state_id=${form.state_id}`
-    )
+    let cancelled = false;
+    const url = distId
+      ? `/masters/cities/lookup?district_id=${distId}&state_id=${stateId}`
+      : `/masters/cities/lookup?state_id=${stateId}`;
+    void apiGet<Array<{ id: string; name: string }>>(url)
       .then((res) => {
-        if (res?.data) {
-          setFormCities([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
-        } else {
-          setFormCities([]);
-        }
+        if (!cancelled) setFormCities(res?.data ? [...res.data].sort((a, b) => a.name.localeCompare(b.name)) : []);
       })
-      .catch(() => setFormCities([]));
-  }, [form.district_id, form.state_id]);
+      .catch(() => {
+        if (!cancelled) setFormCities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.district_id, form.state_id, formDistrictsFor, formDistricts.length]);
+
+  // A city typed in the City box that is not in the master is created under the selected district.
+  async function handleFullCitySelectOrCustom(cityVal: string, cityLabel: string) {
+    if (!cityVal) {
+      setField("city_id", "");
+      return;
+    }
+    if (formCities.some((c) => c.id === cityVal)) {
+      setField("city_id", cityVal);
+      return;
+    }
+    if (!form.state_id || (formDistricts.length > 0 && !form.district_id)) {
+      setFormAlert({ type: "info", message: "Please select State and District before adding a city." });
+      return;
+    }
+    try {
+      const res = await apiPost<{ id: string; name: string }>("/masters/cities", {
+        name: cityLabel,
+        state_id: form.state_id,
+        ...(form.district_id ? { district_id: form.district_id } : {}),
+        country_id: defaultIndiaId,
+      });
+      if (res?.data?.id) {
+        setFormCities((prev) => [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name)));
+        setField("city_id", res.data.id);
+        setFormAlert({ type: "success", message: `City "${res.data.name}" added successfully.` });
+      }
+    } catch (err: any) {
+      setFormAlert({ type: "error", message: err?.detail || err?.message || "Failed to add the city." });
+    }
+  }
 
   function handleCopyPrimaryFull() {
     const direct = (form.contact_calling_number || "").trim();
@@ -1941,6 +2100,24 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     }));
   }
 
+  // Email: several addresses are allowed (spec: "provision to add multiple"); the first one is the primary.
+  function emailRows(): string[] {
+    return form.emails && form.emails.length > 0 ? form.emails : [form.email || ""];
+  }
+  function setEmailAt(index: number, value: string) {
+    const rows = [...emailRows()];
+    rows[index] = value;
+    setForm((p) => ({ ...p, emails: rows, email: rows[0] || "" }));
+  }
+  function addEmailRow() {
+    const rows = [...emailRows(), ""];
+    setForm((p) => ({ ...p, emails: rows, email: rows[0] || "" }));
+  }
+  function removeEmailAt(index: number) {
+    const rows = emailRows().filter((_, k) => k !== index);
+    setForm((p) => ({ ...p, emails: rows, email: rows[0] || "" }));
+  }
+
   function handleUpdateSocialMedia(index: number, key: "platform" | "url", value: string) {
     setForm((prev) => {
       const list = [...(prev.social_media || [])];
@@ -1987,10 +2164,19 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       return;
     }
 
+    {
+      const badEmail = emailRows().map((e) => e.trim()).filter(Boolean).find((e) => !isValidEmail(e));
+      if (badEmail) {
+        const msg = `"${badEmail}" is not a valid email address.`;
+        setError(msg);
+        setFormAlert({ type: "error", message: msg });
+        setSaving(false);
+        return;
+      }
+    }
+
     try {
-      const emailList = form.email.trim()
-        ? [form.email.trim()]
-        : (form.emails && form.emails.length > 0 ? form.emails : []);
+      const emailList = [...new Set(emailRows().map((e) => e.trim()).filter(Boolean))];
 
       const cleanSocialMedia = (form.social_media || []).filter(
         (sm) => sm.platform.trim() || sm.url.trim()
@@ -2015,6 +2201,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         address: form.address.trim() || null,
         area: form.area.trim() || null,
         state_id: form.state_id || null,
+        district_id: form.district_id || null,
         district: form.district.trim() || null,
         city_id: form.city_id || null,
         pincode: form.pincode.trim() || null,
@@ -2034,6 +2221,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         ...(() => {
           const cleared = clearInapplicableCompanyFields(form);
           return {
+            sector: cleared.sector.trim() || null,
             monthly_turnover: cleared.monthly_turnover || null,
             potential_business_per_month: cleared.potential_business_per_month || null,
             direct_import_from_china: cleared.direct_import_from_china || null,
@@ -2055,7 +2243,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       setReloadCounter((c) => c + 1);
       closeModal();
       setAlertPopup({
-        title: currentCompanyId ? "Company Updated" : "Company Created",
+        title: currentCompanyId && !isContinuingFromQuick ? "Company Updated" : "Company Created",
         message: `Company "${saved.company_name}" saved successfully.`,
       });
     } catch (err: any) {
@@ -2510,7 +2698,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         country_id: countryFilter || "",
         state_id: stateFilter || "",
         city_id: cityFilter || "",
-        district: districtFilter || "",
+        district_id: districtFilter || "",
         company_type: companyTypeFilter || "",
         company_grade: gradeFilter || "",
         current_status: statusFilter || "",
@@ -2722,6 +2910,9 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       openQuickAdd();
       return;
     }
+    if (!supplier) {
+      setIsContinuingFromQuick(false);
+    }
     setCurrentCompanyId(supplier ? supplier.id : null);
     setInitialCompanyStatus(supplier ? (supplier.current_status || "") : "");
     setModalMode(mode);
@@ -2765,6 +2956,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         products_interested: supplier.products_interested || "",
         gst_registration_date: supplier.gst_registration_date || "",
         age_of_company: supplier.age_of_company || "",
+        sector: supplier.sector || "",
         monthly_turnover: supplier.monthly_turnover || "",
         potential_business_per_month: supplier.potential_business_per_month || "",
         direct_import_from_china: supplier.direct_import_from_china || "",
@@ -2817,6 +3009,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   function closeModal() {
     setModalOpen(false);
     setCurrentCompanyId(null);
+    setIsContinuingFromQuick(false);
     setInitialCompanyStatus("");
     setCompanyLeads([]);
     setCompanyFollowUps([]);
@@ -2848,11 +3041,13 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           whatsapp_number: contact.whatsapp_number || "",
           wechat_number: contact.wechat_number || "",
           email: contact.email || "",
+          is_primary: contact.is_primary ? "yes" : "no",
         }
         : EMPTY_CONTACT_FORM
     );
     setContactCountryId(contact?.country_id || formCountryId || defaultIndiaId || null);
-    setContactSameCallingWhatsapp(false);
+    // Spec: Whatsapp Number is "by default - same as calling" for a new contact (an existing one keeps its own).
+    setContactSameCallingWhatsapp(!contact);
     setContactSameCallingWechat(false);
     setContactFormOpen(true);
   }
@@ -2880,6 +3075,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       email: contactForm.email.trim() || null,
       birth_date: contactForm.birth_date || null,
       anniversary_date: contactForm.anniversary_date || null,
+      is_primary: contactForm.is_primary === "yes",
     };
 
     setContactSubmitting(true);
@@ -2917,52 +3113,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     } catch (err) {
       setError(err);
     }
-  }
-
-  async function handleRowDelete(id: string) {
-    const targetCompany = rows.find((r) => r.id === id);
-    if (targetCompany?.current_status?.toLowerCase() === "existing") {
-      alert("Companies with status 'Existing' cannot be deleted. You can set them to Inactive instead.");
-      return;
-    }
-    if (targetCompany?.potential?.toLowerCase() === "yes") {
-      alert("Companies marked as 'Potential' cannot be deleted.");
-      return;
-    }
-    if (!confirm("Delete this company?")) return;
-    await guardRowAction(`delete:${id}`, async () => {
-      try {
-        await apiDelete(`/companies/${id}`);
-        setRows((prev) => prev.filter((r) => r.id !== id));
-        setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
-      } catch (err: any) {
-        const msg = err?.detail || err?.message || "Failed to delete company.";
-        setError(msg);
-        alert(msg);
-      }
-    });
-  }
-
-  async function handleToggleActive(company: Company) {
-    const nextActive = !company.is_active;
-    const actionText = nextActive ? "activate" : "deactivate";
-    if (!confirm(`Are you sure you want to ${actionText} "${company.company_name}"?`)) return;
-    await guardRowAction(`toggle-active:${company.id}`, async () => {
-      try {
-        if (nextActive) {
-          await apiPost(`/companies/${company.id}/activate`, {});
-        } else {
-          await apiPost(`/companies/${company.id}/deactivate`, {});
-        }
-        setRows((prev) =>
-          prev.map((r) => (r.id === company.id ? { ...r, is_active: nextActive } : r))
-        );
-      } catch (err: any) {
-        const msg = err?.detail || err?.message || `Failed to ${actionText} company.`;
-        setError(msg);
-        alert(msg);
-      }
-    });
   }
 
   async function handleBulkDelete() {
@@ -3402,10 +3552,14 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
               <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
-                {currentCompanyId ? "Edit Company" : "Add New Company"}
+                {isContinuingFromQuick ? "Add New Company" : currentCompanyId ? "Edit Company" : "Add New Company"}
               </h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
-                {currentCompanyId ? "Update company details below." : "Enter company information, contact details, and business profile."}
+                {isContinuingFromQuick
+                  ? "Basic info saved from Quick Add. Continue filling remaining company profile and details."
+                  : currentCompanyId
+                    ? "Update company details below."
+                    : "Enter company information, contact details, and business profile."}
               </div>
             </div>
             <button
@@ -3737,7 +3891,10 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     </div>
 
                     <div style={{ gridColumn: "span 2" }}>
-                      <label style={fieldLabelStyle}>Company Website</label>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <label style={fieldLabelStyle}>Company Website</label>
+                        <OpenLink value={form.primary_website} testId="open-company-website" />
+                      </div>
                       <input
                         id="primary_website"
                         type="text"
@@ -3751,18 +3908,45 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     {/* Row 3: Email (span 3), Webpage (IndiaMart Or Other) (span 1) */}
                     <div style={{ gridColumn: "span 3" }}>
                       <label style={fieldLabelStyle}>Email</label>
-                      <input
-                        id="email"
-                        type="email"
-                        style={inputStyle}
-                        placeholder="Enter email address"
-                        value={form.email}
-                        onChange={(e) => setField("email", e.target.value)}
-                      />
+                      {emailRows().map((em, idx, arr) => (
+                        <div key={idx} style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "6px" }}>
+                          <input
+                            id={idx === 0 ? "email" : `email_${idx}`}
+                            type="email"
+                            style={{ ...inputStyle, flex: 1 }}
+                            placeholder="Enter email address"
+                            value={em}
+                            onChange={(e) => setEmailAt(idx, e.target.value)}
+                          />
+                          <OpenLink kind="email" value={em} />
+                          {arr.length > 1 && (
+                            <button
+                              type="button"
+                              title="Remove email"
+                              aria-label="Remove email"
+                              onClick={() => removeEmailAt(idx)}
+                              style={{ width: "32px", height: "32px", borderRadius: "5px", border: "1px solid #fecaca", background: "#fef2f2", color: "#ef4444", cursor: "pointer", flexShrink: 0 }}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        data-testid="btn-add-email"
+                        onClick={addEmailRow}
+                        style={{ padding: "4px 12px", fontSize: "12.5px", fontWeight: 600, color: "#2563eb", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "5px", cursor: "pointer" }}
+                      >
+                        + Add Email
+                      </button>
                     </div>
 
                     <div>
-                      <label style={fieldLabelStyle}>Webpage (IndiaMart Or Other)</label>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <label style={fieldLabelStyle}>Webpage (IndiaMart Or Other)</label>
+                        <OpenLink value={form.secondary_website} testId="open-webpage" />
+                      </div>
                       <input
                         id="secondary_website"
                         type="text"
@@ -3829,13 +4013,18 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       <SelectWithSearch
                         id="district_id"
                         value={form.district_id}
-                        placeholder={!form.state_id ? "Select State First" : formDistricts.length === 0 ? "No Districts Found" : "Select District"}
+                        placeholder={
+                          !form.state_id
+                            ? "Select State First"
+                            : formDistricts.length === 0 && formDistrictsFor === form.state_id
+                              ? "No Districts Found"
+                              : "Select District"
+                        }
                         disabled={!form.state_id || formDistricts.length === 0}
                         options={formDistricts.map((d) => ({ value: d.id, label: d.name }))}
-                        allowCustom={true}
                         onChange={(val, lbl) => {
                           setField("district_id", val);
-                          setField("district", lbl || val);
+                          setField("district", lbl);
                           setField("city_id", "");
                           setFormCities([]);
                         }}
@@ -3849,13 +4038,19 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       <SelectWithSearch
                         id="city_id"
                         value={form.city_id}
-                        placeholder={!form.district_id ? "Select District First" : formCities.length === 0 ? "No Cities Found" : "Select City"}
-                        disabled={!form.district_id || formCities.length === 0}
+                        placeholder={
+                          !form.state_id
+                            ? "Select State First"
+                            : formDistricts.length > 0 && !form.district_id
+                              ? "Select District First"
+                              : "Select City"
+                        }
+                        disabled={!form.state_id || (formDistricts.length > 0 && !form.district_id)}
                         options={formCities.map((c) => ({ value: c.id, label: c.name }))}
                         allowCustom={true}
                         hasError={Boolean(validationErrors.city_id)}
-                        onChange={(val) => {
-                          setField("city_id", val);
+                        onChange={(val, lbl) => {
+                          void handleFullCitySelectOrCustom(val, lbl);
                           if (validationErrors.city_id) setValidationErrors((prev) => ({ ...prev, city_id: "" }));
                         }}
                       />
@@ -4061,6 +4256,28 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       </div>
                     )}
 
+                    {showsSector(form.company_type) && (
+                      <div>
+                        <label style={fieldLabelStyle}>Sector</label>
+                        <select
+                          id="sector"
+                          style={selectStyle}
+                          value={form.sector}
+                          onChange={(e) => setField("sector", e.target.value)}
+                        >
+                          <option value="">Select</option>
+                          {[
+                            ...(form.sector && !(COMPANY_SECTORS as readonly string[]).includes(form.sector) ? [form.sector] : []),
+                            ...COMPANY_SECTORS,
+                          ].map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div>
                       <label style={fieldLabelStyle}>Business Category</label>
                       <select
@@ -4137,7 +4354,11 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                         type="date"
                         style={inputStyle}
                         value={form.gst_registration_date}
-                        onChange={(e) => setField("gst_registration_date", e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          // Age of Company is derived from the registration date.
+                          setForm((p) => ({ ...p, gst_registration_date: v, age_of_company: v ? computeCompanyAge(v) : "" }));
+                        }}
                       />
                     </div>
 
@@ -4146,10 +4367,10 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       <input
                         id="age_of_company"
                         type="text"
-                        style={inputStyle}
-                        placeholder="e.g. 5 Years"
+                        readOnly
+                        style={{ ...inputStyle, background: "#f1f5f9", color: "#334155", cursor: "default" }}
+                        placeholder="Auto from registration date (years)"
                         value={form.age_of_company}
-                        onChange={(e) => setField("age_of_company", e.target.value)}
                       />
                     </div>
                   </div>
@@ -4284,6 +4505,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                           value={sm.url}
                           onChange={(e) => handleUpdateSocialMedia(idx, "url", e.target.value)}
                         />
+                        <OpenLink value={sm.url} testId={`open-social-${idx}`} />
                         <button
                           type="button"
                           onClick={() => handleRemoveSocialMedia(idx)}
@@ -4422,7 +4644,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                         boxShadow: "0 2px 6px rgba(37,99,235,0.25)",
                       }}
                     >
-                      {saving ? "Saving..." : (currentCompanyId ? "Update & Exit" : "Save & Exit")}
+                      {saving ? "Saving..." : (currentCompanyId && !isContinuingFromQuick ? "Update & Exit" : "Save & Exit")}
                     </button>
                   </div>
                 </div>
@@ -4802,6 +5024,31 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                               color: "#0f172a",
                             }}
                           />
+                        </div>
+
+                        {/* Is Primary - Yes / No (Add form: No by default) */}
+                        <div className="field">
+                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Is Primary
+                          </label>
+                          <select
+                            data-testid="contact-is-primary"
+                            value={contactForm.is_primary}
+                            onChange={(e) => setContactForm((f) => ({ ...f, is_primary: e.target.value }))}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                              background: "#ffffff",
+                            }}
+                          >
+                            <option value="no">No</option>
+                            <option value="yes">Yes</option>
+                          </select>
                         </div>
 
                         {/* Handling Territory */}
@@ -5810,6 +6057,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   </label>
                   <select
                     value={districtFilter}
+                    disabled={districtFilterLocked}
+                    data-testid="filter-district"
                     onChange={(e) => {
                       setDistrictFilter(e.target.value);
                       setCityFilter("");
@@ -5825,10 +6074,10 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       background: "#ffffff",
                     }}
                   >
-                    <option value="">All</option>
+                    <option value="">{districtFilterLocked ? "Select State First" : "All"}</option>
                     <option value="blank">Blank</option>
                     {filterDistricts.map((d) => (
-                      <option key={d.id || d.name} value={d.name}>{d.name}</option>
+                      <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
                   </select>
                 </div>
@@ -5840,6 +6089,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   </label>
                   <select
                     value={cityFilter}
+                    disabled={cityFilterLocked}
+                    data-testid="filter-city"
                     onChange={(e) => setCityFilter(e.target.value)}
                     style={{
                       width: "100%",
@@ -5852,7 +6103,9 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       background: "#ffffff",
                     }}
                   >
-                    <option value="">All</option>
+                    <option value="">
+                      {!stateFilter ? "Select State First" : cityFilterLocked ? "Select District First" : "All"}
+                    </option>
                     <option value="blank">Blank</option>
                     {availableCities.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
@@ -5941,87 +6194,93 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 </div>
 
                 {/* 10. Potential for Business per month */}
-                <div>
-                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Potential for Business per month
-                  </label>
-                  <select
-                    value={potentialBusinessFilter}
-                    onChange={(e) => setPotentialBusinessFilter(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "38px",
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      color: potentialBusinessFilter ? "#0f172a" : "#64748b",
-                      background: "#ffffff",
-                    }}
-                  >
-                    <option value="">All</option>
-                    <option value="blank">Blank</option>
-                    {POTENTIAL_BUSINESS_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                </div>
+                {filterVis.potentialPerMonth && (
+                  <div>
+                    <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                      Potential for Business per month
+                    </label>
+                    <select
+                      value={potentialBusinessFilter}
+                      onChange={(e) => setPotentialBusinessFilter(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: "38px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        color: potentialBusinessFilter ? "#0f172a" : "#64748b",
+                        background: "#ffffff",
+                      }}
+                    >
+                      <option value="">All</option>
+                      <option value="blank">Blank</option>
+                      {POTENTIAL_BUSINESS_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* 11. Monthly Turnover */}
-                <div>
-                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Monthly Turnover
-                  </label>
-                  <select
-                    value={monthlyTurnoverFilter}
-                    onChange={(e) => setMonthlyTurnoverFilter(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "38px",
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      color: monthlyTurnoverFilter ? "#0f172a" : "#64748b",
-                      background: "#ffffff",
-                    }}
-                  >
-                    <option value="">All</option>
-                    <option value="blank">Blank</option>
-                    {MONTHLY_TURNOVER_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                </div>
+                {filterVis.monthlyTurnover && (
+                  <div>
+                    <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                      Monthly Turnover
+                    </label>
+                    <select
+                      value={monthlyTurnoverFilter}
+                      onChange={(e) => setMonthlyTurnoverFilter(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: "38px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        color: monthlyTurnoverFilter ? "#0f172a" : "#64748b",
+                        background: "#ffffff",
+                      }}
+                    >
+                      <option value="">All</option>
+                      <option value="blank">Blank</option>
+                      {MONTHLY_TURNOVER_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* 12. Sector */}
-                <div>
-                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Sector
-                  </label>
-                  <select
-                    value={sectorFilter}
-                    onChange={(e) => setSectorFilter(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "38px",
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      color: sectorFilter ? "#0f172a" : "#64748b",
-                      background: "#ffffff",
-                    }}
-                  >
-                    <option value="">All</option>
-                    {COMPANY_SECTORS.map((sec) => (
-                      <option key={sec} value={sec}>
-                        {sec}
-                      </option>
-                    ))}
-                    <option value="blank">Blank</option>
-                  </select>
-                </div>
+                {filterVis.sector && (
+                  <div>
+                    <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                      Sector
+                    </label>
+                    <select
+                      value={sectorFilter}
+                      onChange={(e) => setSectorFilter(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: "38px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        color: sectorFilter ? "#0f172a" : "#64748b",
+                        background: "#ffffff",
+                      }}
+                    >
+                      <option value="">All</option>
+                      {COMPANY_SECTORS.map((sec) => (
+                        <option key={sec} value={sec}>
+                          {sec}
+                        </option>
+                      ))}
+                      <option value="blank">Blank</option>
+                    </select>
+                  </div>
+                )}
 
                 {/* 13. Business Category */}
                 <div>
@@ -6050,57 +6309,61 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 </div>
 
                 {/* 14. Direct Import from China? */}
-                <div>
-                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Direct Import from China?
-                  </label>
-                  <select
-                    value={directImportFilter}
-                    onChange={(e) => setDirectImportFilter(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "38px",
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      color: directImportFilter ? "#0f172a" : "#64748b",
-                      background: "#ffffff",
-                    }}
-                  >
-                    <option value="">All</option>
-                    <option value="Yes">Yes</option>
-                    <option value="No">No</option>
-                    <option value="blank">Blank</option>
-                  </select>
-                </div>
+                {filterVis.directImport && (
+                  <div>
+                    <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                      Direct Import from China?
+                    </label>
+                    <select
+                      value={directImportFilter}
+                      onChange={(e) => setDirectImportFilter(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: "38px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        color: directImportFilter ? "#0f172a" : "#64748b",
+                        background: "#ffffff",
+                      }}
+                    >
+                      <option value="">All</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                      <option value="blank">Blank</option>
+                    </select>
+                  </div>
+                )}
 
                 {/* 15. Monthly Import Volume */}
-                <div>
-                  <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
-                    Monthly Import Volume
-                  </label>
-                  <select
-                    value={monthlyImportVolumeFilter}
-                    onChange={(e) => setMonthlyImportVolumeFilter(e.target.value)}
-                    style={{
-                      width: "100%",
-                      height: "38px",
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13px",
-                      color: monthlyImportVolumeFilter ? "#0f172a" : "#64748b",
-                      background: "#ffffff",
-                    }}
-                  >
-                    <option value="">All</option>
-                    <option value="blank">Blank</option>
-                    {IMPORT_VOLUME_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                </div>
+                {filterVis.monthlyImportVolume && (
+                  <div>
+                    <label style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                      Monthly Import Volume
+                    </label>
+                    <select
+                      value={monthlyImportVolumeFilter}
+                      onChange={(e) => setMonthlyImportVolumeFilter(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: "38px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        color: monthlyImportVolumeFilter ? "#0f172a" : "#64748b",
+                        background: "#ffffff",
+                      }}
+                    >
+                      <option value="">All</option>
+                      <option value="blank">Blank</option>
+                      {IMPORT_VOLUME_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* 16. Sales Person */}
                 <div>
@@ -6495,7 +6758,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                                               gap: "4px",
                                             }}
                                           >
-                                            <span style={{ fontSize: "11px" }}>🟢</span> {wa}
+                                            <WhatsAppIcon size={13} /> {wa}
                                           </a>
                                         ) : null}
                                         {!phone && !wa && <span style={{ color: "#94a3b8" }}>—</span>}
@@ -6662,72 +6925,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                                         </svg>
                                       </button>
                                     )}
-                                    {s.current_status?.toLowerCase() === "existing" ? (
-                                      <button
-                                        type="button"
-                                        className="btn"
-                                        data-testid="btn-toggle-inactive"
-                                        disabled={isRowActionPending(`toggle-active:${s.id}`)}
-                                        style={{
-                                          background: s.is_active ? "#f59e0b" : "#10b981",
-                                          color: "#ffffff",
-                                          padding: "5px 9px",
-                                          borderRadius: "4px",
-                                          border: "none",
-                                          cursor: isRowActionPending(`toggle-active:${s.id}`) ? "default" : "pointer",
-                                          opacity: isRowActionPending(`toggle-active:${s.id}`) ? 0.6 : 1,
-                                          display: "inline-flex",
-                                          alignItems: "center",
-                                          justifyContent: "center",
-                                          fontSize: "11px",
-                                          fontWeight: 600,
-                                        }}
-                                        onClick={() => {
-                                          void handleToggleActive(s);
-                                        }}
-                                        title={s.is_active ? "Toggle Inactive (Existing companies cannot be deleted)" : "Activate Company"}
-                                      >
-                                        {s.is_active ? "Deactivate" : "Activate"}
-                                      </button>
-                                    ) : (
-                                      canDelete && (() => {
-                                        const isEligibleForDelete =
-                                          (!s.current_status || s.current_status.toLowerCase() === "new") &&
-                                          (!s.potential || s.potential.toLowerCase() === "no");
-                                        if (!isEligibleForDelete) return null;
-                                        return (
-                                          <button
-                                            type="button"
-                                            className="btn"
-                                            data-testid="btn-delete-company"
-                                            disabled={isRowActionPending(`delete:${s.id}`)}
-                                            style={{
-                                              background: "#ef4444",
-                                              color: "#ffffff",
-                                              padding: "6px 8px",
-                                              borderRadius: "4px",
-                                              border: "none",
-                                              cursor: isRowActionPending(`delete:${s.id}`) ? "default" : "pointer",
-                                              opacity: isRowActionPending(`delete:${s.id}`) ? 0.6 : 1,
-                                              display: "inline-flex",
-                                              alignItems: "center",
-                                              justifyContent: "center",
-                                            }}
-                                            onClick={() => {
-                                              void handleRowDelete(s.id);
-                                            }}
-                                            title="Delete Company"
-                                          >
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                              <polyline points="3 6 5 6 21 6" />
-                                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                              <line x1="10" y1="11" x2="10" y2="17" />
-                                              <line x1="14" y1="11" x2="14" y2="17" />
-                                            </svg>
-                                          </button>
-                                        );
-                                      })()
-                                    )}
                                   </div>
                                 </td>
                               );
@@ -6776,6 +6973,9 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           title={`Company Detail #${drawerCompany.company_name}`}
           subtitle={`Company Type: ${drawerCompany.company_type || "—"} | Status: ${drawerCompany.is_active ? "Active" : "Inactive"}`}
           onClose={handleCloseDrawer}
+          className="company-detail-drawer"
+          width="100%"
+          maxWidth="min(1150px, calc(100vw - 220px))"
           onEdit={
             canUpdate
               ? () => {
@@ -6788,30 +6988,49 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           editLabel="✏️ Edit Company"
         >
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <DetailFieldGrid
-              fields={[
-                { label: "Company Name", value: drawerCompany.company_name, fullWidth: true },
-                { label: "Company Type", value: drawerCompany.company_type || "—" },
-                { label: "GST No Of Company", value: drawerCompany.tax_id_number || "—" },
-                { label: "Brand Description", value: drawerCompany.brand_description || "—" },
-                { label: "Area", value: drawerCompany.area || "—" },
-                { label: "District", value: drawerCompany.district || "—" },
-                { label: "Country", value: resolver.get("countries", drawerCompany.country_id) || "—" },
-                { label: "Province / State", value: resolver.get("states", drawerCompany.state_id) || "—" },
-                { label: "City", value: resolver.get("cities", drawerCompany.city_id) || "—" },
-                { label: "Product Categories", value: chipList(drawerCompany.category_ids, "categories"), fullWidth: true },
-                { label: "Sub-Categories", value: chipList(drawerCompany.sub_category_ids, "subCategories"), fullWidth: true },
-                { label: "Products Supplied", value: chipList(drawerCompany.product_ids, "products"), fullWidth: true },
-                { label: "Secondary Products", value: drawerCompany.secondary_products_description || "—", fullWidth: true },
-                { label: "Address", value: drawerCompany.address || "—", fullWidth: true },
-              ]}
-            />
-
-            <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a" }}>
-                Primary Contact Information
-              </h4>
+            {/* Section 1: Company Profile & Location */}
+            <div style={{ background: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", overflow: "hidden" }}>
+              <div style={{ padding: "12px 18px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "14px", color: "#1e293b" }}>
+                <span>🏢</span> Company Overview & Location
+              </div>
               <DetailFieldGrid
+                columns={4}
+                style={{ background: "#ffffff", border: "none", borderRadius: 0, padding: "18px 20px" }}
+                fields={[
+                  { label: "Company Name", value: drawerCompany.company_name, span: 2 },
+                  { label: "Company Type", value: drawerCompany.company_type || "—" },
+                  { label: "GST No Of Company", value: drawerCompany.tax_id_number || "—" },
+                  {
+                    label: "Sales Person (Assigned)",
+                    value: (() => {
+                      const sp = filterSalesPersons.find((u) => u.id === drawerCompany.sales_person_id) || salesPersons.find((u) => u.id === drawerCompany.sales_person_id);
+                      return sp ? (sp.full_name || sp.username) : (drawerCompany.sales_person_id ? "Assigned" : "—");
+                    })(),
+                  },
+                  { label: "Country", value: resolver.get("countries", drawerCompany.country_id) || "—" },
+                  { label: "Province / State", value: resolver.get("states", drawerCompany.state_id) || "—" },
+                  { label: "District", value: drawerCompany.district || "—" },
+                  { label: "City", value: resolver.get("cities", drawerCompany.city_id) || "—" },
+                  { label: "Area", value: drawerCompany.area || "—" },
+                  { label: "Pincode", value: drawerCompany.pincode || "—" },
+                  { label: "Brand Description", value: drawerCompany.brand_description || "—", span: 2 },
+                  { label: "Full Address", value: drawerCompany.address || "—", fullWidth: true },
+                  { label: "Product Categories", value: chipList(drawerCompany.category_ids, "categories"), span: 2 },
+                  { label: "Sub-Categories", value: chipList(drawerCompany.sub_category_ids, "subCategories"), span: 2 },
+                  { label: "Products Supplied", value: chipList(drawerCompany.product_ids, "products"), span: 2 },
+                  { label: "Secondary Products", value: drawerCompany.secondary_products_description || "—", span: 2 },
+                ]}
+              />
+            </div>
+
+            {/* Section 2: Contact Information */}
+            <div style={{ background: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", overflow: "hidden" }}>
+              <div style={{ padding: "12px 18px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "14px", color: "#1e293b" }}>
+                <span>📇</span> Primary Contact Information
+              </div>
+              <DetailFieldGrid
+                columns={4}
+                style={{ background: "#ffffff", border: "none", borderRadius: 0, padding: "18px 20px" }}
                 fields={[
                   {
                     label: "Full Name",
@@ -6819,66 +7038,154 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   },
                   { label: "Designation", value: drawerCompany.contact_designation || "—" },
                   { label: "Calling Number", value: drawerCompany.contact_calling_number || "—" },
-                  { label: "WhatsApp Number", value: drawerCompany.contact_whatsapp_number || "—" },
+                  {
+                    label: "WhatsApp Number",
+                    value: drawerCompany.contact_whatsapp_number ? (
+                      <a
+                        href={`https://wa.me/${drawerCompany.contact_whatsapp_number.replace(/[^0-9]/g, "")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "#16a34a", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                      >
+                        <WhatsAppIcon size={14} /> {drawerCompany.contact_whatsapp_number}
+                      </a>
+                    ) : "—",
+                  },
                   { label: "WeChat Number", value: drawerCompany.contact_wechat_number || "—" },
-                  { label: "Email Addresses", value: drawerCompany.emails && drawerCompany.emails.length ? drawerCompany.emails.join(", ") : "—", fullWidth: true },
-                  { label: "Primary Website", value: drawerCompany.primary_website || "—" },
-                  { label: "Secondary Website", value: drawerCompany.secondary_website || "—" },
+                  { label: "IndiaMart Number", value: drawerCompany.contact_indiamart_number || "—" },
+                  {
+                    label: "Email Addresses",
+                    value:
+                      drawerCompany.emails && drawerCompany.emails.length ? (
+                        <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "4px 14px" }}>
+                          {drawerCompany.emails.map((em) =>
+                            toMailto(em) ? (
+                              <a key={em} href={toMailto(em) as string} style={{ color: "#0061f2", textDecoration: "none" }}>
+                                {em}
+                              </a>
+                            ) : (
+                              <span key={em}>{em}</span>
+                            )
+                          )}
+                        </span>
+                      ) : (
+                        "—"
+                      ),
+                    span: 2,
+                  },
+                  { label: "Primary Website", value: <LinkValue value={drawerCompany.primary_website} />, span: 2 },
+                  { label: "Secondary Website", value: <LinkValue value={drawerCompany.secondary_website} />, span: 2 },
+                  {
+                    label: "Social Media",
+                    value:
+                      drawerCompany.social_media && drawerCompany.social_media.some((sm) => sm.url) ? (
+                        <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "4px 14px" }}>
+                          {drawerCompany.social_media
+                            .filter((sm) => sm.url)
+                            .map((sm, i) => (
+                              <LinkValue key={i} value={sm.url} text={sm.platform || sm.url} />
+                            ))}
+                        </span>
+                      ) : (
+                        "—"
+                      ),
+                    span: 2,
+                  },
                 ]}
               />
               {drawerCompany.contacts && drawerCompany.contacts.length > 0 && (
-                <div style={{ marginTop: "16px", borderTop: "1px solid #e2e8f0", paddingTop: "12px" }}>
-                  <h5 style={{ fontSize: "12.5px", fontWeight: 700, margin: "0 0 10px 0", color: "#475569" }}>
-                    Other Contacts
+                <div style={{ padding: "14px 20px", borderTop: "1px solid #e2e8f0", background: "#fafafa" }}>
+                  <h5 style={{ fontSize: "13px", fontWeight: 700, margin: "0 0 10px 0", color: "#475569" }}>
+                    Additional Contacts ({drawerCompany.contacts.length})
                   </h5>
-                  {drawerCompany.contacts.map((c) => (
-                    <div
-                      key={c.id}
-                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: "13px" }}
-                    >
-                      <span>
-                        {c.salutation ? `${c.salutation} ` : ""}
-                        {c.person_name}
-                        {c.designation ? ` — ${c.designation}` : ""}
-                        {computeAge(c.birth_date) !== null && ` (Age ${computeAge(c.birth_date)})`}
-                      </span>
-                      <span style={{ color: "#64748b" }}>{c.calling_number || "—"}</span>
-                    </div>
-                  ))}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "10px" }}>
+                    {drawerCompany.contacts.map((c) => (
+                      <div
+                        key={c.id}
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "6px",
+                          padding: "10px 12px",
+                          fontSize: "13px",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, color: "#0f172a" }}>
+                          {c.salutation ? `${c.salutation} ` : ""}
+                          {c.person_name}
+                          {computeAge(c.birth_date) !== null && (
+                            <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 500, marginLeft: "4px" }}>
+                              (Age {computeAge(c.birth_date)})
+                            </span>
+                          )}
+                        </div>
+                        {c.designation && <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>{c.designation}</div>}
+                        <div style={{ fontSize: "12px", color: "#0284c7", marginTop: "4px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span>📞 {c.calling_number || "—"}</span>
+                          {c.whatsapp_number && (
+                            <a
+                              href={`https://wa.me/${c.whatsapp_number.replace(/[^0-9]/g, "")}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: "#16a34a", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                            >
+                              <WhatsAppIcon size={12} /> {c.whatsapp_number}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
 
-            <DetailFieldGrid
-              fields={[
-                { label: "Category", value: drawerCompany.company_category || "—" },
-                { label: "Business Category", value: drawerCompany.business_category || "—" },
-                { label: "Sector", value: drawerCompany.sector || "—" },
-                { label: "Company Grade", value: drawerCompany.company_grade || "—" },
-                { label: "Current Status", value: <StatusPill value={drawerCompany.current_status} /> },
-                { label: "Potential", value: drawerCompany.potential || "—" },
-                ...(showsPotentialReason(drawerCompany.potential || "")
-                  ? [{ label: "Potential Reason", value: drawerCompany.potential_reason || "—" }]
-                  : []),
-                ...(showsPotentialBusinessPerMonth(drawerCompany.potential || "")
-                  ? [{ label: "Potential Business / Month", value: drawerCompany.potential_business_per_month || "—" }]
-                  : []),
-                ...(showsMonthlyTurnover(drawerCompany.company_type || "")
-                  ? [{ label: "Monthly Turnover", value: drawerCompany.monthly_turnover || "—" }]
-                  : []),
-                ...(showsDirectImportCluster(drawerCompany.company_type || "")
-                  ? [{ label: "Direct Import From China", value: drawerCompany.direct_import_from_china || "—" }]
-                  : []),
-                ...(showsImportSubFields(drawerCompany.company_type || "", drawerCompany.direct_import_from_china || "")
-                  ? [
-                    { label: "Monthly Import Volume", value: drawerCompany.monthly_import_volume || "—" },
-                    { label: "Products Needed For Imports", value: drawerCompany.products_needed_for_imports || "—", fullWidth: true },
-                  ]
-                  : []),
-                { label: "Visited Factory/Office", value: drawerCompany.visited_factory_office ? "Yes" : "No" },
-                { label: "Overall Remarks", value: drawerCompany.overall_remarks || "—", fullWidth: true },
-              ]}
-            />
+            {/* Section 3: Business Classification & Commercial Details */}
+            <div style={{ background: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", overflow: "hidden" }}>
+              <div style={{ padding: "12px 18px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "14px", color: "#1e293b" }}>
+                <span>📊</span> Business Classification & Commercial Details
+              </div>
+              <DetailFieldGrid
+                columns={4}
+                style={{ background: "#ffffff", border: "none", borderRadius: 0, padding: "18px 20px" }}
+                fields={[
+                  { label: "Category", value: drawerCompany.company_category || "—" },
+                  { label: "Business Category", value: drawerCompany.business_category || "—" },
+                  { label: "Sector", value: drawerCompany.sector || "—" },
+                  { label: "Company Grade", value: drawerCompany.company_grade || "—" },
+                  { label: "Current Status", value: <StatusPill value={drawerCompany.current_status} /> },
+                  { label: "Potential", value: drawerCompany.potential || "—" },
+                  ...(showsPotentialReason(drawerCompany.potential || "")
+                    ? [{ label: "Potential Reason", value: drawerCompany.potential_reason || "—", span: 2 }]
+                    : []),
+                  ...(showsPotentialBusinessPerMonth(drawerCompany.potential || "")
+                    ? [{ label: "Potential Business / Month", value: drawerCompany.potential_business_per_month || "—" }]
+                    : []),
+                  ...(showsMonthlyTurnover(drawerCompany.company_type || "")
+                    ? [{ label: "Monthly Turnover", value: drawerCompany.monthly_turnover || "—" }]
+                    : []),
+                  { label: "GST Registration Date", value: drawerCompany.gst_registration_date || "—" },
+                  { label: "Age of Company", value: drawerCompany.age_of_company ? `${drawerCompany.age_of_company} yrs` : "—" },
+                  { label: "Machines Buying From", value: drawerCompany.machines_buying_from || "—", span: 2 },
+                  { label: "Spares Buying From", value: drawerCompany.spares_buying_from || "—", span: 2 },
+                  { label: "Products Interested (P1)", value: drawerCompany.products_interested || drawerCompany.product_manufacture_or_supply || "—", span: 2 },
+                  ...(showsDirectImportCluster(drawerCompany.company_type || "")
+                    ? [{ label: "Direct Import From China", value: drawerCompany.direct_import_from_china || "—" }]
+                    : []),
+                  ...(showsImportSubFields(drawerCompany.company_type || "", drawerCompany.direct_import_from_china || "")
+                    ? [
+                      { label: "Monthly Import Volume", value: drawerCompany.monthly_import_volume || "—" },
+                      { label: "Products Needed For Imports", value: drawerCompany.products_needed_for_imports || "—", span: 2 },
+                    ]
+                    : []),
+                  { label: "Visited Factory/Office", value: drawerCompany.visited_factory_office ? "Yes" : "No" },
+                  ...(drawerCompany.visit_remarks
+                    ? [{ label: "Visit Remarks", value: drawerCompany.visit_remarks, span: 3 }]
+                    : []),
+                  { label: "Overall Remarks", value: drawerCompany.overall_remarks || "—", fullWidth: true },
+                ]}
+              />
+            </div>
           </div>
         </SideDrawer>
       )}
@@ -7033,6 +7340,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               </label>
               <div style={{ display: "flex", gap: "6px", width: "100%", minWidth: 0 }}>
                 <input
+                  id="quick_tax_id_number"
+                  data-testid="quick-tax-id"
                   type="text"
                   autoComplete="off"
                   style={{
@@ -7114,7 +7423,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 options={quickStates.map((s) => ({ value: s.id, label: s.name }))}
                 hasError={Boolean(quickErrors.state_id)}
                 onChange={(stateId) => {
-                  setQuickForm((p) => ({ ...p, state_id: stateId, district: "", city_id: "" }));
+                  setQuickForm((p) => ({ ...p, state_id: stateId, district_id: "", district: "", city_id: "" }));
                   if (quickErrors.state_id) setQuickErrors((p) => ({ ...p, state_id: "" }));
                 }}
               />
@@ -7130,12 +7439,17 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               </label>
               <SelectWithSearch
                 id="quick_district"
-                value={quickForm.district}
-                placeholder={!quickForm.state_id ? "Select State First" : "Select"}
-                options={quickDistricts.map((d) => ({ value: d.name, label: d.name }))}
-                allowCustom={true}
-                disabled={!quickForm.state_id}
-                onChange={(val, lbl) => setQuickForm((p) => ({ ...p, district: lbl || val, city_id: "" }))}
+                value={quickForm.district_id}
+                placeholder={
+                  !quickForm.state_id
+                    ? "Select State First"
+                    : quickDistricts.length === 0 && quickDistrictsFor === quickForm.state_id
+                      ? "No Districts Found"
+                      : "Select"
+                }
+                options={quickDistricts.map((d) => ({ value: d.id, label: d.name }))}
+                disabled={!quickForm.state_id || quickDistricts.length === 0}
+                onChange={(val, lbl) => setQuickForm((p) => ({ ...p, district_id: val, district: lbl, city_id: "" }))}
               />
             </div>
 
@@ -7147,14 +7461,15 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               <SelectWithSearch
                 id="quick_city_id"
                 value={quickForm.city_id}
-                placeholder={!quickForm.district ? "Select District First" : "Select"}
-                disabled={!quickForm.district}
-                options={!quickForm.district ? [] : quickCities
-                  .filter((c: any) => {
-                    const matchedDist = quickDistricts.find((d) => d.name.toLowerCase() === quickForm.district.toLowerCase());
-                    return !c.district_id || (matchedDist && c.district_id === matchedDist.id);
-                  })
-                  .map((c) => ({ value: c.id, label: c.name }))}
+                placeholder={
+                  !quickForm.state_id
+                    ? "Select State First"
+                    : quickDistricts.length > 0 && !quickForm.district_id
+                      ? "Select District First"
+                      : "Select"
+                }
+                disabled={!quickForm.state_id || (quickDistricts.length > 0 && !quickForm.district_id)}
+                options={quickCities.map((c) => ({ value: c.id, label: c.name }))}
                 allowCustom={true}
                 onChange={async (cityVal, cityLabel) => {
                   await handleQuickCitySelectOrCustom(cityVal, cityLabel);
@@ -7318,6 +7633,9 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 value={quickForm.primary_website}
                 onChange={(e) => setQuickForm((p) => ({ ...p, primary_website: e.target.value }))}
               />
+              <div style={{ marginTop: "4px" }}>
+                <OpenLink value={quickForm.primary_website} testId="open-quick-webpage" />
+              </div>
             </div>
 
             {/* 14. Sales Person */}

@@ -269,12 +269,14 @@ async def upload_product_image(
     return {"success": True, "data": {"url": image_url}}
 
 
-@router.post("/bulk-delete", summary="Bulk delete products with zero-stock enforcement")
+@router.post("/bulk-delete", summary="Bulk delete products with zero-stock enforcement (admin level)")
 async def bulk_delete_products(
     payload: BulkDeletePayload,
     request: Request,
     service: ProductService = Depends(get_product_service),
     current_user: CurrentUser = Depends(require_permission("product.delete")),
+    # Spec: Bulk Delete is admin level -> needs the Bulk Actions permission as well as the delete permission.
+    _bulk_allowed: CurrentUser = Depends(require_permission("product.bulk_action")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),

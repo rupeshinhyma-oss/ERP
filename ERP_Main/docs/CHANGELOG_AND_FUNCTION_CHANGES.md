@@ -3,6 +3,27 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-14] — Seed First-Install Protection, Registry Host Safeguard & Federation DNS Resilience
+
+### 1. Database Seed First-Install Protection (`BOOTSTRAP_FORCE_RESET`)
+- **Non-Destructive Bootstrap Guard:**
+  - Hardened `backend/scripts/seed.py` to protect existing production database rows.
+  - If existing platform administrators, global users, or registry entries are detected, database seeding exits safely without mutating live records.
+  - Destructive re-initialization is strictly blocked unless `BOOTSTRAP_FORCE_RESET=true` is explicitly injected into environment variables.
+
+### 2. Registry Host Safeguard (`seed_registry.py`)
+- **Protecting Production Spoke URLs:**
+  - Hardened `backend/scripts/seed_registry.py` to prevent local developer test runs from unintentionally overwriting production spoke URLs with `http://localhost:*`.
+  - Spoke instance base URLs and frontend URLs are updated from environment variables (`INHYMA_ERP_URL`, `YINGLIMA_ERP_URL`, etc.) only if those variables are non-empty and explicitly set.
+
+### 3. Platform-Gated Winsock DNS Isolation
+- **Platform Gating (`sys.platform.startswith("win")`):**
+  - In `backend/app/core/dns_resilience.py`, asynchronous DNS caching is platform-gated strictly to Windows developer environments.
+  - Production Linux containers run unpatched with standard `glibc` resolvers.
+  - DNS cache uses 5-tuple key `(host, port, family, type, proto)`, preserving exact port mappings and eliminating cross-port collisions across `localhost:8000`, `8001`, and `8002`.
+
+---
+
 ## [Release 2026-10-14] — Session-Scoped Login & Logout (one login = one session id)
 
 ### Why

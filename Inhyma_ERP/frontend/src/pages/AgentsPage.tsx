@@ -25,6 +25,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { IconTrash, IconPlus } from "@/components/icons";
+import { SortHeader } from "@/components/SortHeader";
 
 export interface AgentItem {
   id: string;
@@ -936,25 +937,127 @@ export function AgentsPage() {
                     />
                   </th>
                   <th style={{ padding: "12px 14px", width: "60px" }}>Sr. No.</th>
-                  <th
-                    onClick={() => {
-                      setSortField("full_name");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    Agents / Company Name +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Agents / Company Name"
+                      isSorted={sortField === "full_name"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "full_name") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("full_name"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th style={{ padding: "12px 14px" }}>Type of Agent</th>
-                  <th style={{ padding: "12px 14px" }}>Calling / WhatsApp No.</th>
-                  <th style={{ padding: "12px 14px" }}>Area / City</th>
-                  <th style={{ padding: "12px 14px" }}>District / State</th>
-                  <th style={{ padding: "12px 14px" }}>Sales Person</th>
-                  <th style={{ padding: "12px 14px", width: "70px" }}>Grade</th>
-                  <th style={{ padding: "12px 14px", width: "80px" }}>Status</th>
-                  <th style={{ padding: "12px 14px", width: "80px" }}>Potential</th>
-                  <th style={{ padding: "12px 14px", width: "60px" }}>Age</th>
-                  <th style={{ padding: "12px 14px" }}>Added on</th>
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Type of Agent"
+                      isSorted={sortField === "agent_type"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "agent_type") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("agent_type"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Calling / WhatsApp No."
+                      isSorted={sortField === "calling_number"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "calling_number") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("calling_number"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Area / City"
+                      isSorted={sortField === "city"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "city") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("city"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="District / State"
+                      isSorted={sortField === "district"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "district") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("district"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Sales Person"
+                      isSorted={sortField === "sales_person"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "sales_person") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("sales_person"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px", width: "70px" }}>
+                    <SortHeader
+                      label="Grade"
+                      isSorted={sortField === "agent_grade"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "agent_grade") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("agent_grade"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px", width: "80px" }}>
+                    <SortHeader
+                      label="Status"
+                      isSorted={sortField === "current_status"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "current_status") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("current_status"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px", width: "80px" }}>
+                    <SortHeader
+                      label="Potential"
+                      isSorted={sortField === "potential"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "potential") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("potential"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px", width: "60px" }}>
+                    <SortHeader
+                      label="Age"
+                      isSorted={sortField === "age"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "age") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("age"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Added on"
+                      isSorted={sortField === "created_at"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "created_at") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("created_at"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
                   <th style={{ padding: "12px 14px", textAlign: "center" }}>Action</th>
                 </tr>
               </thead>

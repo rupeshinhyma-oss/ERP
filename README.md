@@ -196,4 +196,34 @@ A comprehensive, production-tested deployment manual is available in **[`DEPLOYM
 - **Disambiguated Session Verification & False Logout Prevention:** 3-way status contract (`valid` vs `notFound` vs `revoked`) ensuring client background watchers do not falsely terminate sessions on network blips or server restarts.
 - **Multi-Identifier Spoke Resolution:** Bidirectional resolution of machine keys (`erp-01` / `inhyma`, `erp-02` / `yinglima`) enabling uninterrupted SSO switching and centralized access governance across spokes.
 
+---
+
+## 6. Ecosystem Resilience, Email Deduplication & Production Safeguards
+
+### A. Central Federation Multi-URL Discovery & Spoke Resilience
+- **Multi-Candidate Resolution (`erp_main_api_base_urls()`):** Spoke backends resolve candidate URLs sequentially (`ERP_MAIN_API_BASE_URL`, `ERP_MAIN_URL`, and defaults), ensuring resilience when switching between custom domains and cloud platform endpoints.
+- **Outbound IPv4 Binding (`0.0.0.0`):** Outbound `httpx.AsyncClient` connections bind explicitly to `0.0.0.0`, eliminating broken IPv6 routing in cloud container meshes.
+- **40-Second Cold-Start Sleeping Budget:** Cloud container instances (e.g. Render starter tiers) are allocated a 40.0s timeout budget (`httpx.Timeout(40.0, connect=20.0)`), allowing sleeping upstream containers to cold-boot cleanly during SSO handovers.
+- **900s Stale Session Tolerance (`_from_cache`):** If the central control plane is temporarily unreachable or undergoing deployment, verified sessions are served from spoke local memory cache for up to 15 minutes, preventing user lockouts.
+- **Live Federation Diagnostics (`GET /api/v1/health/federation`):** Diagnostic endpoint providing real-time ping latency and connectivity verification between spoke nodes and central control.
+
+### B. Platform-Gated Winsock DNS Isolation
+- **Windows Gating (`sys.platform.startswith("win")`):** Asynchronous DNS caching in `dns_resilience.py` runs exclusively on Windows developer workstations, preventing Winsock socket leaks (`WSAEADDRINUSE`) without affecting production Linux containers.
+- **Port-Sensitive 5-Tuple DNS Cache Key:** Keyed by `(host, port, family, type, proto)`, preserving exact port destinations and preventing localhost cross-port routing collisions across `localhost:8000`, `8001`, and `8002`.
+
+### C. Persistent Inbound Email Deduplication
+- **Atomic Relational Ledger (`email_inbound_processed`):** Stores compound unique keys `(message_id, uid, inquiry_id, supplier_id)`. Checks `SELECT 1 FROM email_inbound_processed WHERE message_id = :mid` before invoking OpenAI extraction APIs, completely eliminating duplicate quotes across worker restarts.
+- **30-Minute Historical Baseline:** On worker startup, historical messages older than 30 minutes are stamped into the deduplication ledger without creating duplicate quotes.
+- **Zero-Cost Follow-ups:** Supplier quotation extraction runs strictly once (`QT-AUTO-01`); subsequent negotiation emails bypass LLM extraction and append directly to the thread timeline.
+
+### D. Idempotent Deployment & Seed First-Install Protection
+- **Bootstrap Guard (`BOOTSTRAP_FORCE_RESET`):** All `seed.py` scripts across `Inhyma_ERP`, `Yinglima_ERP`, and `ERP_Main` halt automatically if existing records are detected. Live accounts, credentials, and master geographies are never overwritten unless `BOOTSTRAP_FORCE_RESET=true` is explicitly provided.
+- **Registry Host Safety (`seed_registry.py`):** Spoke instance URLs are updated only if explicit environment variables (`INHYMA_ERP_URL`, `YINGLIMA_ERP_URL`) are provided, preventing local developer runs from overwriting production cloud URLs with localhost.
+- **SSO Handover Inactive User Guards:** `POST /api/v1/auth/sso-handover` verifies local account status; incoming SSO handovers for users with `is_active=False` or `deleted_at IS NOT NULL` are rejected with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
+
+### E. Database-Backed Organization Branding & Storage Quota Guards
+- **Versioned Logo Streaming (`GET /api/v1/organizations/logo?v={sha1}`):** Streams high-resolution organization logos directly from PostgreSQL with `Cache-Control: public, max-age=86400, immutable`. The `v` query hash forces immediate browser cache refresh on logo update.
+- **Client Storage Quota Protection:** `try/catch` handlers around `localStorage.setItem` in `brand.ts` and `Organization.tsx` eliminate mobile browser `QuotaExceededError` crashes when handling large base64 logo strings.
+
+
 

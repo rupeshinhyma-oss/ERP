@@ -33,6 +33,7 @@ class TechnicalTaskCallLogRead(TechnicalTaskCallLogBase):
 
 class TechnicalTaskBase(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=255)
+    company_id: uuid.UUID | None = None
     task_type: str = Field(default="In-House", max_length=100)
     city: str = Field(..., min_length=1, max_length=100)
     third_party: str | None = Field(default=None, max_length=100)
@@ -55,6 +56,7 @@ class TechnicalTaskBase(BaseModel):
     call_type: str = Field(default="Demo", max_length=50)
 
     creator_remarks: str | None = None
+    technician_remarks: str | None = None
     task_approved_by: str | None = Field(default=None, max_length=100)
     task_approved_date: date | None = None
     task_allotted_to: str | None = Field(default=None, max_length=100)
@@ -63,6 +65,7 @@ class TechnicalTaskBase(BaseModel):
 
     payment_status: str | None = Field(default=None, max_length=50)
     payment_mode: str | None = Field(default=None, max_length=50)
+    collected_amount: Decimal | None = None
     payment_screenshot: str | None = Field(default=None, max_length=500)
     status: str = Field(default="Pending", max_length=50)
     cancel_remarks: str | None = None
@@ -76,6 +79,9 @@ class TechnicalTaskCreate(TechnicalTaskBase):
 
 class TechnicalTaskUpdate(BaseModel):
     company_name: str | None = None
+    company_id: uuid.UUID | None = None
+    # Optimistic concurrency: when supplied, the save is rejected (409) if someone else changed the task first.
+    version: int | None = None
     task_type: str | None = None
     city: str | None = None
     third_party: str | None = None
@@ -124,6 +130,15 @@ class TechnicalTaskStatusUpdate(BaseModel):
     completed_date: date | None = None
     remarks: str | None = None
     cancel_remarks: str | None = None
+    # Completion form (chargeable tasks): did the technician collect the money, and how much.
+    payment_collected: bool | None = None
+    collected_amount: Decimal | None = None
+    # Approver overrides (workflow doc: Task Type / Service Type / Amount / Payment Terms are set by the creator
+    # and "Task Approver can override"). Only applied when approving.
+    task_type: str | None = Field(default=None, max_length=100)
+    service_type: str | None = Field(default=None, max_length=50)
+    service_charge: Decimal | None = None
+    payment_terms: str | None = None
 
     @model_validator(mode="after")
     def validate_cancellation_remarks(self) -> TechnicalTaskStatusUpdate:
@@ -171,3 +186,22 @@ class TechnicalTaskCountsResponse(BaseModel):
 
 class TechnicalTaskBulkDeleteRequest(BaseModel):
     ids: list[uuid.UUID]
+
+
+class TechnicalCallLogReportRow(BaseModel):
+    """One row of the separate Technical Call Log report (log + its task's identifying details)."""
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    call_date: date
+    call_type: str
+    remarks: str
+    created_by: str
+    created_at: datetime
+    company_name: str
+    city: str
+    machine_model: str
+    contact_person_name: str | None = None
+    contact_phone: str | None = None
+    task_status: str
+    task_allotted_to: str | None = None

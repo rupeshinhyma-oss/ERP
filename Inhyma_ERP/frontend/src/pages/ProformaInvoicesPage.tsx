@@ -19,6 +19,7 @@ import { Combobox } from "@/components/Combobox";
 import { ClientNameAutocomplete, type CompanyAutocompleteItem } from "@/components/ClientNameAutocomplete";
 import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { SortHeader } from "@/components/SortHeader";
 import { apiDelete, apiGet, apiPatch, apiPost, errorMessage as apiErrorText } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useOptions, useMasterNames } from "@/lib/options";
@@ -399,24 +400,112 @@ export function ProformaInvoicesPage({
     searchTerm,
   ]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = (colIdx: number) => {
+    if (sortColIndex === colIdx) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else {
+        setSortColIndex(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColIndex(colIdx);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedItems = useMemo(() => {
+    if (sortColIndex === null) return filteredItems;
+    const list = [...filteredItems];
+    list.sort((a, b) => {
+      let vA: any = "";
+      let vB: any = "";
+      switch (sortColIndex) {
+        case 1: // Proforma No.
+          vA = a.proforma_no || "";
+          vB = b.proforma_no || "";
+          break;
+        case 2: // Warehouse
+          vA = a.warehouse || "";
+          vB = b.warehouse || "";
+          break;
+        case 3: // Lead Source
+          vA = a.lead_source || "";
+          vB = b.lead_source || "";
+          break;
+        case 4: // Exp. Deli. Date
+          vA = a.expected_delivery_date || "";
+          vB = b.expected_delivery_date || "";
+          break;
+        case 5: // Company
+          vA = a.company_name || "";
+          vB = b.company_name || "";
+          break;
+        case 6: // City / State
+          vA = `${a.city || ""} ${a.state || ""}`;
+          vB = `${b.city || ""} ${b.state || ""}`;
+          break;
+        case 7: // Sales Person
+          vA = a.sales_person || "";
+          vB = b.sales_person || "";
+          break;
+        case 8: // Amount (Inc.GST)
+          vA = Number(a.total_with_tax) || 0;
+          vB = Number(b.total_with_tax) || 0;
+          break;
+        case 9: // Discount
+          vA = Number(a.total_discount) || 0;
+          vB = Number(b.total_discount) || 0;
+          break;
+        case 10: // Status
+          vA = a.status || "";
+          vB = b.status || "";
+          break;
+        default:
+          return 0;
+      }
+      if (typeof vA === "number" && typeof vB === "number") {
+        return sortDirection === "asc" ? vA - vB : vB - vA;
+      }
+      const sA = String(vA).toLowerCase();
+      const sB = String(vB).toLowerCase();
+      if (sA < sB) return sortDirection === "asc" ? -1 : 1;
+      if (sA > sB) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [filteredItems, sortColIndex, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedItems.length / perPage));
   const paginatedItems = useMemo(() => {
     const start = (currentPage - 1) * perPage;
-    return filteredItems.slice(start, start + perPage);
-  }, [filteredItems, currentPage, perPage]);
+    return sortedItems.slice(start, start + perPage);
+  }, [sortedItems, currentPage, perPage]);
 
   const paginationMeta: PaginationMeta = useMemo(() => ({
     current_page: currentPage,
     total_pages: totalPages,
-    total_records: filteredItems.length,
+    total_records: sortedItems.length,
     page_size: perPage,
     has_previous: currentPage > 1,
     has_next: currentPage < totalPages,
-  }), [currentPage, totalPages, filteredItems.length, perPage]);
+  }), [currentPage, totalPages, sortedItems.length, perPage]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, activeTab, appliedWarehouse, appliedSalesPerson, appliedLeadSource, appliedDateRange, appliedExpDateRange, perPage]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (appliedDateRange) count++;
+    if (appliedExpDateRange) count++;
+    if (appliedWarehouse && appliedWarehouse !== "All") count++;
+    if (appliedSalesPerson && appliedSalesPerson !== "All") count++;
+    if (appliedLeadSource && appliedLeadSource !== "All") count++;
+    return count;
+  }, [appliedDateRange, appliedExpDateRange, appliedWarehouse, appliedSalesPerson, appliedLeadSource]);
 
   const totals = useMemo(() => {
     let totalQty = 0;
@@ -1426,6 +1515,7 @@ export function ProformaInvoicesPage({
               aria-label="Filter"
               title="Toggle Filter Panel"
               style={{
+                position: "relative",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1441,6 +1531,27 @@ export function ProformaInvoicesPage({
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
+              {activeFilterCount > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "-6px",
+                    right: "-6px",
+                    background: "#ef4444",
+                    color: "#ffffff",
+                    borderRadius: "10px",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    padding: "1px 5px",
+                    minWidth: "16px",
+                    textAlign: "center",
+                    lineHeight: "14px",
+                    border: "2px solid #ffffff",
+                  }}
+                >
+                  {activeFilterCount}
+                </span>
+              )}
             </button>
 
             <button type="button" className="btn btn-add-new" onClick={handleOpenCreate}>
@@ -1852,34 +1963,34 @@ export function ProformaInvoicesPage({
                     Sr. No.
                   </th>
                   <th style={{ padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Proforma No.
+                    <SortHeader label="Proforma No." isSorted={sortColIndex === 1} sortDirection={sortDirection} onSort={() => handleHeaderSort(1)} />
                   </th>
                   <th style={{ padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Warehouse
+                    <SortHeader label="Warehouse" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} />
                   </th>
                   <th style={{ padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Lead Source
+                    <SortHeader label="Lead Source" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} />
                   </th>
                   <th style={{ padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Exp. Deli. Date
+                    <SortHeader label="Exp. Deli. Date" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} />
                   </th>
                   <th style={{ padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Company
+                    <SortHeader label="Company" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} />
                   </th>
                   <th style={{ padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    City / State
+                    <SortHeader label="City / State" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} />
                   </th>
                   <th style={{ padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Sales Person
+                    <SortHeader label="Sales Person" isSorted={sortColIndex === 7} sortDirection={sortDirection} onSort={() => handleHeaderSort(7)} />
                   </th>
                   <th style={{ textAlign: "right", padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Amount (Inc.GST)
+                    <SortHeader label="Amount (Inc.GST)" isSorted={sortColIndex === 8} sortDirection={sortDirection} onSort={() => handleHeaderSort(8)} align="right" />
                   </th>
                   <th style={{ textAlign: "right", padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Discount
+                    <SortHeader label="Discount" isSorted={sortColIndex === 9} sortDirection={sortDirection} onSort={() => handleHeaderSort(9)} align="right" />
                   </th>
                   <th style={{ textAlign: "center", padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Status
+                    <SortHeader label="Status" isSorted={sortColIndex === 10} sortDirection={sortDirection} onSort={() => handleHeaderSort(10)} align="center" />
                   </th>
                   <th style={{ textAlign: "center", width: "60px", padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
                     Action

@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, List, Optional
 
-from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Date, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import (
@@ -32,12 +32,22 @@ class ProductStock(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Soft
     """
 
     __tablename__ = "product_stocks"
+    __table_args__ = (
+        # One stock row per product: two simultaneous first movements can no longer create two rows.
+        Index(
+            "uq_product_stocks_product_id",
+            "product_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND product_id IS NOT NULL"),
+            sqlite_where=text("deleted_at IS NULL AND product_id IS NOT NULL"),
+        ),
+    )
 
     sr_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     product_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), nullable=True, index=True)
     product_name_tally: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     product_code: Mapped[str] = mapped_column(String(100), default="-", server_default="-", nullable=False)
-    brand: Mapped[str] = mapped_column(String(100), default="-", server_default="-", nullable=False)
+    brand: Mapped[str] = mapped_column(String(100), default="-", server_default="-", nullable=False, index=True)
     category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     sub_category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     hsn_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -73,7 +83,9 @@ class StockAdjustment(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, S
     __tablename__ = "stock_adjustments"
 
     adjustment_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
-    adjustment_date: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    adjustment_date: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # as typed, DD-MM-YYYY
+    # Real date parsed from ``adjustment_date`` -- the string cannot be range-filtered or sorted correctly.
+    adjustment_dt: Mapped[Optional[Any]] = mapped_column(Date, nullable=True, index=True)
     client_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     invoice_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     warehouse: Mapped[str] = mapped_column(String(100), nullable=False, index=True)

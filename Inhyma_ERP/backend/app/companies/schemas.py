@@ -48,6 +48,7 @@ class CompanyContactCreate(BaseModel):
     email: EmailStr | None = None
     birth_date: str | None = Field(default=None, max_length=20, description="DD-MM-YYYY.")
     anniversary_date: str | None = Field(default=None, max_length=20, description="DD-MM-YYYY.")
+    is_primary: bool = Field(default=False, description="Add-form default is No; the First Data Form contact is Yes.")
 
     @field_validator("email", mode="before")
     @classmethod
@@ -74,6 +75,7 @@ class CompanyContactUpdate(BaseModel):
     email: EmailStr | None = None
     birth_date: str | None = Field(default=None, max_length=20)
     anniversary_date: str | None = Field(default=None, max_length=20)
+    is_primary: bool | None = None
 
     @field_validator("email", mode="before")
     @classmethod
@@ -153,6 +155,7 @@ class CompanyCreate(BaseModel):
     brand_description: str | None = None
     country_id: uuid.UUID | None = None
     state_id: uuid.UUID | None = None
+    district_id: uuid.UUID | None = None
     city_id: uuid.UUID | None = None
     area: str | None = Field(default=None, max_length=255)
     district: str | None = Field(default=None, max_length=150)
@@ -262,6 +265,7 @@ class CompanyUpdate(BaseModel):
     brand_description: str | None = None
     country_id: uuid.UUID | None = None
     state_id: uuid.UUID | None = None
+    district_id: uuid.UUID | None = None
     city_id: uuid.UUID | None = None
     area: str | None = Field(default=None, max_length=255)
     district: str | None = Field(default=None, max_length=150)
@@ -361,6 +365,7 @@ class CompanyRead(BaseModel):
     brand_description: str | None
     country_id: uuid.UUID | None
     state_id: uuid.UUID | None
+    district_id: uuid.UUID | None = None
     city_id: uuid.UUID | None
     area: str | None = None
     district: str | None = None
@@ -425,6 +430,7 @@ class CompanyListItemRead(BaseModel):
     company_name: str
     country_id: uuid.UUID | None = None
     state_id: uuid.UUID | None = None
+    district_id: uuid.UUID | None = None
     city_id: uuid.UUID | None = None
     area: str | None = None
     district: str | None = None

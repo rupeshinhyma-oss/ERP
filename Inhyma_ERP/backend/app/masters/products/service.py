@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 
 from app.cache.manager import CacheManager
 from app.common.list_query import ListQueryParams
@@ -345,36 +345,28 @@ class ProductService:
         return await self.update(product_id, status=RecordStatus.INACTIVE)
 
     async def _check_zero_stock_or_raise(self, product: Product) -> None:
-        """Strictly enforce zero-stock lock: raise 'Stock exists' if stock > 0 in any warehouse or on product."""
-        if getattr(product, "current_stock", 0) and float(product.current_stock) > 0:
-            raise BadRequestException("Stock exists")
+        """Spec: a product cannot be deleted while stock exists in ANY warehouse ("stock exists").
 
-        # Check physical/transit stock across all warehouses from inventory ProductStock
-        try:
-            stmt = select(ProductStock).where(
-                or_(
-                    ProductStock.product_id == product.id,
-                    ProductStock.product_name_tally == product.product_name_tally,
-                    ProductStock.product_code == product.product_code,
-                )
-            )
-            res = await self.repository.session.execute(stmt)
-            stock_rows = res.scalars().all()
-            for s in stock_rows:
-                if (
-                    (s.total_qty or 0) > 0
-                    or (s.mumbai or 0) > 0
-                    or (s.ahmedabad or 0) > 0
-                    or (s.indore or 0) > 0
-                    or (s.mumbai_transit or 0) > 0
-                    or (s.ahmedabad_transit or 0) > 0
-                    or (s.indore_transit or 0) > 0
-                ):
-                    raise BadRequestException("Stock exists")
-        except BadRequestException:
-            raise
-        except Exception:
-            pass
+        Every warehouse balance counts -- physical, transit and ordered -- and a negative balance is also "not zero".
+        The stock row is found by product id (old rows without one: by exact name). A failure of the check itself is
+        an error, never a silent "no stock" -- the delete must not go through on a guess.
+        """
+        from sqlalchemy import and_, func
+
+        from app.inventory.stock_service import WAREHOUSE_COLUMNS
+
+        names = {n.lower() for n in (product.product_name_tally, product.product_name) if n}
+        stmt = select(ProductStock).where(
+            ProductStock.deleted_at.is_(None),
+            or_(
+                ProductStock.product_id == product.id,
+                and_(ProductStock.product_id.is_(None), func.lower(ProductStock.product_name_tally).in_(names or {""})),
+            ),
+        )
+        for stock in (await self.repository.session.execute(stmt)).scalars().all():
+            holding = [c.replace("_", " ").title() for c in WAREHOUSE_COLUMNS if abs(float(getattr(stock, c) or 0.0)) > 1e-9]
+            if holding:
+                raise BadRequestException(f"Stock exists in {', '.join(holding)}. Clear the stock before deleting this product.")
 
     async def delete(self, product_id: uuid.UUID) -> None:
         """Soft-delete a product, strictly enforcing zero-stock and inactive status."""
@@ -652,11 +644,14 @@ class ProductService:
             # Check if Product Name already exists in DB
             if product_name:
                 from sqlalchemy import select, or_
+                # exact (case-insensitive) match -- a typed % or _ must not act as a wildcard and flag unrelated products
+                lowered_name = product_name.lower()
                 stmt_dup = select(Product).where(
+                    Product.deleted_at.is_(None),
                     or_(
-                        Product.product_name_tally.ilike(product_name),
-                        Product.product_name.ilike(product_name),
-                    )
+                        func.lower(Product.product_name_tally) == lowered_name,
+                        func.lower(Product.product_name) == lowered_name,
+                    ),
                 )
                 res_dup = await self.repository.session.execute(stmt_dup)
                 existing_dup = res_dup.scalars().first()

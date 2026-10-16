@@ -132,14 +132,21 @@ export interface DetailField {
   label: string;
   value: ReactNode;
   fullWidth?: boolean;
+  span?: number;
 }
 
 /**
- * The plain two-column field grid the nine simple master pages use inside
- * the drawer -- one direct translation of openDetailDrawer()'s fieldsHtml
- * template.
+ * The field grid used inside detail drawers. Supports configurable column counts (defaults to 2).
  */
-export function DetailFieldGrid({ fields }: { fields: DetailField[] }) {
+export function DetailFieldGrid({
+  fields,
+  columns = 2,
+  style,
+}: {
+  fields: DetailField[];
+  columns?: number;
+  style?: React.CSSProperties;
+}) {
   return (
     <div
       style={{
@@ -147,27 +154,37 @@ export function DetailFieldGrid({ fields }: { fields: DetailField[] }) {
         border: "1px solid #e2e8f0",
         borderRadius: "8px",
         padding: "20px",
+        ...style,
       }}
     >
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 20px" }}>
-        {fields.map((f, i) => (
-          <div key={i} style={f.fullWidth ? { gridColumn: "span 2" } : undefined}>
-            <span
-              style={{
-                fontSize: "12px",
-                fontWeight: 600,
-                color: "#64748b",
-                display: "block",
-                marginBottom: "3px",
-              }}
-            >
-              {f.label}
-            </span>
-            <strong style={{ fontSize: "14px", color: "#0f172a", wordBreak: "break-word" }}>
-              {f.value === null || f.value === undefined || f.value === "" ? "—" : f.value}
-            </strong>
-          </div>
-        ))}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+          gap: "16px 20px",
+        }}
+      >
+        {fields.map((f, i) => {
+          const colSpan = f.fullWidth ? `span ${columns}` : f.span ? `span ${Math.min(f.span, columns)}` : undefined;
+          return (
+            <div key={i} style={colSpan ? { gridColumn: colSpan } : undefined}>
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#64748b",
+                  display: "block",
+                  marginBottom: "3px",
+                }}
+              >
+                {f.label}
+              </span>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", wordBreak: "break-word" }}>
+                {f.value === null || f.value === undefined || f.value === "" ? "—" : f.value}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

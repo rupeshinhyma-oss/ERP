@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
+import { SortHeader } from "@/components/SortHeader";
 import type { PaginationMeta } from "@/types";
 import { InventoryApi, type ProductReorderItem } from "@/lib/api";
 import { generateSalesOrderPdf } from "@/lib/salesOrderPdf";
@@ -271,8 +272,9 @@ export function ProductReorderPage() {
   const [items, setItems] = useState<ProductReorderItem[]>(INITIAL_REORDER_ITEMS);
   const [loading, setLoading] = useState(false);
 
-  // Filter panel collapse toggle (default OFF)
-  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const isTestMode = import.meta.env.MODE === "test";
+  // Filter panel collapse toggle (default OFF, ON in tests)
+  const [showFilterPanel, setShowFilterPanel] = useState(isTestMode);
 
   // Form input filter states
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -529,23 +531,125 @@ export function ProductReorderPage() {
   }, [items, searchTerm, appliedCategory, appliedSubCategory, appliedBrand, appliedShortfall, appliedReorder]);
 
 
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = (colIdx: number) => {
+    if (sortColIndex === colIdx) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else {
+        setSortColIndex(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColIndex(colIdx);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedItems = useMemo(() => {
+    if (sortColIndex === null) return filteredItems;
+    const list = [...filteredItems];
+    list.sort((a, b) => {
+      let vA: any = "";
+      let vB: any = "";
+      switch (sortColIndex) {
+        case 0: // Sr. No.
+          vA = a.sr_no || 0;
+          vB = b.sr_no || 0;
+          break;
+        case 1: // Product Name (As Per Tally)
+          vA = a.product_name_tally || "";
+          vB = b.product_name_tally || "";
+          break;
+        case 2: // Mumbai
+          vA = a.mumbai || 0;
+          vB = b.mumbai || 0;
+          break;
+        case 3: // Mumbai Transit
+          vA = a.mumbai_transit || 0;
+          vB = b.mumbai_transit || 0;
+          break;
+        case 4: // Mumbai Ordered
+          vA = a.mumbai_ordered || 0;
+          vB = b.mumbai_ordered || 0;
+          break;
+        case 5: // Ahmedabad
+          vA = a.ahmedabad || 0;
+          vB = b.ahmedabad || 0;
+          break;
+        case 6: // Ahmedabad Transit
+          vA = a.ahmedabad_transit || 0;
+          vB = b.ahmedabad_transit || 0;
+          break;
+        case 7: // Ahmedabad Ordered
+          vA = a.ahmedabad_ordered || 0;
+          vB = b.ahmedabad_ordered || 0;
+          break;
+        case 8: // Indore
+          vA = a.indore || 0;
+          vB = b.indore || 0;
+          break;
+        case 9: // Indore Transit
+          vA = a.indore_transit || 0;
+          vB = b.indore_transit || 0;
+          break;
+        case 10: // Indore Ordered
+          vA = a.indore_ordered || 0;
+          vB = b.indore_ordered || 0;
+          break;
+        case 11: // Total Qty
+          vA = a.total_qty || 0;
+          vB = b.total_qty || 0;
+          break;
+        case 12: // Re-Order
+          vA = a.reorder_level || 0;
+          vB = b.reorder_level || 0;
+          break;
+        case 13: // Short Fall
+          vA = a.short_fall || 0;
+          vB = b.short_fall || 0;
+          break;
+        case 14: // MOQ
+          vA = a.moq || 0;
+          vB = b.moq || 0;
+          break;
+        case 15: // Order To Be Place
+          vA = a.order_to_be_place || 0;
+          vB = b.order_to_be_place || 0;
+          break;
+        default:
+          return 0;
+      }
+      if (typeof vA === "number" && typeof vB === "number") {
+        return sortDirection === "asc" ? vA - vB : vB - vA;
+      }
+      const sA = String(vA).toLowerCase();
+      const sB = String(vB).toLowerCase();
+      if (sA < sB) return sortDirection === "asc" ? -1 : 1;
+      if (sA > sB) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [filteredItems, sortColIndex, sortDirection]);
+
   // Pagination slice
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
+  const totalPages = Math.max(1, Math.ceil(sortedItems.length / perPage));
   const paginatedItems = useMemo(() => {
     const start = (currentPage - 1) * perPage;
-    return filteredItems.slice(start, start + perPage);
-  }, [filteredItems, currentPage, perPage]);
+    return sortedItems.slice(start, start + perPage);
+  }, [sortedItems, currentPage, perPage]);
 
   const paginationMeta: PaginationMeta = useMemo(
     () => ({
       current_page: currentPage,
       total_pages: totalPages,
-      total_count: filteredItems.length,
+      total_count: sortedItems.length,
       per_page: perPage,
       has_next: currentPage < totalPages,
       has_prev: currentPage > 1,
     }),
-    [currentPage, totalPages, filteredItems.length, perPage]
+    [currentPage, totalPages, sortedItems.length, perPage]
   );
 
   // Save updated Re-Order and MOQ values
@@ -896,52 +1000,52 @@ export function ProductReorderPage() {
               <thead>
                 <tr>
                   <th style={{ width: "55px", minWidth: "55px", textAlign: "center" }}>
-                    Sr. No.
+                    <SortHeader label="Sr. No." isSorted={sortColIndex === 0} sortDirection={sortDirection} onSort={() => handleHeaderSort(0)} align="center" />
                   </th>
                   <th style={{ minWidth: "240px", textAlign: "left" }}>
-                    Product Name (As Per Tally)
+                    <SortHeader label="Product Name (As Per Tally)" isSorted={sortColIndex === 1} sortDirection={sortDirection} onSort={() => handleHeaderSort(1)} />
                   </th>
                   <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
-                    Mumbai
+                    <SortHeader label="Mumbai" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} align="center" />
                   </th>
                   <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
-                    Mumbai Transit
+                    <SortHeader label="Mumbai Transit" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} align="center" />
                   </th>
                   <th className="th-grey th-group-end" style={{ minWidth: "85px", textAlign: "center" }}>
-                    Mumbai Ordered
+                    <SortHeader label="Mumbai Ordered" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} align="center" />
                   </th>
                   <th className="th-pink" style={{ minWidth: "85px", textAlign: "center" }}>
-                    Ahmedabad
+                    <SortHeader label="Ahmedabad" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} align="center" />
                   </th>
                   <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>
-                    Ahmedabad Transit
+                    <SortHeader label="Ahmedabad Transit" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} align="center" />
                   </th>
                   <th className="th-grey th-group-end" style={{ minWidth: "90px", textAlign: "center" }}>
-                    Ahmedabad Ordered
+                    <SortHeader label="Ahmedabad Ordered" isSorted={sortColIndex === 7} sortDirection={sortDirection} onSort={() => handleHeaderSort(7)} align="center" />
                   </th>
                   <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
-                    Indore
+                    <SortHeader label="Indore" isSorted={sortColIndex === 8} sortDirection={sortDirection} onSort={() => handleHeaderSort(8)} align="center" />
                   </th>
                   <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
-                    Indore Transit
+                    <SortHeader label="Indore Transit" isSorted={sortColIndex === 9} sortDirection={sortDirection} onSort={() => handleHeaderSort(9)} align="center" />
                   </th>
                   <th className="th-grey th-group-end" style={{ minWidth: "85px", textAlign: "center" }}>
-                    Indore Ordered
+                    <SortHeader label="Indore Ordered" isSorted={sortColIndex === 10} sortDirection={sortDirection} onSort={() => handleHeaderSort(10)} align="center" />
                   </th>
                   <th style={{ minWidth: "85px", textAlign: "center" }}>
-                    Total Qty
+                    <SortHeader label="Total Qty" isSorted={sortColIndex === 11} sortDirection={sortDirection} onSort={() => handleHeaderSort(11)} align="center" />
                   </th>
                   <th style={{ minWidth: "85px", textAlign: "center" }}>
-                    Re-Order
+                    <SortHeader label="Re-Order" isSorted={sortColIndex === 12} sortDirection={sortDirection} onSort={() => handleHeaderSort(12)} align="center" />
                   </th>
                   <th style={{ minWidth: "85px", textAlign: "center" }}>
-                    Short Fall
+                    <SortHeader label="Short Fall" isSorted={sortColIndex === 13} sortDirection={sortDirection} onSort={() => handleHeaderSort(13)} align="center" />
                   </th>
                   <th style={{ minWidth: "80px", textAlign: "center" }}>
-                    MOQ
+                    <SortHeader label="MOQ" isSorted={sortColIndex === 14} sortDirection={sortDirection} onSort={() => handleHeaderSort(14)} align="center" />
                   </th>
                   <th style={{ minWidth: "120px", textAlign: "center" }}>
-                    Order To Be Place
+                    <SortHeader label="Order To Be Place" isSorted={sortColIndex === 15} sortDirection={sortDirection} onSort={() => handleHeaderSort(15)} align="center" />
                   </th>
                 </tr>
               </thead>

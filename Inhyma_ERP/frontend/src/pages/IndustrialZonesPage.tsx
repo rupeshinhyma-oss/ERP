@@ -25,6 +25,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { IconTrash, IconPlus } from "@/components/icons";
+import { SortHeader } from "@/components/SortHeader";
 
 export interface IndustrialZoneItem {
   id: string;
@@ -788,61 +789,75 @@ export function IndustrialZonesPage() {
                       onChange={handleSelectAll}
                     />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("zone_name");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", width: "70px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    Sr. No. ▾
+                  <th style={{ padding: "12px 14px", width: "70px", whiteSpace: "nowrap" }}>
+                    Sr. No.
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("zone_name");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    Zone Name +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Zone Name"
+                      isSorted={sortField === "zone_name"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "zone_name") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("zone_name"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("nearby_city");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    Nearby City +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Nearby City"
+                      isSorted={sortField === "nearby_city"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "nearby_city") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("nearby_city"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("district");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    Dist. / State +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Dist. / State"
+                      isSorted={sortField === "district"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "district") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("district"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("num_industries");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    No. Of Ind. +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="No. Of Ind."
+                      isSorted={sortField === "num_industries"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "num_industries") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("num_industries"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("zone_grade");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", width: "80px", cursor: "pointer" }}
-                  >
-                    Grade +
+                  <th style={{ padding: "12px 14px", width: "80px" }}>
+                    <SortHeader
+                      label="Grade"
+                      isSorted={sortField === "zone_grade"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "zone_grade") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("zone_grade"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th style={{ padding: "12px 14px" }}>Pote. Cate. Of Machi.</th>
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Pote. Cate. Of Machi."
+                      isSorted={sortField === "potential_category_machines"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "potential_category_machines") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("potential_category_machines"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
                   <th style={{ padding: "12px 14px", width: "100px", textAlign: "center" }}>Action</th>
                 </tr>
               </thead>

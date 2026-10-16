@@ -77,6 +77,11 @@ class Company(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     state_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("states.id", ondelete="RESTRICT"), nullable=True, index=True
     )
+    # District master link (State -> District -> City). ``district`` below stays as the denormalised display name
+    # (kept in sync by the service) so older rows / free-text callers keep working.
+    district_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("districts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     city_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("cities.id", ondelete="RESTRICT"), nullable=True, index=True
     )

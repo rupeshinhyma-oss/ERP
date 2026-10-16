@@ -3,6 +3,90 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-14] — Seed First-Install Guards, Inbound Email DB Deduplication & Handover Account Protection
+
+### 1. Database Seed First-Install Protection (`BOOTSTRAP_FORCE_RESET`)
+- **Non-Destructive Bootstrap Guard:**
+  - Hardened `backend/scripts/seed.py` so that automatic startup scripts in container environments (e.g. Render build/start commands) cannot overwrite or corrupt existing production database rows.
+  - If existing users, organizations, or permissions exist, seeding halts safely unless `BOOTSTRAP_FORCE_RESET=true` is explicitly provided.
+  - Master geography seeding (`countries`, `states`, `districts`, `cities`) skips insertion if existing rows are present, protecting customized data.
+
+### 2. Atomic Inbound Email Deduplication (`email_inbound_processed`)
+- **Persistent Database Deduplication Ledger:**
+  - Added PostgreSQL table `email_inbound_processed` (`backend/app/inquiries/models.py`) to prevent duplicate quote processing and double API consumption when the inbound email poller restarts.
+  - Keyed by `(message_id, uid, inquiry_id, supplier_id)`.
+  - Poller checks `SELECT 1 FROM email_inbound_processed WHERE message_id = :mid` before invoking AI extraction or recording quotation attachments.
+  - Incorporates a 30-minute historical baseline cutoff on initialization: emails older than 30 minutes are stamped into the deduplication ledger without creating duplicate quotes.
+
+### 3. SSO Handover Local Account Guards & Disabled User Rejection
+- **Enforcing Local User Status on Federated Handover:**
+  - Updated `POST /api/v1/auth/sso-handover` in `backend/app/api/v1/auth.py`.
+  - When an incoming handover ticket is presented for a user with `is_active=False` or `deleted_at IS NOT NULL`, the system immediately rejects the handover with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
+  - Prevents terminated or suspended users from re-activating accounts via central SSO.
+  - Respects `SSO_HANDOVER_AUTO_PROVISION=false`: blocks unauthorized user creation during handover.
+
+### 4. Shared Token Pair Types Restoration
+- **Session Types Alignment:**
+  - Restored `TokenPair` in `backend/app/auth/security.py` and aligned with `TokenResponse` in `backend/app/auth/schemas.py`, ensuring full compatibility with session-scoped token handlers.
+
+---
+
+## [Release 2026-10-14] — Resilient Central Federation, DNS Winsock Isolation & Live Diagnostics
+
+### 1. Multi-URL Central Control Plane Discovery
+- **Config Fallback Array (`erp_main_api_base_urls()` in `app/core/config.py`):**
+  - Added multi-candidate discovery searching across `ERP_MAIN_API_BASE_URL`, `ERP_MAIN_URL`, and fallback default URLs.
+  - Enables seamless spoke communication across custom cloud domains and internal Render platform URLs.
+
+### 2. Outbound IPv4 Binding & Sleeping Container Wake-Up Budget
+- **IPv4 Socket Binding (`0.0.0.0`):**
+  - In `backend/app/federation/erp_main_client.py`, `httpx.AsyncClient` binds outbound traffic to `0.0.0.0`, eliminating IPv6 connection drops on container platforms.
+- **40-Second Cold-Start Sleeping Budget:**
+  - Extended federation timeout budget to 40 seconds (`httpx.Timeout(40.0, connect=20.0)`), allowing sleeping Render instances to wake up cleanly without timing out SSO handovers.
+
+### 3. 900-Second Stale Session Cache Fallback
+- **Partition Tolerance (`_from_cache`):**
+  - If ERP_Main is temporarily unreachable or undergoing deployment, active session validations fall back to local memory cache for up to 900 seconds (15 minutes).
+  - Flags validated session as `_from_cache = True`, maintaining system uptime without dropping active operations.
+
+### 4. Platform-Gated Winsock DNS Isolation
+- **Platform Gating (`sys.platform.startswith("win")`):**
+  - In `backend/app/core/dns_resilience.py`, DNS caching is platform-gated to Windows workstations only.
+  - Linux production environments run unpatched, relying on native `glibc` DNS resolution.
+  - Caching key uses 5-tuple `(host, port, family, type, proto)`, preserving exact port destinations and preventing localhost collisions.
+
+### 5. Central Federation Health Diagnostics
+- **Endpoint `GET /api/v1/health/federation`:**
+  - Added spoke diagnostic endpoint to test real-time federation health, connectivity latency (ms), and reachable endpoints against ERP_Main.
+
+---
+
+## [Release 2026-10-14] — Database-Backed Organization Branding & Storage Quota Protection
+
+### 1. Versioned Database-Persisted Organization Logo
+- **Streaming Endpoint `GET /api/v1/organizations/logo?v={sha1}`:**
+  - Stored enterprise logos directly in PostgreSQL `organizations.logo_data` and streamed via public endpoint with immutable caching (`Cache-Control: public, max-age=86400, immutable`).
+  - SHA-1 hash query parameter guarantees immediate cache invalidation whenever the logo is updated in settings.
+
+### 2. Client-Side Storage Quota Guards
+- **Safe Quota Degradation in `brand.ts` and `Organization.tsx`:**
+  - Wrapped `localStorage.setItem` for large brand assets in `try/catch` handlers.
+  - Prevents `QuotaExceededError` crashes on mobile and webview browsers when storing large base64 logos, falling back gracefully to remote URLs or in-memory state.
+
+---
+
+## [Release 2026-10-14] — Universal Filter Button UI Standardization
+
+### 1. Enterprise UI Harmonization
+- Standardized all module filter buttons to match the Companies reference:
+  - Color palette: `#556987` solid background, `#475569` on hover, permanently locked to `#556987` when active.
+  - Geometry: `padding: 8px 14px`, `border-radius: 6px`, no hardcoded square dimensions.
+  - Icon: 16x16px SVG funnel icon.
+  - Clean surface: zero counter badges or colored dots on the button face.
+  - Default state: all filter drawers initialize collapsed (`useState(false)`).
+
+---
+
 ## [Release 2026-10-14] — Session-Scoped Tokens (one login = one session id)
 
 - Access and refresh tokens carry a `sid` claim (`auth/security.py`). `AuthService._issue_token_pair` binds both tokens to one session id; refresh keeps it. `TokenResponse` gains `session_id` and `session_mode` (`"central"` or `"local"`).

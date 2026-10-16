@@ -359,14 +359,20 @@ Manage complete vendor team directory:
 ## 6. INVENTORY: Product Master Module
 
 - **Route:** `/masters/products`
-- **Purpose:** Centralized product catalog, dynamic specifications builder, CBM packaging calculations, photo gallery uploader, and ReportLab PDF datasheet generation.
+- **Purpose:** Centralized product catalog, machine-spares compatibility mapping, package-level dimensions report, CBM packaging calculations, photo gallery uploader, and ReportLab PDF datasheet generation.
+
+### 6.0. Master Multi-View Navigation Strip
+- Directly beneath the breadcrumb bar (`Dashboard / Product Master`), the `.master-view-nav` tab bar allows one-click switching between three dedicated views:
+  1. **`📦 Product Master` (`catalog`):** Main product catalog grid featuring column pinning, inline stock inspection, and bulk activation/deactivation.
+  2. **`⚙️ Machine-Spares Universal View` (`universal-view`):** Machine-wise spare parts breakdown showing all linked spare parts, codes, stock levels, and compatibility notes with a dedicated link modal (`/masters/products/machine-spares/universal-view`).
+  3. **`📐 Dimensions & Weights Report` (`dimensions-report`):** Package-level breakdown for multi-box products, displaying Length, Width, Height, CBM, Net Weight, and Gross Weight with direct CSV and XLSX export triggers.
 
 ### 6.1. Product Master Table Columns
 1. **Checkbox:** Row selector.
-2. **SR. NO.:** Sequential number.
+2. **SR. NO.:** Sequential number with sort cue.
 3. **IMAGE:** Thumbnail preview with click-to-expand lightbox.
 4. **PRODUCT CODE:** Unique SKU / Item code.
-5. **PRODUCT NAME (TALLY):** Official internal accounting name.
+5. **PRODUCT NAME (TALLY):** Official internal accounting name with real-time duplicate suggestions guard.
 6. **INVOICE NAME:** Commercial description used on billing documents.
 7. **CATEGORY / SUB-CATEGORY:** Hierarchy badges.
 8. **BRAND:** Manufacturer brand name.
@@ -374,7 +380,7 @@ Manage complete vendor team directory:
 10. **PRIMARY UOM:** Base unit (e.g. PCS, SET, KG).
 11. **PACKAGING CBM:** Calculated volume ($L \times W \times H / 1,000,000$).
 12. **STATUS:** `Active` / `Inactive` badge.
-13. **ACTIONS:** View Detail Drawer, Edit Product, Download PDF Datasheet, Delete.
+13. **ACTIONS:** View Detail Drawer, Edit Product, Download PDF Datasheet, Delete (strictly zero-stock locked).
 
 ### 6.3. Add / Edit Product Form Fields
 - **Basic Details:**

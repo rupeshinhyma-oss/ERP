@@ -141,6 +141,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-billing-company", label: "Billing Company", path: "/masters/billing-company", permission: "billingcompany.view" },
           { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", permission: "organizationlist.view" },
           { key: "masters-technicians", label: "Technicians", path: "/masters/technicians", permission: "technician.view" },
+          { key: "masters-technical-task-types", label: "Technical Task Types", path: "/masters/technical-task-types", permission: "option_list.manage" },
           { key: "masters-banks", label: "Bank", path: "/masters/banks", permission: "bank.view" },
           { key: "masters-transport", label: "Transport", path: "/masters/transport", permission: "transport.view" },
           { key: "masters-payment-terms", label: "Payment Terms", path: "/masters/payment-terms", permission: "payment_term.view" },
@@ -215,6 +216,8 @@ export const PAGE_TITLES: Record<string, string> = {
   "my-tasks": "My Tasks",
   tasks: "Task Management",
   "technical-tasks": "Technical Task List",
+  "technical-call-logs": "Technical Call Log Report",
+  "masters-technical-task-types": "Technical Task Types",
   "tasks-kanban": "Tasks Kanban Board",
   "tasks-calendar": "Tasks Calendar",
 

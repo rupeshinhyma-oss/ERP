@@ -1488,6 +1488,17 @@
   transform: translateX(0);
 }
 
+.company-detail-drawer.side-drawer-card {
+  width: 100% !important;
+  max-width: min(1150px, calc(100vw - 220px)) !important;
+}
+
+@media (max-width: 768px) {
+  .company-detail-drawer.side-drawer-card {
+    max-width: 96vw !important;
+  }
+}
+
 /* ==========================================================================
    Universal search dropdown (topbar).
    ========================================================================== */

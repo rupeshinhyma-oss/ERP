@@ -54,6 +54,8 @@ import { ImportPurchasePage } from "@/pages/purchase/ImportPurchasePage";
 import { ImportPurchasePdfPage } from "@/pages/ImportPurchasePdfPage";
 import { TasksPage } from "@/pages/tasks/TasksPage";
 import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
+import { GeneralReportsPage } from "@/pages/GeneralReportsPage";
+import { TechnicalTaskTypesPage } from "@/pages/masters/TechnicalTaskTypes";
 import { TechnicianOperationsPage } from "@/pages/TechnicianOperationsPage";
 import { AttendancePage } from "@/pages/hrms/AttendancePage";
 import { LeavePage } from "@/pages/hrms/LeavePage";
@@ -101,7 +103,6 @@ import { TrashPage } from "@/pages/Trash";
 import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { initGlobalAutocompleteBlocker } from "@/lib/autocompleteBlocker";
-import { ComingSoonPage } from "@/components/ComingSoon";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ProductStockPage } from "@/pages/ProductStockPage";
 import { ProductReorderPage } from "@/pages/ProductReorderPage";
@@ -324,16 +325,7 @@ export function App() {
           <Route path="/delete-order-report/list" element={<Navigate to="/reports/deleted-orders" replace />} />
           <Route path="/deleted-orders" element={<Navigate to="/reports/deleted-orders" replace />} />
 
-          <Route
-            path="/reports/general"
-            element={
-              <ComingSoonPage
-                activeKey="reports-general"
-                title="General Reports"
-                featureName="General Reports"
-              />
-            }
-          />
+          <Route path="/reports/general" element={<GeneralReportsPage />} />
 
           <Route path="/planning" element={<Navigate to="/dashboard" replace />} />
           <Route path="/tasks/my" element={<Navigate to="/tasks?tab=my" replace />} />
@@ -342,6 +334,8 @@ export function App() {
           <Route path="/tasks/calendar" element={<Navigate to="/tasks?tab=calendar" replace />} />
           <Route path="/technical-task/list" element={<TechnicalTasksPage />} />
           <Route path="/technical-tasks" element={<Navigate to="/technical-task/list" replace />} />
+          <Route path="/technical-task/call-logs" element={<Navigate to="/reports/general?tab=call-logs" replace />} />
+          <Route path="/masters/technical-task-types" element={<TechnicalTaskTypesPage />} />
           <Route path="/technician-operations" element={<TechnicianOperationsPage />} />
           <Route path="/technicians/gatepass" element={<Navigate to="/technician-operations?tab=gatepasses" replace />} />
           <Route path="/technicians/wallet" element={<Navigate to="/technician-operations?tab=wallets" replace />} />

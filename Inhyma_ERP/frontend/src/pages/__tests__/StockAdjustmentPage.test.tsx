@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { StockAdjustmentPage, INITIAL_ADJUSTMENTS } from "../StockAdjustmentPage";
+import { InventoryApi } from "@/lib/api";
 
 // Mock AppShell to isolate page testing
 vi.mock("@/components/AppShell", () => ({
@@ -189,9 +190,9 @@ describe("StockAdjustmentPage", () => {
     // Open filter panel
     fireEvent.click(screen.getByTitle("Filter stock adjustments"));
 
-    // Date range input should have initial value "08/21/2026 - 09/19/2026"
+    // Date range input starts empty (no hidden default range that would hide current records)
     const dateInput = screen.getByTestId("date-range-input") as HTMLInputElement;
-    expect(dateInput.value).toBe("08/21/2026 - 09/19/2026");
+    expect(dateInput.value).toBe("");
 
     // Popover is not open initially
     expect(screen.queryByTestId("date-range-popover")).toBeNull();
@@ -282,7 +283,8 @@ describe("StockAdjustmentPage", () => {
     expect(screen.queryByTestId("action-menu-adj-1")).toBeNull();
   });
 
-  it("deletes record when clicking Delete in action dropdown", () => {
+  it("deletes record when clicking Delete in action dropdown", async () => {
+    const del = vi.spyOn(InventoryApi, "deleteStockAdjustment").mockResolvedValue({} as any);
     render(
       <BrowserRouter>
         <StockAdjustmentPage />
@@ -299,8 +301,34 @@ describe("StockAdjustmentPage", () => {
     const deleteBtn = screen.getByRole("button", { name: /Delete/i });
     fireEvent.click(deleteBtn);
 
-    // GARUDA ENGINEERS should now be removed
-    expect(screen.queryByText("GARUDA ENGINEERS")).toBeNull();
+    // GARUDA ENGINEERS is removed once the server has deleted it (and reversed its stock)
+    await waitFor(() => expect(screen.queryByText("GARUDA ENGINEERS")).toBeNull());
+    expect(del).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the record and shows the reason when the server refuses the delete", async () => {
+    vi.spyOn(InventoryApi, "deleteStockAdjustment").mockRejectedValue(new Error("Reversing would leave Mumbai with negative stock."));
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => undefined);
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Actions" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /Delete/i }));
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith("Reversing would leave Mumbai with negative stock."));
+    expect(screen.getByText("GARUDA ENGINEERS")).toBeTruthy();
+  });
+
+  it("asks the server for the list without any hidden date range", async () => {
+    const list = vi.spyOn(InventoryApi, "listStockAdjustments").mockResolvedValue({ data: { items: [], total: 0 } } as any);
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    expect(list.mock.calls[0][0]?.date_range).toBeUndefined();
   });
 
   it("triggers PDF generation when clicking Download in action dropdown", () => {

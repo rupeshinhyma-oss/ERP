@@ -1043,4 +1043,73 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Responsive Collapse Mode**: Fully compatible with the 72px icon-collapsed sidebar state (`sidebarCollapsed`). Clicking the group icon expands the sidebar and group seamlessly.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 10, 2026 (Consolidated Collapsible Masters Accordion in Sidebar; Top-level Inquiries, Products, Suppliers & Buyers; Inquiry Lifecycle Tabs & Bulk Actions; zero regression).*
+
+## 16. Central Ecosystem Federation, DB-Backed Inbound Email Deduplication & Bootstrap Seed Guards
+
+### 16.1. Resilient Central Federation & Spoke Survival Mechanics
+In a distributed multi-ERP enterprise mesh where `ERP_Main` serves as the central control plane, spoke ERP instances (`Yinglima_ERP`, `Inhyma_ERP`) communicate with central for single sign-on (SSO), federation, and tenant verification.
+
+1. **Multi-URL Base Discovery (`erp_main_api_base_urls()` in `app/core/config.py`):**
+   - Automatically probes candidate URLs across `ERP_MAIN_API_BASE_URL`, `ERP_MAIN_URL`, and fallback platform URLs.
+   - Ensures continuous connectivity across custom cloud domains and internal container platforms (such as Render.com).
+2. **Explicit IPv4 Outbound Binding (`0.0.0.0`):**
+   - In `backend/app/federation/erp_main_client.py`, `httpx.AsyncClient` binds outbound traffic to `0.0.0.0`, eliminating IPv6 routing drops on container platforms.
+3. **40-Second Cold-Start Sleeping Budget:**
+   - Free/Starter cloud tiers spin down during inactivity. Federation requests allocate a 40.0-second total timeout budget (`httpx.Timeout(40.0, connect=20.0)`), allowing sleeping instances to cold-boot cleanly.
+4. **900-Second Stale Session Fallback Tolerance (`_from_cache`):**
+   - If central is undergoing deployment or experiencing network partitions, spoke backends retain active verified sessions in local memory cache for up to 900 seconds (15 minutes).
+   - The user session is authenticated with `session["_from_cache"] = True`, preventing enterprise operational lockouts.
+5. **Federation Health Diagnostic Endpoint (`GET /api/v1/health/federation`):**
+   - Provides live health and latency metrics against central endpoints without requiring a full SSO login attempt.
+   - Returns reachable candidate URL, latency in milliseconds, status code, and detailed fallback diagnosis.
+
+### 16.2. Platform-Gated Winsock DNS Resilience
+On Windows workstations and local developer environments, asynchronous DNS lookups in `asyncio` and `httpx` can trigger Winsock socket leaks (`WSAEADDRINUSE`) or silent lockups.
+- **Platform Gating (`sys.platform.startswith("win")`):**
+  - Winsock DNS caching is strictly restricted to Windows developer hosts.
+  - Production Linux containers run completely unaffected, relying on native `glibc` DNS resolvers.
+- **Port-Sensitive 5-Tuple DNS Cache:**
+  - Cache entries are keyed by `(host, port, family, type, proto)`, preserving specific port destinations and preventing localhost collisions when running multiple instances on `localhost:8000`, `8001`, and `8002`.
+
+### 16.3. Persistent Database Inbound Email Deduplication
+To completely eliminate duplicate AI quotation extraction and redundant supplier emails across worker restarts:
+- **Relational Deduplication Table (`email_inbound_processed`):**
+  - Tracks every ingested email by unique compound constraints: `message_id`, `uid`, `inquiry_id`, `supplier_id`, and `processed_at`.
+  - Before invoking OpenAI or processing mail body attachments, the worker checks `SELECT 1 FROM email_inbound_processed WHERE message_id = :mid`.
+- **Atomic Insertion Under Concurrency:**
+  - Ingestion commits a deduplication record in the same database transaction, preventing concurrent poller runs from double-billing AI extraction APIs.
+- **30-Minute Historical Baseline:**
+  - Inbound worker establishes a historical cutoff timestamp (`utcnow() - timedelta(minutes=30)`).
+  - Historical emails older than 30 minutes are stamped into the deduplication ledger without triggering repetitive quotes, ensuring newly started workers process only fresh inbound communications.
+
+### 16.4. Idempotent Deployment & First-Install Seed Protection
+Production database seeds (`backend/scripts/seed.py`) run during automated container build and start phases (e.g. `render.yaml`).
+- **First-Install Guard (`BOOTSTRAP_FORCE_RESET`):**
+  - If existing organization, user, or role records are detected in the database, `seed.py` immediately skips mutating live production accounts.
+  - Destructive re-seeding is strictly prohibited unless `BOOTSTRAP_FORCE_RESET=true` is explicitly injected into environment variables.
+- **Geography & Master Data Protection:**
+  - Countries, States, Districts, and Cities are verified for existing records before running bulk insert scripts.
+- **SSO Handover Local Account Guards:**
+  - If a user exists in the spoke ERP but has `is_active=False` or `deleted_at IS NOT NULL`, `POST /api/v1/auth/sso-handover` rejects handover with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
+  - If a user does not exist locally and `SSO_HANDOVER_AUTO_PROVISION=false`, access is cleanly rejected with `403 Forbidden`.
+
+### 16.5. Database-Backed Organization Branding & Storage Quota Protection
+Enterprise logos and branding assets are stored directly in PostgreSQL with public streaming:
+- **Endpoint `GET /api/v1/organizations/logo?v={sha1}`:**
+  - Streams high-resolution PNG/JPEG binary data with long-term `Cache-Control: public, max-age=86400, immutable`.
+  - The query parameter `v` contains a SHA-1 hash of the image content, forcing immediate browser cache refresh upon logo replacement.
+- **Client Storage Quota Protections (`try/catch` in `brand.ts` and `Organization.tsx`):**
+  - Storing massive Base64 strings in browser `localStorage` causes `QuotaExceededError` crashes on mobile or restricted webview browsers.
+  - All brand caching operations are wrapped in graceful quota guards that safely degrade to in-memory state or remote streaming without throwing unhandled exceptions.
+
+### 16.6. Universal Filter Button UI Standardization
+All module page headers utilize a uniform filter toggle button matching the Companies reference:
+- **Color Palette:** Solid `#556987` background, `#475569` on hover, permanently locked to `#556987` when active or open.
+- **Geometry & Padding:** `padding: 8px 14px; border-radius: 6px; border: none; box-shadow: 0 2px 4px rgba(0,0,0,0.1);`. Hardcoded fixed dimensions (`38px x 38px`, `min-width: 36px`) are removed to prevent distorted square buttons.
+- **Funnel Icon:** Embedded 16×16px SVG funnel icon.
+- **Clean Surface:** No internal counter badges or notification dots on the button face.
+- **Initial State Invariant:** All filter panels and drawers initialize collapsed (`useState(false)`).
+
+---
+*Maintained and verified for Inhyma Solutions Enterprise ERP (Yinglima Node). Last updated: October 2026 (Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, Database-Backed Branding, Universal Filter Standardization).*
+

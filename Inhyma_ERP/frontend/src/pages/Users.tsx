@@ -7,13 +7,14 @@
  * server-generated temporary password exactly once, in a dedicated modal.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
 import { Banner, Modal, TableMessageRow } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
+import { SortHeader } from "@/components/SortHeader";
 import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
 import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
@@ -284,6 +285,65 @@ export function UsersPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [reloadCounter, setReloadCounter] = useState(0);
   const query = useDebouncedValue(searchInput, 300);
+
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = (colIdx: number) => {
+    if (sortColIndex === colIdx) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else {
+        setSortColIndex(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColIndex(colIdx);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    if (sortColIndex === null) return rows;
+    const list = [...rows];
+    list.sort((a, b) => {
+      let vA: any = "";
+      let vB: any = "";
+      switch (sortColIndex) {
+        case 1: // Employee
+          vA = a.full_name || a.display_name || a.employee_name || a.username || "";
+          vB = b.full_name || b.display_name || b.employee_name || b.username || "";
+          break;
+        case 2: // Username
+          vA = a.username || "";
+          vB = b.username || "";
+          break;
+        case 3: // Email
+          vA = a.email || "";
+          vB = b.email || "";
+          break;
+        case 4: // Department
+          vA = a.department || "";
+          vB = b.department || "";
+          break;
+        case 5: // Status
+          vA = a.status || "";
+          vB = b.status || "";
+          break;
+        case 6: // Last Login
+          vA = a.last_login_at || "";
+          vB = b.last_login_at || "";
+          break;
+        default:
+          return 0;
+      }
+      const sA = String(vA).toLowerCase();
+      const sB = String(vB).toLowerCase();
+      if (sA < sB) return sortDirection === "asc" ? -1 : 1;
+      if (sA > sB) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [rows, sortColIndex, sortDirection]);
 
   const [roles, setRoles] = useState<Role[]>([]);
   const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
@@ -1047,28 +1107,40 @@ export function UsersPage() {
                     <input
                       type="checkbox"
                       className="select-all-checkbox"
-                      checked={rows.length > 0 && selectedIds.size === rows.length}
+                      checked={sortedRows.length > 0 && selectedIds.size === sortedRows.length}
                       onChange={(e) => {
-                        setSelectedIds(e.target.checked ? new Set(rows.map((u) => u.id)) : new Set());
+                        setSelectedIds(e.target.checked ? new Set(sortedRows.map((u) => u.id)) : new Set());
                       }}
                     />
                   </th>
-                  <th>Employee</th>
-                  <th>Username</th>
-                  <th>Email</th>
-                  <th>Department</th>
-                  <th>Status</th>
-                  <th>Last Login</th>
+                  <th>
+                    <SortHeader label="Employee" isSorted={sortColIndex === 1} sortDirection={sortDirection} onSort={() => handleHeaderSort(1)} />
+                  </th>
+                  <th>
+                    <SortHeader label="Username" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} />
+                  </th>
+                  <th>
+                    <SortHeader label="Email" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} />
+                  </th>
+                  <th>
+                    <SortHeader label="Department" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} />
+                  </th>
+                  <th>
+                    <SortHeader label="Status" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} />
+                  </th>
+                  <th>
+                    <SortHeader label="Last Login" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} />
+                  </th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <UserTableSkeletonRows count={8} />
-                ) : rows.length === 0 ? (
+                ) : sortedRows.length === 0 ? (
                   <TableMessageRow colSpan={8}>No user accounts found.</TableMessageRow>
                 ) : (
-                  rows.map((u) => {
+                  sortedRows.map((u) => {
                     const statusUpper = (u.status || "").toUpperCase();
                     const isTargetSuperAdmin = Boolean(u.roles?.includes("super_admin"));
                     const hasAdminRole = Boolean(u.roles?.includes("super_admin") || u.roles?.includes("admin"));

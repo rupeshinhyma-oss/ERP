@@ -10,6 +10,7 @@ from app.cache.manager import CacheManager
 from app.database.session import get_db_session
 from app.masters.cities.repository import CityRepository
 from app.masters.countries.repository import CountryRepository
+from app.masters.districts.repository import DistrictRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
 from app.masters.products.repository import ProductRepository
@@ -33,4 +34,5 @@ def get_company_service(
         ProductSubCategoryRepository(db),
         cache_manager,
         product_repository=ProductRepository(db),
+        district_repository=DistrictRepository(db),
     )
