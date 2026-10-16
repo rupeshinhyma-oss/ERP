@@ -850,11 +850,11 @@ export function IndustrialZonesPage() {
                   <th style={{ padding: "12px 14px" }}>
                     <SortHeader
                       label="Pote. Cate. Of Machi."
-                      isSorted={sortField === "potential_category_machines"}
+                      isSorted={sortField === "potential_machine_categories"}
                       sortDirection={sortDir}
                       onSort={() => {
-                        if (sortField === "potential_category_machines") setSortDir(sortDir === "asc" ? "desc" : "asc");
-                        else { setSortField("potential_category_machines"); setSortDir("asc"); }
+                        if (sortField === "potential_machine_categories") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("potential_machine_categories"); setSortDir("asc"); }
                       }}
                     />
                   </th>

@@ -452,12 +452,12 @@ export function ProformaInvoicesPage({
           vB = b.sales_person || "";
           break;
         case 8: // Amount (Inc.GST)
-          vA = Number(a.total_with_tax) || 0;
-          vB = Number(b.total_with_tax) || 0;
+          vA = Number(a.amount_inc_gst) || 0;
+          vB = Number(b.amount_inc_gst) || 0;
           break;
         case 9: // Discount
-          vA = Number(a.total_discount) || 0;
-          vB = Number(b.total_discount) || 0;
+          vA = Number(a.discount) || 0;
+          vB = Number(b.discount) || 0;
           break;
         case 10: // Status
           vA = a.status || "";

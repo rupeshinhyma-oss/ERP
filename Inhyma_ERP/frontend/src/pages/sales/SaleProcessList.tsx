@@ -582,16 +582,16 @@ export function SaleProcessListPage() {
           vB = b.third_party_delivery ? "Yes" : "No";
           break;
         case 6: // PO
-          vA = a.po_number || "";
-          vB = b.po_number || "";
+          vA = a.po ? String(a.po) : "";
+          vB = b.po ? String(b.po) : "";
           break;
         case 7: // Sales Person
           vA = a.sales_person || "";
           vB = b.sales_person || "";
           break;
         case 8: // Amount
-          vA = Number(includingGst ? a.amount_inc_tax : a.amount_ex_tax) || 0;
-          vB = Number(includingGst ? b.amount_inc_tax : b.amount_ex_tax) || 0;
+          vA = Number(includingGst ? (a.amount_inc_gst ?? a.total_amount) : (a.amount_exc_gst ?? a.total_basic ?? a.total_amount)) || 0;
+          vB = Number(includingGst ? (b.amount_inc_gst ?? b.total_amount) : (b.amount_exc_gst ?? b.total_basic ?? b.total_amount)) || 0;
           break;
         case 9: // Discount
           vA = Number(a.discount) || 0;

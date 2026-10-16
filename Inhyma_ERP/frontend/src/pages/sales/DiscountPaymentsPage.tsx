@@ -587,8 +587,8 @@ export function DiscountPaymentsPage({
           vB = b.company_name || "";
           break;
         case 3: // Contact Person
-          vA = a.contact_person || "";
-          vB = b.contact_person || "";
+          vA = a.contact_person_name || a.contact_name || "";
+          vB = b.contact_person_name || b.contact_name || "";
           break;
         case 4: // Sales Person
           vA = a.sales_person || "";
