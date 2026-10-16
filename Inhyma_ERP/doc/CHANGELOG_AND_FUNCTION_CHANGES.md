@@ -38,6 +38,12 @@
 - **Inhyma Standard Header Sorting ([`SortHeader.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/SortHeader.tsx)):**
   - Implemented universal ascending (`▲`) and descending (`▼`) sorting component across Inhyma module tables.
   - Applied across Product Master, Product Stock, Stock Adjustment, Stock Transfer, Companies, and Sales Process list views.
+- **TypeScript Type Safety & Sorting Accessor Harmonization:**
+  - Standardized model-field accessors in table sorting pipelines to achieve strict 0-error TypeScript compilation (`tsc --noEmit`):
+    - **Industrial Zones ([`IndustrialZonesPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/IndustrialZonesPage.tsx)):** Aligned sort key to `potential_machine_categories` on `IndustrialZoneItem`.
+    - **Proforma Invoices ([`ProformaInvoicesPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ProformaInvoicesPage.tsx)):** Corrected numeric sorting accessors to canonical model fields `amount_inc_gst` and `discount`.
+    - **Discount Payments ([`DiscountPaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/DiscountPaymentsPage.tsx)):** Standardized contact person fallback using `a.contact_person_name || a.contact_name || ""`.
+    - **Sales Process List ([`SaleProcessList.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/SaleProcessList.tsx)):** Updated PO column sort to `a.po ? String(a.po) : ""` and Amount sort to `includingGst ? (a.amount_inc_gst ?? a.total_amount) : (a.amount_exc_gst ?? a.total_basic ?? a.total_amount)`.
 
 ### 4. Technical Tasks & Company Geography Integration
 - **Migrations `k7a8b9c0d1e2` & `l8b9c0d1e2f3`:**
