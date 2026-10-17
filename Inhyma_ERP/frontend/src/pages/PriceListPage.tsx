@@ -63,6 +63,37 @@ function resolveImageUrl(url: string | null | undefined): string {
   return encodeURI(`${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`);
 }
 
+const PriceListSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`pricelist-skeleton-${index}`} className="table-skeleton-row" style={{ borderBottom: "1px solid #f1f5f9" }}>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-line" style={{ width: 20, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px 14px" }}>
+          <div className="skeleton-line" style={{ width: "75%", marginBottom: 4 }} />
+          <div className="skeleton-line" style={{ width: "45%" }} />
+        </td>
+        <td style={{ padding: "12px 14px" }}>
+          <div className="skeleton-line" style={{ width: "65%", marginBottom: 4 }} />
+          <div className="skeleton-line" style={{ width: "40%" }} />
+        </td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 50, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-line" style={{ width: 60, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "65%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 60, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 65, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}>
+          <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+            <div className="skeleton-box" style={{ width: 26, height: 26, borderRadius: 4 }} />
+            <div className="skeleton-box" style={{ width: 26, height: 26, borderRadius: 4 }} />
+          </div>
+        </td>
+      </tr>
+    ))}
+  </>
+);
+
 export function PriceListPage() {
   // --- Pricing Mode State (Exclusive vs Inclusive GST) ---
   const [isInclusiveMode, setIsInclusiveMode] = useState<boolean>(false);
@@ -1033,15 +1064,11 @@ export function PriceListPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={11} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                      Loading commercial price list...
-                    </td>
-                  </tr>
+                  <PriceListSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
                 ) : items.length === 0 ? (
                   <tr>
                     <td colSpan={11} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                      No products found matching your search and filter criteria.
+                      No Data
                     </td>
                   </tr>
                 ) : (

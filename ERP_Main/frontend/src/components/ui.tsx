@@ -5,23 +5,82 @@
  * and Empty States matching Yinglima/Inhyma ERP styles.
  */
 
-import { type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { isAbortError, errorMessage } from "@/lib/api";
 import { useBodyScrollLock } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import { IconAlertTriangle, IconX } from "./icons";
 
 /* ------------------------------------------------------------------ */
-/* Banners                                                            */
+/* Banners -> Floating Toast Notifications Standard                   */
 /* ------------------------------------------------------------------ */
 
 export function ErrorBanner({ error }: { error: unknown }) {
+  const showToast = useToast();
+  const lastErrorRef = useRef<unknown>(null);
+
+  useEffect(() => {
+    if (!error || isAbortError(error)) return;
+    if (error !== lastErrorRef.current) {
+      lastErrorRef.current = error;
+      showToast(errorMessage(error), "error");
+    }
+  }, [error, showToast]);
+
   if (!error || isAbortError(error)) return null;
-  return <div className="error-banner">{errorMessage(error)}</div>;
+  return (
+    <div
+      className="error-banner"
+      role="alert"
+      style={{
+        position: "absolute",
+        width: "1px",
+        height: "1px",
+        padding: 0,
+        margin: "-1px",
+        overflow: "hidden",
+        clip: "rect(0, 0, 0, 0)",
+        whiteSpace: "nowrap",
+        border: 0,
+      }}
+    >
+      {errorMessage(error)}
+    </div>
+  );
 }
 
 export function SuccessBanner({ message }: { message?: string | null }) {
+  const showToast = useToast();
+  const lastMsgRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!message) return;
+    if (message !== lastMsgRef.current) {
+      lastMsgRef.current = message;
+      showToast(message, "success");
+    }
+  }, [message, showToast]);
+
   if (!message) return null;
-  return <div className="success-banner">{message}</div>;
+  return (
+    <div
+      className="success-banner"
+      role="status"
+      style={{
+        position: "absolute",
+        width: "1px",
+        height: "1px",
+        padding: 0,
+        margin: "-1px",
+        overflow: "hidden",
+        clip: "rect(0, 0, 0, 0)",
+        whiteSpace: "nowrap",
+        border: 0,
+      }}
+    >
+      {message}
+    </div>
+  );
 }
 
 export function Banner({
@@ -32,10 +91,10 @@ export function Banner({
   success?: string | null;
 }) {
   return (
-    <div style={{ marginBottom: "16px" }}>
+    <>
       <ErrorBanner error={error} />
       {!error && <SuccessBanner message={success} />}
-    </div>
+    </>
   );
 }
 

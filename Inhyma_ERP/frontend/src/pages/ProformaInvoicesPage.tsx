@@ -112,6 +112,51 @@ function ActionMenuItem({ label, color, onClick }: { label: string; color?: stri
   );
 }
 
+const ProformaSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`proforma-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ textAlign: "center", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: 24, margin: "0 auto" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "80%" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "70%" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "65%" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "60%" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "85%" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "65%" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "60%" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} />
+        </td>
+        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-line" style={{ width: "50%", marginLeft: "auto" }} />
+        </td>
+        <td style={{ textAlign: "center", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-badge" style={{ width: 70, margin: "0 auto" }} />
+        </td>
+        <td style={{ textAlign: "center", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
+          <div className="skeleton-box" style={{ width: 26, height: 26, borderRadius: 4, margin: "0 auto" }} />
+        </td>
+      </tr>
+    ))}
+  </>
+);
+
 function statusBadgeClass(status: string, tabs: StatusTab[]): string {
   return tabs.find((t) => t.key === status)?.badge || "badge badge-neutral";
 }
@@ -1999,15 +2044,11 @@ export function ProformaInvoicesPage({
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={12} style={{ textAlign: "center", padding: "28px", color: "#64748b", height: "50px", backgroundColor: "#ffffff" }}>
-                      Loading…
-                    </td>
-                  </tr>
+                  <ProformaSkeletonRows count={perPage > 10 ? 8 : perPage} />
                 ) : filteredItems.length === 0 ? (
                   <tr>
                     <td colSpan={12} style={{ textAlign: "center", padding: "28px", color: "#64748b", height: "50px", backgroundColor: "#ffffff" }}>
-                      No proforma invoices found.
+                      No Data
                     </td>
                   </tr>
                 ) : (

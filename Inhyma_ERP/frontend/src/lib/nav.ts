@@ -44,6 +44,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
       { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
+      { key: "payments", label: "Payments", path: "/payments", icon: "currency" },
       { key: "technician-operations", label: "Technician Ops & Wallet", path: "/technician-operations", icon: "truck" },
     ],
   },
@@ -216,6 +217,8 @@ export const PAGE_TITLES: Record<string, string> = {
   "my-tasks": "My Tasks",
   tasks: "Task Management",
   "technical-tasks": "Technical Task List",
+  payments: "Payments",
+  "task-payments": "Payments",
   "technical-call-logs": "Technical Call Log Report",
   "masters-technical-task-types": "Technical Task Types",
   "tasks-kanban": "Tasks Kanban Board",
@@ -378,6 +381,9 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/technician-gatepass/list": "/technician-operations?tab=gatepasses",
   "/technician-wallet/list": "/technician-operations?tab=wallets",
   "/machine-warranty/list": "/technician-operations?tab=warranty",
+  "/task-payments": "/payments",
+  "/task-payments/list": "/payments",
+  "/technical-task/payments": "/payments",
 };
 
 /**

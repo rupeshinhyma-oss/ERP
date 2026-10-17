@@ -19,6 +19,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { TableMessageRow } from "@/components/ui";
@@ -857,6 +859,15 @@ export function LeadsPage() {
   // Paginated Sliced Leads
   const totalRecords = sortedLeads.length;
   const totalPages = Math.ceil(totalRecords / itemsPerPage) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: totalRecords,
+    page_size: itemsPerPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, totalRecords, itemsPerPage]);
+
   const paginatedLeads = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return sortedLeads.slice(start, start + itemsPerPage);
@@ -2219,81 +2230,16 @@ export function LeadsPage() {
           </div>
 
           {/* Table Pagination Footer matching Companies design */}
-          <div
-            style={{
-              padding: "12px 20px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              background: "#ffffff",
-              borderTop: "1px solid #f1f5f9",
-              flexWrap: "wrap",
-              gap: "12px",
-            }}
-          >
-            <div style={{ fontSize: "13px", color: "#64748b" }}>
-              Showing {startIndex} To {endIndex} Of {totalRecords} Entries
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <button
-                type="button"
-                id="btn-prev-page"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                style={{
-                  height: "32px",
-                  padding: "0 14px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage <= 1 ? "#f8fafc" : "#ffffff",
-                  color: currentPage <= 1 ? "#94a3b8" : "#334155",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-                }}
-              >
-                Previous
-              </button>
-
-              <span
-                style={{
-                  height: "32px",
-                  minWidth: "32px",
-                  padding: "0 10px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: "6px",
-                  background: "#0061f2",
-                  color: "#ffffff",
-                  fontSize: "12.5px",
-                  fontWeight: 700,
-                }}
-              >
-                {currentPage}
-              </span>
-
-              <button
-                type="button"
-                id="btn-next-page"
-                disabled={currentPage >= totalPages || totalRecords === 0}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                style={{
-                  height: "32px",
-                  padding: "0 14px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage >= totalPages || totalRecords === 0 ? "#f8fafc" : "#ffffff",
-                  color: currentPage >= totalPages || totalRecords === 0 ? "#94a3b8" : "#334155",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  cursor: currentPage >= totalPages || totalRecords === 0 ? "not-allowed" : "pointer",
-                }}
-              >
-                Next
-              </button>
-            </div>
+          <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setItemsPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
       </main>

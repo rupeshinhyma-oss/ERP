@@ -39,6 +39,21 @@ function iconFor(type: ToastType): string {
   return type === "success" ? "✓ " : type === "error" ? "✕ " : "ℹ ";
 }
 
+let globalShowToast: ShowToast | null = null;
+
+/**
+ * Imperative toast trigger callable anywhere inside or outside React component trees.
+ */
+export function toast(message: string, type: ToastType = "info", duration = 3500) {
+  if (globalShowToast) {
+    globalShowToast(message, type, duration);
+  } else if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("app:toast", { detail: { message, type, duration } })
+    );
+  }
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
@@ -70,6 +85,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, duration);
     timers.current.push(hideTimer);
   }, []);
+
+  useEffect(() => {
+    globalShowToast = showToast;
+    const onEvent = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.message) {
+        showToast(d.message, d.type, d.duration);
+      }
+    };
+    window.addEventListener("app:toast", onEvent);
+    return () => {
+      globalShowToast = null;
+      window.removeEventListener("app:toast", onEvent);
+    };
+  }, [showToast]);
 
   const value = useMemo(() => showToast, [showToast]);
 

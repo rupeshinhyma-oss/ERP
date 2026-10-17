@@ -22,6 +22,28 @@ interface OptionRow {
 const inputStyle: React.CSSProperties = { height: 36, borderRadius: 5, border: "1px solid #cbd5e1", padding: "0 10px", fontSize: 13.5, boxSizing: "border-box" };
 const btn = (bg: string): React.CSSProperties => ({ background: bg, color: "#fff", border: "none", borderRadius: 5, height: 34, padding: "0 14px", cursor: "pointer", fontSize: 13 });
 
+function TechnicalTaskTypesSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`task-type-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
+            <span className="skeleton-line" style={{ width: index % 2 === 0 ? "70%" : "50%", height: 14 }} />
+          </td>
+          <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
+            <span className="skeleton-badge" style={{ width: 55, height: 20 }} />
+          </td>
+          <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", display: "flex", gap: 8 }}>
+            <span className="skeleton-box" style={{ width: 60, height: 26, borderRadius: 4 }} />
+            <span className="skeleton-box" style={{ width: 70, height: 26, borderRadius: 4 }} />
+            <span className="skeleton-box" style={{ width: 55, height: 26, borderRadius: 4 }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function TechnicalTaskTypesPage() {
   const [rows, setRows] = useState<OptionRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -97,7 +119,7 @@ export function TechnicalTaskTypesPage() {
               <tr>{["Task Type", "Status", "Actions"].map((h) => <th key={h} style={{ textAlign: "left", padding: "8px 10px", fontSize: 12, textTransform: "uppercase", color: "#475569", borderBottom: "1px solid #e2e8f0" }}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {loading && rows.length === 0 && <tr><td colSpan={3} style={{ padding: 12, color: "#64748b" }}>Loading...</td></tr>}
+              {loading && rows.length === 0 && <TechnicalTaskTypesSkeletonRows />}
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>

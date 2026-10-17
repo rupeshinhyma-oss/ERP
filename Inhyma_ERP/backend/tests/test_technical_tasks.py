@@ -505,3 +505,48 @@ async def test_admin_level_actions_for_normal_users(test_client: AsyncClient, li
     allowed = await test_client.post(f"/api/v1/technical-tasks/{appr['id']}/reopen", json={"status": "Approved", "task_allotted_to": "Mangal"})
     assert allowed.status_code == 200
 
+
+async def test_payment_summary_and_recording(test_client: AsyncClient):
+    chargeable = await _create(test_client, service_type="Chargeable", service_charge=10000, payment_terms="Immediate")
+    await _approve(test_client, chargeable["id"])
+
+    res = await test_client.get("/api/v1/technical-tasks/payment-summary")
+    summary = res.json()["data"]
+    assert summary["total_payment"] == 10000.0
+    assert summary["paid"] == 0.0
+    assert summary["due"] == 10000.0
+    assert summary["pending_count"] == 1
+    assert summary["completed_count"] == 0
+
+    p1 = await test_client.post(
+        f"/api/v1/technical-tasks/{chargeable['id']}/record-payment",
+        json={"amount": 4000, "payment_mode": "UPI / QR", "reference_no": "UPI987654"},
+    )
+    assert p1.status_code == 200
+    assert float(p1.json()["data"]["collected_amount"]) == 4000.0
+    assert p1.json()["data"]["payment_status"] == "Pending"
+
+    res2 = await test_client.get("/api/v1/technical-tasks/payment-summary")
+    summary2 = res2.json()["data"]
+    assert summary2["total_payment"] == 10000.0
+    assert summary2["paid"] == 4000.0
+    assert summary2["due"] == 6000.0
+    assert summary2["pending_count"] == 1
+    assert summary2["completed_count"] == 0
+
+    p2 = await test_client.post(
+        f"/api/v1/technical-tasks/{chargeable['id']}/record-payment",
+        json={"amount": 6000, "payment_mode": "Company Acc", "reference_no": "NEFT123"},
+    )
+    assert p2.status_code == 200
+    assert float(p2.json()["data"]["collected_amount"]) == 10000.0
+    assert p2.json()["data"]["payment_status"] == "Paid"
+
+    res3 = await test_client.get("/api/v1/technical-tasks/payment-summary")
+    summary3 = res3.json()["data"]
+    assert summary3["total_payment"] == 10000.0
+    assert summary3["paid"] == 10000.0
+    assert summary3["due"] == 0.0
+    assert summary3["pending_count"] == 0
+    assert summary3["completed_count"] == 1
+

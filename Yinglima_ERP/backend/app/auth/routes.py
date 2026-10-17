@@ -410,40 +410,9 @@ async def sso_handover_login(
                 "This account was deleted or disabled in this ERP. Ask an administrator to restore it."
             )
     else:
-        import os as _os
-
-        if _os.environ.get("SSO_HANDOVER_AUTO_PROVISION", "true").strip().lower() in {"0", "false", "no"}:
-            raise UnauthorizedException("No account exists for you in this ERP.")
-        # Auto-provision minimal local user on confirmed central handover
-        from app.api.v1.internal_users import _system_actor_id
-        from app.users.repository import UserRepository
-        from app.users.service import UserService
-        import secrets
-
-        user_service = UserService(
-            user_repository=UserRepository(db),
-            user_role_repository=rbac_service.user_role_repository,
-            rbac_service=rbac_service,
-            auth_service=auth_service,
+        raise UnauthorizedException(
+            "No account exists for you in this ERP. An administrator must explicitly grant access or assign ERP membership in ERP_Dashboard."
         )
-        system_actor_id = await _system_actor_id(db)
-        display_name = str(token_data.get("user") or req_email.split("@")[0])
-        first = display_name.split()[0]
-        last = display_name.split()[-1] if len(display_name.split()) > 1 else None
-        dummy_phone = f"+0000{secrets.randbelow(900000) + 100000}"
-        temp_pass = f"Tmp!{secrets.token_urlsafe(12)}"
-        user, _ = await user_service.create_user(
-            first_name=first,
-            last_name=last,
-            display_name=display_name,
-            email=req_email,
-            username=req_email.split("@")[0],
-            phone=dummy_phone,
-            password=temp_pass,
-            has_login=True,
-            created_by=system_actor_id,
-        )
-        await db.flush()
 
     access_token, refresh_token = await auth_service.issue_session_for_federated_user(
         user, context, session_id=handover_sid

@@ -59,12 +59,16 @@
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/technical-tasks` | List service tickets by status tab and priority | `technicaltask.view` |
-| `GET` | `/api/v1/technical-tasks/counts` | Status tab badge counts (Pending, Allotted, Under Process, etc.) | `technicaltask.view` |
+| `GET` | `/api/v1/technical-tasks` | List service tickets by status tab, priority, and payment status (`payment_collected=pending|completed`) | `technicaltask.view` |
+| `GET` | `/api/v1/technical-tasks/counts` | Status tab badge counts (Pending, Approved, Payment Pending, Completed, Cancel) | `technicaltask.view` |
+| `GET` | `/api/v1/technical-tasks/payment-summary` | Aggregated payment KPIs (`total_payment`, `paid`, `due`, `pending_count`, `completed_count`) | `technicaltask.view` |
 | `POST` | `/api/v1/technical-tasks` | Create field service ticket / breakdown maintenance call | `technicaltask.create` |
 | `GET` | `/api/v1/technical-tasks/{id}` | Inspect detailed service ticket | `technicaltask.view` |
-| `PATCH` | `/api/v1/technical-tasks/{id}` | Update machine details, problem notes, or scheduled visit | `technicaltask.update` |
-| `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition ticket status with resolution remarks | `technicaltask.update` |
+| `PATCH` | `/api/v1/technical-tasks/{id}` | Update machine details, problem notes, payment fields, or scheduled visit | `technicaltask.update` |
+| `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition ticket status with resolution remarks and optional payment collection | `technicaltask.update` |
+| `POST` | `/api/v1/technical-tasks/{id}/record-payment` | Atomically record collected payment amount, payment mode, reference no, date, and receipt | `technicaltask.update` |
+| `POST` | `/api/v1/technical-tasks/upload-screenshot` | Upload payment screenshot / receipt image or PDF | Authenticated |
+| `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete technical tasks by array of IDs | `technicaltask.delete` |
 | `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical service task | `technicaltask.delete` |
 
 ---

@@ -136,6 +136,9 @@ class TechnicalTaskService:
     async def get_counts(self, **scope: Any) -> dict[str, int]:
         return await self.repository.get_counts(**scope)
 
+    async def get_payment_summary(self, **scope: Any) -> dict[str, Any]:
+        return await self.repository.get_payment_summary(**scope)
+
     async def list_tasks(self, **kwargs: Any) -> tuple[list[TechnicalTask], int]:
         return await self.repository.list_tasks(**kwargs)
 
@@ -275,6 +278,57 @@ class TechnicalTaskService:
             await self.repository.create_call_log(
                 task_id=task.id, call_date=date.today(), call_type=log_type, remarks=log_remarks, created_by=actor
             )
+        result = await self.repository.update(task, expected_version=task.version, **updates)
+        invalidate_counts_cache()
+        return result
+
+    async def record_payment(
+        self,
+        task_id: uuid.UUID,
+        amount: Decimal,
+        payment_mode: str,
+        payment_date: date | None = None,
+        reference_no: str | None = None,
+        payment_screenshot: str | None = None,
+        remarks: str | None = None,
+        user_name: str | None = None,
+    ) -> TechnicalTask:
+        task = await self.get_by_id(task_id)
+        if not task:
+            raise NotFoundException(f"Technical task {task_id} not found.")
+
+        current_collected = task.collected_amount or Decimal(0)
+        new_collected = current_collected + amount
+        updates: dict[str, Any] = {
+            "collected_amount": new_collected,
+            "payment_mode": payment_mode,
+        }
+        if payment_screenshot:
+            updates["payment_screenshot"] = payment_screenshot
+
+        target_charge = task.service_charge or Decimal(0)
+        if target_charge > 0 and new_collected >= target_charge:
+            updates["payment_status"] = "Paid"
+            if canonical_status(task.status) == PAYMENT_PENDING:
+                updates["status"] = COMPLETED
+                if not task.completed_date:
+                    updates["completed_date"] = payment_date or date.today()
+        else:
+            updates["payment_status"] = "Pending"
+
+        log_remarks = f"Collected ₹{amount:,.2f} via {payment_mode}."
+        if reference_no:
+            log_remarks += f" Ref: {reference_no}."
+        if remarks:
+            log_remarks += f" Remarks: {remarks}."
+
+        await self.repository.create_call_log(
+            task_id=task.id,
+            call_date=payment_date or date.today(),
+            call_type="Payment Collected",
+            remarks=log_remarks,
+            created_by=user_name or "Accounts",
+        )
         result = await self.repository.update(task, expected_version=task.version, **updates)
         invalidate_counts_cache()
         return result

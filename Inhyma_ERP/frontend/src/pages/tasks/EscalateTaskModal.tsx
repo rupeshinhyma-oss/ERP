@@ -292,7 +292,10 @@ export const EscalateTaskModal: React.FC<EscalateTaskModalProps> = ({
               </label>
 
               {loading ? (
-                <div style={{ padding: "12px", color: "#64748b", fontSize: "13px" }}>Loading candidate users...</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "12px", border: "1px solid #e2e8f0", borderRadius: "6px" }} aria-hidden="true">
+                  <span className="skeleton-line" style={{ width: "60%", height: 14 }} />
+                  <span className="skeleton-line" style={{ width: "40%", height: 12 }} />
+                </div>
               ) : targetType === "ORGANIZATION_USER" ? (
                 <SearchableUserSelect
                   users={availableUsers}

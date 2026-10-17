@@ -80,35 +80,34 @@ class UserService:
         self.auth_service = auth_service
 
     @staticmethod
-    def _username_base_from(email: str, phone: str) -> str:
+    def _username_base_from(email: str, phone: str | None = None) -> str:
         """Derive a readable username stem from the email's local part, falling back to phone."""
         local_part = email.split("@", 1)[0] if "@" in email else ""
         stem = re.sub(r"[^a-zA-Z0-9._-]", "", local_part).strip(".-_")
         if len(stem) >= 3:
             return stem.lower()
-        digits_only = re.sub(r"\D", "", phone)
+        digits_only = re.sub(r"\D", "", phone or "")
         return f"user{digits_only[-6:]}" if digits_only else "user"
 
-    async def _generate_unique_username(self, *, email: str, phone: str) -> str:
+    async def _generate_unique_username(self, *, email: str, phone: str | None = None) -> str:
         """
         Generate a unique, system-assigned username.
 
         Used when an admin creates a user without specifying a username.
         Tries a clean stem derived from the email first (e.g. ``john.doe``);
-        if that's taken, appends a short random numeric suffix and retries
-        a bounded number of times before falling back to a fully random tag.
+        if that's taken, appends a short numeric suffix and retries
+        a bounded number of times.
         """
         base = self._username_base_from(email, phone)[:90]
         if not await self.user_repository.username_exists(base):
             return base
 
-        for _ in range(20):
-            candidate = f"{base}{secrets.randbelow(90000) + 10000}"[:100]
+        for i in range(1, 100):
+            candidate = f"{base}{i}"[:100]
             if not await self.user_repository.username_exists(candidate):
                 return candidate
 
-        # Extremely unlikely fallback: fully random suffix, effectively collision-free.
-        return f"{base[:80]}{secrets.token_hex(8)}"[:100]
+        return f"{base[:80]}{secrets.token_hex(4)}"[:100]
 
     async def get_by_id_or_raise(self, user_id: uuid.UUID) -> User:
         """Fetch a user by ID or raise :class:`NotFoundException`."""
@@ -298,22 +297,22 @@ class UserService:
 
         if not email:
             raise ConflictException("Email is required for a user with login access.")
-        if not phone:
-            raise ConflictException("Phone number is required for a user with login access.")
         if not password or not password.strip():
             raise ConflictException("A password is required for a user with login access.")
+
+        phone_clean = phone.strip() if phone and phone.strip() else None
 
         if username and await self.user_repository.username_exists(username):
             raise ConflictException("A user with that username already exists.")
         if await self.user_repository.email_exists(email):
             raise ConflictException("A user with that email already exists.")
-        if await self.user_repository.phone_exists(phone):
+        if phone_clean and await self.user_repository.phone_exists(phone_clean):
             raise ConflictException("A user with that phone number already exists.")
 
         password_to_set = password.strip()
 
         resolved_username = username.strip() if username and username.strip() else (
-            await self._generate_unique_username(email=email, phone=phone)
+            await self._generate_unique_username(email=email, phone=phone_clean)
         )
 
         user = await self.user_repository.create(
@@ -325,7 +324,7 @@ class UserService:
             has_login=True,
             username=resolved_username,
             email=email,
-            phone=phone,
+            phone=phone_clean,
             manager_id=manager_id,
             date_of_birth=date_of_birth,
             gender=gender,

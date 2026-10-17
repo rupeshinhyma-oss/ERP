@@ -37,6 +37,7 @@
    - 8.17. [Inventory: Stock Adjustment & Order PDF Generation](#817-inventory-stock-adjustment--order-pdf-generation)
    - 8.18. [Contact: Companies & Multi-Contact Directory](#818-contact-companies--multi-contact-directory)
    - 8.19. [Task: Technical Tasks & Field Service Dispatch](#819-task-technical-tasks--field-service-dispatch)
+     - 8.19.1. [Technical Tasks: Payments Module & Technician Collections](#8191-technical-tasks-payments-module-payments--technician-collections)
    - 8.20. [HRMS: Leave Management Foundation & Master Data Architecture (Phase 1)](#820-hrms-leave-management-foundation--master-data-architecture-phase-1)
    - 8.21. [Purchase: Local Purchase Management & Costing Engine](#821-purchase-local-purchase-management--costing-engine)
    - 8.22. [Purchase: Import Purchase Consignments & Customs Landing Matrix](#822-purchase-import-purchase-consignments--customs-landing-matrix)
@@ -753,6 +754,42 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Service Modes: `On-Site Client Visit`, `Remote Diagnostic Support`, `Workshop Repair`.
   - Technician Allotment: Searchable technician assignment linked to employee directory with scheduled service visit dates.
 
+#### 8.19.1. Technical Tasks: Payments Module (`/payments`) & Technician Collections
+- **Files:**
+  - Frontend: `frontend/src/pages/technicalTasks/PaymentsPage.tsx`, `frontend/src/pages/PaymentsPage.tsx`, `frontend/src/styles/payments.css`, `frontend/src/lib/technicalTasksApi.ts`, `frontend/src/lib/nav.ts`.
+  - Backend: `backend/app/technical_tasks/routes.py`, `backend/app/technical_tasks/service.py`, `backend/app/technical_tasks/repository.py`, `backend/app/technical_tasks/schemas.py`, `backend/app/technical_tasks/models.py`.
+  - Automated Tests: `backend/tests/test_technical_tasks.py` (`test_payment_summary_and_recording`).
+- **Endpoints:**
+  - `GET /api/v1/technical-tasks/payment-summary`: Aggregates real-time financial KPI totals (`total_payment`, `paid`, `due`, `pending_count`, `completed_count`) using high-performance indexed database queries.
+  - `POST /api/v1/technical-tasks/{task_id}/record-payment`: Atomically updates `collected_amount`, `payment_mode`, `payment_status` (`Paid` if balance cleared, `Pending` if balance remains), sets task status to `Completed` if work was done, and appends an audit call log entry (`call_type="Payment Collected"`).
+  - `POST /api/v1/technical-tasks/upload-screenshot`: Uploads payment receipt image/document attachment to storage.
+- **Top Financial KPI Metric Cards:**
+  - **`TOTAL PAYMENT`**: Aggregated sum of service charges across all chargeable technical tasks.
+  - **`PAID`**: Aggregated total amount collected from clients/technicians displayed in emerald green (`#16a34a`).
+  - **`DUE`**: Dynamic pending balance ($\text{Total} - \text{Paid}$) in high-contrast slate font (`#0f172a`).
+- **Status Tabs & Sub-Toolbar Controls:**
+  - `Pending (<count>)`: Displays tasks with unpaid or partial payment balance (active default tab with blue indicator).
+  - `Completed (<count>)`: Displays tasks where full service charge payment has been collected and reconciled.
+  - Selectable pagination (`10`, `25`, `50`, `100` Items/Page), instant live search across company, city, machine model, contact person, technician, and priority.
+  - Collapsible filter drawer: City, Task Type, Priority, Technician, and Date Range.
+- **Dual Amount Display & Grid Matrix:**
+  - `Total Amount`: Shows formatted INR currency (`₹...`) alongside green `Chargable` pill badge (or gray `Non-Chargable`).
+  - `Paid/Due`: Multi-line breakdown showing collected payment in blue (`Paid: ₹...`) and remaining balance in red (`Due: ₹...`).
+  - Interactive company name linking to detail drawer/modal.
+  - Row action menu (`⋮`) offering quick triggers: *Record Payment* and *View Details*.
+- **Interactive Modals:**
+  - **Record / Collect Payment Modal:** Real-time balance due calculator. Captures Amount to Collect (validated against positive values), Payment Mode (*Company Acc*, *Self collect*, *UPI / QR*, *Cheque*, *Cash*, *Bank Transfer*), Date, Reference/UTR No, Receipt Screenshot/Document upload, and collection remarks. Submitting records payment and automatically logs a call history audit record.
+  - **Add Payment Modal:** Typeahead client linking via `ClientNameAutocomplete` to quickly initiate chargeable service tasks.
+  - **Payment Details Modal:** Full ticket overview including machine model, problem reported, technician assigned, approver, billing breakdown, and receipt document preview.
+  - **Bulk Delete Modal:** Multi-row soft-delete with confirmation modal.
+- **Strict Zero-Synthetic-Data Enforcement:**
+  - Absolute ban on automated mock/QA data generation scripts (18 test/seeding scripts purged across Inhyma and ERP_Dashboard).
+  - Authentic accounts protected: `User A`, `User B`, `User C`, `User D`, and `Admin`.
+  - Honest zero states rendered across all tables when no authentic records exist.
+- **Navigation Architecture:**
+  - Dedicated item in the **`TASK`** navigation block in `nav.ts` with custom `₹` currency icon (`IconIndianRupee`).
+  - Deprecated and removed legacy `Gatepass` navigation link from the `TASK` section to maintain clean, streamlined operational workflows.
+
 ### 8.20. HRMS: Leave Management Foundation & Master Data Architecture (Phase 1)
 - **Files:**
   - Backend: `backend/app/hrms/models.py`, `backend/app/hrms/leave_service.py`, `backend/app/hrms/leave_routes.py`, `backend/app/hrms/schemas.py`, `backend/app/hrms/service.py`.
@@ -818,7 +855,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Expense Loading: $\text{Loading \%} = \frac{\text{Total Expenses}}{\text{Basic Invoice Value}} \times 100$.
   - Line Item Landing: $\text{Expense Per Unit} = \text{Unit Rate} \times \frac{\text{Loading \%}}{100}$, $\text{Unit Landing Value} = \text{Unit Rate} + \text{Expense Per Unit}$.
   - **Stock Movement Hook:** Transitioning to `confirmed` status invokes `move_stock(db, warehouse, [(product, qty)], +1)` and sets `stock_applied = True`, `confirmed_by`, and `confirmed_at`.
-- **Frontend Architecture:**
+- **Frontend Architecture & "Grey and Locked" UX Standard:**
+  - **Non-Editable Calculated Fields:** `Total Of All Expenses` and `% Loading Expense (Value Based)` are wrapped in the `.calc-locked-wrapper` container with `#e9ecef` background, `1px solid #cbd5e1` border, `#475569` text, `cursor: not-allowed`, and a 🔒 lock icon indicator, clearly indicating they are computed values and cannot be edited by hand.
+  - **Product Line Items Matrix:** Computed table columns (`Item Total`, `Expense Per Unit`, `Unit Landing Rate (VB)`, and `Total Landing Rate (VB)`) and footer grand totals are styled with `.calc-locked` cells and `cursor: not-allowed`.
   - Live landing rate calculation in client table matching server formula.
   - Datalist supplier lookup (`<datalist id="local-supplier-options">`) enforcing selection from known suppliers.
   - UOM badge display pulled dynamically from `/masters/uom`.
@@ -834,7 +873,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `PUT /api/v1/purchase/import-orders/{id}`: Update editable consignment record.
   - `PATCH /api/v1/purchase/import-orders/{id}/status`: Move consignment through workflow (`pending` -> `confirmed` -> `received` -> `closed`).
   - `DELETE /api/v1/purchase/import-orders/{id}`: Soft-delete consignment.
-- **Dual Landing Valuation Matrix:**
+- **Dual Landing Valuation Matrix & "Grey and Locked" UX Standard:**
+  - **Computed Landing Cards:** Summary boxes for `Total Expenses`, `Invoice Total Value (INR)`, `Gross Total Landing (INR)`, `% Loading Expense (Value Based)`, and `Loading Amount per CBM` use the `.calc-locked` class (`#e9ecef` background, `#cbd5e1` border, `#475569` text, `cursor: not-allowed`, with 🔒 lock indicator icons).
+  - **Customs Matrix Computed Columns:** Volumetric CBM, customs duties, unit landing rate (VB), unit landing rate (CB), and differential diff columns are styled with `.calc-locked`.
   - Calculates landing rates on both **Value Basis (VB)** (allocated proportionally by line-item USD valuation) and **CBM Volume Basis (CB)** (allocated proportionally by volumetric cubic meters).
   - Calculates differential $\text{Diff (CB - VB)} = \text{Unit Landing (CB)} - \text{Unit Landing (VB)}$ to reveal volume penalties on bulky cargo.
 - **Multi-Date Range Filtering & In-Transit Restraints:**
@@ -941,6 +982,17 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Clean Surface:** No internal counter badges or notification dots on the button, guaranteeing an identical rectangular footprint across all modules.
   - **Initial State Invariant:** All filter panels and drawers initialize collapsed (`useState(false)`), ensuring clean page loads.
 - **Hooks Architecture:** Custom hooks for asynchronous state management: `useAuth`, `usePendingGuard`, `useToast`, `usePagination`.
+- **Computed Fields "Grey and Locked" Design Standard (`.calc-locked`):**
+  - **Purpose:** Visually isolate formula-computed or server-derived fields from user-fillable fields across all ERP order and master forms.
+  - **Color & Visual Tokens:** Soft slate grey background (`#e9ecef` in light mode, `#1e293b` in dark mode), subtle border (`#cbd5e1` / `#334155`), slate-600 font (`#475569`, `font-weight: 600`), and `cursor: not-allowed`.
+  - **Container Helpers:** `.calc-locked-wrapper` flex container supporting input prefixes (e.g. `₹`, `$`, `%`) and lock indicator iconography (`🔒`).
+  - **Applied Modules:** Local Purchase (`Total Of All Expenses`, `% Loading Expense (VB)`, line-item landing calculations), Import Purchase (`Total Expenses`, `Invoice Total Value`, `Gross Total Landing`, `% Loading Expense`, `Loading Amount per CBM`), and Products Master (`packaging_unit_cbm`, multi-package volume and weight summaries).
+- **Universal "No Data" Empty State Standard:**
+  - When query results or table datasets return 0 records, the table body MUST render a full-width row with the exact centered string: **`"No Data"`** (e.g. `<TableMessageRow colSpan={columns.length}>No Data</TableMessageRow>`).
+  - Inconsistent, fragmented legacy empty messages (`"No records found."`, `"No suppliers found."`, `"No soft-deleted records found."`) are prohibited.
+- **Table Skeleton Row Loaders Architecture:**
+  - Reusable modular skeleton rows (e.g., `ProductSkeletonRows`, `CompanySkeletonRows`, `SupplierSkeletonRows`, `StockAdjustmentSkeletonRows`, `StockTransferSkeletonRows`) are rendered during table loading states.
+  - Ensures zero layout shift, preserving column widths and header geometry until live records arrive from the backend.
 
 ---
 
@@ -1136,10 +1188,13 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Companies** | `GET` | `/api/v1/companies/export` | Export company database to Excel / CSV | `company.export` |
 | **Technical Tasks** | `GET` | `/api/v1/technical-tasks` | List technical service tasks with tab status, call type & filters | `technicaltask.view` |
 | **Technical Tasks** | `GET` | `/api/v1/technical-tasks/counts` | Get status counts across tabs (All, Pending, Allotted, Under Process, etc.) | `technicaltask.view` |
+| **Technical Tasks** | `GET` | `/api/v1/technical-tasks/payment-summary` | Aggregated payment summary KPIs (`total_payment`, `paid`, `due`, counts) | `technicaltask.view` |
 | **Technical Tasks** | `POST` | `/api/v1/technical-tasks` | Create field service ticket or machine maintenance task | `technicaltask.create` |
 | **Technical Tasks** | `GET` | `/api/v1/technical-tasks/{id}` | Retrieve technical service task details | `technicaltask.view` |
 | **Technical Tasks** | `PATCH` | `/api/v1/technical-tasks/{id}` | Update technical service task fields & notes | `technicaltask.update` |
 | **Technical Tasks** | `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition task status (pending -> allotted -> under process -> done) | `technicaltask.update` |
+| **Technical Tasks** | `POST` | `/api/v1/technical-tasks/{id}/record-payment` | Atomically record collected payment amount, payment mode, reference no, date, and receipt | `technicaltask.update` |
+| **Technical Tasks** | `POST` | `/api/v1/technical-tasks/upload-screenshot` | Upload payment screenshot / receipt image or PDF | Authenticated |
 | **Technical Tasks** | `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical task | `technicaltask.delete` |
 | **Technical Tasks** | `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete selected technical tasks | `technicaltask.delete` |
 | **Masters** | `GET/POST`| `/api/v1/masters/districts` | Manage administrative district records | `district.*` |
@@ -1291,9 +1346,42 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
   - Document-level capture-phase `focusin` event interceptor immediately re-verifying and applying `autocomplete="off"` prior to browser layout engine suggestions popup rendering.
 - **Eliminates Browser Bubble Artifacts**: Permanently suppresses floating tooltip popover bubbles (e.g. historical name suggestions) from obscuring critical inputs.
 
-### Wheel Scroll Value Lockout & Spin-Button Elimination (`main.tsx` & `style.css`)
-- **Passive Mouse Wheel Listener**: Document-level listener detecting `wheel` events on `input[type="number"]` and immediately executing `target.blur()`, preventing inadvertent numeric increments or decrements during page scroll.
-- **Spin-Button Styling Suppression**: Universal CSS removal of `-webkit-outer-spin-button` and `-webkit-inner-spin-button` alongside `-moz-appearance: textfield` to maintain clean visual input boundaries.
+### 12. Frontend Architecture, Zero-Layout-Shift Floating Toasts & Hardening Standards
+
+#### 12.1. Universal "Grey and Locked" Calculation Design Pattern (`.calc-locked`)
+To eliminate ambiguity between user-editable inputs and system-calculated or formula-derived values across forms:
+- **Design Tokens & Classes ([`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css)):**
+  - **Background:** `#e9ecef` (Light slate grey) in light mode, `#1e293b` in dark mode.
+  - **Border:** `1px solid #cbd5e1` (slate-300) in light mode, `#334155` in dark mode.
+  - **Font Color:** `#475569` (slate-600) with `font-weight: 600` for high contrast and readability.
+  - **Interaction:** `cursor: not-allowed`, `user-select: none`, with non-focusable read-only behavior.
+  - **Iconography:** Integrated 🔒 lock icon badge for clear visual signaling.
+  - **Standard Classes:** `.calc-locked`, `.calculated-field`, and `.calc-locked-wrapper`.
+- **Implemented Modules:**
+  - **Local Purchase ([`LocalPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/LocalPurchasePage.tsx)):** `Total Of All Expenses`, `% Loading Expense (Value Based)`, line-item calculated columns (`Item Total`, `Expense Per Unit`, `Unit Landing Rate (VB)`, `Total Landing Rate (VB)`).
+  - **Import Purchase ([`ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):** `Total Expenses`, `Invoice Total Value (INR)`, `Gross Total Landing (INR)`, `% Loading Expense (VB)`, `Loading Amount per CBM`, line-item landing rates and totals.
+  - **Product Master ([`Products.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/masters/Products.tsx)):** `packaging_unit_cbm` and multi-package total cards (`packageTotals.cbm`, `net`, `gross`).
+
+#### 12.2. Zero-Layout-Shift Floating Toast Architecture & Banner Deprecation
+- **Floating Toast Notification System ([`toast.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/toast.tsx), [`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css)):**
+  - Replaced legacy disruptive in-page static alert banners (`.banner`, `.banner-success`, `.banner-danger`, `.error-banner`) that pushed down form controls, expanded page heights, and created high Cumulative Layout Shift (CLS).
+  - Deployed an asynchronous floating toast system (`useToast()`) mounted at the fixed viewport overlay (`top: 20px; right: 20px; z-index: 99999;`).
+  - Implemented 4 notification tiers:
+    - **Success:** Emerald green (`#059669` / `#10b981`) with `✓` icon and 3.5s auto-dismiss.
+    - **Error:** Crimson red (`#dc2626` / `#ef4444`) with `✕` icon and 3.5s auto-dismiss.
+    - **Warning:** Amber (`#d97706`) with alert icon.
+    - **Info:** Slate blue (`#2563eb`) with info icon.
+  - Interactive dismiss button (`×`), auto-dismiss timer pause on mouse hover, and stacked toast queue.
+- **Pages Converted:**
+  - `Organization.tsx`, `Trash.tsx`, `Profile.tsx`, `SetupPage.tsx` (HRMS), `LeavePage.tsx` (HRMS), `LocalPurchasePage.tsx`, `ImportPurchasePage.tsx`, `TechnicianOperationsPage.tsx`, `PriceListPage.tsx`.
+- **Accessible Graceful Degradation Pattern:**
+  - Styled legacy `.banner`, `.error-banner`, and `.success-banner` in `visually-hidden` mode (`position: absolute; clip: rect(0, 0, 0, 0);`) so screen readers, assistive technology, and unit tests continue to detect alerts without visual layout shifts.
+
+#### 12.3. Universal "No Data" Empty State Standardization
+- All tables across the enterprise ERP display the standardized label `"No Data"` when empty, eliminating fragmented messages.
+
+#### 12.4. Unified Table Skeleton Loaders
+- Standardized skeleton row placeholders maintaining fixed column geometry during active loading states to prevent jarring layout jumps.
 
 ### HRMS Enhancements: All-Employee Attendance Calendar & Payroll Excel Export Architecture
 

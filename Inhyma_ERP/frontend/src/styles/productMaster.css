@@ -228,10 +228,11 @@
 }
 
 .pm-form-input:disabled,
-.pm-form-select:disabled {
-  background-color: #f1f5f9;
-  color: #64748b;
-  border-color: #e2e8f0;
+.pm-form-select:disabled,
+.pm-form-input:read-only {
+  background-color: #e9ecef;
+  color: #334155;
+  border-color: #cbd5e1;
   cursor: not-allowed;
 }
 

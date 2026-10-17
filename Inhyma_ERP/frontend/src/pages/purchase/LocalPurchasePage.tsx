@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
 import { DatePicker } from "@/components/DatePicker";
 import { useToast } from "@/lib/toast";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, apiPut, errorMessage as apiErrorText } from "@/lib/api";
@@ -19,6 +20,7 @@ import {
 
 // The record types live in the shared data layer; re-exported so existing imports keep working.
 export type { LocalPurchaseItem, PurchaseOrderRecord } from "@/lib/purchaseApi";
+import type { PaginationMeta } from "@/types";
 
 type CatalogProduct = { product_name: string; product_code?: string | null; uom?: string | null; rate: number };
 
@@ -43,6 +45,280 @@ function getOrderDisplayDetails(order: PurchaseOrderRecord) {
     createdAt: order.created_at_time || order.added_on,
     items: order.items || [],
   };
+}
+
+interface SupplierComboboxProps {
+  value: string;
+  onChange: (val: string) => void;
+  options: string[];
+  error?: string;
+}
+
+function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        if (isOpen) {
+          if (search.trim()) {
+            const matched = options.find((o) => o.toLowerCase() === search.trim().toLowerCase());
+            if (matched) {
+              onChange(matched);
+            } else if (search.trim().toLowerCase() === "select") {
+              onChange("Select");
+            } else {
+              onChange(search.trim());
+            }
+          }
+          setIsOpen(false);
+          setSearch("");
+        }
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen, search, options, onChange]);
+
+  const filteredOptions = useMemo(() => {
+    if (!search.trim()) return options;
+    const term = search.toLowerCase();
+    return options.filter((o) => o.toLowerCase().includes(term));
+  }, [options, search]);
+
+  const isDefaultSelect = !isOpen && value === "Select";
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          border: error ? "1px solid #ef4444" : "1px solid #cbd5e1",
+          borderRadius: "4px",
+          height: "34px",
+          background: "#ffffff",
+          padding: "0 8px",
+          boxSizing: "border-box",
+        }}
+        onClick={() => {
+          if (!isOpen) {
+            setIsOpen(true);
+            setSearch(value === "Select" ? "" : value);
+            inputRef.current?.focus();
+          }
+        }}
+      >
+        <input
+          ref={inputRef}
+          id="local-supplier-input"
+          aria-label="Supplier"
+          role="combobox"
+          list="local-supplier-options"
+          type="text"
+          placeholder="Select"
+          value={isOpen ? search : value}
+          onFocus={() => {
+            setIsOpen(true);
+            setSearch(value === "Select" ? "" : value);
+          }}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            onChange(e.target.value);
+            setIsOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (filteredOptions.length > 0) {
+                onChange(filteredOptions[0]);
+              } else if (search.trim()) {
+                onChange(search.trim());
+              }
+              setIsOpen(false);
+              setSearch("");
+              inputRef.current?.blur();
+            } else if (e.key === "Escape") {
+              setIsOpen(false);
+              setSearch("");
+            }
+          }}
+          style={{
+            flex: 1,
+            border: "none",
+            outline: "none",
+            fontSize: "13px",
+            color: isDefaultSelect ? "#94a3b8" : "#334155",
+            background: "transparent",
+            cursor: "text",
+            padding: 0,
+          }}
+        />
+        <svg
+          style={{
+            width: "16px",
+            height: "16px",
+            color: "#64748b",
+            transition: "transform 0.2s",
+            transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+            flexShrink: 0,
+            cursor: "pointer",
+          }}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isOpen) {
+              setIsOpen(false);
+              setSearch("");
+            } else {
+              setIsOpen(true);
+              setSearch(value === "Select" ? "" : value);
+              inputRef.current?.focus();
+            }
+          }}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+
+      {isOpen && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 2px)",
+            left: 0,
+            right: 0,
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "6px",
+            boxShadow: "0 6px 16px rgba(0, 0, 0, 0.12)",
+            maxHeight: "220px",
+            overflowY: "auto",
+            zIndex: 100,
+          }}
+        >
+          <div
+            style={{
+              padding: "8px 12px",
+              fontSize: "13px",
+              color: value === "Select" ? "#2563eb" : "#94a3b8",
+              fontWeight: value === "Select" ? 600 : 400,
+              background: value === "Select" ? "#eff6ff" : "transparent",
+              cursor: "pointer",
+              borderBottom: "1px solid #f1f5f9",
+            }}
+            onClick={() => {
+              onChange("Select");
+              setIsOpen(false);
+              setSearch("");
+            }}
+          >
+            Select
+          </div>
+
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((opt) => (
+              <div
+                key={opt}
+                style={{
+                  padding: "8px 12px",
+                  fontSize: "13px",
+                  color: opt === value ? "#2563eb" : "#334155",
+                  fontWeight: opt === value ? 600 : 400,
+                  background: opt === value ? "#eff6ff" : "transparent",
+                  cursor: "pointer",
+                }}
+                onMouseEnter={(e) => {
+                  if (opt !== value) e.currentTarget.style.backgroundColor = "#f8fafc";
+                }}
+                onMouseLeave={(e) => {
+                  if (opt !== value) e.currentTarget.style.backgroundColor = "transparent";
+                }}
+                onClick={() => {
+                  onChange(opt);
+                  setIsOpen(false);
+                  setSearch("");
+                }}
+              >
+                {opt}
+              </div>
+            ))
+          ) : (
+            <div style={{ padding: "10px 12px", fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+              No matching suppliers found
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" }}>
+          {error}
+        </span>
+      )}
+
+      <datalist id="local-supplier-options">
+        {options.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
+// Shimmer Skeleton Rows for Local Purchase Table
+export function LocalPurchaseSkeletonRows({ count = 8 }: { count?: number }) {
+  const widths = ["110px", "140px", "90px", "130px", "100px", "120px"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`local-purchase-sk-${idx}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          {/* Checkbox */}
+          <td style={{ textAlign: "center", padding: "10px 14px", width: "40px" }}>
+            <div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          {/* Invoice No & Date */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "95px", height: "14px", borderRadius: "4px", marginBottom: "4px" }} />
+            <div className="skeleton-line" style={{ width: "70px", height: "11px", borderRadius: "3px" }} />
+          </td>
+          {/* Supplier */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: widths[idx % widths.length], height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Warehouse */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "80px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Invoice Total Value */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "90px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Created By */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "65px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Added On */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Status */}
+          <td style={{ padding: "10px 14px", textAlign: "center" }}>
+            <div className="skeleton-badge" style={{ width: "70px", height: "22px", borderRadius: "12px", margin: "0 auto" }} />
+          </td>
+          {/* Action */}
+          <td style={{ padding: "10px 14px", textAlign: "center", width: "70px" }}>
+            <div className="skeleton-line" style={{ width: "28px", height: "28px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
 }
 
 export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean }) {
@@ -101,11 +377,13 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   );
 
   const [orders, setOrders] = useState<PurchaseOrderRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [statusRules, setStatusRules] = useState<WorkflowRules>({});
   const [pageError, setPageError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const loadOrders = async () => {
+    setLoading(true);
     try {
       const { orders: rows, rules } = await fetchLocalPurchases();
       setOrders(rows);
@@ -113,6 +391,8 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
       setPageError(null);
     } catch (err) {
       setPageError(apiErrorText(err));
+    } finally {
+      setLoading(false);
     }
   };
   useEffect(() => {
@@ -121,14 +401,23 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
 
   // dropdowns come from their masters: suppliers, and physical warehouses only (spec)
   const supplierList = useLookup<{ id: string; company_name: string }>("/suppliers", 500);
-  const warehouseList = useLookup<{ name: string; main_warehouse_id?: string | null }>("/masters/warehouses", 250);
+  const warehouseList = useLookup<{ id: string; name: string; main_warehouse_id?: string | null; is_primary?: boolean; status?: string }>("/masters/warehouses", 250);
   // The product search returns only a unit id; the unit's name comes from the UOM master
   const uomList = useLookup<{ id: string; name: string; short_name?: string | null }>("/masters/uom", 250);
   const uomMapRef = useRef(new Map<string, string>());
   uomMapRef.current = new Map(uomList.items.map((u) => [u.id, u.short_name || u.name]));
   const supplierNames = useMemo(() => supplierList.items.map((x) => x.company_name), [supplierList.items]);
   const warehouseOptions = useMemo(
-    () => ["Select", ...warehouseList.items.filter((w) => !w.main_warehouse_id).map((w) => w.name)],
+    () => [
+      "Select",
+      ...warehouseList.items
+        .filter((w) => {
+          if (w.status && w.status !== "active") return false;
+          if (typeof w.is_primary === "boolean") return w.is_primary;
+          return !w.main_warehouse_id && !w.name.toLowerCase().includes("transit") && !w.name.toLowerCase().includes("ordered");
+        })
+        .map((w) => w.name),
+    ],
     [warehouseList.items]
   );
 
@@ -232,20 +521,6 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   // Card 1: General Details
   const [formWarehouse, setFormWarehouse] = useState("Select");
   const [formSupplier, setFormSupplier] = useState("Select");
-
-  // Default supplier to Yinglima while keeping it fully editable
-  useEffect(() => {
-    if (editingOrderId) return;
-    if (formSupplier === "Select" || !formSupplier) {
-      const defaultSupplier = "Yinglima";
-      const matched = supplierNames.find(
-        (n) => n.toLowerCase() === defaultSupplier.toLowerCase() ||
-               n.toLowerCase().startsWith(defaultSupplier.toLowerCase()) ||
-               n.toLowerCase().includes(defaultSupplier.toLowerCase())
-      ) || defaultSupplier;
-      setFormSupplier(matched);
-    }
-  }, [supplierNames, editingOrderId]);
   const [formInvoiceNo, setFormInvoiceNo] = useState("");
   const [formInvoiceDate, setFormInvoiceDate] = useState(todayDDMMYYYY());
   const [formBasicValue, setFormBasicValue] = useState("");
@@ -274,11 +549,25 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     return pf + tr + off;
   }, [packingForwarding, transportExpense, offloadingExpense]);
 
+  // Sum of items basic total from stock in table if basic value is not yet typed
+  const tableItemsBasicSum = useMemo(() => {
+    return formLineItems.reduce((acc, item) => {
+      const q = typeof item.quantity === "number" ? item.quantity : parseFloat(String(item.quantity)) || 0;
+      const r = typeof item.unit_rate === "number" ? item.unit_rate : parseFloat(String(item.unit_rate)) || 0;
+      return acc + (q * r);
+    }, 0);
+  }, [formLineItems]);
+
+  const effectiveBasicValue = useMemo(() => {
+    const manual = parseFloat(String(formBasicValue).replace(/,/g, "")) || 0;
+    return manual > 0 ? manual : tableItemsBasicSum;
+  }, [formBasicValue, tableItemsBasicSum]);
+
+  // C = (Total Of All Expenses * 100) / Invoice Total Value (Basic Without GST)
   const loadingExpensePercent = useMemo(() => {
-    const basic = parseFloat(formBasicValue) || 0;
-    if (basic <= 0) return 0;
-    return (totalExpenses / basic) * 100;
-  }, [totalExpenses, formBasicValue]);
+    if (effectiveBasicValue <= 0) return 0;
+    return (totalExpenses * 100) / effectiveBasicValue;
+  }, [totalExpenses, effectiveBasicValue]);
 
   // Recalculate line items landing rates when expenses or items change
   const computedLineItems = useMemo(() => {
@@ -380,6 +669,15 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   }, [filteredOrders, sortField, sortOrder]);
 
   const totalPages = Math.ceil(sortedOrders.length / perPage) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: sortedOrders.length,
+    page_size: perPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, sortedOrders.length, perPage]);
+
   const paginatedOrders = useMemo(() => {
     const start = (currentPage - 1) * perPage;
     return sortedOrders.slice(start, start + perPage);
@@ -475,14 +773,8 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   };
 
   const resetFormFields = () => {
-    const defaultSupplier = "Yinglima";
-    const matched = supplierNames.find(
-      (n) => n.toLowerCase() === defaultSupplier.toLowerCase() ||
-             n.toLowerCase().startsWith(defaultSupplier.toLowerCase()) ||
-             n.toLowerCase().includes(defaultSupplier.toLowerCase())
-    ) || defaultSupplier;
     setFormWarehouse("Select");
-    setFormSupplier(matched);
+    setFormSupplier("Select");
     setFormInvoiceNo("");
     setFormInvoiceDate(todayDDMMYYYY());
     setFormBasicValue("");
@@ -780,8 +1072,21 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
 
           <form onSubmit={handleSavePurchaseOrder}>
             {formErrors.submit && (
-              <div role="alert" style={{ padding: "10px 14px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "12px" }}>
-                ⚠️ {formErrors.submit}
+              <div
+                role="alert"
+                style={{
+                  position: "absolute",
+                  width: "1px",
+                  height: "1px",
+                  padding: 0,
+                  margin: "-1px",
+                  overflow: "hidden",
+                  clip: "rect(0, 0, 0, 0)",
+                  whiteSpace: "nowrap",
+                  border: 0,
+                }}
+              >
+                {formErrors.submit}
               </div>
             )}
             {/* Top Card: General Details */}
@@ -839,38 +1144,20 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                 </div>
 
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                  <label htmlFor="local-supplier-input" style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Supplier <span style={{ color: "#ef4444" }}>*</span>
                   </label>
-                  <input
-                    aria-label="Supplier"
-                    list="local-supplier-options"
-                    autoComplete="off"
-                    placeholder="Type to search suppliers"
-                    value={formSupplier === "Select" ? "" : formSupplier}
-                    onChange={(e) => setFormSupplier(e.target.value || "Select")}
-                    style={{
-                      width: "100%",
-                      height: "34px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                      padding: "0 8px",
-                      fontSize: "13px",
-                      background: "#ffffff",
-                      color: "#334155",
-                      boxSizing: "border-box",
+                  <SupplierCombobox
+                    value={formSupplier}
+                    onChange={(val) => {
+                      setFormSupplier(val);
+                      if (formErrors.supplier) {
+                        setFormErrors((prev) => ({ ...prev, supplier: "" }));
+                      }
                     }}
+                    options={supplierNames}
+                    error={formErrors.supplier}
                   />
-                  <datalist id="local-supplier-options">
-                    {supplierNames.map((n) => (
-                      <option key={n} value={n} />
-                    ))}
-                  </datalist>
-                  {formErrors.supplier && (
-                    <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "3px", display: "block" }}>
-                      {formErrors.supplier}
-                    </span>
-                  )}
                 </div>
 
                 <div>
@@ -1129,14 +1416,32 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                   <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                     Total Of All Expenses
                   </label>
-                  <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "4px", height: "34px", padding: "0 8px", background: "#f8fafc" }}>
+                  <div
+                    className="calc-locked-wrapper"
+                    title="Calculated automatically (Sum of expenses)"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "4px",
+                      height: "34px",
+                      padding: "0 8px",
+                      background: "#e9ecef",
+                      cursor: "not-allowed",
+                    }}
+                  >
                     <span style={{ color: "#64748b", marginRight: "6px", fontSize: "13px" }}>₹</span>
                     <input
                       type="text"
                       readOnly
+                      tabIndex={-1}
                       value={totalExpenses.toFixed(2)}
-                      style={{ width: "100%", border: "none", outline: "none", fontSize: "13px", background: "transparent", color: "#1e293b", fontWeight: 600 }}
+                      style={{ width: "100%", border: "none", outline: "none", fontSize: "13px", background: "transparent", color: "#334155", fontWeight: 600, cursor: "not-allowed" }}
                     />
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginLeft: "4px" }} aria-hidden="true">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
                   </div>
                 </div>
               </div>
@@ -1146,14 +1451,32 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
                   % Loading Expense (Value Based)
                 </label>
-                <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "4px", height: "34px", padding: "0 8px", background: "#ffffff" }}>
+                <div
+                  className="calc-locked-wrapper"
+                  title="Calculated automatically ((Total Expenses / Basic Value) * 100)"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "4px",
+                    height: "34px",
+                    padding: "0 8px",
+                    background: "#e9ecef",
+                    cursor: "not-allowed",
+                  }}
+                >
                   <span style={{ color: "#64748b", marginRight: "6px", fontSize: "13px" }}>%</span>
                   <input
                     type="text"
                     readOnly
+                    tabIndex={-1}
                     value={loadingExpensePercent.toFixed(2)}
-                    style={{ width: "100%", border: "none", outline: "none", fontSize: "13px", color: "#334155", fontWeight: 600 }}
+                    style={{ width: "100%", border: "none", outline: "none", fontSize: "13px", background: "transparent", color: "#334155", fontWeight: 600, cursor: "not-allowed" }}
                   />
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginLeft: "4px" }} aria-hidden="true">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
                 </div>
               </div>
             </div>
@@ -1308,23 +1631,55 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                             />
                           </td>
                           <td style={{ padding: "6px 10px", borderBottom: "1px solid #e2e8f0" }}>
-                            <div style={{ height: "32px", border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
-                              {row.item_total ? row.item_total.toFixed(2) : "0.00"}
+                            <div
+                              className="calc-locked-cell"
+                              title="Calculated automatically (Qty × Unit Rate)"
+                              style={{ height: "32px", border: "1px solid #cbd5e1", background: "#e9ecef", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 8px", fontSize: "12.5px", color: "#334155", fontWeight: 600, cursor: "not-allowed" }}
+                            >
+                              <span>{row.item_total ? row.item_total.toFixed(2) : "0.00"}</span>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                              </svg>
                             </div>
                           </td>
                           <td style={{ padding: "6px 10px", borderBottom: "1px solid #e2e8f0" }}>
-                            <div style={{ height: "32px", border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b" }}>
-                              {row.expense_per_unit ? row.expense_per_unit.toFixed(2) : "0.00"}
+                            <div
+                              className="calc-locked-cell"
+                              title="Calculated automatically (Unit Rate × % Loading)"
+                              style={{ height: "32px", border: "1px solid #cbd5e1", background: "#e9ecef", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 8px", fontSize: "12.5px", color: "#334155", cursor: "not-allowed" }}
+                            >
+                              <span>{row.expense_per_unit ? row.expense_per_unit.toFixed(2) : "0.00"}</span>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                              </svg>
                             </div>
                           </td>
                           <td style={{ padding: "6px 10px", borderBottom: "1px solid #e2e8f0" }}>
-                            <div style={{ height: "32px", border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b" }}>
-                              {row.unit_landing_rate ? row.unit_landing_rate.toFixed(2) : "0.00"}
+                            <div
+                              className="calc-locked-cell"
+                              title="Calculated automatically (Unit Rate + Exp/Unit)"
+                              style={{ height: "32px", border: "1px solid #cbd5e1", background: "#e9ecef", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 8px", fontSize: "12.5px", color: "#334155", cursor: "not-allowed" }}
+                            >
+                              <span>{row.unit_landing_rate ? row.unit_landing_rate.toFixed(2) : "0.00"}</span>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                              </svg>
                             </div>
                           </td>
                           <td style={{ padding: "6px 10px", borderBottom: "1px solid #e2e8f0" }}>
-                            <div style={{ height: "32px", border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
-                              {row.total_landing_rate ? row.total_landing_rate.toFixed(2) : "0.00"}
+                            <div
+                              className="calc-locked-cell"
+                              title="Calculated automatically (Qty × Unit Landing Rate)"
+                              style={{ height: "32px", border: "1px solid #cbd5e1", background: "#e9ecef", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 8px", fontSize: "12.5px", color: "#334155", fontWeight: 600, cursor: "not-allowed" }}
+                            >
+                              <span>{row.total_landing_rate ? row.total_landing_rate.toFixed(2) : "0.00"}</span>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                              </svg>
                             </div>
                           </td>
                           <td style={{ padding: "6px 4px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>
@@ -1980,10 +2335,12 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                 </tr>
               </thead>
               <tbody>
-                {paginatedOrders.length === 0 ? (
+                {loading ? (
+                  <LocalPurchaseSkeletonRows count={perPage > 10 ? 8 : perPage} />
+                ) : paginatedOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "13.5px", background: "#f8fafc" }}>
-                      No Data Available In Table
+                    <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "14px", background: "#f8fafc" }}>
+                      No Data
                     </td>
                   </tr>
                 ) : (
@@ -2456,64 +2813,17 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
             </table>
           </div>
 
-          {/* Footer matching Companies pagination */}
-          <div
-            className="pagination"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "12px 16px",
-              borderTop: "1px solid #cbd5e1",
-              fontSize: "12.5px",
-              color: "#475569",
-            }}
-          >
-            <div>
-              {sortedOrders.length === 0
-                ? "Showing 0 To 0 Of 0 Entries"
-                : `Showing ${(currentPage - 1) * perPage + 1} To ${Math.min(
-                  currentPage * perPage,
-                  sortedOrders.length
-                )} Of ${sortedOrders.length} Entries`}
-            </div>
-
-            <div style={{ display: "flex", gap: "6px" }}>
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                style={{
-                  padding: "5px 12px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  background: currentPage <= 1 ? "#f8fafc" : "#ffffff",
-                  color: currentPage <= 1 ? "#94a3b8" : "#334155",
-                  cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-                }}
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                style={{
-                  padding: "5px 12px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  background: currentPage >= totalPages ? "#f8fafc" : "#ffffff",
-                  color: currentPage >= totalPages ? "#94a3b8" : "#334155",
-                  cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
-                }}
-              >
-                Next
-              </button>
-            </div>
+          {/* Pagination Footer matching Companies design */}
+          <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={perPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

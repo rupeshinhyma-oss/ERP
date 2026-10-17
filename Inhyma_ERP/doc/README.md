@@ -22,6 +22,8 @@ Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distr
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of all functional updates, migrations, and bug fixes.
+  - Release October 17, 2026 (Part 2): Universal "Grey and Locked" calculation design pattern across Local Purchase, Import Purchase, and Products master; Zero-Layout-Shift Floating Toast Architecture replacing static in-page banners; universal "No Data" table empty state standardization across all modules; unified skeleton row loaders.
+  - Release October 17, 2026 (Part 1): Dedicated Payments module (`/payments`) with real-time financial KPI cards (`TOTAL PAYMENT`, `PAID`, `DUE`), technician collection recording modal, auto-audited call logs, zero-synthetic-data policy enforcement (purged 18 QA mock scripts, preserved authentic users A/B/C/D), and removal of deprecated Gatepass from task navigation.
   - Release October 14, 2026: Universal Filter Button UI standardization across all modules (matching Companies `#556987`, 8x14px, badge-less, default collapsed state).
   - Release October 14, 2026 (Part 1): Session-Scoped Tokens (`sid` claim, central session binding, per-session revocation via `/api/v1/internal/sessions/{sid}/revoke`).
   - Release October 10, 2026 (Part 2): Spoke multi-identifier resolution (`erp-01` / `inhyma`), super administrator unrestricted ecosystem access, watcher infinite loop prevention, and graceful SSO switching fallbacks.

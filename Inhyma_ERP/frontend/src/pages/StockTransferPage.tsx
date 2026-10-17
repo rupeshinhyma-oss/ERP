@@ -1383,7 +1383,7 @@ export function StockTransferPage({
                 ) : paginatedItems.length === 0 ? (
                   <tr>
                     <td colSpan={displayOrder.length} style={{ textAlign: "center", padding: "36px", color: "#64748b" }}>
-                      No stock transfers found.
+                      No Data
                     </td>
                   </tr>
                 ) : (

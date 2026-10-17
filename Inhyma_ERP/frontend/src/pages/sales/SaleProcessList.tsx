@@ -20,7 +20,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
 import { SideDrawer } from "@/components/SideDrawer";
+import type { PaginationMeta } from "@/types";
 import { apiDelete, apiGet, apiPatch } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
@@ -223,6 +225,75 @@ interface StatusTabDef {
   key: string;
   label: string;
   count: number;
+}
+
+// Shimmer Skeleton Rows for Sale Process Table
+export function SaleProcessSkeletonRows({ count = 8 }: { count?: number }) {
+  const widths = ["130px", "160px", "120px", "150px", "140px"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`sale-process-sk-${idx}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          {/* Order No */}
+          <td style={{ padding: "10px 12px" }}>
+            <div className="skeleton-line" style={{ width: "90px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Warehouse */}
+          <td style={{ padding: "10px 12px" }}>
+            <div className="skeleton-line" style={{ width: "80px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Exp. Deli. Date */}
+          <td style={{ padding: "10px 12px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Company */}
+          <td style={{ padding: "10px 12px" }}>
+            <div className="skeleton-line" style={{ width: widths[idx % widths.length], height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* City / State */}
+          <td style={{ padding: "10px 12px" }}>
+            <div className="skeleton-line" style={{ width: "85px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Third Party */}
+          <td style={{ padding: "10px 12px" }}>
+            <div className="skeleton-badge" style={{ width: "45px", height: "18px", borderRadius: "10px" }} />
+          </td>
+          {/* PO */}
+          <td style={{ padding: "10px 12px" }}>
+            <div className="skeleton-line" style={{ width: "60px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Sales Person */}
+          <td style={{ padding: "10px 12px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Amount */}
+          <td style={{ padding: "10px 12px", textAlign: "right" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px", marginLeft: "auto" }} />
+          </td>
+          {/* Discount */}
+          <td style={{ padding: "10px 12px", textAlign: "right" }}>
+            <div className="skeleton-line" style={{ width: "60px", height: "14px", borderRadius: "4px", marginLeft: "auto" }} />
+          </td>
+          {/* Status */}
+          <td style={{ padding: "10px 12px", textAlign: "center" }}>
+            <div className="skeleton-badge" style={{ width: "70px", height: "20px", borderRadius: "12px", margin: "0 auto" }} />
+          </td>
+          {/* Acc. Dep. */}
+          <td style={{ padding: "10px 12px", textAlign: "center" }}>
+            <div className="skeleton-badge" style={{ width: "65px", height: "20px", borderRadius: "12px", margin: "0 auto" }} />
+          </td>
+          {/* Gatepass */}
+          <td style={{ padding: "10px 12px", textAlign: "center" }}>
+            <div className="skeleton-badge" style={{ width: "55px", height: "20px", borderRadius: "12px", margin: "0 auto" }} />
+          </td>
+          {/* Action */}
+          <td style={{ padding: "10px 12px", textAlign: "center", width: "40px" }}>
+            <div className="skeleton-line" style={{ width: "24px", height: "24px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
 }
 
 export function SaleProcessListPage() {
@@ -618,6 +689,15 @@ export function SaleProcessListPage() {
 
   // Pagination
   const totalPages = Math.ceil(sortedOrders.length / perPage) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: sortedOrders.length,
+    page_size: perPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, sortedOrders.length, perPage]);
+
   const paginatedOrders = useMemo(() => {
     const start = (currentPage - 1) * perPage;
     return sortedOrders.slice(start, start + perPage);
@@ -1432,15 +1512,11 @@ export function SaleProcessListPage() {
               </thead>
               <tbody>
                 {loading && orders.length === 0 ? (
-                  <tr>
-                    <td colSpan={14} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
-                      Loading sale process orders…
-                    </td>
-                  </tr>
+                  <SaleProcessSkeletonRows count={8} />
                 ) : paginatedOrders.length === 0 ? (
                   <tr>
                     <td colSpan={14} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                      No sale process orders found.
+                      No Data
                     </td>
                   </tr>
                 ) : (
@@ -1945,58 +2021,17 @@ export function SaleProcessListPage() {
             </table>
           </div>
 
-          {/* Pagination Footer */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "10px 16px",
-              borderTop: "1px solid #e2e8f0",
-              fontSize: "12px",
-              color: "#64748b",
-            }}
-          >
-            <div>
-              Showing {filteredOrders.length > 0 ? (currentPage - 1) * perPage + 1 : 0} to{" "}
-              {Math.min(currentPage * perPage, filteredOrders.length)} of {filteredOrders.length} entries
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: "4px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage <= 1 ? "#f1f5f9" : "#ffffff",
-                  color: currentPage <= 1 ? "#94a3b8" : "#334155",
-                  cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-                }}
-              >
-                Previous
-              </button>
-              <span style={{ fontWeight: 600, color: "#1e293b", padding: "0 4px" }}>
-                Page {currentPage} of {totalPages}
-              </span>
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: "4px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage >= totalPages ? "#f1f5f9" : "#ffffff",
-                  color: currentPage >= totalPages ? "#94a3b8" : "#334155",
-                  cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
-                }}
-              >
-                Next
-              </button>
-            </div>
+          {/* Pagination Footer matching Companies design */}
+          <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={perPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

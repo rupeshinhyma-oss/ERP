@@ -181,7 +181,7 @@ async def provision_local_user(
 
     first = payload.first_name or payload.display_name.split()[0]
     last = payload.last_name or (payload.display_name.split()[-1] if len(payload.display_name.split()) > 1 else None)
-    dummy_phone = payload.phone or f"+0000{secrets.randbelow(900000) + 100000}"
+    clean_phone = payload.phone.strip() if payload.phone and payload.phone.strip() else None
     temp_pass = f"Tmp!{secrets.token_urlsafe(12)}"
 
     system_actor_id = await _system_actor_id(db)
@@ -192,7 +192,7 @@ async def provision_local_user(
         display_name=payload.display_name,
         email=email_clean,
         username=payload.username,
-        phone=dummy_phone,
+        phone=clean_phone,
         password=payload.password or temp_pass,
         has_login=True,
         created_by=system_actor_id,

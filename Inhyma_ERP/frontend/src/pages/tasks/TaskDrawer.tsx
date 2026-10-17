@@ -116,7 +116,10 @@ const SubtaskCollaborationSection: React.FC<{ subtaskId: string }> = ({ subtaskI
       {isOpen && (
         <div style={{ marginTop: "8px", background: "#f8fafc", borderRadius: "6px", padding: "10px", border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: "10px" }}>
           {loading ? (
-            <div style={{ fontSize: "11px", color: "#64748b" }}>Loading subtask discussion...</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }} aria-hidden="true">
+              <span className="skeleton-line" style={{ width: "60%", height: 12 }} />
+              <span className="skeleton-line" style={{ width: "80%", height: 12 }} />
+            </div>
           ) : (
             <>
               {/* Attachments */}
@@ -227,7 +230,10 @@ const EscalationCollaborationSection: React.FC<{ escalationId: string }> = ({ es
       {isOpen && (
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {loading ? (
-            <div style={{ fontSize: "11px", color: "#991b1b" }}>Loading discussion...</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }} aria-hidden="true">
+              <span className="skeleton-line" style={{ width: "50%", height: 12 }} />
+              <span className="skeleton-line" style={{ width: "75%", height: 12 }} />
+            </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "180px", overflowY: "auto" }}>
               {comments.length === 0 ? (
@@ -1188,7 +1194,27 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
         {/* Drawer Content Area */}
         <div style={{ padding: "20px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "18px" }}>
           {loading ? (
-            <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>Loading details...</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }} aria-hidden="true">
+              <div style={{ background: "#f8fafc", padding: "14px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <span className="skeleton-line" style={{ width: "40%", height: 16, marginBottom: 8 }} />
+                <span className="skeleton-box" style={{ width: "100%", height: 8, borderRadius: 4 }} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <span className="skeleton-line" style={{ width: "70%", height: 20 }} />
+                <span className="skeleton-line" style={{ width: "95%", height: 14 }} />
+                <span className="skeleton-line" style={{ width: "85%", height: 14 }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 6 }}>
+                  <span className="skeleton-line" style={{ width: "50%", height: 12, marginBottom: 6 }} />
+                  <span className="skeleton-line" style={{ width: "70%", height: 14 }} />
+                </div>
+                <div style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: 6 }}>
+                  <span className="skeleton-line" style={{ width: "50%", height: 12, marginBottom: 6 }} />
+                  <span className="skeleton-line" style={{ width: "70%", height: 14 }} />
+                </div>
+              </div>
+            </div>
           ) : !task ? (
             <div style={{ textAlign: "center", padding: "40px", color: "#ef4444" }}>{error || "Task not found."}</div>
           ) : drawerTab === "details" ? (
@@ -2263,7 +2289,14 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
               </span>
 
               {loadingTimeline ? (
-                <div style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>Loading timeline...</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px", paddingLeft: "16px", borderLeft: "2px solid #e2e8f0" }} aria-hidden="true">
+                  {[1, 2, 3].map((n) => (
+                    <div key={n} style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <span className="skeleton-line" style={{ width: "30%", height: 12 }} />
+                      <span className="skeleton-line" style={{ width: "75%", height: 14 }} />
+                    </div>
+                  ))}
+                </div>
               ) : timeline.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "30px", color: "#94a3b8", fontSize: "13px" }}>
                   No timeline events recorded.

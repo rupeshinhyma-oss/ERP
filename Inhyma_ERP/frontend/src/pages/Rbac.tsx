@@ -1835,7 +1835,7 @@ export function RbacPage() {
                     ) : (
                       <tr>
                         <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
-                          No departments found.
+                          No Data
                         </td>
                       </tr>
                     )}

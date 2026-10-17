@@ -11,6 +11,8 @@ import type {
   TechnicalTaskCounts,
   TechnicalTaskCreatePayload,
   SerialLookupResult,
+  TechnicalTaskPaymentSummary,
+  TechnicalTaskPaymentRecordPayload,
 } from "@/types/technicalTasks";
 import type { ApiResult } from "@/types";
 
@@ -231,5 +233,23 @@ export async function fetchCallLogReport(
 /** Open vs Closed month-wise dashboard data. */
 export async function fetchMonthlySummary(months = 12): Promise<TechnicalMonthlySummary> {
   const res = await apiGet<TechnicalMonthlySummary>(`/technical-tasks/monthly-summary?months=${months}`);
+  return res.data;
+}
+
+/** Get payment KPIs summary for Payments module. */
+export async function fetchPaymentSummary(): Promise<TechnicalTaskPaymentSummary> {
+  const res = await apiGet<TechnicalTaskPaymentSummary>("/technical-tasks/payment-summary");
+  return res.data;
+}
+
+/** Record a collected payment for a technical task. */
+export async function recordTechnicalTaskPayment(
+  id: string,
+  payload: TechnicalTaskPaymentRecordPayload
+): Promise<TechnicalTask> {
+  const res = await apiPost<TechnicalTask>(
+    `/technical-tasks/${encodeURIComponent(id)}/record-payment`,
+    payload
+  );
   return res.data;
 }

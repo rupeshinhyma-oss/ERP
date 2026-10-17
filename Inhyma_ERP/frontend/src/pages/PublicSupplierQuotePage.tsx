@@ -144,11 +144,18 @@ export default function PublicSupplierQuotePage() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", fontFamily: "Inter, -apple-system, sans-serif" }}>
-        <div style={{ textAlign: "center", padding: "30px" }}>
-          <div style={{ width: "40px", height: "40px", border: "4px solid #e2e8f0", borderTopColor: "#0061f2", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
-          <div style={{ fontSize: "15px", fontWeight: 600, color: "#334155" }}>Loading Request for Quotation...</div>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={{ minHeight: "100vh", background: "#f8fafc", padding: "40px 20px", fontFamily: "Inter, -apple-system, sans-serif" }} aria-hidden="true">
+        <div style={{ maxWidth: "800px", margin: "0 auto", background: "#ffffff", padding: "32px", borderRadius: "12px", border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="skeleton-line" style={{ width: "30%", height: 24 }} />
+            <span className="skeleton-badge" style={{ width: 80, height: 24 }} />
+          </div>
+          <span className="skeleton-line" style={{ width: "50%", height: 16 }} />
+          <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+            <span className="skeleton-line" style={{ width: "90%", height: 16 }} />
+            <span className="skeleton-line" style={{ width: "70%", height: 16 }} />
+            <span className="skeleton-line" style={{ width: "80%", height: 16 }} />
+          </div>
         </div>
       </div>
     );

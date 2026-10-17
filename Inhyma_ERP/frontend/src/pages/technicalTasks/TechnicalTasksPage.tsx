@@ -2468,130 +2468,9 @@ function TechnicalTasksPageContent() {
                   <tr>
                     <td
                       colSpan={TOTAL_COLS_COUNT}
-                      style={{ textAlign: "left", padding: "50px 24px 50px 120px", color: "#64748b" }}
+                      style={{ textAlign: "center", padding: "48px 16px", color: "#64748b", fontSize: "14px" }}
                     >
-                      {Boolean(
-                        debouncedSearch ||
-                        filterCity ||
-                        filterTaskType ||
-                        filterStatus ||
-                        filterCallType ||
-                        filterServiceType ||
-                        filterTechnician ||
-                        filterPriority ||
-                        filterDateFrom ||
-                        filterDateTo ||
-                        filterThirdPartyCity ||
-                        filterPaymentCollected ||
-                        activeTab !== "all"
-                      ) ? (
-                        <div
-                          style={{
-                            display: "inline-flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            textAlign: "center",
-                            maxWidth: "460px",
-                            gap: "12px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: "48px",
-                              height: "48px",
-                              borderRadius: "50%",
-                              background: "#f1f5f9",
-                              color: "#64748b",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: "22px",
-                            }}
-                          >
-                            🔍
-                          </div>
-                          <div style={{ fontSize: "15px", fontWeight: 600, color: "#334155" }}>
-                            No technical tasks found matching your filters
-                          </div>
-                          <div style={{ fontSize: "13px", color: "#64748b" }}>
-                            Try adjusting or resetting your search and filter parameters.
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleResetFilters();
-                              setSearchQuery("");
-                              setDebouncedSearch("");
-                              setActiveTab("all");
-                            }}
-                            className="btn"
-                            style={{
-                              backgroundColor: "#0061f2",
-                              color: "#ffffff",
-                              fontWeight: 600,
-                              padding: "7px 18px",
-                              borderRadius: "6px",
-                              border: "none",
-                              cursor: "pointer",
-                              fontSize: "13px",
-                              marginTop: "4px",
-                            }}
-                          >
-                            Clear All Filters
-                          </button>
-                        </div>
-                      ) : (
-                        <div
-                          style={{
-                            display: "inline-flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            textAlign: "center",
-                            maxWidth: "460px",
-                            gap: "12px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: "48px",
-                              height: "48px",
-                              borderRadius: "50%",
-                              background: "#e0f2fe",
-                              color: "#0284c7",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: "22px",
-                            }}
-                          >
-                            📋
-                          </div>
-                          <div style={{ fontSize: "15px", fontWeight: 600, color: "#1e293b" }}>
-                            No technical tasks in the system yet
-                          </div>
-                          <div style={{ fontSize: "13px", color: "#64748b" }}>
-                            Get started by creating your first technical task.
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleOpenAdd}
-                            className="btn"
-                            style={{
-                              backgroundColor: "#0061f2",
-                              color: "#ffffff",
-                              fontWeight: 600,
-                              padding: "8px 20px",
-                              borderRadius: "6px",
-                              border: "none",
-                              cursor: "pointer",
-                              fontSize: "13px",
-                              marginTop: "4px",
-                            }}
-                          >
-                            + Add New Task
-                          </button>
-                        </div>
-                      )}
+                      No Data
                     </td>
                   </tr>
                 ) : (
@@ -5184,7 +5063,14 @@ function TechnicalTasksPageContent() {
                           </tr>
                         </thead>
                         <tbody>
-                          {callLogsList.map((log, idx) => (
+                          {callLogsList.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>
+                                No Data
+                              </td>
+                            </tr>
+                          ) : (
+                            callLogsList.map((log, idx) => (
                             <tr key={log.id} style={{ borderTop: "1px solid #e2e8f0" }}>
                               <td style={{ padding: "10px 12px", color: "#64748b" }}>{idx + 1}</td>
                               <td style={{ padding: "10px 12px", fontWeight: 600 }}>
@@ -5210,7 +5096,8 @@ function TechnicalTasksPageContent() {
                                 {log.remarks}
                               </td>
                             </tr>
-                          ))}
+                          ))
+                        )}
                         </tbody>
                       </table>
                     </div>
