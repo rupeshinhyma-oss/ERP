@@ -57,6 +57,10 @@ export interface TokenPair {
   access_token: string;
   refresh_token: string;
   user?: Profile;
+  /** The login (session) these tokens belong to. Signing out ends exactly this session. */
+  session_id?: string | null;
+  /** "central": ERP_Main knows this session (switching ERPs works). "local": this ERP only (fallback). */
+  session_mode?: "central" | "local" | null;
 }
 
 export interface Profile {
@@ -577,23 +581,4 @@ export type SheetRow = Record<string, unknown>;
 
 /** target field key -> source sheet column name (or null for "don't import"). */
 export type ColumnMapping = Record<string, string | null>;
-
-/* ------------------------------------------------------------------ */
-/* Universal search                                                   */
-/* ------------------------------------------------------------------ */
-
-export interface SearchResultItem {
-  category: string;
-  id: string;
-  title: string;
-  subtitle?: string | null;
-  target_url: string;
-  icon: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface UniversalSearchResponse {
-  query: string;
-  total_hits: number;
-  results: SearchResultItem[];
-}
+

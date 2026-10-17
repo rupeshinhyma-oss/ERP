@@ -25,8 +25,6 @@ export function LeadSourcesPage() {
       liveModule="lead_sources"
       entityName="Lead Source"
       heading="Lead Sources"
-      subtitle="Track inquiry acquisition channels, marketing campaigns, and lead origin streams."
-      breadcrumbTrail={["Settings", "Masters", "Lead Sources"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search..."
       hideQuickAdd={true}

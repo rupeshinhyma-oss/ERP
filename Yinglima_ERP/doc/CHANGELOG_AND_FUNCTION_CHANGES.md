@@ -3,6 +3,172 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-14] — Seed First-Install Guards, Inbound Email DB Deduplication & Handover Account Protection
+
+### 1. Database Seed First-Install Protection (`BOOTSTRAP_FORCE_RESET`)
+- **Non-Destructive Bootstrap Guard:**
+  - Hardened `backend/scripts/seed.py` so that automatic startup scripts in container environments (e.g. Render build/start commands) cannot overwrite or corrupt existing production database rows.
+  - If existing users, organizations, or permissions exist, seeding halts safely unless `BOOTSTRAP_FORCE_RESET=true` is explicitly provided.
+  - Master geography seeding (`countries`, `states`, `districts`, `cities`) skips insertion if existing rows are present, protecting customized data.
+
+### 2. Atomic Inbound Email Deduplication (`email_inbound_processed`)
+- **Persistent Database Deduplication Ledger:**
+  - Added PostgreSQL table `email_inbound_processed` (`backend/app/inquiries/models.py`) to prevent duplicate quote processing and double API consumption when the inbound email poller restarts.
+  - Keyed by `(message_id, uid, inquiry_id, supplier_id)`.
+  - Poller checks `SELECT 1 FROM email_inbound_processed WHERE message_id = :mid` before invoking AI extraction or recording quotation attachments.
+  - Incorporates a 30-minute historical baseline cutoff on initialization: emails older than 30 minutes are stamped into the deduplication ledger without creating duplicate quotes.
+
+### 3. SSO Handover Local Account Guards & Disabled User Rejection
+- **Enforcing Local User Status on Federated Handover:**
+  - Updated `POST /api/v1/auth/sso-handover` in `backend/app/api/v1/auth.py`.
+  - When an incoming handover ticket is presented for a user with `is_active=False` or `deleted_at IS NOT NULL`, the system immediately rejects the handover with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
+  - Prevents terminated or suspended users from re-activating accounts via central SSO.
+  - Respects `SSO_HANDOVER_AUTO_PROVISION=false`: blocks unauthorized user creation during handover.
+
+### 4. Shared Token Pair Types Restoration
+- **Session Types Alignment:**
+  - Restored `TokenPair` in `backend/app/auth/security.py` and aligned with `TokenResponse` in `backend/app/auth/schemas.py`, ensuring full compatibility with session-scoped token handlers.
+
+---
+
+## [Release 2026-10-14] — Resilient Central Federation, DNS Winsock Isolation & Live Diagnostics
+
+### 1. Multi-URL Central Control Plane Discovery
+- **Config Fallback Array (`erp_main_api_base_urls()` in `app/core/config.py`):**
+  - Added multi-candidate discovery searching across `ERP_MAIN_API_BASE_URL`, `ERP_MAIN_URL`, and fallback default URLs.
+  - Enables seamless spoke communication across custom cloud domains and internal Render platform URLs.
+
+### 2. Outbound IPv4 Binding & Sleeping Container Wake-Up Budget
+- **IPv4 Socket Binding (`0.0.0.0`):**
+  - In `backend/app/federation/erp_main_client.py`, `httpx.AsyncClient` binds outbound traffic to `0.0.0.0`, eliminating IPv6 connection drops on container platforms.
+- **40-Second Cold-Start Sleeping Budget:**
+  - Extended federation timeout budget to 40 seconds (`httpx.Timeout(40.0, connect=20.0)`), allowing sleeping Render instances to wake up cleanly without timing out SSO handovers.
+
+### 3. 900-Second Stale Session Cache Fallback
+- **Partition Tolerance (`_from_cache`):**
+  - If ERP_Main is temporarily unreachable or undergoing deployment, active session validations fall back to local memory cache for up to 900 seconds (15 minutes).
+  - Flags validated session as `_from_cache = True`, maintaining system uptime without dropping active operations.
+
+### 4. Platform-Gated Winsock DNS Isolation
+- **Platform Gating (`sys.platform.startswith("win")`):**
+  - In `backend/app/core/dns_resilience.py`, DNS caching is platform-gated to Windows workstations only.
+  - Linux production environments run unpatched, relying on native `glibc` DNS resolution.
+  - Caching key uses 5-tuple `(host, port, family, type, proto)`, preserving exact port destinations and preventing localhost collisions.
+
+### 5. Central Federation Health Diagnostics
+- **Endpoint `GET /api/v1/health/federation`:**
+  - Added spoke diagnostic endpoint to test real-time federation health, connectivity latency (ms), and reachable endpoints against ERP_Main.
+
+---
+
+## [Release 2026-10-14] — Database-Backed Organization Branding & Storage Quota Protection
+
+### 1. Versioned Database-Persisted Organization Logo
+- **Streaming Endpoint `GET /api/v1/organizations/logo?v={sha1}`:**
+  - Stored enterprise logos directly in PostgreSQL `organizations.logo_data` and streamed via public endpoint with immutable caching (`Cache-Control: public, max-age=86400, immutable`).
+  - SHA-1 hash query parameter guarantees immediate cache invalidation whenever the logo is updated in settings.
+
+### 2. Client-Side Storage Quota Guards
+- **Safe Quota Degradation in `brand.ts` and `Organization.tsx`:**
+  - Wrapped `localStorage.setItem` for large brand assets in `try/catch` handlers.
+  - Prevents `QuotaExceededError` crashes on mobile and webview browsers when storing large base64 logos, falling back gracefully to remote URLs or in-memory state.
+
+---
+
+## [Release 2026-10-14] — Universal Filter Button UI Standardization
+
+### 1. Enterprise UI Harmonization
+- Standardized all module filter buttons to match the Companies reference:
+  - Color palette: `#556987` solid background, `#475569` on hover, permanently locked to `#556987` when active.
+  - Geometry: `padding: 8px 14px`, `border-radius: 6px`, no hardcoded square dimensions.
+  - Icon: 16x16px SVG funnel icon.
+  - Clean surface: zero counter badges or colored dots on the button face.
+  - Default state: all filter drawers initialize collapsed (`useState(false)`).
+
+---
+
+## [Release 2026-10-14] — Session-Scoped Tokens (one login = one session id)
+
+- Access and refresh tokens carry a `sid` claim (`auth/security.py`). `AuthService._issue_token_pair` binds both tokens to one session id; refresh keeps it. `TokenResponse` gains `session_id` and `session_mode` (`"central"` or `"local"`).
+- **Login** opens the login's central session via ERP_Main (`federation/erp_main_client.open_central_session`) only *after* the password is verified. If ERP_Main cannot be reached or refuses, the login still succeeds with a local session id `loc-<uuid>`.
+- **SSO handover** issues tokens carrying the verified central `sid`.
+- **Per-session revocation:** `AuthService.revoke_session` stores `sid:<sid>` in `token_blacklist` (cached), closes that session's WebSockets (`ConnectionManager.disconnect_session`). `verify_access_token` and `refresh` reject a revoked `sid` and, for central sessions, ask ERP_Main at most every 45 s (`central_session_state`, fail-open) so a lost message cannot leave a session alive.
+- **New endpoint:** `POST /api/v1/internal/sessions/{sid}/revoke` (service credential). `POST /auth/logout` now revokes the token's session and reports it to ERP_Main (`push_session_signout_to_erp_main`); it no longer signs the person out of their other logins.
+- **Frontend:** the login page uses the session id from the login reply; a fresh handover always replaces a saved session; no stored default-admin login; scoped cookie clearing; visible reason when an automatic sign-in fails.
+- **Reliability hardening:** when ERP_Main cannot be reached during a handover the ERP now answers **503** (`EcosystemSessionUnavailable`) instead of 401, so the browser retries instead of treating it as "session ended"; the login's central call uses short timeouts (connect 1.5 s, read 3 s) so a login never hangs. Browser: one shared handover exchange per arrival, retries 0.7/2.5/6 s, per-status messages, "Signing you in..." state, a switcher that validates before navigating (and no longer declares hooks after an early return), and a watcher that checks immediately then every 30 s / 2 min (was 2.5 s).
+- **Tests:** `test_session_scoped_tokens.py`; frontend `ssoHandoverSession.test.ts`.
+
+---
+
+## [Release 2026-10-13] — Supplier Module Side Drawer Expansion, Potential Dropdown Fix & Master Documentation
+
+### 1. Supplier Detail Side Drawer Overhaul (720px 2-Column Executive Layout)
+- **Expanded Width & Structured Cards in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Expanded drawer from 480px to **720px** (`maxWidth: 720px, width: 100%`) for a spacious, non-overlapping dual-column layout.
+  - Added 5 structured cards: Company Profile & Classification, Primary Contact Information, Factory Visit & Inspection Media, Pipeline Status & Commercial Evaluation, and Additional Contacts.
+  - Implemented smart clickable badges for inspection videos and cloud folders (`▶️ YouTube Video ↗`, `📁 Google Drive ↗`, `📂 OneDrive ↗`, `🎬 Vimeo ↗`, `🎥 Video Link ↗`).
+  - Added direct clickable links for Phone (`tel:`), WhatsApp (`https://wa.me/...`), Email (`mailto:`), and official websites.
+
+### 2. Potential Dropdown Case-Sensitivity Bug Fix
+- **Option Value Alignment in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Normalized database potential values (`"yes"` / `"no"`) with the Edit Modal's dropdown options, resolving the bug where suppliers with Potential = Yes were reverting to "Select Potential" upon opening the modal.
+
+### 3. Supplier Master Requirement Specification Document
+- **Master Documentation in [`MODULE_SUPPLIERS.md`](file:///d:/Om%20work1/ERP/Yinglima_ERP/doc/MODULE_SUPPLIERS.md):**
+  - Compiled the complete master specification for the Supplier module, including field validations (calling number digit restrictions, WeChat/WhatsApp handling), business logic (one-way New -> Existing progression, deletion protection rules), side drawer architecture, and downstream cross-module integrations with Local Purchase, Sourcing, and Planning.
+
+---
+
+## [Release 2026-10-13] — Latency & Response-Time Optimization Across Backend & Frontend
+
+### 1. Backend N+1 Query Elimination & Eager Loading
+- **RBAC Roles Preloading in [`repository.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/rbac/repository.py), [`routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/rbac/routes.py), and [`service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/rbac/service.py):**
+  - Replaced serial loop querying permissions for each role (`for r in roles: await get_permission_codes_for_role(r.id)`) with `list_all_with_permissions` using SQLAlchemy `selectinload(Role.permission_links).selectinload(RolePermission.permission)`.
+  - Dropped database round trips from 45 serial queries down to 2 batched queries.
+  - Response time dropped from **5,464 ms to 340 ms (16x faster)**.
+- **User Management Batching in [`users/routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/users/routes.py):**
+  - Implemented `_batch_users_with_roles` replacing the 4 sequential queries per user row (roles, manager, position, employee position) with 3 single SQL queries using `IN (...)`.
+  - Response time dropped from **2,928 ms to 620 ms (4.7x faster)**.
+
+### 2. 0ms Fast-Path In-Memory DNS Resolution
+- **Winsock DNS Bypass in [`dns_resilience.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/core/dns_resilience.py):**
+  - Added an in-memory 60-second TTL fast-path cache to prevent repetitive Windows Winsock system calls (160ms each) on pooled Supabase connections across Yinglima ERP, Inhyma ERP, and Central ERP Main.
+
+### 3. Frontend Route Code-Splitting with `React.lazy`
+- **Dynamic Module Loading in [`App.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/App.tsx):**
+  - Converted secondary and master pages to `React.lazy` dynamic imports wrapped with `<Suspense>`.
+  - Initial production JavaScript bundle dropped from **1,497.86 kB (1.5 MB) down to 266.16 kB (82% smaller)**.
+  - Heavy third-party packages such as SheetJS (`xlsx` at 429 kB) are now loaded strictly on-demand when Excel export/import actions occur.
+
+### 4. Shell Caching & Form Optimization
+- **Profile & Brand Caching in [`auth.ts`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/lib/auth.ts), [`AppShell.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/AppShell.tsx), and [`brand.ts`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/lib/brand.ts):**
+  - Added 10-second throttling to `/auth/profile` sync to eliminate redundant network hits during navigation.
+  - Added memory caching and in-flight request deduplication to `resolveBrandName()`, reducing `/organizations/public` calls to 0.99 ms.
+- **Local Purchase Quote Optimization in [`LocalPurchaseForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseForm.tsx):**
+  - Corrected lookup URL from `/suppliers?page_size=1000` to standard `/suppliers` to enable global caching.
+  - Line-item quote lookups now execute in parallel via `Promise.all` and update state in a single batch, reducing form load latency to 269 ms.
+
+---
+## [Release 2026-10-12] — Local Purchase Supplier Type-Ahead, Bill Document Cloud Storage & RBAC Master Documentation
+
+### 1. Local Purchase Supplier Searchable Combobox & Extraction Auto-Fill
+- **Type-Ahead Autocomplete in [`LocalPurchaseForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseForm.tsx):**
+  - Replaced the static HTML `<select>` dropdown with the application's reusable [`SearchableDropdown`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/SearchableDropdown.tsx).
+  - Users can now type characters (e.g. "San", "LT", "Young") to filter suppliers in real time with keyboard navigation (Arrow Up/Down + Enter) and a quick-clear (`✕`) button.
+  - Selecting a supplier automatically syncs with quotation line-item pricing and planning sheet imports.
+- **Bill Document Cloud Storage in Supabase & Download Action:**
+  - Extended local purchase backend schemas and services ([`schemas.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/schemas.py), [`service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/purchases/local/service.py), [`storage.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/common/storage.py)) to upload and persist invoice files (PDFs, images, Excel) to Supabase Storage.
+  - Added direct invoice document download actions on both [`LocalPurchaseForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseForm.tsx) and [`LocalPurchaseDetailModal.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/purchases/LocalPurchaseDetailModal.tsx).
+  - When **⚡ Extract Bill Data** runs, any detected supplier name or ID automatically resolves against the supplier database and pre-fills the type-ahead search bar.
+
+### 2. Comprehensive RBAC & Permissions Master Guide
+- **Master Documentation in [`ROLES_AND_PERMISSIONS_MASTER_GUIDE.md`](file:///d:/Om%20work1/ERP/Yinglima_ERP/doc/ROLES_AND_PERMISSIONS_MASTER_GUIDE.md):**
+  - Created a full architectural and operational guide covering Yinglima ERP's Role-Based Access Control (RBAC) engine.
+  - Documented the Department-Role convergence, the 3-tier precedence hierarchy (Super Admin > Department Defaults > User Overrides), and the mathematical effective permission formula.
+  - Included a complete matrix of all 25 modules and their fine-grained permission codes (`module.action`), backend dependencies (`require_permission`), frontend UI guards (`<Can>`, `hasPermission`), and real-time Redis/memory cache invalidation lifecycles.
+
+---
+
 ## [Release 2026-10-10] — Cross-Ecosystem Single Sign-Out (SLO), M2M Force Logout API & WebSocket Disconnect
 
 ### 1. Internal Machine-to-Machine Force-Logout API

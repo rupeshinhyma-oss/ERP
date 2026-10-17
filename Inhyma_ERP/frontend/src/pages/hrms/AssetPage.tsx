@@ -618,19 +618,16 @@ export function AssetPage() {
 
   return (
     <AppShell activeKey="hrms-assets">
-      <main className="page" style={{ paddingBottom: 60 }}>
+      <main className="page">
         {/* Breadcrumb & Header */}
         <Breadcrumb trail={["HRMS", "Asset Management"]} />
 
-        <div className="page-header" style={{ marginBottom: 18 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%", flexWrap: "wrap", gap: 12 }}>
+        <div className="page-header">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", flexWrap: "wrap", gap: 12 }}>
             <div>
-              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: "var(--color-text, #0f172a)" }}>
+              <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
                 Asset Management
               </h1>
-              <div className="page-subtitle" style={{ marginTop: 4, color: "var(--color-muted, #64748b)", fontSize: 13.5 }}>
-                Track hardware, devices, IT equipment, and corporate workforce assignments.
-              </div>
             </div>
 
             <div className="page-header-actions">

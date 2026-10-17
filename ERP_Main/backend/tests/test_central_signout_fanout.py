@@ -1,5 +1,5 @@
 """
-Signing out centrally must end the person's sessions in every ERP they hold an ACTIVE membership in.
+Signing out centrally ends THAT session in every ERP the person holds an ACTIVE membership in.
 
 The fan-out once referenced a column that does not exist (ErpInstance.is_active); the error was swallowed
 and logged as a warning, so central sign-out silently never reached any ERP.  This test makes that failure loud.
@@ -19,9 +19,9 @@ EST = "/api/v1/global/ecosystem-session/establish"
 class _SpyAdapter:
     calls: list = []
 
-    async def logout_local_user(self, erp, ident, *, reason=None):
-        _SpyAdapter.calls.append((erp.key, ident, reason))
-        return {"logged_out": True}
+    async def revoke_session(self, erp, session_id, *, reason=None):
+        _SpyAdapter.calls.append((erp.key, session_id, reason))
+        return True
 
 
 @pytest.fixture(autouse=True)

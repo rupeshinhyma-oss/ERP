@@ -1,10 +1,10 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { Pagination } from "@/components/Pagination";
+import { SortHeader } from "@/components/SortHeader";
 import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
 import type { PaginationMeta } from "@/types";
 import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
@@ -372,7 +372,10 @@ export function StockAdjustmentPage({
   const navigate = useNavigate();
   const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
+  // Real records only: in the app the list comes from the server, never from browser storage (records kept there
+  // were adjustments that never reached the stock).
   const [items, setItems] = useState<StockAdjustmentItem[]>(() => {
+    if (!isTestMode) return [];
     try {
       const saved = localStorage.getItem("local_stock_adjustments");
       if (saved) {
@@ -392,13 +395,13 @@ export function StockAdjustmentPage({
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
   // Filter input draft states
-  const [dateRangeFilter, setDateRangeFilter] = useState("08/21/2026 - 09/19/2026");
+  const [dateRangeFilter, setDateRangeFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [purposeFilter, setPurposeFilter] = useState("All");
   const [warehouseFilter, setWarehouseFilter] = useState("All");
 
   // Applied filter states
-  const [appliedDateRange, setAppliedDateRange] = useState("08/21/2026 - 09/19/2026");
+  const [appliedDateRange, setAppliedDateRange] = useState("");
   const [appliedType, setAppliedType] = useState("All");
   const [appliedPurpose, setAppliedPurpose] = useState("All");
   const [appliedWarehouse, setAppliedWarehouse] = useState("All");
@@ -430,28 +433,40 @@ export function StockAdjustmentPage({
     };
   }, [openActionMenuId, showAddMenu]);
 
-  // Fetch live adjustments from PostgreSQL database
+  // Fetch live adjustments from the server. Date range / type / purpose / warehouse are applied by the server (newest
+  // first), so records older than the first 200 are no longer unreachable.
+  const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     if (initialLoading) {
       setLoading(true);
     }
-    InventoryApi.listStockAdjustments({ limit: 200 })
+    setLoadError(null);
+    InventoryApi.listStockAdjustments({
+      limit: 500,
+      date_range: appliedDateRange || undefined,
+      type: appliedType,
+      purpose: appliedPurpose,
+      warehouse: appliedWarehouse,
+    })
       .then((res) => {
         if (!cancelled && res?.data?.items && Array.isArray(res.data.items)) {
-          const savedStr = localStorage.getItem("local_stock_adjustments");
-          const localSaved: StockAdjustmentItem[] = savedStr ? JSON.parse(savedStr) : [];
-          const existingIds = new Set(res.data.items.map((i: any) => i.id));
-          const extraLocal = localSaved.filter((i) => !existingIds.has(i.id));
-          setItems([...extraLocal, ...res.data.items]);
+          if (isTestMode) {
+            const savedStr = localStorage.getItem("local_stock_adjustments");
+            const localSaved: StockAdjustmentItem[] = savedStr ? JSON.parse(savedStr) : [];
+            const existingIds = new Set(res.data.items.map((i: any) => i.id));
+            setItems([...localSaved.filter((i) => !existingIds.has(i.id)), ...res.data.items]);
+          } else {
+            setItems(res.data.items);
+          }
         }
       })
       .catch((err) => {
-        console.warn("Using offline adjustments fallback:", err);
+        if (cancelled) return;
+        console.warn("Could not load stock adjustments:", err);
         if (!isTestMode) {
-          const savedStr = localStorage.getItem("local_stock_adjustments");
-          const localSaved: StockAdjustmentItem[] = savedStr ? JSON.parse(savedStr) : [];
-          setItems(localSaved);
+          setItems([]);
+          setLoadError(err?.message || "Could not load stock adjustments. Please try again.");
         }
       })
       .finally(() => {
@@ -462,25 +477,22 @@ export function StockAdjustmentPage({
     return () => {
       cancelled = true;
     };
-  }, [initialLoading]);
+  }, [initialLoading, appliedDateRange, appliedType, appliedPurpose, appliedWarehouse, isTestMode]);
 
-  // Handle item deletion
-  const handleDeleteItem = useCallback((id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    // Persist deletion to PostgreSQL DB
-    InventoryApi.deleteStockAdjustment(id).catch((err) => {
-      console.warn("Failed to delete stock adjustment from DB:", err);
-    });
-    try {
-      const savedStr = localStorage.getItem("local_stock_adjustments");
-      if (savedStr) {
-        const parsed: StockAdjustmentItem[] = JSON.parse(savedStr);
-        localStorage.setItem("local_stock_adjustments", JSON.stringify(parsed.filter((item) => item.id !== id)));
+  // Handle item deletion: the server deletes the adjustment AND reverses its stock. If it refuses (for example the goods
+  // were already used) the row stays and the reason is shown.
+  const handleDeleteItem = useCallback(
+    async (id: string) => {
+      if (!isTestMode && !window.confirm("Delete this adjustment? Its stock effect will be reversed.")) return;
+      try {
+        await InventoryApi.deleteStockAdjustment(id);
+        setItems((prev) => prev.filter((item) => item.id !== id));
+      } catch (err: any) {
+        window.alert(err?.message || "Could not delete the adjustment.");
       }
-    } catch (e) {
-      console.error(e);
-    }
-  }, []);
+    },
+    [isTestMode]
+  );
 
   // Handle item download: creates PDF document matching template
   const handleDownloadItem = useCallback((item: StockAdjustmentItem) => {
@@ -511,11 +523,11 @@ export function StockAdjustmentPage({
 
   // Handle filter reset
   const handleResetFilters = useCallback(() => {
-    setDateRangeFilter("08/21/2026 - 09/19/2026");
+    setDateRangeFilter("");
     setTypeFilter("All");
     setPurposeFilter("All");
     setWarehouseFilter("All");
-    setAppliedDateRange("08/21/2026 - 09/19/2026");
+    setAppliedDateRange("");
     setAppliedType("All");
     setAppliedPurpose("All");
     setAppliedWarehouse("All");
@@ -576,30 +588,87 @@ export function StockAdjustmentPage({
     });
   }, [items, searchTerm, appliedDateRange, appliedType, appliedPurpose, appliedWarehouse]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = (colIdx: number) => {
+    if (sortColIndex === colIdx) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else {
+        setSortColIndex(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColIndex(colIdx);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedItems = useMemo(() => {
+    if (sortColIndex === null) return filteredItems;
+    const list = [...filteredItems];
+    list.sort((a, b) => {
+      let vA: any = "";
+      let vB: any = "";
+      switch (sortColIndex) {
+        case 0: // Adjustment Date (DD-MM-YYYY -> YYYYMMDD so it sorts as a date, not as text)
+          vA = String(a.adjustment_date || "").split("-").reverse().join("");
+          vB = String(b.adjustment_date || "").split("-").reverse().join("");
+          break;
+        case 1: // Client / Inv. No.
+          vA = a.client_name || a.invoice_no || "";
+          vB = b.client_name || b.invoice_no || "";
+          break;
+        case 2: // Warehouse
+          vA = a.warehouse || "";
+          vB = b.warehouse || "";
+          break;
+        case 3: // Type
+          vA = a.type || "";
+          vB = b.type || "";
+          break;
+        case 4: // Purpose
+          vA = a.purpose || "";
+          vB = b.purpose || "";
+          break;
+        case 5: // Total
+          vA = Number(a.total_amount) || 0;
+          vB = Number(b.total_amount) || 0;
+          break;
+        case 6: // Created By
+          vA = a.created_by || "";
+          vB = b.created_by || "";
+          break;
+        default:
+          return 0;
+      }
+      if (typeof vA === "number" && typeof vB === "number") {
+        return sortDirection === "asc" ? vA - vB : vB - vA;
+      }
+      const sA = String(vA).toLowerCase();
+      const sB = String(vB).toLowerCase();
+      if (sA < sB) return sortDirection === "asc" ? -1 : 1;
+      if (sA > sB) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [filteredItems, sortColIndex, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedItems.length / perPage));
   const paginatedItems = useMemo(() => {
     const start = (currentPage - 1) * perPage;
-    return filteredItems.slice(start, start + perPage);
-  }, [filteredItems, currentPage, perPage]);
+    return sortedItems.slice(start, start + perPage);
+  }, [sortedItems, currentPage, perPage]);
 
   const paginationMeta: PaginationMeta = useMemo(() => ({
     current_page: currentPage,
     total_pages: totalPages,
-    total_records: filteredItems.length,
+    total_records: sortedItems.length,
     page_size: perPage,
     has_previous: currentPage > 1,
     has_next: currentPage < totalPages,
-  }), [currentPage, totalPages, filteredItems.length, perPage]);
+  }), [currentPage, totalPages, sortedItems.length, perPage]);
 
-  // Active filter badge count
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (appliedDateRange !== "08/21/2026 - 09/19/2026" && appliedDateRange !== "") count++;
-    if (appliedType !== "All") count++;
-    if (appliedPurpose !== "All") count++;
-    if (appliedWarehouse !== "All") count++;
-    return count;
-  }, [appliedDateRange, appliedType, appliedPurpose, appliedWarehouse]);
 
   // Handle saving new adjustment
   const handleCreateAdjustment = (e: React.FormEvent) => {
@@ -647,25 +716,24 @@ export function StockAdjustmentPage({
   return (
     <AppShell activeKey="stock-adjustment">
       <main className="page">
-        {/* Breadcrumb Trail */}
-        <Breadcrumb trail={["Inventory", "Stock Adjustment"]} />
-
         {/* Top Page Header */}
         <div className="page-header">
           <div>
-            <h1>Stock Adjustment</h1>
-            <div className="page-subtitle">
-              Manage inventory adjustments, physical count reconciliation, and discrepancies.
-            </div>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Stock Adjustment</h1>
+            {loadError && (
+              <div role="alert" style={{ marginTop: "6px", fontSize: "13px", color: "#b91c1c" }}>
+                {loadError}
+              </div>
+            )}
           </div>
 
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
-              className="btn adjustment-btn-filter"
+              className="btn btn-filter-toggle"
               style={{
-                background: showFilterPanel ? "#0061f2" : "#475569",
+                background: "#556987",
                 color: "#ffffff",
                 padding: "8px 14px",
                 borderRadius: "6px",
@@ -683,7 +751,6 @@ export function StockAdjustmentPage({
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFilterCount > 0 && <span className="adjustment-filter-badge">{activeFilterCount}</span>}
             </button>
 
             {/* Add New Button with dropdown */}
@@ -951,25 +1018,6 @@ export function StockAdjustmentPage({
                 </select>
                 <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
               </div>
-
-              <button
-                type="button"
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "13px",
-                  background: "#ffffff",
-                  cursor: "pointer",
-                  color: "#0f172a",
-                  fontWeight: 600,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                📌 Freeze Columns (2)
-              </button>
             </div>
 
             <div className="adjustment-search-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
@@ -1006,64 +1054,28 @@ export function StockAdjustmentPage({
             <table className="adjustment-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th className="sortable" style={{ position: "sticky", left: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Adjustment Date</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.8 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th className="sortable">
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Client / Inv. No.</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th className="sortable">
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Warehouse</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
+                  <th>
+                    <SortHeader label="Adjustment Date" isSorted={sortColIndex === 0} sortDirection={sortDirection} onSort={() => handleHeaderSort(0)} />
                   </th>
                   <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>Type</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th className="sortable">
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Purpose</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
-                  </th>
-                  <th className="sortable" style={{ textAlign: "right" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "4px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                        <span>Total</span>
-                        <span className="sort-icon">⇅</span>
-                      </div>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
+                    <SortHeader label="Client / Inv. No." isSorted={sortColIndex === 1} sortDirection={sortDirection} onSort={() => handleHeaderSort(1)} />
                   </th>
                   <th>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                      <span>Created By</span>
-                      <button type="button" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: 0.3 }} title="Freeze column">📌</button>
-                    </div>
+                    <SortHeader label="Warehouse" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} />
                   </th>
-                  <th style={{ textAlign: "center", width: "60px", position: "sticky", right: 0, zIndex: 12, backgroundColor: "#f1f5f9" }}>
+                  <th>
+                    <SortHeader label="Type" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} />
+                  </th>
+                  <th>
+                    <SortHeader label="Purpose" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} />
+                  </th>
+                  <th style={{ textAlign: "right" }}>
+                    <SortHeader label="Total" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} align="right" />
+                  </th>
+                  <th>
+                    <SortHeader label="Created By" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} />
+                  </th>
+                  <th style={{ textAlign: "center", width: "60px" }}>
                     <span>Action</span>
                   </th>
                 </tr>

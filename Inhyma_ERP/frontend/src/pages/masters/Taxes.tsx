@@ -26,8 +26,6 @@ export function TaxesPage() {
       liveModule="taxes"
       entityName="tax"
       heading="Taxes"
-      subtitle="HSN Numbers, GST Percentages, and Import Duties."
-      breadcrumbTrail={["Settings", "Masters", "Taxes"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search HSN Number or Sr. No..."
       hideQuickAdd={true}

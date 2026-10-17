@@ -40,11 +40,13 @@ from app.auth.schemas import (
 from app.auth.security import InvalidTokenError, TokenType, decode_token
 from app.auth.service import AuthService, CurrentUser, LoginContext
 from app.core.config import settings
-from app.core.exceptions import UnauthorizedException
+from app.core.exceptions import UnauthorizedException, ServiceUnavailableException
 from app.federation.erp_main_client import (
     EcosystemSessionError,
+    EcosystemSessionUnavailable,
+    open_central_session,
     push_password_to_erp_main,
-    push_signout_to_erp_main,
+    push_session_signout_to_erp_main,
     verify_ecosystem_session,
 )
 from app.common.rate_limit import enforce_rate_limit, forgot_password_limiter
@@ -63,12 +65,19 @@ _bearer_scheme = HTTPBearer(auto_error=True)
 def _token_response(
     access_token: str, refresh_token: str, user: ProfileResponse | None = None
 ) -> TokenResponse:
-    """Build the standard token-pair response payload."""
+    """Build the standard token-pair response payload (including which login/session these tokens belong to)."""
+    sid: str | None = None
+    try:
+        sid = decode_token(access_token, expected_type=TokenType.ACCESS).get("sid")
+    except Exception:
+        sid = None
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=user,
+        session_id=str(sid) if sid else None,
+        session_mode=("local" if str(sid).startswith("loc-") else "central") if sid else None,
     )
 
 
@@ -82,8 +91,17 @@ async def login(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Verify credentials and issue a new token pair, tracked as a new session."""
+    async def _open_central_session(authenticated_user) -> str | None:
+        # Only reached AFTER the password was verified here.  ERP_Main decides whether this person may use this ERP and
+        # opens the ONE session of this login; None -> a clearly labelled local-only session (never blocks the login).
+        info = await open_central_session(authenticated_user.email)
+        return str(info["session_id"]) if info else None
+
     user, access_token, refresh_token = await auth_service.login(
-        identifier=payload.identifier, password=payload.password, context=context
+        identifier=payload.identifier,
+        password=payload.password,
+        context=context,
+        session_resolver=_open_central_session,
     )
     roles = await rbac_service.list_roles_for_user(user.id)
     permissions = await auth_service.get_user_effective_permissions(user.id, force_refresh=True)
@@ -160,16 +178,15 @@ async def logout(
     await auth_service.logout(
         access_token_jti=access_payload["jti"], access_token_exp=exp, refresh_token=payload.refresh_token
     )
-    # Signing out here means signing out EVERYWHERE (dashboard on every device + every ERP the person can use).
-    # ERP_Main owns that decision; tell it directly, server-to-server.  Best effort: never blocks this logout.
-    try:
-        import uuid as _uuid
-
-        signed_out_user = await auth_service.user_repository.get_by_id(_uuid.UUID(str(access_payload["sub"])))
-        if signed_out_user is not None and signed_out_user.email:
-            await push_signout_to_erp_main(signed_out_user.email)
-    except Exception:
-        pass
+    # End THIS login everywhere it was used -- not the person's other logins: block its session id here, then tell
+    # ERP_Main (server-to-server) so the dashboard and the other ERPs of the same session end too.
+    signed_out_sid = access_payload.get("sid")
+    if signed_out_sid:
+        try:
+            await auth_service.revoke_session(str(signed_out_sid), reason="logout")
+        except Exception:
+            pass
+        await push_session_signout_to_erp_main(str(signed_out_sid))
     await audit_service.record(
         action=AuditAction.LOGOUT,
         module="auth",
@@ -355,6 +372,11 @@ async def sso_handover_login(
             raise UnauthorizedException("SSO handover requires an active central session. Please sign in again.")
         try:
             central = await verify_ecosystem_session(session_id)
+        except EcosystemSessionUnavailable as exc:
+            # ERP_Main is temporarily unreachable: a retryable 503, NOT "your session ended" (401).
+            raise ServiceUnavailableException(
+                "The control plane is not reachable right now. Please try again in a moment."
+            ) from exc
         except EcosystemSessionError as exc:
             raise UnauthorizedException(
                 "Could not confirm your session with ERP_Main. Please try again in a moment."
@@ -370,17 +392,30 @@ async def sso_handover_login(
         if central_role != "super_admin" and "*" not in central_allowed and not my_erp_keys.intersection(central_allowed):
             raise ForbiddenException(f"User '{req_email}' is not authorized to access this ERP.")
 
+    # The central session this handover verified (None when central verification is switched off: then the tokens
+    # get a local-only session id instead of an unverified central one).
+    handover_sid: str | None = None
+    if settings.SSO_HANDOVER_REQUIRE_CENTRAL_VERIFICATION:
+        _verified_sid = str(token_data.get("session_id") or "")
+        if _verified_sid and not _verified_sid.startswith("ihm-sess-"):
+            handover_sid = _verified_sid
+
     # Resolve local user
     stmt = select(User).where(func.lower(User.email) == req_email)
     user = (await db.execute(stmt)).scalars().first()
     if user:
         if user.deleted_at is not None or not user.is_active or not user.can_login:
-            from app.users.models import UserStatus
-            user.deleted_at = None
-            user.is_active = True
-            user.status = UserStatus.ACTIVE
-            await db.flush()
+            # This ERP's own database is the truth for this account.  Signing in through the control plane must never
+            # silently un-delete or re-enable it; an administrator restores it from the Users screen (or ERP_Main
+            # pushes the restore through the access-sync channel).
+            raise UnauthorizedException(
+                "This account was deleted or disabled in this ERP. Ask an administrator to restore it."
+            )
     else:
+        import os as _os
+
+        if _os.environ.get("SSO_HANDOVER_AUTO_PROVISION", "true").strip().lower() in {"0", "false", "no"}:
+            raise UnauthorizedException("No account exists for you in this ERP.")
         # Auto-provision minimal local user on confirmed central handover
         from app.api.v1.internal_users import _system_actor_id
         from app.users.repository import UserRepository
@@ -412,7 +447,9 @@ async def sso_handover_login(
         )
         await db.flush()
 
-    access_token, refresh_token = await auth_service.issue_session_for_federated_user(user, context)
+    access_token, refresh_token = await auth_service.issue_session_for_federated_user(
+        user, context, session_id=handover_sid
+    )
     roles = await rbac_service.list_roles_for_user(user.id)
     permissions = await auth_service.get_user_effective_permissions(user.id)
 

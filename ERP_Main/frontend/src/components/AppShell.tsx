@@ -27,7 +27,6 @@ import { getEcosystemCookie, isExplicitlyLoggedOut, setEcosystemCookie } from "@
 
 
 import { useGlobalSession } from "@/lib/session";
-import { Breadcrumb } from "./Breadcrumb";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { ICONS } from "./icons";
 
@@ -44,7 +43,6 @@ export function AppShell({
   activeKey,
   pageTitle,
   pageSubtitle,
-  breadcrumbs,
   actions,
   children,
 }: AppShellProps) {
@@ -333,7 +331,7 @@ export function AppShell({
             padding: "16px 12px",
             display: "flex",
             flexDirection: "column",
-            gap: "20px",
+            gap: "4px",
           }}
         >
           {NAV_SECTIONS.map((section) => {
@@ -346,85 +344,51 @@ export function AppShell({
             if (visibleItems.length === 0) return null;
 
             return (
-              <div key={section.label} className="nav-group">
-                <div
-                  className="nav-group-title"
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    color: "var(--color-muted)",
-                    padding: "0 8px 8px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {section.label}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                  {visibleItems.map((item) => {
-                    const isActive =
-                      activeKey === item.key ||
-                      (item.key === "users" &&
-                        ["roles", "permissions", "memberships", "access-policies", "conflicts"].includes(activeKey));
-                    const IconComponent = ICONS[item.icon] || ICONS.dashboard;
+              <div key={section.label} className="nav-group" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                {visibleItems.map((item) => {
+                  const isActive =
+                    activeKey === item.key ||
+                    (item.key === "users" &&
+                      ["roles", "permissions", "memberships", "access-policies", "conflicts"].includes(activeKey));
+                  const IconComponent = ICONS[item.icon] || ICONS.dashboard;
 
-                    return (
-                      <Link
-                        key={item.key}
-                        to={item.path}
-                        className={`nav-item ${isActive ? "active" : ""}`}
-                        onClick={() => setMobileNavOpen(false)}
+                  return (
+                    <Link
+                      key={item.key}
+                      to={item.path}
+                      className={`nav-item ${isActive ? "active" : ""}`}
+                      onClick={() => setMobileNavOpen(false)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        padding: "8px 10px",
+                        borderRadius: "var(--radius-sm, 6px)",
+                        fontSize: "13px",
+                        fontWeight: isActive ? 600 : 500,
+                        color: isActive ? "var(--sidebar-active-text, #0061f2)" : "var(--sidebar-text, #334155)",
+                        background: isActive ? "var(--sidebar-active-bg, #e0edff)" : "transparent",
+                        textDecoration: "none",
+                        transition: "background 0.15s ease, color 0.15s ease",
+                      }}
+                    >
+                      <IconComponent
+                        width={18}
+                        height={18}
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          padding: "8px 10px",
-                          borderRadius: "var(--radius-sm, 6px)",
-                          fontSize: "13px",
-                          fontWeight: isActive ? 600 : 500,
-                          color: isActive ? "var(--sidebar-active-text, #0061f2)" : "var(--sidebar-text, #334155)",
-                          background: isActive ? "var(--sidebar-active-bg, #e0edff)" : "transparent",
-                          textDecoration: "none",
-                          transition: "background 0.15s ease, color 0.15s ease",
+                          color: isActive ? "var(--sidebar-active-text, #0061f2)" : "var(--color-muted)",
+                          flexShrink: 0,
                         }}
-                      >
-                        <IconComponent
-                          width={18}
-                          height={18}
-                          style={{
-                            color: isActive ? "var(--sidebar-active-text, #0061f2)" : "var(--color-muted)",
-                            flexShrink: 0,
-                          }}
-                        />
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {item.label}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
+                      />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.label}
+                      </span>
+                    </Link>
+                  );
+                })}
               </div>
             );
           })}
-        </div>
-
-        {/* Sidebar Footer */}
-        <div
-          style={{
-            padding: "12px 16px",
-            borderTop: "1px solid var(--sidebar-border, #e2e8f0)",
-            fontSize: "11px",
-            color: "var(--color-muted)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <span>ERP_Main v1.0.0</span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />
-            Online
-          </span>
         </div>
       </aside>
 
@@ -610,8 +574,6 @@ export function AppShell({
             boxSizing: "border-box",
           }}
         >
-          {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumb trail={breadcrumbs} />}
-
           <div
             className="page-header"
             style={{

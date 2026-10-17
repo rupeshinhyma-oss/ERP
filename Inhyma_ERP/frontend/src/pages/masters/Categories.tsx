@@ -18,7 +18,6 @@ export function CategoriesPage() {
       liveModule="categories"
       entityName="category"
       heading="Product Categories"
-      subtitle={<>The top level of the category &rarr; sub-category product classification.</>}
       breadcrumbTrail={["Master Data", "Categories"]}
       newButtonLabel="+ New Category"
       hideQuickAdd

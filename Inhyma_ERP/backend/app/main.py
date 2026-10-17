@@ -28,9 +28,12 @@ from app.auth.service import CurrentUser
 from app.cache.dependency import get_cleanup_worker
 from app.common.storage import sanitize_filename
 from app.core.config import settings
+from app.core.dns_resilience import install_dns_resilience
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.database.engine import dispose_engine, get_engine
+
+install_dns_resilience()
 from app.integration import jobs as _integration_jobs  # noqa: F401 - import registers the dispatch_integration_event handler
 from app.integration import handlers as _integration_handlers  # noqa: F401 - import registers consumer handlers
 from app.middleware.audit_middleware import AuditMiddleware
@@ -107,6 +110,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             HrmsTrackingPoint,
         )
         async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data TEXT;"))
+            await conn.execute(text("ALTER TABLE organizations ALTER COLUMN logo_url TYPE TEXT;"))
             await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS organization_ids JSON;"))
             await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS carry_forward_allowed BOOLEAN DEFAULT false;"))
             await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS description TEXT;"))
@@ -331,11 +336,13 @@ def create_application() -> FastAPI:
             raise HTTPException(status_code=404, detail="Private file not found.")
         return FileResponse(target)
 
-    # Public static uploads for product images, supplier media, and expense receipts
+    # Public static uploads for product images, supplier media, branding logos, and expense receipts
     (uploads_dir / "expenses").mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "branding").mkdir(parents=True, exist_ok=True)
     app.mount("/uploads/products", StaticFiles(directory=uploads_dir / "products"), name="uploads_products")
     app.mount("/uploads/suppliers", StaticFiles(directory=uploads_dir / "suppliers"), name="uploads_suppliers")
     app.mount("/uploads/expenses", StaticFiles(directory=uploads_dir / "expenses"), name="uploads_expenses")
+    app.mount("/uploads/branding", StaticFiles(directory=uploads_dir / "branding"), name="uploads_branding")
     app.mount("/static/uploads", StaticFiles(directory=uploads_dir / "products"), name="static_uploads")
 
     # ---------------------------------------------------------------

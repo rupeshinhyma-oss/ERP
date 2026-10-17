@@ -60,6 +60,8 @@
 49. [SALE: Proforma Invoices (Extended Commercial Terms, Address Routing, Approvals Workflow)](#49-sale-proforma-invoices-extended-commercial-terms-address-routing-approvals-workflow)
 50. [COMPANIES: Advanced Specification Fields (Monthly Turnover, Potential Analysis, Direct Import from China)](#50-companies-advanced-specification-fields-monthly-turnover-potential-analysis-direct-import-from-china)
 51. [SUPPLIERS: Mandatory Calling Number Validation & Contact Phone Rules](#51-suppliers-mandatory-calling-number-validation--contact-phone-rules)
+52. [HRMS: HRMS All-Employee Attendance Calendar & Payroll Excel Export QA Verification](#52-hrms-hrms-all-employee-attendance-calendar--payroll-excel-export-qa-verification)
+53. [GLOBAL UI STANDARD: Universal Filter Toggle Button & Collapsible Panel Specification](#53-global-ui-standard-universal-filter-toggle-button--collapsible-panel-specification)
 
 ---
 
@@ -357,14 +359,20 @@ Manage complete vendor team directory:
 ## 6. INVENTORY: Product Master Module
 
 - **Route:** `/masters/products`
-- **Purpose:** Centralized product catalog, dynamic specifications builder, CBM packaging calculations, photo gallery uploader, and ReportLab PDF datasheet generation.
+- **Purpose:** Centralized product catalog, machine-spares compatibility mapping, package-level dimensions report, CBM packaging calculations, photo gallery uploader, and ReportLab PDF datasheet generation.
+
+### 6.0. Master Multi-View Navigation Strip
+- Directly beneath the breadcrumb bar (`Dashboard / Product Master`), the `.master-view-nav` tab bar allows one-click switching between three dedicated views:
+  1. **`📦 Product Master` (`catalog`):** Main product catalog grid featuring column pinning, inline stock inspection, and bulk activation/deactivation.
+  2. **`⚙️ Machine-Spares Universal View` (`universal-view`):** Machine-wise spare parts breakdown showing all linked spare parts, codes, stock levels, and compatibility notes with a dedicated link modal (`/masters/products/machine-spares/universal-view`).
+  3. **`📐 Dimensions & Weights Report` (`dimensions-report`):** Package-level breakdown for multi-box products, displaying Length, Width, Height, CBM, Net Weight, and Gross Weight with direct CSV and XLSX export triggers.
 
 ### 6.1. Product Master Table Columns
 1. **Checkbox:** Row selector.
-2. **SR. NO.:** Sequential number.
+2. **SR. NO.:** Sequential number with sort cue.
 3. **IMAGE:** Thumbnail preview with click-to-expand lightbox.
 4. **PRODUCT CODE:** Unique SKU / Item code.
-5. **PRODUCT NAME (TALLY):** Official internal accounting name.
+5. **PRODUCT NAME (TALLY):** Official internal accounting name with real-time duplicate suggestions guard.
 6. **INVOICE NAME:** Commercial description used on billing documents.
 7. **CATEGORY / SUB-CATEGORY:** Hierarchy badges.
 8. **BRAND:** Manufacturer brand name.
@@ -372,7 +380,7 @@ Manage complete vendor team directory:
 10. **PRIMARY UOM:** Base unit (e.g. PCS, SET, KG).
 11. **PACKAGING CBM:** Calculated volume ($L \times W \times H / 1,000,000$).
 12. **STATUS:** `Active` / `Inactive` badge.
-13. **ACTIONS:** View Detail Drawer, Edit Product, Download PDF Datasheet, Delete.
+13. **ACTIONS:** View Detail Drawer, Edit Product, Download PDF Datasheet, Delete (strictly zero-stock locked).
 
 ### 6.3. Add / Edit Product Form Fields
 - **Basic Details:**
@@ -791,6 +799,18 @@ Manage complete vendor team directory:
     - Inline selector to add new departments with role dropdown, assignment type, and effective dates.
     - Synchronizes changes immediately upon addition or removal without closing the drawer, eliminating the need for a separate modal.
 
+### 15.1.2. Cross-ERP User Federation, Password Synchronization & Sign-Out Everywhere
+- **Central Control Plane Sync (`ERP_Main`):**
+  - Users created or updated in `ERP_Main` with access to Inhyma are provisioned via `POST /api/v1/internal/users/sync`.
+  - Unchecking Inhyma access in `ERP_Main` soft-deletes the local user record (`is_active=False`, `deleted_at=now()`) and revokes all active sessions.
+- **Bi-Directional Password Synchronization:**
+  - Password changes initiated in Inhyma (`POST /users/{id}/reset-password` or `/auth/change-password`) asynchronously push the updated Argon2id hash to `ERP_Main` (`POST /api/v1/auth/internal/sync-password`), which then fans out to peer spokes (e.g. Yinglima).
+  - Outbound calls fail silently if `ERP_Main` is unreachable, with the Durable Access Sync Engine handling queued synchronizations.
+- **Global Sign-Out Everywhere Fanout:**
+  - When `ERP_Main` issues a global signout fanout, Inhyma receives `POST /api/v1/auth/internal/revoke-user-tokens`.
+  - **Multi-Identifier Matching:** Accurately locates local user by `id`, `user_id`, `email`, or `username`.
+  - Instantly revokes all active refresh tokens and pushes WebSocket `FORCE_LOGOUT` (`code 4001`) to connected browser sessions.
+
 ### 15.5. Test Cases for Users Module
 - [ ] Open `/users`, verify User Accounts & Passwords table loads with search bar, status dropdown filter, and `+ Create User Account` button.
 - [ ] Verify each row has a checkbox and the table header has a `select-all-checkbox`.
@@ -806,6 +826,8 @@ Manage complete vendor team directory:
   - User's active session is terminated in the database.
   - User's active browser tabs receive a real-time WebSocket disconnect (`code 4001`) and are immediately redirected to `/login`.
   - In-flight access tokens are invalidated via cache timestamp check (`auth_force_logout:{user_id}`).
+- [ ] **Cross-ERP Sign-Out Everywhere**: When sign-out everywhere is triggered from `ERP_Main`, verify Inhyma's `POST /api/v1/auth/internal/revoke-user-tokens` receives the call, matches the user via multi-identifier resolution, revokes tokens, and logs the user out.
+- [ ] **Bi-Directional Password Sync**: Change a user's password locally in Inhyma. Verify that `ERP_Main` receives the update via `POST /api/v1/auth/internal/sync-password` and propagates it to Yinglima without errors.
 - [ ] Click `✏️ Edit Profile` on a user row. Verify:
   - Drawer opens with identity, HR attributes, and dynamically populated **Position** dropdown.
   - **Department & Role Assignments** section is displayed directly inside the drawer.
@@ -2452,4 +2474,56 @@ Checklist to execute:
 - [ ] Verify draft unapproved payroll cannot be exported or viewed by non-admin/non-HR employees.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, and CRM Phase 1 Foundation).*
+
+## 53. GLOBAL UI STANDARD: Universal Filter Toggle Button & Collapsible Panel Specification
+
+### Overview & Visual Benchmark
+- **Benchmark Source:** [Companies.tsx](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Companies.tsx#L5628) header filter toggle button.
+- **Design Philosophy:** Complete visual and behavioral uniformity across all modules in Inhyma. All filter toggle buttons share identical colors, dimensions, borders, shadows, icons, and lifecycle behavior.
+
+### Key Visual & Functional Specifications
+1. **Design Tokens & Palette:**
+   - **Default Background:** `#556987` (solid slate/navy).
+   - **Hover Background:** `#475569`.
+   - **Active/Toggled State:** Permanently `#556987`. It never turns bright blue (`#0284c7` or `#0061f2`) when active or open.
+   - **Color / Fill:** `#ffffff`.
+   - **Border:** `none`.
+   - **Border Radius:** `6px`.
+   - **Padding:** `8px 14px`.
+   - **Box Shadow:** `0 2px 4px rgba(0, 0, 0, 0.1)`.
+   - **Display:** `inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s ease`.
+2. **Dimension Standardization (Auto Box-Sizing):**
+   - Removed all hardcoded square constraints (`width: 38px`, `height: 38px`, `height: 35px`, `min-width: 36px`, etc.).
+   - Standardized box model: `width: auto !important; height: auto !important; min-width: unset !important; min-height: unset !important;`.
+3. **Funnel Icon Standardization:**
+   - Universal 16×16px SVG funnel polygon:
+     ```html
+     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+     </svg>
+     ```
+4. **Clean Surface (Zero Badge Invariant):**
+   - Buttons do NOT contain red notification badges, count pills (`activeFilterCount`), or indicator dots. The button preserves an identical visual footprint regardless of active filter count.
+5. **Initial State (Collapsed / Off Invariant):**
+   - Filter panels and drawers across all modules are strictly **off by default** (`useState(false)`). The user must explicitly click the funnel button to reveal filter fields.
+
+### Modules Covered by Universal Standard
+- **Contact:** `Companies.tsx`, `Suppliers.tsx`, `AgentsPage.tsx`, `FollowUpsPage.tsx`, `IndustrialZonesPage.tsx`, `LeadsPage.tsx`.
+- **Inventory:** `ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx`, `ProductReorderPage.tsx`, `PriceListPage.tsx`, `masters/Products.tsx`.
+- **Sales & Commercial:** `sales/SaleProcessList.tsx`, `sales/DiscountPaymentsPage.tsx`, `ProformaInvoicesPage.tsx`, `DeletedOrdersPage.tsx`.
+- **Tasks & Engineering:** `technicalTasks/TechnicalTasksPage.tsx`.
+- **Generic Masters:** `components/MasterPage.tsx` (applies to Brands, Categories, UOM, Taxes, Warehouses, Call Types, Buyer Types, etc.).
+
+### Test Cases
+- [ ] Verify navigating to any module page (e.g. `/product-stock`, `/stock-adjustment`, `/stock-transfer`, `/deleted-orders`, `/sales/process`, `/price-list`) renders the funnel filter button in `#556987`.
+- [ ] Verify the filter button has rectangular padding (`8px 14px`) and is not forced into a square shape (e.g. 38x38px).
+- [ ] Verify hovering over the filter button darkens the background to `#475569`.
+- [ ] Verify clicking the filter button expands the filter drawer/panel and the button retains its `#556987` color (does NOT change to blue/cyan).
+- [ ] Verify clicking the filter button again collapses the filter panel smoothly.
+- [ ] Verify on a fresh page load or browser refresh, all filter panels start collapsed/off.
+- [ ] Verify the filter button has no red number badge or indicator dot attached to it.
+- [ ] Verify applying filters (date ranges, warehouse, sales person, status) updates the grid correctly.
+- [ ] Verify clicking 'Reset Filters' clears inputs and restores all grid records.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Universal Filter Button UI Standardization Across All Modules, Session-Scoped Tokens, Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, and CRM Phase 1 Foundation).*

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
-import { setBrandName } from "@/lib/brand";
+import { setBrandName, getCachedBrandLogo, setBrandLogo, resolveImageUrl, subscribeBrandLogo } from "@/lib/brand";
 import { createSsoHandoverUrlFromSession, processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
 import { ErrorBanner } from "@/components/ui";
 import type { Profile, TokenPair } from "@/types";
@@ -17,6 +17,7 @@ interface PublicOrgInfo {
   company_name: string;
   legal_name?: string | null;
   logo_url?: string | null;
+  logo_data?: string | null;
 }
 
 function EyeIcon({ visible }: { visible: boolean }) {
@@ -52,7 +53,7 @@ function LoginIllustration() {
 
 const BRAND_CACHE_KEY = "erp_brand_name";
 
-import { establishCentralEcosystemSession, getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
+import { establishCentralEcosystemSession, setEcosystemCookie } from "@/lib/ecosystemSession";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -69,7 +70,19 @@ export function LoginPage() {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [signingIn, setSigningIn] = useState(() => {
+    try {
+      return sessionStorage.getItem("ihm_handover_pending") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [brandLogo, setBrandLogoState] = useState<string | null>(() => getCachedBrandLogo());
   const identifierRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return subscribeBrandLogo(setBrandLogoState);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,15 +92,22 @@ export function LoginPage() {
     (async () => {
       try {
         const { data } = await apiGet<PublicOrgInfo>("/organizations/public");
-        if (cancelled || !data?.company_name) return;
-        setBrand(data.company_name);
-        setBrandName(data.company_name);
-        try {
-          localStorage.setItem(BRAND_CACHE_KEY, data.company_name);
-        } catch {
-          /* ignore */
+        if (cancelled || !data) return;
+        if (data.company_name) {
+          setBrand(data.company_name);
+          setBrandName(data.company_name);
+          try {
+            localStorage.setItem(BRAND_CACHE_KEY, data.company_name);
+          } catch {
+            /* ignore */
+          }
+          document.title = `Sign In - ${data.company_name}`;
         }
-        document.title = `Sign In - ${data.company_name}`;
+        const logo = data.logo_url || data.logo_data || null;
+        if (logo) {
+          setBrandLogo(logo);
+          setBrandLogoState(logo);
+        }
       } catch {
         /* fallback to default */
       }
@@ -100,7 +120,18 @@ export function LoginPage() {
 
   useEffect(() => {
     identifierRef.current?.focus();
+    // If an automatic sign-in (switching ERPs) could not complete, say why instead of showing a bare login page.
+    try {
+      const notice = sessionStorage.getItem("ihm_login_notice");
+      if (notice) {
+        sessionStorage.removeItem("ihm_login_notice");
+        setError(new Error(notice));
+      }
+    } catch {
+      /* storage unavailable */
+    }
     processIncomingSsoHandover().then((result) => {
+      setSigningIn(false);
       // Unlike AppShell/App, being on the Login page itself means either
       // outcome ("logged-in" or "already-logged-in") should move on to
       // /dashboard -- there's no reason to stay on the login form once we
@@ -113,6 +144,20 @@ export function LoginPage() {
 
   if (Auth.isLoggedIn()) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  if (signingIn) {
+    return (
+      <div
+        role="status"
+        style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", color: "#334155", fontFamily: "inherit" }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "18px", fontWeight: 600 }}>Signing you in…</div>
+          <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>Connecting to the ERP. This can take a few seconds.</div>
+        </div>
+      </div>
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -142,13 +187,21 @@ export function LoginPage() {
       }
 
       // 2. Ask ERP_Main who this person is and which ERPs they may use.
-      const existingSessionId = getEcosystemCookie()?.session_id;
-      const central = await establishCentralEcosystemSession({
-        email,
-        password,
-        source_erp: ERP_KEY,
-        existing_session_id: existingSessionId && !existingSessionId.startsWith("ihm-sess-") ? existingSessionId : undefined,
-      });
+      //    If the ERP already opened THIS login's central session (session_mode "central"), just read it: its id is
+      //    inside the tokens, so signing out later ends exactly this login.  Otherwise (ERP_Main was unreachable for
+      //    the ERP, or the local password did not match) fall back to proving identity with the password, as before.
+      //    Every password login is its own session: a session id of another login is never reused.
+      let central: Awaited<ReturnType<typeof establishCentralEcosystemSession>> = null;
+      if (tokens?.session_mode === "central" && tokens.session_id) {
+        central = await establishCentralEcosystemSession({
+          email,
+          source_erp: ERP_KEY,
+          existing_session_id: tokens.session_id,
+        });
+      }
+      if (!central) {
+        central = await establishCentralEcosystemSession({ email, password, source_erp: ERP_KEY });
+      }
 
       if (central) {
         const route = routeForCentralSession(ERP_KEY, central);
@@ -171,7 +224,10 @@ export function LoginPage() {
       }
       if (!tokens) throw localError ?? new Error("Invalid credentials.");
 
-      const sessionId = central?.session_id || `ihm-sess-${Date.now()}`;
+      const sessionId =
+        central?.session_id ||
+        (tokens.session_mode === "central" ? tokens.session_id : undefined) ||
+        `ihm-sess-${Date.now()}`;
       if (tokens.user) {
         Auth.setSession(tokens, tokens.user, sessionId);
       } else {
@@ -208,7 +264,16 @@ export function LoginPage() {
       {/* Top Header Logo */}
       <header style={{ padding: "10px 32px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center" }}>
         <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
-          <img src="/logo.png" alt="IHM Logo" style={{ height: "40px", width: "auto", objectFit: "contain" }} />
+          <img
+            src={resolveImageUrl(brandLogo) || "/logo.png"}
+            alt={`${brand || "ERP"} Logo`}
+            onError={(e) => {
+              if (e.currentTarget.src !== window.location.origin + "/logo.png") {
+                e.currentTarget.src = "/logo.png";
+              }
+            }}
+            style={{ height: "40px", width: "auto", maxWidth: "200px", objectFit: "contain" }}
+          />
         </Link>
       </header>
 

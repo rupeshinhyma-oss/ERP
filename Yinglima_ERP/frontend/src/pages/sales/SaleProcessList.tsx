@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
@@ -253,8 +252,6 @@ export function SaleProcessListPage() {
 
   return (
     <AppShell activeKey="sale-process">
-      <Breadcrumb trail={["Sale", "Sale Process"]} />
-
       <div style={{ padding: "0 4px" }}>
         {/* Page Header */}
         <div
@@ -269,7 +266,7 @@ export function SaleProcessListPage() {
         >
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#0f172a" }}>
+              <h1 className="page-title">
                 Sale Process
               </h1>
               <span
@@ -285,9 +282,6 @@ export function SaleProcessListPage() {
               >
                 {total} Orders
               </span>
-            </div>
-            <div style={{ marginTop: "4px", color: "#64748b", fontSize: "13px" }}>
-              Inter-company sales, container consignment fulfillment & dispatch pipeline
             </div>
           </div>
 

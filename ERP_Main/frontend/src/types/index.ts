@@ -339,6 +339,8 @@ export interface PaginationMeta {
 export interface TokenPair {
   access_token: string;
   expires_at?: string;
+  /** The central session of THIS login (admin login returns it). Signing out ends exactly this session. */
+  session_id?: string | null;
 }
 
 export interface GlobalUserProfile {

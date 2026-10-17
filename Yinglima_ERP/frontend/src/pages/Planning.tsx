@@ -20,7 +20,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
@@ -719,7 +718,13 @@ function ColumnFilterPopover({
 }
 function isSystemColumn(name: string): boolean {
   const cleaned = (name || "").trim().toLowerCase();
-  return cleaned === "item" || cleaned === "test(y/n)" || cleaned.includes("test (y/n)") || cleaned === "approval date";
+  return (
+    cleaned === "item" ||
+    cleaned.startsWith("test") ||
+    cleaned.startsWith("tally") ||
+    cleaned === "approval date" ||
+    cleaned === "approval_date"
+  );
 }
 
 function isPureMumColumn(name: string, label?: string): boolean {
@@ -2349,7 +2354,7 @@ export function PlanningPage() {
 
   function isTestColumn(colName: string): boolean {
     const name = colName.trim().toLowerCase();
-    return name.startsWith("test");
+    return name.startsWith("test") || name.startsWith("tally");
   }
 
 
@@ -3269,21 +3274,8 @@ export function PlanningPage() {
   return (
     <AppShell activeKey="planning">
       <main className="page">
-        <Breadcrumb
-          trail={
-            activeSheet
-              ? [
-                "Shipment Planning",
-                activeSheet.name,
-                ...(activeOrganizationId
-                  ? [`Filter Organization: ${organizations.items.find((o) => o.id === activeOrganizationId)?.name ?? ""}`]
-                  : []),
-              ]
-              : ["Shipment Planning"]
-          }
-        />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: "#0F172A", margin: 0, flexShrink: 0 }}>
+          <h1 className="page-title" style={{ flexShrink: 0 }}>
             Shipment Planning{activeSheet ? ` / ${activeSheet.name}` : ""}
             {activeOrganizationId && (
               <span style={{ fontSize: 13, fontWeight: 500, color: "#2563EB" }}>

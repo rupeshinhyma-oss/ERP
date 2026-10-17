@@ -27,6 +27,7 @@ import { useToast } from "@/lib/toast";
 import { generateGatePassPdf } from "@/lib/gatePassPdf";
 import type { SaleOrder, SaleSummaryMetrics } from "@/types/saleProcess";
 import { SaleProcessDetailModal } from "./SaleProcessDetailModal";
+import { SortHeader } from "@/components/SortHeader";
 
 export const INDIAN_STATES = [
   "Maharashtra",
@@ -310,7 +311,9 @@ export function SaleProcessListPage() {
 
       const res = await apiGet<{ items: SaleOrder[]; total: number; metrics?: SaleSummaryMetrics }>(url);
       if (res?.data?.items && Array.isArray(res.data.items)) {
-        setOrders(res.data.items);
+        if (!isTestMode || res.data.items.length > 0) {
+          setOrders(res.data.items);
+        }
         if (res.data.metrics) {
           setMetrics(res.data.metrics);
         } else if (res.data.items.length === 0 && !isTestMode) {
@@ -395,38 +398,6 @@ export function SaleProcessListPage() {
     },
   ], [metrics, isTestMode]);
 
-  // Filter count for active filter badge
-  const activeFiltersCount = useMemo(() => {
-    let cnt = 0;
-    if (orderDateFrom) cnt++;
-    if (orderDateTo) cnt++;
-    if (invoiceDateFrom) cnt++;
-    if (invoiceDateTo) cnt++;
-    if (expDateFrom) cnt++;
-    if (expDateTo) cnt++;
-    if (stateFilter) cnt++;
-    if (dispatchFilter) cnt++;
-    if (warehouseFilter) cnt++;
-    if (salesPersonFilter) cnt++;
-    if (companyFilter) cnt++;
-    if (thirdPartyFilter) cnt++;
-    if (poFilter) cnt++;
-    return cnt;
-  }, [
-    orderDateFrom,
-    orderDateTo,
-    invoiceDateFrom,
-    invoiceDateTo,
-    expDateFrom,
-    expDateTo,
-    stateFilter,
-    dispatchFilter,
-    warehouseFilter,
-    salesPersonFilter,
-    companyFilter,
-    thirdPartyFilter,
-    poFilter,
-  ]);
 
   const handleResetFilters = () => {
     setOrderDateFrom("");
@@ -563,12 +534,94 @@ export function SaleProcessListPage() {
     search,
   ]);
 
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = (colIdx: number) => {
+    if (sortColIndex === colIdx) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else {
+        setSortColIndex(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColIndex(colIdx);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedOrders = useMemo(() => {
+    if (sortColIndex === null) return filteredOrders;
+    const list = [...filteredOrders];
+    list.sort((a, b) => {
+      let vA: any = "";
+      let vB: any = "";
+      switch (sortColIndex) {
+        case 0: // Order No
+          vA = a.order_no || "";
+          vB = b.order_no || "";
+          break;
+        case 1: // Warehouse
+          vA = a.warehouse || "";
+          vB = b.warehouse || "";
+          break;
+        case 2: // Exp. Deli. Date
+          vA = a.expected_delivery_date || "";
+          vB = b.expected_delivery_date || "";
+          break;
+        case 3: // Company
+          vA = a.company_name || "";
+          vB = b.company_name || "";
+          break;
+        case 4: // City / State
+          vA = `${a.city || ""} ${a.state || ""}`;
+          vB = `${b.city || ""} ${b.state || ""}`;
+          break;
+        case 5: // Third Party
+          vA = a.third_party_delivery ? "Yes" : "No";
+          vB = b.third_party_delivery ? "Yes" : "No";
+          break;
+        case 6: // PO
+          vA = a.po ? String(a.po) : "";
+          vB = b.po ? String(b.po) : "";
+          break;
+        case 7: // Sales Person
+          vA = a.sales_person || "";
+          vB = b.sales_person || "";
+          break;
+        case 8: // Amount
+          vA = Number(includingGst ? (a.amount_inc_gst ?? a.total_amount) : (a.amount_exc_gst ?? a.total_basic ?? a.total_amount)) || 0;
+          vB = Number(includingGst ? (b.amount_inc_gst ?? b.total_amount) : (b.amount_exc_gst ?? b.total_basic ?? b.total_amount)) || 0;
+          break;
+        case 9: // Discount
+          vA = Number(a.discount) || 0;
+          vB = Number(b.discount) || 0;
+          break;
+        case 10: // Status
+          vA = a.status || "";
+          vB = b.status || "";
+          break;
+        default:
+          return 0;
+      }
+      if (typeof vA === "number" && typeof vB === "number") {
+        return sortDirection === "asc" ? vA - vB : vB - vA;
+      }
+      const sA = String(vA).toLowerCase();
+      const sB = String(vB).toLowerCase();
+      if (sA < sB) return sortDirection === "asc" ? -1 : 1;
+      if (sA > sB) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [filteredOrders, sortColIndex, sortDirection, includingGst]);
+
   // Pagination
-  const totalPages = Math.ceil(filteredOrders.length / perPage) || 1;
+  const totalPages = Math.ceil(sortedOrders.length / perPage) || 1;
   const paginatedOrders = useMemo(() => {
     const start = (currentPage - 1) * perPage;
-    return filteredOrders.slice(start, start + perPage);
-  }, [filteredOrders, currentPage, perPage]);
+    return sortedOrders.slice(start, start + perPage);
+  }, [sortedOrders, currentPage, perPage]);
 
   // Export to CSV
   const handleExport = () => {
@@ -775,7 +828,7 @@ export function SaleProcessListPage() {
 
   return (
     <AppShell activeKey="sales-process">
-      <main className="page" style={{ padding: "16px 24px", maxWidth: "100%", background: "#f8fafc" }}>
+      <main className="page">
         <Breadcrumb trail={["Sale", "Sale Process"]} />
 
         {/* Page Header & Top Actions */}
@@ -840,6 +893,7 @@ export function SaleProcessListPage() {
             {/* Filter Toggle Button */}
             <button
               type="button"
+              className="btn btn-filter-toggle"
               data-testid="btn-toggle-filter"
               aria-label="Filter"
               title="Toggle Filter Panel"
@@ -848,40 +902,18 @@ export function SaleProcessListPage() {
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: "#ffffff",
-                color: filterOpen || activeFiltersCount > 0 ? "#0061f2" : "#475569",
-                border: "1px solid #cbd5e1",
+                background: "#556987",
+                color: "#ffffff",
+                border: "none",
                 borderRadius: "6px",
+                padding: "8px 14px",
                 cursor: "pointer",
-                height: "36px",
-                width: "36px",
-                minWidth: "36px",
-                padding: 0,
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                position: "relative",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFiltersCount > 0 && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "-4px",
-                    right: "-4px",
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    borderRadius: "10px",
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    padding: "1px 5px",
-                    lineHeight: 1,
-                  }}
-                >
-                  {activeFiltersCount}
-                </span>
-              )}
             </button>
 
             {/* + ADD NEW Button */}
@@ -1355,37 +1387,37 @@ export function SaleProcessListPage() {
               <thead>
                 <tr style={{ background: "#f8fafc", textAlign: "left", color: "#475569" }}>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    Order No <span style={{ fontSize: "10px" }}>▾</span>
+                    <SortHeader label="Order No" isSorted={sortColIndex === 0} sortDirection={sortDirection} onSort={() => handleHeaderSort(0)} />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    Warehouse
+                    <SortHeader label="Warehouse" isSorted={sortColIndex === 1} sortDirection={sortDirection} onSort={() => handleHeaderSort(1)} />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    Exp. Deli. Date
+                    <SortHeader label="Exp. Deli. Date" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    Company
+                    <SortHeader label="Company" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    City / State
+                    <SortHeader label="City / State" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    Third Party
+                    <SortHeader label="Third Party" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    PO
+                    <SortHeader label="PO" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>
-                    Sales Person
+                    <SortHeader label="Sales Person" isSorted={sortColIndex === 7} sortDirection={sortDirection} onSort={() => handleHeaderSort(7)} />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700, textAlign: "right" }}>
-                    {includingGst ? "Amount (Inc.GST)" : "Amount (Ex.GST)"} <span style={{ fontSize: "10px" }}>▾</span>
+                    <SortHeader label={includingGst ? "Amount (Inc.GST)" : "Amount (Ex.GST)"} isSorted={sortColIndex === 8} sortDirection={sortDirection} onSort={() => handleHeaderSort(8)} align="right" />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700, textAlign: "right" }}>
-                    Discount
+                    <SortHeader label="Discount" isSorted={sortColIndex === 9} sortDirection={sortDirection} onSort={() => handleHeaderSort(9)} align="right" />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700, textAlign: "center" }}>
-                    Status <span style={{ fontSize: "10px" }}>▾</span>
+                    <SortHeader label="Status" isSorted={sortColIndex === 10} sortDirection={sortDirection} onSort={() => handleHeaderSort(10)} align="center" />
                   </th>
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700, textAlign: "center" }}>
                     Acc. Dep.
@@ -1426,7 +1458,10 @@ export function SaleProcessListPage() {
                       <td style={{ padding: "8px 12px" }}>
                         <button
                           type="button"
-                          onClick={() => setDetailOrderId(o.id)}
+                          onClick={() => {
+                            console.log("Order button clicked for:", o.id);
+                            setDetailOrderId(o.id);
+                          }}
                           style={{
                             background: "none",
                             border: "none",

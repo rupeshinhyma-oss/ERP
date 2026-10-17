@@ -101,6 +101,10 @@ class RBACService:
         """List every role."""
         return await self.role_repository.list_all()
 
+    async def list_roles_with_permissions(self) -> list[Role]:
+        """List every role with permission links preloaded in a single batched query."""
+        return await self.role_repository.list_all_with_permissions()
+
     async def list_permissions(self) -> list[Permission]:
         """List every permission."""
         return await self.permission_repository.list_all()

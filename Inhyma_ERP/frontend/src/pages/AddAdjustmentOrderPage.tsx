@@ -249,42 +249,9 @@ export function AddAdjustmentOrderPage() {
         })),
       };
 
-      try {
-        await InventoryApi.createStockAdjustment(payload);
-      } catch (err) {
-        // If offline or dev mode, still succeed locally
-        console.warn("API createStockAdjustment fallback to local state:", err);
-      }
-
-      // Save locally to localStorage so StockAdjustmentPage can read it immediately
-      const savedListStr = localStorage.getItem("local_stock_adjustments");
-      const currentSaved = savedListStr ? JSON.parse(savedListStr) : [];
-      const newRecord = {
-        id: `adj-${Date.now()}`,
-        adjustment_no: Math.floor(100 + Math.random() * 900).toString(),
-        adjustment_date: new Date().toLocaleDateString("en-GB").replace(/\//g, "-"),
-        client_name: clientName,
-        invoice_no: invoiceNo || `${Math.floor(100 + Math.random() * 900)}/26-27`,
-        warehouse,
-        type: adjustmentType,
-        purpose,
-        total_amount: grandTotal,
-        created_by: "Current User",
-        created_at: new Date().toLocaleDateString("en-GB").replace(/\//g, "-"),
-        remarks: remark,
-        items: selectedProducts.map((p) => ({
-          product_name: p.product_name,
-          product_code: p.product_code,
-          category: p.category,
-          hsn_code: p.hsn_code,
-          gst_rate: p.gst_rate,
-          qty: p.qty,
-          uom: p.uom,
-          rate: p.unit_price,
-          amount: p.total_price,
-        })),
-      };
-      localStorage.setItem("local_stock_adjustments", JSON.stringify([newRecord, ...currentSaved]));
+      // The server records the adjustment AND applies it to the stock in one go. If it refuses (for example "not
+      // enough stock in Mumbai") the error is shown here and nothing is saved -- there is no "saved locally" copy.
+      await InventoryApi.createStockAdjustment(payload);
 
       // Navigate back to stock adjustment list
       navigate("/stock-adjustment");

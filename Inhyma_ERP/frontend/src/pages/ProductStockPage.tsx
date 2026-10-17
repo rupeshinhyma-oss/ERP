@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
+import { SortHeader } from "@/components/SortHeader";
 import type { PaginationMeta } from "@/types";
 import { InventoryApi } from "@/lib/api";
 import "@/styles/productStock.css";
@@ -564,10 +565,10 @@ export function ProductStockSkeletonRows({ count = 8 }: { count?: number }) {
     <>
       {Array.from({ length: count }).map((_, idx) => (
         <tr key={`prod-sk-${idx}`} className="skeleton-row" data-testid="stock-skeleton-row">
-          <td className="td-center col-freeze-1">
+          <td className="td-center">
             <div className="skeleton-line" style={{ width: "22px", height: "14px", borderRadius: "4px", margin: "0 auto" }} />
           </td>
-          <td className="col-freeze-2">
+          <td>
             <div className="skeleton-line" style={{ width: nameWidths[idx % nameWidths.length], height: "14px", borderRadius: "4px" }} />
           </td>
           <td className="td-center">
@@ -750,6 +751,15 @@ export function ProductStockPage({
       ? "goods-expected"
       : "stock");
   const [activeTab, setActiveTab] = useState<"stock" | "goods-expected">(initialTab);
+
+  const isTransactionReport =
+    location.pathname.startsWith("/reports/stock-transactions") ||
+    location.pathname.startsWith("/transaction_report") ||
+    location.pathname.startsWith("/transaction-report") ||
+    location.pathname.startsWith("/stock-transactions");
+  const activeNavKey = isTransactionReport ? "reports-stock-transactions" : "product-stock";
+  const stockTabLabel = isTransactionReport ? "Stock Transactions" : "Product Stock";
+  const pageHeading = activeTab === "goods-expected" ? "Goods Expected Date Report (Marketing)" : stockTabLabel;
 
   const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
@@ -1073,15 +1083,6 @@ export function ProductStockPage({
     });
   }, [items, searchTerm, appliedCategory, appliedSubCategory, appliedBrand, appliedNegativeStock]);
 
-  // Active filter count for badge
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (appliedCategory !== "All") count++;
-    if (appliedSubCategory !== "All") count++;
-    if (appliedBrand !== "All") count++;
-    if (appliedNegativeStock !== "Select") count++;
-    return count;
-  }, [appliedCategory, appliedSubCategory, appliedBrand, appliedNegativeStock]);
 
   // Totals calculations
   const totalPhysical = useMemo(() => {
@@ -1096,20 +1097,118 @@ export function ProductStockPage({
     return filteredItems.reduce((sum, item) => sum + item.mumbai_ordered + item.ahmedabad_ordered + item.indore_ordered, 0);
   }, [filteredItems]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / perPage));
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = (colIdx: number) => {
+    if (sortColIndex === colIdx) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else {
+        setSortColIndex(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColIndex(colIdx);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedItems = useMemo(() => {
+    if (sortColIndex === null) return filteredItems;
+    const list = [...filteredItems];
+    list.sort((a, b) => {
+      let vA: any = "";
+      let vB: any = "";
+      switch (sortColIndex) {
+        case 0: // Sr. No.
+          vA = a.sr_no || 0;
+          vB = b.sr_no || 0;
+          break;
+        case 1: // Product Name (As Per Tally)
+          vA = a.product_name_tally || "";
+          vB = b.product_name_tally || "";
+          break;
+        case 2: // Product Code
+          vA = a.product_code || "";
+          vB = b.product_code || "";
+          break;
+        case 3: // Brand
+          vA = a.brand || "";
+          vB = b.brand || "";
+          break;
+        case 4: // Sub Category
+          vA = a.sub_category || "";
+          vB = b.sub_category || "";
+          break;
+        case 5: // Mumbai
+          vA = a.mumbai || 0;
+          vB = b.mumbai || 0;
+          break;
+        case 6: // Mumbai Transit
+          vA = a.mumbai_transit || 0;
+          vB = b.mumbai_transit || 0;
+          break;
+        case 7: // Mumbai Ordered
+          vA = a.mumbai_ordered || 0;
+          vB = b.mumbai_ordered || 0;
+          break;
+        case 8: // Ahmedabad
+          vA = a.ahmedabad || 0;
+          vB = b.ahmedabad || 0;
+          break;
+        case 9: // Ahmedabad Transit
+          vA = a.ahmedabad_transit || 0;
+          vB = b.ahmedabad_transit || 0;
+          break;
+        case 10: // Ahmedabad Ordered
+          vA = a.ahmedabad_ordered || 0;
+          vB = b.ahmedabad_ordered || 0;
+          break;
+        case 11: // Indore
+          vA = a.indore || 0;
+          vB = b.indore || 0;
+          break;
+        case 12: // Indore Transit
+          vA = a.indore_transit || 0;
+          vB = b.indore_transit || 0;
+          break;
+        case 13: // Indore Ordered
+          vA = a.indore_ordered || 0;
+          vB = b.indore_ordered || 0;
+          break;
+        case 14: // Total Qty
+          vA = a.total_qty || 0;
+          vB = b.total_qty || 0;
+          break;
+        default:
+          return 0;
+      }
+      if (typeof vA === "number" && typeof vB === "number") {
+        return sortDirection === "asc" ? vA - vB : vB - vA;
+      }
+      const sA = String(vA).toLowerCase();
+      const sB = String(vB).toLowerCase();
+      if (sA < sB) return sortDirection === "asc" ? -1 : 1;
+      if (sA > sB) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [filteredItems, sortColIndex, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedItems.length / perPage));
   const paginatedItems = useMemo(() => {
     const start = (currentPage - 1) * perPage;
-    return filteredItems.slice(start, start + perPage);
-  }, [filteredItems, currentPage, perPage]);
+    return sortedItems.slice(start, start + perPage);
+  }, [sortedItems, currentPage, perPage]);
 
   const paginationMeta: PaginationMeta = useMemo(() => ({
     current_page: currentPage,
     total_pages: totalPages,
-    total_records: filteredItems.length,
+    total_records: sortedItems.length,
     page_size: perPage,
     has_previous: currentPage > 1,
     has_next: currentPage < totalPages,
-  }), [currentPage, totalPages, filteredItems.length, perPage]);
+  }), [currentPage, totalPages, sortedItems.length, perPage]);
 
   // Export to Excel
   const handleExport = useCallback(async () => {
@@ -1142,16 +1241,16 @@ export function ProductStockPage({
   }, [filteredItems]);
 
   return (
-    <AppShell activeKey="reports-stock-transactions">
+    <AppShell activeKey={activeNavKey}>
       <main className="page">
         {/* Breadcrumb Trail */}
-        <Breadcrumb trail={["Reports", activeTab === "goods-expected" ? "Goods Expected Report" : "Stock Transactions"]} />
+        <Breadcrumb trail={[isTransactionReport ? "Reports" : "Inventory", activeTab === "goods-expected" ? "Goods Expected Report" : stockTabLabel]} />
 
         {/* Top Page Header */}
         <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
-              {activeTab === "goods-expected" ? "Goods Expected Date Report (Marketing)" : "Product Stock Transactions"}
+              {pageHeading}
             </h1>
           </div>
 
@@ -1161,27 +1260,26 @@ export function ProductStockPage({
                 {/* Filter Toggle Button matching Screenshot 1 */}
                 <button
                   type="button"
-                  className="btn stock-btn-filter"
+                  className="btn btn-filter-toggle"
                   style={{
-                    background: "#4b6584",
+                    background: "#556987",
                     color: "#ffffff",
-                    padding: "8px 12px",
-                    borderRadius: "4px",
+                    padding: "8px 14px",
+                    borderRadius: "6px",
                     border: "none",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     cursor: "pointer",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
                   }}
                   onClick={() => setShowFilterPanel((prev) => !prev)}
                   title="Filter stock list"
                   aria-label="Filter"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
                   </svg>
-                  {activeFilterCount > 0 && <span className="stock-filter-badge">{activeFilterCount}</span>}
                 </button>
 
                 {/* Export Button */}
@@ -1264,7 +1362,7 @@ export function ProductStockPage({
             }}
           >
             <span>📊</span>
-            <span>Product Stock Transactions</span>
+            <span>{stockTabLabel}</span>
           </button>
           <button
             type="button"
@@ -1473,21 +1571,51 @@ export function ProductStockPage({
             <table className="stock-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th className="col-freeze-1" style={{ width: "55px", minWidth: "55px", textAlign: "center" }}>Sr. No.</th>
-                  <th className="col-freeze-2" style={{ minWidth: "220px", textAlign: "left" }}>Product Name (As Per Tally)</th>
-                  <th style={{ width: "110px", textAlign: "center" }}>Product Code</th>
-                  <th style={{ width: "95px", textAlign: "center" }}>Brand</th>
-                  <th style={{ minWidth: "150px", textAlign: "left" }}>Sub Category</th>
-                  <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>Mumbai</th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>Mumbai Transit</th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>Mumbai Ordered</th>
-                  <th className="th-pink" style={{ minWidth: "85px", textAlign: "center" }}>Ahmedabad</th>
-                  <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>Ahmedabad Transit</th>
-                  <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>Ahmedabad Ordered</th>
-                  <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>Indore</th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>Indore Transit</th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>Indore Ordered</th>
-                  <th style={{ width: "90px", textAlign: "center" }}>Total Qty</th>
+                  <th style={{ width: "55px", minWidth: "55px", textAlign: "center" }}>
+                    <SortHeader label="Sr. No." isSorted={sortColIndex === 0} sortDirection={sortDirection} onSort={() => handleHeaderSort(0)} align="center" />
+                  </th>
+                  <th style={{ minWidth: "220px", textAlign: "left" }}>
+                    <SortHeader label="Product Name (As Per Tally)" isSorted={sortColIndex === 1} sortDirection={sortDirection} onSort={() => handleHeaderSort(1)} />
+                  </th>
+                  <th style={{ width: "110px", textAlign: "center" }}>
+                    <SortHeader label="Product Code" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} align="center" />
+                  </th>
+                  <th style={{ width: "95px", textAlign: "center" }}>
+                    <SortHeader label="Brand" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} align="center" />
+                  </th>
+                  <th style={{ minWidth: "150px", textAlign: "left" }}>
+                    <SortHeader label="Sub Category" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} />
+                  </th>
+                  <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
+                    <SortHeader label="Mumbai" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} align="center" />
+                  </th>
+                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                    <SortHeader label="Mumbai Transit" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} align="center" />
+                  </th>
+                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                    <SortHeader label="Mumbai Ordered" isSorted={sortColIndex === 7} sortDirection={sortDirection} onSort={() => handleHeaderSort(7)} align="center" />
+                  </th>
+                  <th className="th-pink" style={{ minWidth: "85px", textAlign: "center" }}>
+                    <SortHeader label="Ahmedabad" isSorted={sortColIndex === 8} sortDirection={sortDirection} onSort={() => handleHeaderSort(8)} align="center" />
+                  </th>
+                  <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>
+                    <SortHeader label="Ahmedabad Transit" isSorted={sortColIndex === 9} sortDirection={sortDirection} onSort={() => handleHeaderSort(9)} align="center" />
+                  </th>
+                  <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>
+                    <SortHeader label="Ahmedabad Ordered" isSorted={sortColIndex === 10} sortDirection={sortDirection} onSort={() => handleHeaderSort(10)} align="center" />
+                  </th>
+                  <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
+                    <SortHeader label="Indore" isSorted={sortColIndex === 11} sortDirection={sortDirection} onSort={() => handleHeaderSort(11)} align="center" />
+                  </th>
+                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                    <SortHeader label="Indore Transit" isSorted={sortColIndex === 12} sortDirection={sortDirection} onSort={() => handleHeaderSort(12)} align="center" />
+                  </th>
+                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                    <SortHeader label="Indore Ordered" isSorted={sortColIndex === 13} sortDirection={sortDirection} onSort={() => handleHeaderSort(13)} align="center" />
+                  </th>
+                  <th style={{ width: "90px", textAlign: "center" }}>
+                    <SortHeader label="Total Qty" isSorted={sortColIndex === 14} sortDirection={sortDirection} onSort={() => handleHeaderSort(14)} align="center" />
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1502,8 +1630,8 @@ export function ProductStockPage({
                 ) : (
                   paginatedItems.map((item) => (
                     <tr key={item.id}>
-                      <td className="td-center col-freeze-1">{item.sr_no}</td>
-                      <td className="col-freeze-2">
+                      <td className="td-center">{item.sr_no}</td>
+                      <td>
                         <a
                           href="#view-product"
                           className="product-link"

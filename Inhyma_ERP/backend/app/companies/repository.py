@@ -8,6 +8,7 @@ link tables). All many-to-many and one-to-many child rows are managed here.
 
 from __future__ import annotations
 
+from typing import Any
 import uuid
 
 from sqlalchemy import ColumnElement, Select, and_, exists, func, or_, select
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.base_repository import BaseRepository
 from app.masters.cities.models import City
 from app.masters.countries.models import Country
+from app.masters.districts.models import District
 from app.masters.product_categories.models import ProductCategory
 from app.masters.product_sub_categories.models import ProductSubCategory
 from app.masters.products.models import Product
@@ -74,6 +76,7 @@ class CompanyRepository(BaseRepository[Company]):
         "country_id",
         "state_id",
         "city_id",
+        "district_id",
         "district",
         "company_type",
         "company_category",
@@ -219,6 +222,49 @@ class CompanyRepository(BaseRepository[Company]):
         )
 
         return stmt.where(or_(*conditions))
+
+    def _apply_dynamic_filters(self, stmt: Select, filters: Any) -> Select:
+        """Apply exact-match and date-range dynamic filters, matching district_id by UUID or legacy name."""
+        district_val = filters.exact.get("district_id") if hasattr(filters, "exact") else None
+        if district_val and str(district_val).lower() != "blank":
+            try:
+                dist_uuid = uuid.UUID(str(district_val))
+                stmt = stmt.where(
+                    or_(
+                        Company.district_id == dist_uuid,
+                        exists().where(
+                            District.id == dist_uuid,
+                            func.lower(Company.district) == func.lower(District.name),
+                        ),
+                    )
+                )
+                from app.common.filtering import FilterParams
+                new_exact = {k: v for k, v in filters.exact.items() if k != "district_id"}
+                filters = FilterParams(exact=new_exact, ranges=filters.ranges)
+            except ValueError:
+                pass
+        return super()._apply_dynamic_filters(stmt, filters)
+
+    def _apply_filters(self, stmt: Select, filters: dict[str, Any] | None) -> Select:
+        """Apply filters dictionary, matching district_id by UUID or legacy name."""
+        if filters and "district_id" in filters:
+            district_val = filters.get("district_id")
+            if district_val and str(district_val).lower() != "blank":
+                try:
+                    dist_uuid = uuid.UUID(str(district_val))
+                    stmt = stmt.where(
+                        or_(
+                            Company.district_id == dist_uuid,
+                            exists().where(
+                                District.id == dist_uuid,
+                                func.lower(Company.district) == func.lower(District.name),
+                            ),
+                        )
+                    )
+                    filters = {k: v for k, v in filters.items() if k != "district_id"}
+                except ValueError:
+                    pass
+        return super()._apply_filters(stmt, filters)
 
     async def name_city_exists(
         self, company_name: str, city_id: uuid.UUID | None = None, *, exclude_id: uuid.UUID | None = None

@@ -6,7 +6,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { createSsoHandoverUrl, ECOSYSTEM_ERPS } from "@/lib/ssoBridge";
+import { ECOSYSTEM_ERPS, planSwitch, warmPeerServices } from "@/lib/ssoBridge";
+import { Auth } from "@/lib/auth";
 import { useGlobalSession } from "@/lib/session";
 
 interface EcosystemSwitcherProps {
@@ -17,6 +18,8 @@ interface EcosystemSwitcherProps {
 export function EcosystemSwitcher({ currentKey = "control-plane", organizationName }: EcosystemSwitcherProps) {
   const { userType, memberships } = useGlobalSession();
   const [open, setOpen] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const currentErp = ECOSYSTEM_ERPS.find((erp) => erp.key === currentKey);
@@ -85,14 +88,35 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
     ? ["*"]
     : activeMemberships.map((m) => (m.erp_key || m.erp_name || "").toLowerCase()).filter(Boolean);
 
-  const handleSwitch = (hostUrl: string) => {
-    setOpen(false);
+  // Wake sleeping services while the person is choosing, and forget an old error when the menu is reopened.
+  useEffect(() => {
+    if (open) {
+      setSwitchError(null);
+      warmPeerServices();
+    }
+  }, [open]);
+
+  const handleSwitch = async (hostUrl: string) => {
+    if (switching) return;
+    setSwitchError(null);
+    setSwitching(true);
     try {
-      const target = createSsoHandoverUrl(hostUrl);
-      window.location.href = target;
+      const plan = await planSwitch(hostUrl);
+      if (!plan.ok) {
+        setSwitchError(plan.message);
+        if (plan.sessionEnded) {
+          Auth.clear();
+          setTimeout(() => window.location.assign("/login"), 1200);
+        }
+        return;
+      }
+      setOpen(false);
+      window.location.href = plan.url;
     } catch (err) {
-      console.error("Failed to generate switch URL:", err);
-      window.location.href = hostUrl;
+      console.error("Failed to prepare the switch:", err);
+      setSwitchError("Could not switch right now. Please try again.");
+    } finally {
+      setSwitching(false);
     }
   };
 
@@ -170,6 +194,14 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
             padding: "6px",
           }}
         >
+          {switchError && (
+            <div
+              role="alert"
+              style={{ margin: "4px 4px 8px", padding: "8px 10px", fontSize: "12px", color: "#991b1b", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px" }}
+            >
+              {switchError}
+            </div>
+          )}
           <div
             style={{
               padding: "8px 10px 6px",

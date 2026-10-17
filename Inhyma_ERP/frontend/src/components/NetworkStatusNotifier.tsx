@@ -11,42 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { getCachedBrandName } from "@/lib/brand";
-
-function updateFavicon(isOnline: boolean) {
-  let faviconLink = document.getElementById("dynamic-favicon") as HTMLLinkElement | null;
-  if (!faviconLink) {
-    faviconLink = document.createElement("link");
-    faviconLink.id = "dynamic-favicon";
-    faviconLink.rel = "icon";
-    document.head.appendChild(faviconLink);
-  }
-
-  if (isOnline) {
-    faviconLink.href = "/logo.png";
-  } else {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = "/logo.png";
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 32;
-      canvas.height = 32;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.filter = "grayscale(100%) opacity(75%)";
-        ctx.drawImage(img, 0, 0, 32, 32);
-        if (faviconLink) faviconLink.href = canvas.toDataURL("image/png");
-      }
-    };
-    img.onerror = () => {
-      if (faviconLink) {
-        faviconLink.href =
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2394a3b8'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3C/svg%3E";
-      }
-    };
-  }
-}
+import { getCachedBrandName, getCachedBrandLogo, subscribeBrandLogo, applyBrandFavicon } from "@/lib/brand";
 
 export function NetworkStatusNotifier() {
   const [isOnline, setIsOnline] = useState(() =>
@@ -55,9 +20,18 @@ export function NetworkStatusNotifier() {
       : true
   );
   const [showRestored, setShowRestored] = useState(false);
+  const [currentLogo, setCurrentLogo] = useState<string | null>(() => getCachedBrandLogo());
 
   useEffect(() => {
-    updateFavicon(isOnline);
+    const unsub = subscribeBrandLogo((logo) => {
+      setCurrentLogo(logo);
+      applyBrandFavicon(logo, !isOnline);
+    });
+    return unsub;
+  }, [isOnline]);
+
+  useEffect(() => {
+    applyBrandFavicon(currentLogo, !isOnline);
 
     const brandName = getCachedBrandName();
     if (!isOnline) {
@@ -66,7 +40,7 @@ export function NetworkStatusNotifier() {
 
     function handleOnline() {
       setIsOnline(true);
-      updateFavicon(true);
+      applyBrandFavicon(currentLogo, false);
       setShowRestored(true);
       const timer = setTimeout(() => setShowRestored(false), 3500);
       return () => clearTimeout(timer);
@@ -74,7 +48,7 @@ export function NetworkStatusNotifier() {
 
     function handleOffline() {
       setIsOnline(false);
-      updateFavicon(false);
+      applyBrandFavicon(currentLogo, true);
       setShowRestored(false);
       document.title = `${getCachedBrandName()} — Offline`;
     }
@@ -86,7 +60,7 @@ export function NetworkStatusNotifier() {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [isOnline]);
+  }, [isOnline, currentLogo]);
 
   if (isOnline && !showRestored) return null;
 

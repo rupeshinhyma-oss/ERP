@@ -254,11 +254,11 @@ export function TrashPage() {
 
   return (
     <AppShell activeKey="trash">
-      <main className="page" style={{ background: "#f8fafc", minHeight: "calc(100vh - 64px)", padding: "24px 32px" }}>
+      <main className="page">
         {/* Page Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <div className="page-header">
           <div>
-            <h1 style={{ color: "#0f172a", fontWeight: 700, fontSize: "22px", margin: 0 }}>Trash</h1>
+            <h1 style={{ color: "#1e293b", fontWeight: 700, fontSize: "20px", margin: 0 }}>Trash</h1>
             <p style={{ color: "#64748b", fontSize: "13.5px", margin: "4px 0 0 0" }}>
               View and manage soft-deleted items across all modules. Permanently delete or restore records to the database.
             </p>

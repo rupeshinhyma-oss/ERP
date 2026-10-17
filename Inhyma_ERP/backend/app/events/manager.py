@@ -43,6 +43,7 @@ class _Connection:
     websocket: WebSocket
     user_id: uuid.UUID
     channels: set[str] = field(default_factory=set)
+    session_id: str = ""
 
 
 class ConnectionManager:
@@ -75,7 +76,7 @@ class ConnectionManager:
 
     # --- connection lifecycle ------------------------------------------------
 
-    async def connect(self, websocket: WebSocket, user_id: uuid.UUID) -> None:
+    async def connect(self, websocket: WebSocket, user_id: uuid.UUID, session_id: str = "") -> None:
         """
         Accept a new WebSocket connection and register it (with no channel
         subscriptions yet -- see :meth:`subscribe`).
@@ -88,7 +89,7 @@ class ConnectionManager:
         rather than a special case to detect/reject.
         """
         await websocket.accept()
-        self._connections[websocket] = _Connection(websocket=websocket, user_id=user_id)
+        self._connections[websocket] = _Connection(websocket=websocket, user_id=user_id, session_id=session_id or "")
         logger.info("WebSocket connected.", extra={"user_id": str(user_id)})
 
     def disconnect(self, websocket: WebSocket) -> None:
@@ -246,6 +247,22 @@ class ConnectionManager:
             if conn.user_id == user_id:
                 try:
                     await ws.send_json({"type": "FORCE_LOGOUT", "message": "You have been logged out by an administrator."})
+                    await ws.close(code=4001, reason="force_logout")
+                except Exception:
+                    pass
+                self.disconnect(ws)
+                closed_count += 1
+        return closed_count
+
+    async def disconnect_session(self, session_id: str) -> int:
+        """Close every open WebSocket that belongs to ONE login (session); other sessions stay connected."""
+        if not session_id:
+            return 0
+        closed_count = 0
+        for ws, conn in list(self._connections.items()):
+            if conn.session_id == session_id:
+                try:
+                    await ws.send_json({"type": "FORCE_LOGOUT", "message": "You have been signed out."})
                     await ws.close(code=4001, reason="force_logout")
                 except Exception:
                     pass

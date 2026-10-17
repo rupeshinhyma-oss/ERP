@@ -10,14 +10,55 @@
 
 | Method | Endpoint URI | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/auth/login` | Authenticate credentials and issue central JWT token pair | Public |
-| `POST` | `/api/v1/auth/refresh` | Rotate single-use refresh token | Refresh Token |
-| `POST` | `/api/v1/auth/logout` | Revoke session and blacklist tokens | Authenticated |
-| `GET` | `/api/v1/auth/me` | Fetch active user profile and effective platform roles | Authenticated |
-| `POST` | `/api/v1/global/ecosystem-session/establish` | Establishes cross-subdomain ecosystem session cookie (`ihm_ecosystem_session`) | Authenticated |
-| `GET` | `/api/v1/global/ecosystem-session/{session_id}` | Live DB verification of central ecosystem session & allowed ERPs | Public / Spoke |
-| `POST` | `/api/v1/global/ecosystem-session/exchange` | Exchange verified central session for authenticated user token | Session ID + Email |
-| `POST` | `/api/v1/global/ecosystem-session/{session_id}/revoke` | Revoke central ecosystem session across all ERPs | Authenticated |
+| `POST` | `/api/v1/global/auth/login` | Platform admin login. Opens ONE session; returns `access_token` and `session_id` (the token carries it as `sid`) | Public |
+| `POST` | `/api/v1/global/user-auth/login` | Global user login. Opens ONE session; returns `access_token` and `session_id` | Public |
+| `POST` | `/api/v1/global/auth/logout` | Sign out THIS admin session everywhere it was used | Admin token |
+| `POST` | `/api/v1/global/user-auth/logout` | Sign out THIS user session everywhere it was used | User token |
+| `POST` | `/api/v1/global/auth/sign-out-everywhere` | Explicit: end EVERY session of this admin account | Admin token |
+| `POST` | `/api/v1/global/user-auth/sign-out-everywhere` | Explicit: end EVERY session of this user account | User token |
+| `POST` | `/api/v1/global/ecosystem-session/establish` | Establish or read a central session (password, or a live `existing_session_id`) | Credentials / live session |
+| `GET` | `/api/v1/global/ecosystem-session/{session_id}` | Live verification of a central session and its allowed ERPs | Public / Spoke |
+| `POST` | `/api/v1/global/ecosystem-session/exchange` | Exchange a verified central session for a dashboard token **bound to that session** | Session ID + Email |
+| `POST` | `/api/v1/global/ecosystem-session/{session_id}/revoke` | Sign out that ONE session everywhere (the session id is the secret) | Session ID |
+
+### 1.1 Session model: one login = one session id (`sid`)
+- **Every login opens exactly one central session** (a `global_sessions` row). Its UUID is the `sid`. It is placed in **every token issued during that login**: the ERP_Main token (`sid` claim for admins, `jti` for global users) and each ERP's access and refresh tokens (`sid` claim). The browser keeps the same id in `localStorage` (`Auth.getSessionId()`) and mirrors it in the shared `ihm_ecosystem_session` cookie.
+- **Where a session starts.** Dashboard login (`/global/auth/login`, `/global/user-auth/login`) returns `session_id`. An ERP login (`/auth/login`) calls ERP_Main `POST /internal/sessions/open` *after* it verified the password itself and gets the session id back (`session_mode: "central"`). Switching ERPs (`/auth/sso-handover`) **reuses** the central session of the login that clicked Switch, so the dashboard and every ERP of one login share one `sid`.
+- **Two logins are two sessions.** The same account on two devices, or two different accounts, have different `sid`s and never affect each other.
+- **Normal sign-out ends exactly one session.** Logout anywhere (dashboard or any ERP) revokes that `sid`: the central row and cached copy, then every ERP the person may use is told (`POST /internal/sessions/{sid}/revoke`; admin: all ACTIVE ERPs, user: ERPs with an ACTIVE membership). In each ERP the `sid` is stored in `token_blacklist` (`jti = "sid:<sid>"`), so all access *and* refresh tokens of that session stop working at once and that session's WebSockets are closed. Idempotent: signing out twice, or an unknown session, is not an error.
+- **"Sign out everywhere" is a separate, explicit action** (see 1.2). It is never triggered by a normal logout.
+
+### 1.2 Sign out everywhere (explicit)
+`POST /api/v1/global/auth/sign-out-everywhere` (platform admin) and `POST /api/v1/global/user-auth/sign-out-everywhere` (global user). Revokes **every** session of the account on every device, stamps `platform_admins.tokens_revoked_before` (which also invalidates admin tokens issued before sessions existed, i.e. without a `sid`) and force-logs the person out of all of their ERPs (`POST /internal/users/{email}/logout` on each ERP). Response: `{ "status": "signed_out_everywhere", "email": "...", "dashboard_sessions_revoked": N, "admin_tokens_invalidated": true|false }`. There is no UI button yet.
+
+### 1.3 Service-to-service contracts
+All use the shared per-ERP service credential: `Authorization: Bearer <credential>` and `X-ERP-Key: <erp key>`.
+
+| Hosted by | Endpoint | Purpose |
+| :--- | :--- | :--- |
+| ERP_Main | `POST /api/v1/internal/sessions/open` body `{ "email" }` | An ERP verified a password; open the ONE central session of this login. `403` if the person has no ACTIVE access grant for the calling ERP, `404` if unknown. The ERP then issues a local-only session (see 1.4). |
+| ERP_Main | `POST /api/v1/internal/sessions/{sid}/signout` | An ERP reports a logout; ERP_Main ends that session everywhere. |
+| ERP_Main | `POST /api/v1/internal/users/password` | An ERP reports a password change; ERP_Main stores it and pushes it to the person's other ERPs. |
+| each ERP | `POST /api/v1/internal/sessions/{sid}/revoke` | ERP_Main ends one session in this ERP. |
+| each ERP | `POST /api/v1/internal/users/{id-or-email}/logout` | Force-logout every session of one person (used by "sign out everywhere", disabling a user, removing access). |
+
+### 1.4 Fallbacks and error handling (reliability rules)
+| Situation | Behaviour |
+| :--- | :--- |
+| ERP_Main unreachable (or refuses) when someone logs into an ERP | The login **still succeeds**. Tokens carry a local id `loc-<uuid>` and the reply says `"session_mode": "local"`. Works inside that ERP; switching ERPs is refused with a clear message until the person signs in again. Logout of a local session works without ERP_Main. |
+| A sign-out message to an ERP is lost (ERP down, network) | Each ERP also asks ERP_Main about central sessions it sees (`central_session_state`, cached 45 s) and ends a revoked one itself, durably. Worst case about 45 seconds. |
+| ERP_Main unreachable while an ERP checks a session | **Fail-open** (answer "unknown", re-check after 15 s): an outage never logs everybody out. Switching ERPs (the handover) **fails closed**: it needs ERP_Main to verify the session and answers "Could not confirm your session with ERP_Main. Please try again in a moment." |
+| Several worker processes | The database is the truth: a revocation made by another worker is honoured on the next re-validation (about 10 s cache). |
+| Admin token issued before sessions existed (no `sid`) | Still accepted; it can only be ended with sign-out-everywhere (`tokens_revoked_before`). |
+| Browser arrives with a handover ticket | A fresh ticket **always wins** over a saved session: stale or foreign saved state is cleared and the ticket exchanged. All components that ask on the same page load (App, AppShell, Login, AuthCallback, React dev double-run) **share one exchange**. |
+| The control plane is unreachable during a handover | The ERP answers **503** (retryable), not 401. The browser retries only temporary failures (network, 5xx) after 0.7 s, 2.5 s and 6 s while the page shows a progress state ("Signing you in..."). After the last retry the login page says the service is temporarily unavailable; the person's session and shared cookie are kept, so the next attempt works. |
+| A handover is refused (4xx) | Final, never retried. **401**: "Your session has ended" and that central session is forgotten. **403**: "You do not have access to this ERP" and the person is sent to an ERP they can use (or the dashboard if its address is configured). No redirect to a made-up address is ever built. |
+| Clicking Switch in the ERP switcher | The switcher checks first (`planSwitch`): the target address must be configured, the sign-in must be a central session (not ERP-only) and not ended. Otherwise it shows the reason inside the menu instead of leaving the page. Opening the menu also wakes sleeping peer services. |
+| Watching for a session ended elsewhere | Each open tab checks its central session immediately when it opens, when it regains focus/visibility, then every 30 s (visible) or 2 min (hidden). An ERP's own 401 also signs the person out, so this is not the only safety net. |
+| Logging out one login in a browser that holds another login | Only the cookie that belongs to the signed-out `sid` is removed; the logout marker is keyed by that `sid`; a cross-tab LOGOUT message without a matching `sid` is ignored. |
+
+### 1.5 Corrections to earlier versions of this document
+These paths were documented but **do not exist** in the code; the real ones are listed in the table above: `POST /api/v1/auth/sign-out-everywhere`, `POST /api/v1/auth/internal/sync-password`, `POST /api/v1/auth/internal/revoke-user-tokens`, and the column name `admin_tokens_revoked_before` (the real column is `platform_admins.tokens_revoked_before`).
 
 ### Ecosystem Session Verification Contract (`GET /api/v1/global/ecosystem-session/{session_id}`)
 

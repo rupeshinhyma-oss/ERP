@@ -74,6 +74,8 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int = Field(..., description="Access token lifetime in seconds.")
     user: ProfileResponse | None = None
+    session_id: str | None = Field(default=None, description="The login (session) these tokens belong to.")
+    session_mode: str | None = Field(default=None, description="\"central\" (ERP_Main knows it) or \"local\" (this ERP only).")
 
 
 class SessionRead(BaseModel):

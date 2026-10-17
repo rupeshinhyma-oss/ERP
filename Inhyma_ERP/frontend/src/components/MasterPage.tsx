@@ -20,7 +20,7 @@
  *    they stay correct automatically.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Banner, Can, ModalAlert, StatusBadge, StatusToggle, TableMessageRow } from "./ui";
@@ -67,9 +67,9 @@ export interface MasterPageProps<T extends MasterRecord> {
   /** Lower-case singular used in modal titles and the delete confirm. */
   entityName: string;
   heading: string;
-  subtitle: ReactNode;
+  subtitle?: ReactNode;
   /** Breadcrumb segments after "Dashboard". */
-  breadcrumbTrail: string[];
+  breadcrumbTrail?: string[];
   newButtonLabel: string;
   searchPlaceholder: string;
   columns: MasterColumn<T>[];
@@ -599,27 +599,6 @@ export function MasterPage<T extends MasterRecord>({
   const [statusFilter, setStatusFilter] = useState("active");
   const [filterOpen, setFilterOpen] = useState(false);
   const [reloadCounter, setReloadCounter] = useState(0);
-  const storageKey = `master_pinned_cols_${entityName}`;
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
-    const saved = localStorage.getItem(storageKey);
-    if (saved !== null) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        // fallback
-      }
-    }
-    return { 0: "left", 1: "left" };
-  });
-
-  useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(pinnedCols));
-  }, [pinnedCols, storageKey]);
-
-  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
-  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
-  const [pinMenuOpen, setPinMenuOpen] = useState(false);
-  const pinMenuRef = useRef<HTMLDivElement>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
@@ -745,115 +724,15 @@ export function MasterPage<T extends MasterRecord>({
   const tableRef = useRef<HTMLTableElement>(null);
   const tableBodyRef = useRef<HTMLTableSectionElement>(null);
 
-  // Close popup menu when clicking outside anywhere on screen
-  useEffect(() => {
-    if (!pinMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
-        setPinMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [pinMenuOpen]);
 
-  const togglePin = useCallback((colIdx: number) => {
-    setPinnedCols((prev) => {
-      const next = { ...prev };
-      if (next[colIdx]) {
-        delete next[colIdx];
-      } else {
-        if (colIdx >= colCount - 2) {
-          next[colIdx] = "right";
-        } else {
-          next[colIdx] = "left";
-        }
-      }
-      return next;
-    });
-  }, [colCount]);
 
   const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: colCount }, (_, i) => i);
-    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
-    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
-    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
-    return [...lefts, ...unpinned, ...rights];
-  }, [colCount, pinnedCols]);
+    return Array.from({ length: colCount }, (_, i) => i);
+  }, [colCount]);
 
-  useLayoutEffect(() => {
-    if (!tableRef.current) return;
-    const tableEl = tableRef.current;
-
-    const updateOffsets = () => {
-      const ths = tableEl.querySelectorAll("thead th");
-      if (!ths.length) return;
-
-      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-      let accumLeft = 0;
-      const nextLefts: Record<number, number> = {};
-      for (const idx of lefts) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextLefts[idx] = accumLeft;
-          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
-      let accumRight = 0;
-      const nextRights: Record<number, number> = {};
-      for (const idx of rights) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextRights[idx] = accumRight;
-          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      setColLeftOffsets(nextLefts);
-      setColRightOffsets(nextRights);
-    };
-
-    updateOffsets();
-
-    const ro = new ResizeObserver(() => updateOffsets());
-    ro.observe(tableEl);
-    return () => ro.disconnect();
-  }, [pinnedCols, rows, columns, loading, displayOrder]);
-
-  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
-    const dir = pinnedCols[colIdx];
-    if (!dir) return {};
-
-    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
-
-    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
-    const isFirstRight = dir === "right" && colIdx === rights[0];
-
-    if (dir === "left") {
-      const left = colLeftOffsets[colIdx] ?? 0;
-      return {
-        position: "sticky",
-        left: `${left}px`,
-        zIndex: isHeader ? 12 : 10,
-        backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
-      };
-    }
-
-    const right = colRightOffsets[colIdx] ?? 0;
-    return {
-      position: "sticky",
-      right: `${right}px`,
-      zIndex: isHeader ? 12 : 10,
-      backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
-    };
-  }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
+  const getFreezeStyle = useCallback((_colIdx: number, _isHeader = false): React.CSSProperties => {
+    return {};
+  }, []);
 
   const reload = useCallback(() => setReloadCounter((n) => n + 1), []);
 
@@ -1347,11 +1226,11 @@ export function MasterPage<T extends MasterRecord>({
   if (isImportOpen) {
     return (
       <AppShell activeKey={activeKey}>
-        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
-          <Breadcrumb trail={[...breadcrumbTrail, `Import ${entityName}s`]} />
+        <main className="page">
+          <Breadcrumb trail={[...(breadcrumbTrail || [heading]), `Import ${entityName}s`]} />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0, textTransform: "capitalize" }}>
+              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0, textTransform: "capitalize" }}>
                 Import {entityName}s
               </h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
@@ -1653,7 +1532,7 @@ export function MasterPage<T extends MasterRecord>({
     return (
       <AppShell activeKey={activeKey}>
         <main className="page">
-          <Breadcrumb trail={[...breadcrumbTrail, editingId ? `Edit ${entityName}` : `Add ${entityName}`]} />
+          <Breadcrumb trail={[...(breadcrumbTrail || [heading]), editingId ? `Edit ${entityName}` : `Add ${entityName}`]} />
           <div className="page-header" style={{ marginBottom: "20px" }}>
             <div>
               <h1 style={{ textTransform: "capitalize" }}>{editingId ? `Edit ${entityName}` : `Add ${entityName}`}</h1>
@@ -1779,17 +1658,6 @@ export function MasterPage<T extends MasterRecord>({
                 <span style={{ fontSize: "10px", color: "#94a3b8", opacity: 0.45, lineHeight: 1 }}>↕</span>
               )}
             </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                togglePin(1);
-              }}
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: pinnedCols[1] ? 1 : 0.4, padding: "0 2px" }}
-              title={pinnedCols[1] ? "Unfreeze" : "Freeze"}
-            >
-              📌
-            </button>
           </div>
         </th>
       );
@@ -1800,9 +1668,6 @@ export function MasterPage<T extends MasterRecord>({
         <th key="col-action" style={{ textAlign: "center", ...getFreezeStyle(colCount - 1, true) }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
             <span>{actionsHeader || "ACTION"}</span>
-            <button type="button" onClick={() => togglePin(colCount - 1)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: pinnedCols[colCount - 1] ? 1 : 0.4 }} title={pinnedCols[colCount - 1] ? "Unfreeze" : "Freeze"}>
-              📌
-            </button>
           </div>
         </th>
       );
@@ -1810,7 +1675,6 @@ export function MasterPage<T extends MasterRecord>({
 
     const mIdx = idx - 2;
     const label = (columnHeaders ?? columns.map((col) => col.header))[mIdx];
-    const isPinned = Boolean(pinnedCols[idx]);
     const isSorted = sortColIndex === idx;
     const isStatusHeader = label?.trim().toLowerCase() === "status";
 
@@ -1937,26 +1801,6 @@ export function MasterPage<T extends MasterRecord>({
               </span>
             )}
           </div>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              togglePin(idx);
-            }}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: "11px",
-              opacity: isPinned ? 1 : 0.4,
-              padding: "0 2px",
-              flexShrink: 0,
-            }}
-            title={isPinned ? "Unfreeze column" : "Freeze column"}
-          >
-            📌
-          </button>
         </div>
       </th>
     );
@@ -2162,22 +2006,22 @@ export function MasterPage<T extends MasterRecord>({
     <AppShell activeKey={activeKey}>
 
       <main className="page">
-        <Breadcrumb trail={breadcrumbTrail} />
-        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginBottom: "8px" }}>
+        {breadcrumbTrail && <Breadcrumb trail={breadcrumbTrail} />}
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: subtitle ? "flex-start" : "center", gap: "12px", marginBottom: "8px" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h1>{heading}</h1>
-            <div className="page-subtitle">{subtitle}</div>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>{heading}</h1>
+            {subtitle && <div className="page-subtitle">{subtitle}</div>}
           </div>
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
             {headerExtras}
             {Boolean(toolbarExtras) && (
               <button
                 type="button"
-                className="btn"
+                className="btn btn-filter-toggle"
                 style={{
-                  background: filterOpen ? "#0061f2" : "#475569",
+                  background: "#556987",
                   color: "#ffffff",
-                  padding: "6px 12px",
+                  padding: "8px 14px",
                   borderRadius: "6px",
                   border: "none",
                   display: "flex",
@@ -2189,7 +2033,7 @@ export function MasterPage<T extends MasterRecord>({
                 onClick={() => setFilterOpen((v) => !v)}
                 title="Toggle Filter Options"
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
                 </svg>
               </button>
@@ -2360,92 +2204,6 @@ export function MasterPage<T extends MasterRecord>({
                   <option value={100}>100</option>
                 </select>
                 <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
-              </div>
-
-              <div ref={pinMenuRef} style={{ position: "relative" }}>
-                <button
-                  type="button"
-                  onClick={() => setPinMenuOpen((v) => !v)}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                    background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
-                    cursor: "pointer",
-                    color: "#0f172a",
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  📌 Freeze Columns ({Object.keys(pinnedCols).length})
-                </button>
-                {pinMenuOpen && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: "38px",
-                      zIndex: 100,
-                      background: "#ffffff",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "8px",
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                      padding: "12px",
-                      minWidth: "220px",
-                      display: "flex",
-                      flexDirection: "column",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      Toggle Frozen Columns
-                    </div>
-
-                    <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                        <input type="checkbox" checked={Boolean(pinnedCols[0])} onChange={() => togglePin(0)} /> Checkbox
-                      </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                        <input type="checkbox" checked={Boolean(pinnedCols[1])} onChange={() => togglePin(1)} /> Sr. No.
-                      </label>
-                      {(columnHeaders ?? columns.map((col) => col.header)).map((label, i) => {
-                        const idx = i + 2;
-                        const isPinned = Boolean(pinnedCols[idx]);
-                        return (
-                          <label key={`${label}-${i}`} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                            <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
-                          </label>
-                        );
-                      })}
-                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0", borderTop: "1px solid #f1f5f9", marginTop: "4px", paddingTop: "6px" }}>
-                        <input type="checkbox" checked={Boolean(pinnedCols[colCount - 1])} onChange={() => togglePin(colCount - 1)} /> Action
-                      </label>
-                    </div>
-
-                    <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
-                      <button
-                        type="button"
-                        onClick={() => setPinnedCols({})}
-                        style={{
-                          width: "100%",
-                          padding: "6px 8px",
-                          fontSize: "12px",
-                          borderRadius: "4px",
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                          cursor: "pointer",
-                          color: "#dc2626",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Clear All Freezes
-                      </button>
-                    </div>
-                  </div>
-
-                )}
               </div>
             </div>
 

@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Pagination } from "@/components/Pagination";
 import {
   fetchTechnicalTasks,
@@ -26,6 +25,7 @@ import type {
 import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
 import { apiGet, errorMessage } from "@/lib/api";
 import { useOptions, optionValues } from "@/lib/options";
+import { useAuth } from "@/lib/hooks";
 import { Banner, Modal } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import "@/styles/technicalTasks.css";
@@ -308,10 +308,24 @@ function TechnicalTaskSkeletonRows({
     </>
   );
 }
+const DEFAULT_MACHINE_MODELS = [
+  "ISL150 Rotary PFS 4 Stations",
+  "DZ800 Double Face Shaping Vacuum Machine 10Kgs",
+  "Sensor (Banding)",
+  "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen",
+  "XLSG36100 Capping Machine",
+  "Automatic Tube Filling & Sealing Machine",
+  "Semi Automatic MAP (Vacuum + 2 Gases) Tray/Cup Sealing Machine",
+  "Cup Filler 16LTR",
+  "AF1000T Auto Auger Filler Conveyor 30LTR",
+  "PFFS200 Pneumatic 4 Side Sealer 240mm PLC",
+  "PFFS1000 Pneumatic Centre Sealer 420mm PLC",
+  "GF100FD Granular Filler Double Head FFS",
+];
 
 /**
- * Typable & Selectable Combobox.
- * Allows the user to type freely (to filter or enter a custom value)
+ * TypableCombobox Component
+ * Allows user to freely type custom text into the input field
  * as well as open a dropdown menu to select from predefined options.
  */
 function TypableCombobox({
@@ -321,6 +335,10 @@ function TypableCombobox({
   placeholder = "Select or type...",
   style,
   id,
+  required,
+  emptyText = "No options available",
+  customText,
+  onSearch,
 }: {
   value: string;
   onChange: (val: string) => void;
@@ -328,24 +346,44 @@ function TypableCombobox({
   placeholder?: string;
   style?: React.CSSProperties;
   id?: string;
+  required?: boolean;
+  emptyText?: string;
+  customText?: (val: string) => string;
+  onSearch?: (val: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // De-duplicate options
+  const uniqueOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const res: string[] = [];
+    for (const opt of options) {
+      const trimmed = (opt || "").trim();
+      if (trimmed && !seen.has(trimmed.toLowerCase())) {
+        seen.add(trimmed.toLowerCase());
+        res.push(trimmed);
+      }
+    }
+    return res;
+  }, [options]);
+
   // Filter options based on typed input
   const filteredOptions = useMemo(() => {
-    if (!value) return options;
+    if (!value || !isTyping) return uniqueOptions;
     const clean = value.trim().toLowerCase();
-    return options.filter((opt) => opt.toLowerCase().includes(clean));
-  }, [options, value]);
+    return uniqueOptions.filter((opt) => opt.toLowerCase().includes(clean));
+  }, [uniqueOptions, value, isTyping]);
 
   // Click outside to close
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
+        setIsTyping(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -354,6 +392,7 @@ function TypableCombobox({
 
   const handleSelect = (val: string) => {
     onChange(val);
+    setIsTyping(false);
     setIsOpen(false);
     setHighlightedIndex(-1);
   };
@@ -401,14 +440,26 @@ function TypableCombobox({
           id={id}
           ref={inputRef}
           type="text"
+          required={required}
           value={value}
           placeholder={placeholder}
           onChange={(e) => {
+            setIsTyping(true);
             onChange(e.target.value);
             if (!isOpen) setIsOpen(true);
             setHighlightedIndex(-1);
+            onSearch?.(e.target.value);
           }}
-          onFocus={() => setIsOpen(true)}
+          onClick={() => {
+            if (!isOpen) {
+              setIsOpen(true);
+            }
+          }}
+          onFocus={() => {
+            if (!isOpen) {
+              setIsOpen(true);
+            }
+          }}
           onKeyDown={handleKeyDown}
           style={{
             width: "100%",
@@ -427,7 +478,9 @@ function TypableCombobox({
         <button
           type="button"
           tabIndex={-1}
+          data-testid={id ? `${id}-toggle` : "combobox-toggle"}
           onClick={() => {
+            setIsTyping(false);
             setIsOpen((prev) => !prev);
             inputRef.current?.focus();
           }}
@@ -455,6 +508,7 @@ function TypableCombobox({
 
       {isOpen && (
         <div
+          data-testid={id ? `${id}-dropdown` : "combobox-dropdown"}
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",
@@ -466,7 +520,7 @@ function TypableCombobox({
             border: "1px solid #cbd5e1",
             borderRadius: "6px",
             boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
-            zIndex: 1050,
+            zIndex: 1100,
             padding: "4px 0",
           }}
         >
@@ -502,14 +556,22 @@ function TypableCombobox({
             })
           ) : (
             <div
+              onClick={() => {
+                if (value) handleSelect(value);
+              }}
               style={{
                 padding: "8px 12px",
                 fontSize: "12.5px",
                 color: "#64748b",
                 fontStyle: "italic",
+                cursor: value ? "pointer" : "default",
               }}
             >
-              {value ? `Use "${value}" as custom city` : "No cities available"}
+              {value
+                ? customText
+                  ? customText(value)
+                  : `Use "${value}"`
+                : emptyText}
             </div>
           )}
         </div>
@@ -531,6 +593,7 @@ function TechnicalTasksPageContent() {
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [totalCount, setTotalCount] = useState<number>(0);
+  const [totalCapped, setTotalCapped] = useState<boolean>(false);
   const [pageSize, setPageSize] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -540,7 +603,10 @@ function TechnicalTasksPageContent() {
 
   // Top Filter Panel (identical to Companies.tsx)
   const [filterOpen, setFilterOpen] = useState<boolean>(false);
-  const [filterDateRange, setFilterDateRange] = useState<string>("");
+  const [filterDateFrom, setFilterDateFrom] = useState<string>("");
+  const [filterDateTo, setFilterDateTo] = useState<string>("");
+  const [filterThirdPartyCity, setFilterThirdPartyCity] = useState<string>("");
+  const [filterPaymentCollected, setFilterPaymentCollected] = useState<string>("");
   const [filterTaskType, setFilterTaskType] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [filterCity, setFilterCity] = useState<string>("");
@@ -556,7 +622,8 @@ function TechnicalTasksPageContent() {
   const { options: optionGroups } = useOptions(TECHNICAL_TASK_OPTION_GROUPS);
   const TASK_TYPE_OPTIONS = optionValues(optionGroups, "technical_task.task_type");
   const CALL_TYPE_OPTIONS = callTypeOptions;
-  const PRIORITY_OPTIONS = optionValues(optionGroups, "technical_task.priority");
+  // Workflow doc: Priority is A or B only.
+  const PRIORITY_OPTIONS = ["A", "B"];
   const SERVICE_TYPE_OPTIONS = optionValues(optionGroups, "technical_task.service_type");
   const baseStatusOptions = optionValues(optionGroups, "technical_task.status");
   const STATUS_OPTIONS = useMemo(() => {
@@ -585,17 +652,8 @@ function TechnicalTasksPageContent() {
     }, 4000);
   }, []);
 
-  // Freeze Columns State (Default to 3 frozen columns on the left: Checkbox, Sr. No, Company)
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>({
-    0: "left",
-    1: "left",
-    2: "left",
-  });
-  const [pinMenuOpen, setPinMenuOpen] = useState<boolean>(false);
-  const pinMenuRef = useRef<HTMLDivElement>(null);
+  // Freeze Columns removed per user request
   const tableRef = useRef<HTMLTableElement>(null);
-  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
-  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -620,6 +678,14 @@ function TechnicalTasksPageContent() {
   const [statusVisitDate, setStatusVisitDate] = useState<string>("");
   const [statusPaymentCollected, setStatusPaymentCollected] = useState<boolean>(true);
   const [statusPaymentMode, setStatusPaymentMode] = useState<string>("Company Acc");
+  const [statusCollectedAmount, setStatusCollectedAmount] = useState<string>("");
+  // Approver overrides (Task Type / Service Type / Amount / Payment Terms)
+  const [approveTaskType, setApproveTaskType] = useState<string>("");
+  const [approveServiceType, setApproveServiceType] = useState<string>("");
+  const [approveAmount, setApproveAmount] = useState<string>("");
+  const [approveTerms, setApproveTerms] = useState<string>("");
+  // Contacts of the selected company (Contact Person dropdown)
+  const [contactOptions, setContactOptions] = useState<Array<{ name: string; designation: string; phone: string }>>([]);
   const [statusScreenshotFile, setStatusScreenshotFile] = useState<File | null>(null);
   const [statusScreenshotUrl, setStatusScreenshotUrl] = useState<string>("");
   const [uploadingScreenshot, setUploadingScreenshot] = useState<boolean>(false);
@@ -639,15 +705,14 @@ function TechnicalTasksPageContent() {
   const [callLogError, setCallLogError] = useState<string | null>(null);
   const [submittingCallLog, setSubmittingCallLog] = useState<boolean>(false);
 
-  // Product Autocomplete State for Machine & Model
-  const [productSuggestions, setProductSuggestions] = useState<Array<{ id: string; product_name: string; product_code?: string }>>([]);
-  const [showProductDropdown, setShowProductDropdown] = useState<boolean>(false);
-  const productSearchRef = useRef<HTMLDivElement>(null);
+  // Product Combobox Options for Machine & Model
+  const [productOptions, setProductOptions] = useState<string[]>(DEFAULT_MACHINE_MODELS);
 
   // Serial Number Filter & Lookup States
   const [filterSerialNumber, setFilterSerialNumber] = useState<string>("");
   const [serialLookupLoading, setSerialLookupLoading] = useState<boolean>(false);
   const [serialLookupInfo, setSerialLookupInfo] = useState<string | null>(null);
+  const [productOption, setProductOption] = useState<"all" | "serial">("all");
 
   // Form State for Add / Edit
   const [formData, setFormData] = useState<TechnicalTaskCreatePayload>({
@@ -716,17 +781,11 @@ function TechnicalTasksPageContent() {
   // Close menus on document click
   useEffect(() => {
     function handleDocClick(e: MouseEvent) {
-      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
-        setPinMenuOpen(false);
-      }
       if (impExpRef.current && !impExpRef.current.contains(e.target as Node)) {
         setImpExpOpen(false);
       }
       if (bulkActionsRef.current && !bulkActionsRef.current.contains(e.target as Node)) {
         setBulkActionsOpen(false);
-      }
-      if (productSearchRef.current && !productSearchRef.current.contains(e.target as Node)) {
-        setShowProductDropdown(false);
       }
       setOpenActionMenuId(null);
     }
@@ -759,6 +818,21 @@ function TechnicalTasksPageContent() {
       } catch (err) {
         console.warn("Could not load call types lookup:", err);
         setCallTypeOptions([]);
+      }
+
+      try {
+        const prodRes = await apiGet<any[]>("/masters/products?limit=200");
+        const prods = Array.isArray(prodRes?.data)
+          ? prodRes.data
+          : (prodRes?.data as any)?.items || [];
+        const names = prods
+          .map((p: any) => String(p.product_name || p.name || ""))
+          .filter(Boolean);
+        if (names.length > 0) {
+          setProductOptions((prev) => Array.from(new Set([...prev, ...names])));
+        }
+      } catch (err) {
+        console.warn("Could not load products lookup:", err);
       }
     }
     loadLookups();
@@ -821,15 +895,37 @@ function TechnicalTasksPageContent() {
       if (filterSerialNumber.trim()) {
         params.serial_number = filterSerialNumber.trim();
       }
+      if (filterServiceType) {
+        params.service_type = filterServiceType;
+      }
+      if (filterThirdPartyCity) {
+        params.third_party_city = filterThirdPartyCity;
+      }
+      if (filterPaymentCollected) {
+        params.payment_collected = filterPaymentCollected;
+      }
+      if (filterDateFrom) {
+        params.date_from = filterDateFrom;
+      }
+      if (filterDateTo) {
+        params.date_to = filterDateTo;
+      }
 
       const res = await fetchTechnicalTasks(params);
       setTasks(res.data || []);
+      if (Array.isArray(res.data)) {
+        const fromTasks = res.data.map((t) => t.machine_model).filter(Boolean);
+        if (fromTasks.length > 0) {
+          setProductOptions((prev) => Array.from(new Set([...prev, ...fromTasks])));
+        }
+      }
       const total =
         res.meta?.pagination?.total_records ??
         res.meta?.pagination?.total_items ??
         (res.meta as any)?.total ??
         (Array.isArray(res.data) ? res.data.length : 0);
       setTotalCount(total);
+      setTotalCapped(Boolean((res.meta as any)?.total_capped));
     } catch (err) {
       console.error("Error fetching technical tasks:", err);
       setApiError(err);
@@ -850,6 +946,11 @@ function TechnicalTasksPageContent() {
     filterTechnician,
     filterPriority,
     filterStatus,
+    filterServiceType,
+    filterThirdPartyCity,
+    filterPaymentCollected,
+    filterDateFrom,
+    filterDateTo,
   ]);
 
   useEffect(() => {
@@ -1008,28 +1109,22 @@ function TechnicalTasksPageContent() {
     URL.revokeObjectURL(url);
   };
 
-  // Product Search handler for Machine & Model
+  // Product Search handler for Machine & Model combobox
   const handleProductSearch = async (val: string) => {
-    if (!val.trim()) {
-      setProductSuggestions([]);
-      setShowProductDropdown(false);
-      return;
-    }
+    if (!val || !val.trim()) return;
     try {
       const res = await apiGet<any[] | { items: any[] }>(
-        `/masters/products?is_active=true&search=${encodeURIComponent(val.trim())}&limit=20`
+        `/masters/products?is_active=true&search=${encodeURIComponent(val.trim())}&limit=50`
       );
-      const prods = Array.isArray(res?.data) ? res.data : (res?.data?.items || []);
-      const mapped = prods.map((p: any) => ({
-        id: String(p.id),
-        product_name: String(p.product_name || p.name || ""),
-        product_code: String(p.product_code || ""),
-      }));
-      setProductSuggestions(mapped);
-      setShowProductDropdown(mapped.length > 0);
+      const prods = Array.isArray(res?.data) ? res.data : (res?.data as any)?.items || [];
+      const names = prods
+        .map((p: any) => String(p.product_name || p.name || ""))
+        .filter(Boolean);
+      if (names.length > 0) {
+        setProductOptions((prev) => Array.from(new Set([...prev, ...names])));
+      }
     } catch {
-      setProductSuggestions([]);
-      setShowProductDropdown(false);
+      // ignore
     }
   };
 
@@ -1108,16 +1203,23 @@ function TechnicalTasksPageContent() {
     setStatusAllottedTo(task.task_allotted_to || "");
     setStatusVisitDate(task.scheduled_visit_date || task.task_approved_date || "");
     setStatusRemarks(task.approver_remarks || "");
+    setApproveTaskType(task.task_type || "");
+    setApproveServiceType(task.service_type || "");
+    setApproveAmount(task.service_charge ? String(task.service_charge) : "");
+    setApproveTerms(task.payment_terms || "");
   };
 
   const openCompleteModal = (task: TechnicalTask) => {
     setStatusModalTask(task);
     setNewStatusValue("Completed");
-    setStatusPaymentCollected(task.payment_status?.toLowerCase() === "paid");
+    setStatusPaymentCollected(
+      task.payment_status?.toLowerCase() === "paid" || task.status.toLowerCase() === "payment pending"
+    );
     setStatusPaymentMode(task.payment_mode || "Company Acc");
     setStatusScreenshotUrl(task.payment_screenshot || "");
     setStatusScreenshotFile(null);
-    setStatusRemarks(task.approver_remarks || "");
+    setStatusCollectedAmount(String(task.collected_amount ?? task.service_charge ?? ""));
+    setStatusRemarks(task.technician_remarks || "");
   };
 
   const openReopenModal = (task: TechnicalTask) => {
@@ -1130,6 +1232,7 @@ function TechnicalTasksPageContent() {
 
   // Open Add New Task
   const handleOpenAdd = () => {
+    setContactOptions([]);
     setEditingTask(null);
     setFormData({
       company_name: "",
@@ -1157,15 +1260,17 @@ function TechnicalTasksPageContent() {
     });
     setFormError(null);
     setSerialLookupInfo(null);
-    setShowProductDropdown(false);
+    setProductOption("all");
     setAddEditModalOpen(true);
   };
 
   // Open Edit Task
   const handleOpenEdit = (task: TechnicalTask) => {
     setEditingTask(task);
+    void loadCompanyContacts(task.company_id);
     setFormData({
       company_name: task.company_name,
+      company_id: task.company_id || null,
       task_type: task.task_type,
       city: task.city,
       third_party: task.third_party || "",
@@ -1190,7 +1295,7 @@ function TechnicalTasksPageContent() {
     });
     setFormError(null);
     setSerialLookupInfo(null);
-    setShowProductDropdown(false);
+    setProductOption(task.serial_number ? "serial" : "all");
     setAddEditModalOpen(true);
   };
 
@@ -1217,8 +1322,17 @@ function TechnicalTasksPageContent() {
       setFormError("Third-Party City is required for third-party onsite visits.");
       return;
     }
-    if (!formData.machine_model.trim()) {
-      setFormError("Machine & Model is required.");
+    let finalMachineModel = formData.machine_model?.trim() || "";
+    if (!finalMachineModel && productOption === "serial" && formData.serial_number?.trim()) {
+      finalMachineModel = formData.serial_number.trim();
+      setFormData((prev) => ({ ...prev, machine_model: finalMachineModel }));
+    }
+    if (!finalMachineModel) {
+      setFormError(
+        productOption === "serial"
+          ? "Please lookup or enter a Machine Serial Number."
+          : "Machine & Model is required."
+      );
       return;
     }
     if (!formData.task_description?.trim()) {
@@ -1227,6 +1341,10 @@ function TechnicalTasksPageContent() {
     }
     if (!formData.service_type || formData.service_type === "Select") {
       setFormError("Service Type is required.");
+      return;
+    }
+    if (formData.service_type === "Chargeable" && !(Number(formData.service_charge) > 0)) {
+      setFormError("Amount is required for chargeable tasks.");
       return;
     }
     if (formData.service_type === "Chargeable" && !formData.payment_terms?.trim()) {
@@ -1242,7 +1360,7 @@ function TechnicalTasksPageContent() {
     setFormError(null);
     try {
       if (editingTask) {
-        await updateTechnicalTask(editingTask.id, formData);
+        await updateTechnicalTask(editingTask.id, { ...formData, version: editingTask.version });
         showSuccess("Technical task updated successfully.");
       } else {
         await createTechnicalTask(formData);
@@ -1276,6 +1394,26 @@ function TechnicalTasksPageContent() {
         }
       }
 
+      // A task cannot be approved without a technician (also enforced by the API).
+      if (
+        targetStatus === "Approved" &&
+        !(statusAllottedTo || statusModalTask.task_allotted_to)
+      ) {
+        setActionError("Select the technician (Task Allotted To) before approving.");
+        return;
+      }
+
+      if (targetStatus === "Approved" && approveServiceType === "Chargeable") {
+        if (!(Number(approveAmount) > 0)) {
+          setActionError("Amount is required for chargeable tasks.");
+          return;
+        }
+        if (!approveTerms.trim()) {
+          setActionError("Payment Terms are required for chargeable tasks.");
+          return;
+        }
+      }
+
       // Reopen workflow if currently in Cancel / Cancelled stage
       if (statusModalTask.status.toLowerCase() === "cancel" || statusModalTask.status.toLowerCase() === "cancelled") {
         await reopenTechnicalTask(statusModalTask.id, {
@@ -1301,6 +1439,10 @@ function TechnicalTasksPageContent() {
           targetStatus = "Payment Pending";
           targetPaymentStatus = "Pending";
         } else {
+          if (!(Number(statusCollectedAmount || statusModalTask.service_charge || 0) > 0)) {
+            setActionError("Enter the amount collected.");
+            return;
+          }
           targetPaymentStatus = "Paid";
           if (statusScreenshotFile) {
             setUploadingScreenshot(true);
@@ -1320,7 +1462,18 @@ function TechnicalTasksPageContent() {
         task_allotted_to: targetStatus === "Approved" ? (statusAllottedTo || undefined) : undefined,
         task_approved_date: targetStatus === "Approved" ? (statusVisitDate || undefined) : undefined,
         scheduled_visit_date: targetStatus === "Approved" ? (statusVisitDate || undefined) : undefined,
+        task_type: targetStatus === "Approved" ? approveTaskType || undefined : undefined,
+        service_type: targetStatus === "Approved" ? approveServiceType || undefined : undefined,
+        service_charge:
+          targetStatus === "Approved" && approveServiceType === "Chargeable" ? Number(approveAmount) : undefined,
+        payment_terms:
+          targetStatus === "Approved" && approveServiceType === "Chargeable" ? approveTerms.trim() : undefined,
         payment_status: targetPaymentStatus,
+        payment_collected: targetPaymentStatus === "Paid" ? true : targetPaymentStatus === "Pending" ? false : undefined,
+        collected_amount:
+          targetPaymentStatus === "Paid"
+            ? Number(statusCollectedAmount || statusModalTask.service_charge || 0)
+            : undefined,
         payment_mode: targetPaymentStatus === "Paid" ? statusPaymentMode : undefined,
         payment_screenshot: targetPaymentStatus === "Paid" ? (uploadedScreenshotUrl || undefined) : undefined,
         cancel_remarks:
@@ -1342,122 +1495,63 @@ function TechnicalTasksPageContent() {
     }
   };
 
-  // Freeze Columns Logic (Exact match to Companies.tsx)
-  const togglePin = useCallback((colIdx: number) => {
-    setPinnedCols((prev) => {
-      const next = { ...prev };
-      if (next[colIdx]) {
-        delete next[colIdx];
-      } else {
-        if (colIdx >= 17) {
-          next[colIdx] = "right";
-        } else {
-          next[colIdx] = "left";
-        }
-      }
-      return next;
-    });
+  // Admin-level actions (workflow doc): Edit at Approved stage, Delete beyond Pending, Reopen of cancelled tasks.
+  // The API enforces the same rules; these only decide which menu items are shown.
+  const { profile: authProfile, isSuperAdmin, hasPermission } = useAuth();
+  const isAdminLevel = isSuperAdmin || hasPermission("technicaltask.manage");
+  const myUsername = authProfile?.username || "";
+  const canEditTask = (t: TechnicalTask) => {
+    const st = t.status.toLowerCase();
+    if (st === "pending") return true;
+    if (st === "approved") return isAdminLevel || t.task_approved_by === myUsername;
+    return false;
+  };
+  const canDeleteTask = (t: TechnicalTask) => t.status.toLowerCase() === "pending" || isAdminLevel;
+  const canReopenTask = (t: TechnicalTask) => isAdminLevel || !t.task_approved_by || t.task_approved_by === myUsername;
+
+  const loadCompanyContacts = useCallback(async (companyId?: string | null) => {
+    if (!companyId) {
+      setContactOptions([]);
+      return;
+    }
+    try {
+      const res = await apiGet<any[]>(`/companies/${companyId}/contacts`);
+      setContactOptions(
+        (res.data || [])
+          .map((c: any) => ({
+            name: String(c.person_name || ""),
+            designation: String(c.designation || ""),
+            phone: String(c.calling_number || c.whatsapp_number || ""),
+          }))
+          .filter((c) => c.name)
+      );
+    } catch {
+      setContactOptions([]); // fall back to typing the contact manually
+    }
   }, []);
 
   const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: TOTAL_COLS_COUNT }, (_, i) => i);
-    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
-    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
-    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
-    return [...lefts, ...unpinned, ...rights];
-  }, [pinnedCols]);
+    return Array.from({ length: TOTAL_COLS_COUNT }, (_, i) => i);
+  }, []);
 
-  useLayoutEffect(() => {
-    if (!tableRef.current) return;
-    const tableEl = tableRef.current;
-
-    const updateOffsets = () => {
-      const ths = tableEl.querySelectorAll("thead th");
-      if (!ths.length) return;
-
-      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-      let accumLeft = 0;
-      const nextLefts: Record<number, number> = {};
-      for (const idx of lefts) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextLefts[idx] = accumLeft;
-          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
-      let accumRight = 0;
-      const nextRights: Record<number, number> = {};
-      for (const idx of rights) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextRights[idx] = accumRight;
-          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      setColLeftOffsets(nextLefts);
-      setColRightOffsets(nextRights);
-    };
-
-    updateOffsets();
-
-    if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => updateOffsets());
-      ro.observe(tableEl);
-      return () => ro.disconnect();
-    }
-  }, [displayOrder, pinnedCols, tasks, loading]);
-
-  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
-    const dir = pinnedCols[colIdx];
-    const headerTopStyle: React.CSSProperties = isHeader
+  const getFreezeStyle = useCallback((_colIdx: number, isHeader = false): React.CSSProperties => {
+    return isHeader
       ? {
         position: "sticky",
         top: 0,
-        zIndex: dir ? 30 : 15,
+        zIndex: 15,
         backgroundColor: "#f8fafc",
         boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
       }
       : {};
-
-    if (!dir) return headerTopStyle;
-
-    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
-
-    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
-    const isFirstRight = dir === "right" && colIdx === rights[0];
-
-    if (dir === "left") {
-      const left = colLeftOffsets[colIdx] ?? 0;
-      return {
-        ...headerTopStyle,
-        position: "sticky",
-        left: `${left}px`,
-        zIndex: isHeader ? 35 : 10,
-        backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
-      };
-    }
-
-    const right = colRightOffsets[colIdx] ?? 0;
-    return {
-      ...headerTopStyle,
-      position: "sticky",
-      right: `${right}px`,
-      zIndex: isHeader ? 35 : 10,
-      backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
-    };
-  }, [displayOrder, pinnedCols, colLeftOffsets, colRightOffsets]);
+  }, []);
 
   // Reset Filters
   const handleResetFilters = () => {
-    setFilterDateRange("");
+    setFilterDateFrom("");
+    setFilterDateTo("");
+    setFilterThirdPartyCity("");
+    setFilterPaymentCollected("");
     setFilterTaskType("");
     setFilterStatus("");
     setFilterCity("");
@@ -1589,25 +1683,19 @@ function TechnicalTasksPageContent() {
   return (
     <AppShell activeKey="technical-tasks">
       <main className="page">
-        {/* Breadcrumb Trail matching Companies.tsx */}
-        <Breadcrumb trail={["Technical Task List"]} />
-
         {/* Page Header (Exact Match to Companies.tsx) */}
         <div className="page-header">
           <div>
-            <h1>Technical Task List</h1>
-            <div className="page-subtitle">
-              Technical tasks list, client visits, repair calls, and technician allotting.
-            </div>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Technical Task List</h1>
           </div>
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             {/* Filter Toggle Button */}
             <button
               type="button"
               id="technical-tasks-filter-toggle-btn"
-              className="btn"
+              className="btn btn-filter-toggle"
               style={{
-                background: filterOpen ? "#0061f2" : "#475569",
+                background: "#556987",
                 color: "#ffffff",
                 padding: "8px 14px",
                 borderRadius: "6px",
@@ -1830,29 +1918,27 @@ function TechnicalTasksPageContent() {
               {/* Row 1: Date Range | Task Type | Current Status */}
               <div>
                 <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                  Date / Date Range
+                  Task Create Date Range
                 </label>
-                <input
-                  type="text"
-                  value={filterDateRange}
-                  onChange={(e) => setFilterDateRange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSearchFilters();
-                  }}
-                  placeholder="e.g. 17-09-2026"
-                  style={{
-                    width: "100%",
-                    height: "38px",
-                    borderRadius: "5px",
-                    border: "1px solid #cbd5e1",
-                    padding: "0 10px",
-                    fontSize: "13.5px",
-                    color: "#334155",
-                    background: "#ffffff",
-                    boxSizing: "border-box",
-                    outline: "none",
-                  }}
-                />
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    type="date"
+                    aria-label="Created from"
+                    value={filterDateFrom}
+                    max={filterDateTo || undefined}
+                    onChange={(e) => setFilterDateFrom(e.target.value)}
+                    style={{ flex: 1, minWidth: 0, height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px", color: "#334155", background: "#ffffff", boxSizing: "border-box", outline: "none" }}
+                  />
+                  <span style={{ color: "#64748b", fontSize: "12px" }}>to</span>
+                  <input
+                    type="date"
+                    aria-label="Created to"
+                    value={filterDateTo}
+                    min={filterDateFrom || undefined}
+                    onChange={(e) => setFilterDateTo(e.target.value)}
+                    style={{ flex: 1, minWidth: 0, height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px", color: "#334155", background: "#ffffff", boxSizing: "border-box", outline: "none" }}
+                  />
+                </div>
               </div>
 
               <div>
@@ -1977,6 +2063,33 @@ function TechnicalTasksPageContent() {
                 </select>
               </div>
 
+              <div>
+                <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                  Third-Party Site City
+                </label>
+                <TypableCombobox
+                  value={filterThirdPartyCity}
+                  onChange={(city) => setFilterThirdPartyCity(city)}
+                  options={cityOptions}
+                  placeholder="All / Select or type city..."
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                  Payment Collected
+                </label>
+                <select
+                  value={filterPaymentCollected}
+                  onChange={(e) => setFilterPaymentCollected(e.target.value)}
+                  style={selectStyle}
+                >
+                  <option value="">All</option>
+                  <option value="yes">Yes (Collected)</option>
+                  <option value="pending">Pending</option>
+                </select>
+              </div>
+
               <div
                 style={{
                   display: "flex",
@@ -2092,90 +2205,6 @@ function TechnicalTasksPageContent() {
                 </select>
                 <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
               </div>
-
-              {/* Freeze Columns Popover Button */}
-              <div ref={pinMenuRef} style={{ position: "relative" }}>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPinMenuOpen((v) => !v);
-                  }}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                    background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
-                    cursor: "pointer",
-                    color: "#0f172a",
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  📌 Freeze Columns ({Object.keys(pinnedCols).length})
-                </button>
-                {pinMenuOpen && (
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: "38px",
-                      zIndex: 100,
-                      background: "#ffffff",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "8px",
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                      padding: "12px",
-                      minWidth: "240px",
-                      display: "flex",
-                      flexDirection: "column",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      Toggle Frozen Columns
-                    </div>
-                    <div style={{ maxHeight: "220px", overflowY: "auto", paddingRight: "4px" }}>
-                      {TECHNICAL_TASK_COLUMN_LABELS.map((label, idx) => {
-                        if (!label) return null;
-                        const isPinned = Boolean(pinnedCols[idx]);
-                        return (
-                          <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                            <input
-                              type="checkbox"
-                              checked={isPinned}
-                              onChange={() => togglePin(idx)}
-                            />{" "}
-                            {label}
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
-                      <button
-                        type="button"
-                        onClick={() => setPinnedCols({})}
-                        style={{
-                          width: "100%",
-                          padding: "6px 8px",
-                          fontSize: "12px",
-                          borderRadius: "4px",
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                          cursor: "pointer",
-                          color: "#dc2626",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Clear All Freezes
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
 
             {/* Serial Number Search Filter */}
@@ -2276,7 +2305,6 @@ function TechnicalTasksPageContent() {
                     }
 
                     const label = TECHNICAL_TASK_COLUMN_LABELS[idx];
-                    const isPinned = Boolean(pinnedCols[idx]);
                     const isSrNo = idx === 1;
                     const isAction = idx === 17;
 
@@ -2352,28 +2380,6 @@ function TechnicalTasksPageContent() {
                             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {label}
                             </span>
-                          )}
-
-                          {!isAction && !isSrNo && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                togglePin(idx);
-                              }}
-                              style={{
-                                background: "none",
-                                border: "none",
-                                cursor: "pointer",
-                                fontSize: "11px",
-                                opacity: isPinned ? 1 : 0.3,
-                                padding: "0 2px",
-                                flexShrink: 0,
-                              }}
-                              title={isPinned ? "Unfreeze column" : "Freeze column"}
-                            >
-                              📌
-                            </button>
                           )}
                         </div>
                       </th>
@@ -2473,7 +2479,10 @@ function TechnicalTasksPageContent() {
                         filterServiceType ||
                         filterTechnician ||
                         filterPriority ||
-                        filterDateRange ||
+                        filterDateFrom ||
+                        filterDateTo ||
+                        filterThirdPartyCity ||
+                        filterPaymentCollected ||
                         activeTab !== "all"
                       ) ? (
                         <div
@@ -3046,35 +3055,35 @@ function TechnicalTasksPageContent() {
                                               <span>❌</span>
                                               <span>Cancel Task</span>
                                             </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                handleOpenEdit(task);
-                                                setOpenActionMenuId(null);
-                                              }}
-                                              style={{
-                                                padding: "8px 12px",
-                                                background: "none",
-                                                border: "none",
-                                                textAlign: "left",
-                                                fontSize: "13px",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: "6px",
-                                                color: "#334155",
-                                              }}
-                                            >
-                                              <span>✏️</span>
-                                              <span>Edit</span>
-                                            </button>
+                                            {canEditTask(task) && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  handleOpenEdit(task);
+                                                  setOpenActionMenuId(null);
+                                                }}
+                                                style={{
+                                                  padding: "8px 12px",
+                                                  background: "none",
+                                                  border: "none",
+                                                  textAlign: "left",
+                                                  fontSize: "13px",
+                                                  cursor: "pointer",
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: "6px",
+                                                  color: "#334155",
+                                                }}
+                                              >
+                                                <span>✏️</span>
+                                                <span>Edit</span>
+                                              </button>
+                                            )}
                                           </>
                                         )}
 
-                                        {/* Stage 3: Cancel / Payment Pending -> Reopen / Reassign Task, Delete */}
-                                        {(task.status.toLowerCase() === "cancel" ||
-                                          task.status.toLowerCase() === "cancelled" ||
-                                          task.status.toLowerCase() === "payment pending") && (
+                                        {/* Stage 3: Cancel -> Reopen / Reassign (admin or approver); Payment Pending -> mark payment collected */}
+                                        {(task.status.toLowerCase() === "cancel" || task.status.toLowerCase() === "cancelled") && canReopenTask(task) && (
                                           <button
                                             type="button"
                                             onClick={() => {
@@ -3099,31 +3108,58 @@ function TechnicalTasksPageContent() {
                                             <span>Reopen / Reassign</span>
                                           </button>
                                         )}
+                                        {task.status.toLowerCase() === "payment pending" && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              openCompleteModal(task);
+                                              setOpenActionMenuId(null);
+                                            }}
+                                            style={{
+                                              padding: "8px 12px",
+                                              background: "none",
+                                              border: "none",
+                                              textAlign: "left",
+                                              fontSize: "13px",
+                                              cursor: "pointer",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: "6px",
+                                              color: "#16a34a",
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            <span>💰</span>
+                                            <span>Payment Collected</span>
+                                          </button>
+                                        )}
 
-                                        {/* Universal Delete */}
-                                        <div style={{ borderTop: "1px solid #f1f5f9" }} />
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            handleDeleteSingle(task.id);
-                                            setOpenActionMenuId(null);
-                                          }}
-                                          style={{
-                                            padding: "8px 12px",
-                                            background: "none",
-                                            border: "none",
-                                            textAlign: "left",
-                                            fontSize: "13px",
-                                            color: "#dc2626",
-                                            cursor: "pointer",
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: "6px",
-                                          }}
-                                        >
-                                          <span>🗑️</span>
-                                          <span>Delete</span>
-                                        </button>
+                                        {/* Delete: Pending for everyone; later stages are admin level */}
+                                        {canDeleteTask(task) && (<>
+                                          <div style={{ borderTop: "1px solid #f1f5f9" }} />
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              handleDeleteSingle(task.id);
+                                              setOpenActionMenuId(null);
+                                            }}
+                                            style={{
+                                              padding: "8px 12px",
+                                              background: "none",
+                                              border: "none",
+                                              textAlign: "left",
+                                              fontSize: "13px",
+                                              color: "#dc2626",
+                                              cursor: "pointer",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: "6px",
+                                            }}
+                                          >
+                                            <span>🗑️</span>
+                                            <span>Delete</span>
+                                          </button>
+                                        </>)}
                                       </div>
                                     )}
                                   </div>
@@ -3142,6 +3178,11 @@ function TechnicalTasksPageContent() {
           </div>
 
           {/* Standard Inhyma Pagination Footer */}
+          {totalCapped && (
+            <div style={{ padding: "6px 16px", fontSize: "12px", color: "#92400e", background: "#fffbeb" }}>
+              More than {totalCount.toLocaleString()} tasks match - narrow the filters to see the rest.
+            </div>
+          )}
           <div style={{ padding: "8px 16px", borderTop: "1px solid #e2e8f0" }}>
             <Pagination
               pagination={paginationMeta}
@@ -3495,56 +3536,56 @@ function TechnicalTasksPageContent() {
                 detailTask.third_party_city ||
                 detailTask.third_party_contact_name ||
                 detailTask.task_type === "Onsite Visit - Third-Party Location") && (
-                <div
-                  style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "6px",
-                    padding: "12px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "8px",
-                  }}
-                >
                   <div
                     style={{
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      color: "#475569",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "6px",
+                      padding: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
                     }}
                   >
-                    🏢 Third-Party Location Details
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        color: "#475569",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      🏢 Third-Party Location Details
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                      <div>
+                        <span style={{ fontSize: "11px", color: "#64748b" }}>Location / Name:</span>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                          {detailTask.third_party || "—"}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "11px", color: "#64748b" }}>City:</span>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                          {detailTask.third_party_city || "—"}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "11px", color: "#64748b" }}>Contact Person:</span>
+                        <div style={{ fontSize: "12.5px", color: "#334155" }}>
+                          {detailTask.third_party_contact_name || "—"}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "11px", color: "#64748b" }}>Contact Mobile:</span>
+                        <div style={{ fontSize: "12.5px", color: "#334155" }}>
+                          {detailTask.third_party_contact_phone || "—"}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                    <div>
-                      <span style={{ fontSize: "11px", color: "#64748b" }}>Location / Name:</span>
-                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
-                        {detailTask.third_party || "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: "11px", color: "#64748b" }}>City:</span>
-                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
-                        {detailTask.third_party_city || "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: "11px", color: "#64748b" }}>Contact Person:</span>
-                      <div style={{ fontSize: "12.5px", color: "#334155" }}>
-                        {detailTask.third_party_contact_name || "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: "11px", color: "#64748b" }}>Contact Mobile:</span>
-                      <div style={{ fontSize: "12.5px", color: "#334155" }}>
-                        {detailTask.third_party_contact_phone || "—"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+                )}
 
               {/* Approval & Scheduled Visit Date */}
               <div
@@ -3686,13 +3727,27 @@ function TechnicalTasksPageContent() {
                     <span style={{ fontSize: "12.5px", color: "#1e293b" }}>{detailTask.approver_remarks}</span>
                   </div>
                 )}
+                {detailTask.technician_remarks && (
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b" }}>Technician: </span>
+                    <span style={{ fontSize: "12.5px", color: "#1e293b" }}>{detailTask.technician_remarks}</span>
+                  </div>
+                )}
+                {detailTask.collected_amount != null && (
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b" }}>Collected: </span>
+                    <span style={{ fontSize: "12.5px", color: "#1e293b" }}>
+                      ₹{detailTask.collected_amount}{detailTask.payment_mode ? ` (${detailTask.payment_mode})` : ""}
+                    </span>
+                  </div>
+                )}
                 {detailTask.cancel_remarks && (
                   <div>
                     <span style={{ fontSize: "11px", fontWeight: 600, color: "#dc2626" }}>Cancellation: </span>
                     <span style={{ fontSize: "12.5px", color: "#991b1b" }}>{detailTask.cancel_remarks}</span>
                   </div>
                 )}
-                {!detailTask.creator_remarks && !detailTask.approver_remarks && !detailTask.cancel_remarks && (
+                {!detailTask.creator_remarks && !detailTask.approver_remarks && !detailTask.technician_remarks && !detailTask.cancel_remarks && (
                   <span style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
                     No additional remarks recorded.
                   </span>
@@ -3729,37 +3784,38 @@ function TechnicalTasksPageContent() {
 
               {/* Action to Reopen / Reassign if Cancelled */}
               {(detailTask.status.toLowerCase() === "cancel" ||
-                detailTask.status.toLowerCase() === "cancelled") && (
-                <div style={{ marginTop: "8px" }}>
-                  <button
-                    type="button"
-                    data-testid="drawer-btn-reopen-task"
-                    onClick={() => {
-                      const t = detailTask;
-                      setDetailTask(null);
-                      openReopenModal(t);
-                    }}
-                    style={{
-                      width: "100%",
-                      padding: "9px",
-                      background: "#e0e7ff",
-                      color: "#3730a3",
-                      border: "1px solid #c7d2fe",
-                      borderRadius: "6px",
-                      fontWeight: 700,
-                      fontSize: "13px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <span>🔄</span>
-                    <span>Reopen / Reassign Cancelled Task</span>
-                  </button>
-                </div>
-              )}
+                detailTask.status.toLowerCase() === "cancelled") &&
+                canReopenTask(detailTask) && (
+                  <div style={{ marginTop: "8px" }}>
+                    <button
+                      type="button"
+                      data-testid="drawer-btn-reopen-task"
+                      onClick={() => {
+                        const t = detailTask;
+                        setDetailTask(null);
+                        openReopenModal(t);
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "9px",
+                        background: "#e0e7ff",
+                        color: "#3730a3",
+                        border: "1px solid #c7d2fe",
+                        borderRadius: "6px",
+                        fontWeight: 700,
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <span>🔄</span>
+                      <span>Reopen / Reassign Cancelled Task</span>
+                    </button>
+                  </div>
+                )}
             </div>
           )}
         </Modal>
@@ -3812,11 +3868,16 @@ function TechnicalTasksPageContent() {
                 </label>
                 <ClientNameAutocomplete
                   value={formData.company_name}
-                  onChange={(val) => setFormData({ ...formData, company_name: val })}
+                  onChange={(val) => {
+                    setFormData({ ...formData, company_name: val, company_id: null });
+                    setContactOptions([]);
+                  }}
                   onSelectCompany={(item) => {
+                    void loadCompanyContacts(item.id);
                     setFormData((prev) => ({
                       ...prev,
                       company_name: item.company_name,
+                      company_id: item.id,
                       city: item.city_name || prev.city,
                       contact_person_name: item.contact_full_name || prev.contact_person_name,
                       contact_designation: item.contact_designation || prev.contact_designation,
@@ -3838,18 +3899,62 @@ function TechnicalTasksPageContent() {
               >
                 <div>
                   <label style={fieldLabelStyle}>Contact Person</label>
-                  <input
-                    type="text"
-                    placeholder="Contact Person"
-                    value={formData.contact_person_name || ""}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        contact_person_name: e.target.value,
-                      })
-                    }
-                    style={inputStyle}
-                  />
+                  {contactOptions.length > 0 ? (
+                    <>
+                      <select
+                        data-testid="contact-person-select"
+                        value={
+                          contactOptions.some((c) => c.name === formData.contact_person_name)
+                            ? formData.contact_person_name || ""
+                            : "__other__"
+                        }
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "__other__") {
+                            setFormData({ ...formData, contact_person_name: "" });
+                            return;
+                          }
+                          const c = contactOptions.find((x) => x.name === v);
+                          setFormData({
+                            ...formData,
+                            contact_person_name: v,
+                            contact_designation: c?.designation || "",
+                            contact_phone: c?.phone || formData.contact_phone,
+                          });
+                        }}
+                        style={inputStyle}
+                      >
+                        <option value="__other__">Other / type manually</option>
+                        {contactOptions.map((c) => (
+                          <option key={c.name} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      {!contactOptions.some((c) => c.name === formData.contact_person_name) && (
+                        <input
+                          type="text"
+                          placeholder="Contact Person"
+                          value={formData.contact_person_name || ""}
+                          onChange={(e) => setFormData({ ...formData, contact_person_name: e.target.value })}
+                          style={{ ...inputStyle, marginTop: "6px" }}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="Contact Person"
+                      value={formData.contact_person_name || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          contact_person_name: e.target.value,
+                        })
+                      }
+                      style={inputStyle}
+                    />
+                  )}
                 </div>
                 <div>
                   <label style={fieldLabelStyle}>Designation</label>
@@ -4108,135 +4213,209 @@ function TechnicalTasksPageContent() {
                 </div>
               </div>
 
-              {/* Machine Serial Number with Quick Lookup */}
+              {/* Product Option (Figma: All Products vs Product by Serial No.) */}
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                  <label style={{ ...fieldLabelStyle, marginBottom: 0 }}>
-                    Machine Serial Number
-                  </label>
-                  <button
-                    type="button"
-                    data-testid="btn-lookup-serial"
-                    disabled={serialLookupLoading || !formData.serial_number?.trim()}
-                    onClick={() => handleSerialLookup()}
+                <label style={fieldLabelStyle}>Product Option</label>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "24px",
+                    alignItems: "center",
+                    marginTop: "4px",
+                  }}
+                >
+                  <label
                     style={{
-                      background: "#eff6ff",
-                      border: "1px solid #bfdbfe",
-                      color: "#1d4ed8",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      padding: "2px 8px",
-                      borderRadius: "4px",
-                      cursor: serialLookupLoading || !formData.serial_number?.trim() ? "not-allowed" : "pointer",
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: "4px",
+                      gap: "6px",
+                      fontSize: "13px",
+                      color: "#334155",
+                      cursor: "pointer",
+                      fontWeight: 500,
                     }}
                   >
-                    {serialLookupLoading ? "Looking up..." : "🔍 Lookup Serial"}
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  data-testid="field-serial-number"
-                  placeholder="e.g. INH-2026-MC001"
-                  value={formData.serial_number || ""}
-                  onChange={(e) => {
-                    setFormData({ ...formData, serial_number: e.target.value });
-                    if (serialLookupInfo) setSerialLookupInfo(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleSerialLookup();
-                    }
-                  }}
-                  style={inputStyle}
-                />
-                {serialLookupInfo && (
-                  <div
-                    data-testid="serial-lookup-info"
+                    <input
+                      type="radio"
+                      name="productOption"
+                      value="all"
+                      data-testid="radio-product-all"
+                      checked={productOption === "all"}
+                      onChange={() => {
+                        setProductOption("all");
+                        setSerialLookupInfo(null);
+                      }}
+                      style={{
+                        margin: 0,
+                        cursor: "pointer",
+                        accentColor: "#0061f2",
+                      }}
+                    />
+                    All Products
+                  </label>
+                  <label
                     style={{
-                      marginTop: "6px",
-                      padding: "6px 10px",
-                      background: serialLookupInfo.includes("No previous") ? "#fef2f2" : "#f0fdf4",
-                      border: `1px solid ${serialLookupInfo.includes("No previous") ? "#fecaca" : "#bbf7d0"}`,
-                      borderRadius: "4px",
-                      fontSize: "12px",
-                      color: serialLookupInfo.includes("No previous") ? "#991b1b" : "#166534",
-                      lineHeight: 1.4,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      fontSize: "13px",
+                      color: "#334155",
+                      cursor: "pointer",
+                      fontWeight: 500,
                     }}
                   >
-                    {serialLookupInfo}
-                  </div>
-                )}
+                    <input
+                      type="radio"
+                      name="productOption"
+                      value="serial"
+                      data-testid="radio-product-serial"
+                      checked={productOption === "serial"}
+                      onChange={() => {
+                        setProductOption("serial");
+                      }}
+                      style={{
+                        margin: 0,
+                        cursor: "pointer",
+                        accentColor: "#0061f2",
+                      }}
+                    />
+                    Product by Serial No.
+                  </label>
+                </div>
               </div>
 
-              {/* Machine & Model * with Product Master Keyword Autocomplete */}
-              <div ref={productSearchRef} style={{ position: "relative" }}>
-                <label style={fieldLabelStyle}>
-                  Machine & Model <span style={{ color: "#ef4444" }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Search Product..."
-                  value={formData.machine_model}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFormData({ ...formData, machine_model: val });
-                    handleProductSearch(val);
-                  }}
-                  onFocus={() => {
-                    if (formData.machine_model) {
-                      handleProductSearch(formData.machine_model);
-                    }
-                  }}
-                  style={inputStyle}
-                />
-                {showProductDropdown && productSuggestions.length > 0 && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      right: 0,
-                      background: "#ffffff",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "6px",
-                      boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
-                      zIndex: 1100,
-                      maxHeight: "180px",
-                      overflowY: "auto",
-                      marginTop: "4px",
+              {/* Conditional Product Field */}
+              {productOption === "all" ? (
+                /* Mode 1: All Products -> Machine & Model with both typing and dropdown */
+                <div>
+                  <label style={fieldLabelStyle}>
+                    Machine & Model <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <TypableCombobox
+                    id="field-machine-model"
+                    value={formData.machine_model}
+                    onChange={(val) => {
+                      setFormData({ ...formData, machine_model: val });
                     }}
-                  >
-                    {productSuggestions.map((prod) => (
-                      <div
-                        key={prod.id}
-                        onClick={() => {
-                          setFormData({ ...formData, machine_model: prod.product_name });
-                          setShowProductDropdown(false);
-                        }}
-                        style={{
-                          padding: "8px 12px",
-                          fontSize: "13px",
-                          cursor: "pointer",
-                          borderBottom: "1px solid #f1f5f9",
-                          color: "#1e293b",
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#eff6ff")}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                      >
-                        <div style={{ fontWeight: 600 }}>{prod.product_name}</div>
-                        {prod.product_code && (
-                          <div style={{ fontSize: "11px", color: "#64748b" }}>Code: {prod.product_code}</div>
-                        )}
-                      </div>
-                    ))}
+                    onSearch={(val) => {
+                      handleProductSearch(val);
+                    }}
+                    options={productOptions.length > 0 ? productOptions : DEFAULT_MACHINE_MODELS}
+                    placeholder="Search Product..."
+                    emptyText="No products found"
+                    customText={(val) => `Use "${val}" as custom machine/model`}
+                    required
+                  />
+                </div>
+              ) : (
+                /* Mode 2: Product by Serial No. -> Search Serial No. with inline [🔍] button */
+                <div>
+                  <label style={fieldLabelStyle}>
+                    Search Serial No. <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      data-testid="field-serial-number"
+                      placeholder="Enter Product Name"
+                      value={formData.serial_number || ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData({
+                          ...formData,
+                          serial_number: val,
+                        });
+                        if (serialLookupInfo) setSerialLookupInfo(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleSerialLookup();
+                        }
+                      }}
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      data-testid="btn-lookup-serial"
+                      disabled={serialLookupLoading || !formData.serial_number?.trim()}
+                      onClick={() => handleSerialLookup()}
+                      style={{
+                        background: "#0061f2",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "5px",
+                        width: "38px",
+                        height: "38px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: serialLookupLoading || !formData.serial_number?.trim() ? "not-allowed" : "pointer",
+                        opacity: serialLookupLoading || !formData.serial_number?.trim() ? 0.7 : 1,
+                        flexShrink: 0,
+                      }}
+                      title="Search Serial Number"
+                    >
+                      {serialLookupLoading ? (
+                        <span style={{ fontSize: "12px" }}>⏳</span>
+                      ) : (
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <circle cx="11" cy="11" r="8" />
+                          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                      )}
+                    </button>
                   </div>
-                )}
-              </div>
+
+                  {serialLookupInfo && (
+                    <div
+                      data-testid="serial-lookup-info"
+                      style={{
+                        marginTop: "6px",
+                        padding: "6px 10px",
+                        background: serialLookupInfo.includes("No previous") ? "#fef2f2" : "#f0fdf4",
+                        border: `1px solid ${serialLookupInfo.includes("No previous") ? "#fecaca" : "#bbf7d0"}`,
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                        color: serialLookupInfo.includes("No previous") ? "#991b1b" : "#166534",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {serialLookupInfo}
+                    </div>
+                  )}
+
+                  {formData.machine_model && (
+                    <div
+                      style={{
+                        marginTop: "8px",
+                        padding: "6px 10px",
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "4px",
+                        fontSize: "12.5px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span>
+                        <span style={{ color: "#64748b" }}>Machine & Model: </span>
+                        <strong style={{ color: "#1e293b" }}>{formData.machine_model}</strong>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Description (Nature Of Complain) * */}
               <div>
@@ -4460,7 +4639,7 @@ function TechnicalTasksPageContent() {
                 <div className="tech-modal-header">
                   <h2>
                     {statusModalTask.status.toLowerCase() === "cancel" ||
-                    statusModalTask.status.toLowerCase() === "cancelled"
+                      statusModalTask.status.toLowerCase() === "cancelled"
                       ? "🔄 Reopen / Reassign Cancelled Task"
                       : newStatusValue === "Approved"
                         ? "Approve & Allot Task"
@@ -4508,20 +4687,49 @@ function TechnicalTasksPageContent() {
                           ))}
                         </select>
                       </div>
-                      {/* Conditionally visible based on task type: only for Onsite / Client / Third-Party visits */}
-                      {(statusModalTask.task_type?.toLowerCase().includes("onsite") ||
-                        statusModalTask.task_type?.toLowerCase().includes("client location") ||
-                        statusModalTask.task_type?.toLowerCase().includes("third-party") ||
-                        statusModalTask.task_type?.toLowerCase().includes("visit")) && (
-                        <div className="field" style={{ marginTop: "12px" }}>
-                          <label>Scheduled / Visit Date</label>
-                          <input
-                            type="date"
-                            value={statusVisitDate}
-                            onChange={(e) => setStatusVisitDate(e.target.value)}
-                          />
-                        </div>
+                      {/* Approver may override what the creator entered (workflow doc) */}
+                      <div className="field" style={{ marginTop: "12px" }}>
+                        <label>Task Type</label>
+                        <select data-testid="approve-task-type" value={approveTaskType} onChange={(e) => setApproveTaskType(e.target.value)}>
+                          {[...new Set([statusModalTask.task_type, ...TASK_TYPE_OPTIONS].filter(Boolean))].map((t) => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field" style={{ marginTop: "12px" }}>
+                        <label>Service Type</label>
+                        <select data-testid="approve-service-type" value={approveServiceType} onChange={(e) => setApproveServiceType(e.target.value)}>
+                          {[...new Set([statusModalTask.service_type, ...SERVICE_TYPE_OPTIONS].filter(Boolean))].map((t) => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {approveServiceType === "Chargeable" && (
+                        <>
+                          <div className="field" style={{ marginTop: "12px" }}>
+                            <label>Amount (₹)</label>
+                            <input type="number" min="0" step="0.01" data-testid="approve-amount" value={approveAmount} onChange={(e) => setApproveAmount(e.target.value)} />
+                          </div>
+                          <div className="field" style={{ marginTop: "12px" }}>
+                            <label>Payment Terms</label>
+                            <input type="text" data-testid="approve-terms" value={approveTerms} onChange={(e) => setApproveTerms(e.target.value)} />
+                          </div>
+                        </>
                       )}
+                      {/* Conditionally visible based on task type: only for Onsite / Client / Third-Party visits */}
+                      {((approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("onsite") ||
+                        (approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("client location") ||
+                        (approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("third-party") ||
+                        (approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("visit")) && (
+                          <div className="field" style={{ marginTop: "12px" }}>
+                            <label>Scheduled / Visit Date</label>
+                            <input
+                              type="date"
+                              value={statusVisitDate}
+                              onChange={(e) => setStatusVisitDate(e.target.value)}
+                            />
+                          </div>
+                        )}
                     </>
                   )}
 
@@ -4646,6 +4854,21 @@ function TechnicalTasksPageContent() {
                                 </div>
                               )}
                             </div>
+
+                            <div>
+                              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#78350f", marginBottom: "4px" }}>
+                                Amount Collected (₹) <span style={{ color: "#ef4444" }}>*</span>
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                data-testid="complete-collected-amount"
+                                value={statusCollectedAmount}
+                                onChange={(e) => setStatusCollectedAmount(e.target.value)}
+                                style={{ width: "100%", height: "34px", borderRadius: "5px", border: "1px solid #fde68a", padding: "0 10px", fontSize: "13px", boxSizing: "border-box" }}
+                              />
+                            </div>
                           </div>
                         )}
                       </div>
@@ -4654,7 +4877,7 @@ function TechnicalTasksPageContent() {
                   <div className="field" style={{ marginTop: "12px" }}>
                     <label>
                       {statusModalTask.status.toLowerCase() === "cancel" ||
-                      statusModalTask.status.toLowerCase() === "cancelled"
+                        statusModalTask.status.toLowerCase() === "cancelled"
                         ? "Reopen Remarks / Notes"
                         : newStatusValue === "Approved"
                           ? "Approver Remarks"
@@ -4664,7 +4887,7 @@ function TechnicalTasksPageContent() {
                       rows={3}
                       placeholder={
                         statusModalTask.status.toLowerCase() === "cancel" ||
-                        statusModalTask.status.toLowerCase() === "cancelled"
+                          statusModalTask.status.toLowerCase() === "cancelled"
                           ? "Enter reason or instructions for reopening / reassigning"
                           : newStatusValue === "Approved"
                             ? "Add instructions for allotted technician"
@@ -4685,7 +4908,7 @@ function TechnicalTasksPageContent() {
                   </button>
                   <button type="submit" className="btn btn-primary" data-testid="btn-save-status">
                     {statusModalTask.status.toLowerCase() === "cancel" ||
-                    statusModalTask.status.toLowerCase() === "cancelled"
+                      statusModalTask.status.toLowerCase() === "cancelled"
                       ? "Confirm Reopen & Reassign"
                       : "Save Status"}
                   </button>

@@ -120,8 +120,6 @@ export function ErpRegistry() {
     <AppShell
       activeKey="erps"
       pageTitle="ERP Registry"
-      breadcrumbs={["ERP Management", "ERP Registry"]}
-
     >
       <SectionNavTabs
         items={[

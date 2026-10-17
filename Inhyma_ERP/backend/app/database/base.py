@@ -125,6 +125,11 @@ class GUID(TypeDecorator):
     impl = CHAR
     cache_ok = True
 
+    @property
+    def python_type(self) -> type[uuid.UUID]:
+        """Return the underlying Python type represented by this column."""
+        return uuid.UUID
+
     def load_dialect_impl(self, dialect):
         """Use the native UUID type on PostgreSQL, CHAR(36) elsewhere."""
         if dialect.name == "postgresql":

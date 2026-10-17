@@ -36,7 +36,6 @@ import { AuditPage } from "@/pages/Audit";
 import { UsersPage } from "@/pages/Users";
 import { ProfilePage } from "@/pages/Profile";
 import { RbacPage } from "@/pages/Rbac";
-import { EffectivePermissionsPage } from "@/pages/EffectivePermissions";
 import { PositionsPage } from "@/pages/org/Positions";
 import { CompaniesPage } from "@/pages/Companies";
 import { LeadsPage } from "@/pages/LeadsPage";
@@ -55,6 +54,8 @@ import { ImportPurchasePage } from "@/pages/purchase/ImportPurchasePage";
 import { ImportPurchasePdfPage } from "@/pages/ImportPurchasePdfPage";
 import { TasksPage } from "@/pages/tasks/TasksPage";
 import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
+import { GeneralReportsPage } from "@/pages/GeneralReportsPage";
+import { TechnicalTaskTypesPage } from "@/pages/masters/TechnicalTaskTypes";
 import { TechnicianOperationsPage } from "@/pages/TechnicianOperationsPage";
 import { AttendancePage } from "@/pages/hrms/AttendancePage";
 import { LeavePage } from "@/pages/hrms/LeavePage";
@@ -106,7 +107,6 @@ import { TrashPage } from "@/pages/Trash";
 import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { initGlobalAutocompleteBlocker } from "@/lib/autocompleteBlocker";
-import { ComingSoonPage } from "@/components/ComingSoon";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ProductStockPage } from "@/pages/ProductStockPage";
 import { ProductReorderPage } from "@/pages/ProductReorderPage";
@@ -186,7 +186,7 @@ export function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/rbac" element={<RbacPage />} />
-          <Route path="/effective-permissions" element={<EffectivePermissionsPage />} />
+          <Route path="/effective-permissions" element={<Navigate to="/rbac" replace />} />
           {/* Employee was merged into User -- /employees is now an alias for the same page. */}
           <Route path="/employees" element={<UsersPage />} />
           <Route path="/positions" element={<PositionsPage />} />
@@ -319,7 +319,6 @@ export function App() {
           <Route path="/transaction_report/list" element={<ProductStockPage />} />
           <Route path="/transaction-report/list" element={<Navigate to="/reports/stock-transactions" replace />} />
           <Route path="/stock-transactions" element={<Navigate to="/reports/stock-transactions" replace />} />
-          <Route path="/product-stock" element={<Navigate to="/reports/stock-transactions" replace />} />
 
           <Route path="/reports/goods-expected" element={<ProductStockPage defaultTab="goods-expected" />} />
           <Route path="/inventory/goods-expected" element={<ProductStockPage defaultTab="goods-expected" />} />
@@ -330,18 +329,7 @@ export function App() {
           <Route path="/delete-order-report/list" element={<Navigate to="/reports/deleted-orders" replace />} />
           <Route path="/deleted-orders" element={<Navigate to="/reports/deleted-orders" replace />} />
 
-          <Route
-            path="/reports/general"
-            element={
-              <ComingSoonPage
-                activeKey="reports-general"
-                title="General Reports"
-                subtitle="Generate and download business summaries and consolidated reports"
-                breadcrumbLabel="General Reports"
-                featureName="General Reports"
-              />
-            }
-          />
+          <Route path="/reports/general" element={<GeneralReportsPage />} />
 
           <Route path="/planning" element={<Navigate to="/dashboard" replace />} />
           <Route path="/tasks/my" element={<Navigate to="/tasks?tab=my" replace />} />
@@ -350,6 +338,8 @@ export function App() {
           <Route path="/tasks/calendar" element={<Navigate to="/tasks?tab=calendar" replace />} />
           <Route path="/technical-task/list" element={<TechnicalTasksPage />} />
           <Route path="/technical-tasks" element={<Navigate to="/technical-task/list" replace />} />
+          <Route path="/technical-task/call-logs" element={<Navigate to="/reports/general?tab=call-logs" replace />} />
+          <Route path="/masters/technical-task-types" element={<TechnicalTaskTypesPage />} />
           <Route path="/technician-operations" element={<TechnicianOperationsPage />} />
           <Route path="/technicians/gatepass" element={<Navigate to="/technician-operations?tab=gatepasses" replace />} />
           <Route path="/technicians/wallet" element={<Navigate to="/technician-operations?tab=wallets" replace />} />
@@ -398,10 +388,10 @@ export function App() {
           <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
           <Route path="/masters/products" element={<ProductsPage />} />
           <Route path="/masters/price-list" element={<PriceListPage />} />
-          <Route path="/price-list" element={<PriceListPage />} />
-          <Route path="/product-prices" element={<PriceListPage />} />
-          <Route path="/inventory/price-list" element={<PriceListPage />} />
-          <Route path="/inventory/product-prices" element={<PriceListPage />} />
+          <Route path="/price-list" element={<Navigate to="/masters/price-list" replace />} />
+          <Route path="/product-prices" element={<Navigate to="/masters/price-list" replace />} />
+          <Route path="/inventory/price-list" element={<Navigate to="/masters/price-list" replace />} />
+          <Route path="/inventory/product-prices" element={<Navigate to="/masters/price-list" replace />} />
           <Route path="/product/list" element={<ProductsPage />} />
           <Route path="/product" element={<Navigate to="/product/list" replace />} />
           <Route path="/product/addEdit" element={<ProductsPage defaultAdd={true} />} />

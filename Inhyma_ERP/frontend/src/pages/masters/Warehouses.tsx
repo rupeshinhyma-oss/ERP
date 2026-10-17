@@ -61,8 +61,6 @@ export function WarehousesPage() {
       liveModule="warehouses"
       entityName="warehouse"
       heading="Warehouses"
-      subtitle="Manage inventory facilities, transit depots, storage hubs, and fulfillment centers."
-      breadcrumbTrail={["Settings", "Masters", "Warehouses"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search Name, Billing Company or Sr. No..."
       hideQuickAdd={true}

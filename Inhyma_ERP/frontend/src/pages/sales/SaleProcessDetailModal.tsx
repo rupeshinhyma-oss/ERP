@@ -47,6 +47,7 @@ export function SaleProcessDetailModal({
   onClose,
   onStatusUpdated,
 }: SaleProcessDetailModalProps) {
+  console.log("SaleProcessDetailModal rendered with orderId:", orderId);
   const toast = useToast();
   const isTestMode = import.meta.env.MODE === "test";
   const initialOrder = isTestMode ? INITIAL_SALE_ORDERS?.find((it) => it.id === orderId) || null : null;
@@ -379,7 +380,7 @@ export function SaleProcessDetailModal({
                 color: "#1e293b",
               }}
             >
-              Sales Order: {order?.order_no || "Details"}
+              <span>Sales Details</span> • <span>Sales Order</span>: {order?.order_no || "Details"}
             </h2>
             {order && (
               <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 500, marginTop: "2px" }}>

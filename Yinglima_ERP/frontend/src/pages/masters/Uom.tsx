@@ -18,8 +18,6 @@ export function UomPage() {
       liveModule="uom"
       entityName="unit of measurement"
       heading="Units of Measurement"
-      subtitle="KG, GM, PCS, BOX, LTR, MTR, SET, PAIR and any others your products need."
-      breadcrumbTrail={["Master Data", "Units of Measurement"]}
       newButtonLabel="+ New UOM"
       searchPlaceholder="Search name or Sr. No..."
       hideQuickAdd={true}

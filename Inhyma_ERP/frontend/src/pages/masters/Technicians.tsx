@@ -32,8 +32,6 @@ export function TechniciansPage() {
       liveModule="technicians"
       entityName="Technician"
       heading="Technicians"
-      subtitle="Manage service engineers, field technicians, mobile contact numbers, and deployment cities."
-      breadcrumbTrail={["Settings", "Masters", "Technicians"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search..."
       hideQuickAdd={true}

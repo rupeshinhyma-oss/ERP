@@ -13,7 +13,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPatch, apiPost, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
@@ -956,8 +955,6 @@ export function SaleProcessFormPage() {
 
   return (
     <AppShell activeKey="sale-process">
-      <Breadcrumb trail={["Sale", "Sale Process", isEdit ? "Edit Sale Order" : "New Sale Order"]} />
-
       <div style={{ width: "100%", padding: "0 4px", boxSizing: "border-box" }}>
         {/* Header Bar */}
         <div
@@ -971,14 +968,9 @@ export function SaleProcessFormPage() {
           }}
         >
           <div>
-            <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#0f172a" }}>
+            <h1 className="page-title">
               {isEdit ? "Edit Sale Process Order" : "New Sale Process Order"}
             </h1>
-            <div style={{ marginTop: "4px", color: "#64748b", fontSize: "13px" }}>
-              {isEdit
-                ? "Update order details, logistics tracking, and item rates."
-                : "Select consignment from Shipment Planning to automatically load products and quantities."}
-            </div>
           </div>
 
           <div style={{ display: "flex", gap: "10px" }}>

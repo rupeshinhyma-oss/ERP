@@ -275,6 +275,19 @@ In accordance with system security standards, soft-deleted user accounts (`delet
 - **Property Guard**: `User.can_login` evaluates strictly to `False` if `deleted_at` is set.
 - **Restoration**: If an administrator restores the user from the Recycle Bin (clearing `deleted_at`), normal authentication capabilities are restored.
 
+### 6.5. Multi-ERP Identity Federation & Sign-Out Everywhere
+- **Inbound Central Token Revocation (`POST /api/v1/auth/internal/revoke-user-tokens`):**
+  - Receives global revocation signals dispatched by `ERP_Main` when a user executes "Sign Out Everywhere" or when an administrator revokes access centrally.
+  - Authenticated via shared microservice key (`X-Service-Key`).
+  - **Multi-Identifier Matching:** Resolves the local target user by inspecting all provided attributes: local primary key `id`, external `user_id` / `global_user_id`, normalized `email`, or `username`.
+  - Atomically revokes all matching records in `refresh_tokens`, updates user revocation cache, and pushes a real-time WebSocket `FORCE_LOGOUT` (`code: 4001`) event to terminate connected browser sessions instantly.
+- **Bi-Directional Password Synchronization:**
+  - **Outbound Sync (`erp_main_client.py`):** Whenever an authenticated user or administrator changes a password locally in Yinglima (`POST /users/{id}/reset-password` or `/auth/change-password`), the backend asynchronously pushes the new hash to `ERP_Main` (`POST /api/v1/auth/internal/sync-password`). If ERP_Main is temporarily unreachable, the call fails silently without rolling back the local transaction, and the Durable Access Sync Engine catches up queued updates.
+  - **Inbound Central Push:** When ERP_Main resets a password centrally, it updates the user's password hash in Yinglima via internal synchronization RPC.
+- **SSO Ecosystem Bridge & Switcher:**
+  - Supports incoming SSO handover tickets from `ERP_Main` (`POST /auth/sso/handover`) allowing authorized cross-ERP navigation without credential re-entry.
+  - Clears local session cache if an incoming ticket targets an identity differing from the currently active local user.
+
 ---
 
 ## 7. RBAC Engine, Departments & Effective Permissions
@@ -353,6 +366,12 @@ The RBAC engine secures every endpoint via `require_permission(code)` dependenci
   - **Collective Multi-Select & Bulk Deactivation:** The Users directory supports selecting multiple accounts via row/header checkboxes to execute bulk deactivation with built-in safety guardrails (protecting the administrator's own account, super-admin accounts, and already inactive accounts).
   - **Unified Edit User Profile & HR Details Drawer (Integrated Department Management):** The previous separate "Manage Departments" row action is now consolidated directly into the "Edit Profile" drawer. Administrators can manage basic identity, contact info, HR attributes, reporting manager, positions, and add/remove **Department & Role Assignments** (with assignment types and primary flags) in one unified interface without switching modals.
   - **Immediate Real-Time Force Logout:** "Force Logout" (`POST /users/{id}/force-logout`) provides guaranteed real-time session termination. It revokes device sessions in the database, caches a revocation timestamp (`auth_force_logout:{user_id}`) to instantly reject any in-flight access tokens on subsequent API calls, and pushes a real-time WebSocket disconnect event (`FORCE_LOGOUT`, code `4001`) that immediately clears client storage and redirects the active user to the login screen.
+  - **Central Identity Provider Integration (`ERP_Main`):**
+    - Yinglima acts as an autonomous spoke node under the central `ERP_Main` control plane.
+    - User accounts provisioned centrally in `ERP_Main` (`/access/users`) are automatically synchronized to Yinglima's local `users` directory via `POST /api/v1/internal/users/sync`.
+    - Revoking access or deprovisioning from `ERP_Main` soft-deletes the local user record (`is_active=False`, `deleted_at=now()`) and revokes all active session tokens.
+    - Password updates performed locally or centrally are propagated across the ecosystem via `erp_main_client.py` and `POST /api/v1/auth/internal/sync-password`.
+    - Central "Sign Out Everywhere" signals received at `POST /api/v1/auth/internal/revoke-user-tokens` cleanly match users across `id`, `user_id`, `email`, or `username` to invalidate local credentials and push WebSocket disconnection events.
 
 ### 8.3. Departments & Permissions (RBAC & Org Structure)
 - **Endpoints:** `GET /rbac/roles`, `POST /rbac/roles`, `PATCH /rbac/roles/{id}`, `DELETE /rbac/roles/{id}`, `POST /rbac/roles/{id}/delete-with-reassignment`, `PUT /rbac/users/{id}/permissions/bulk`, `GET /rbac/roles/{id}/hierarchy`, `POST /rbac/roles/{id}/parents`, `DELETE /rbac/roles/{id}/parents/{parent_id}`, `POST /rbac/roles/{id}/children`, `DELETE /rbac/roles/{id}/children/{child_id}`.
@@ -1024,4 +1043,73 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Responsive Collapse Mode**: Fully compatible with the 72px icon-collapsed sidebar state (`sidebarCollapsed`). Clicking the group icon expands the sidebar and group seamlessly.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 10, 2026 (Consolidated Collapsible Masters Accordion in Sidebar; Top-level Inquiries, Products, Suppliers & Buyers; Inquiry Lifecycle Tabs & Bulk Actions; zero regression).*
+
+## 16. Central Ecosystem Federation, DB-Backed Inbound Email Deduplication & Bootstrap Seed Guards
+
+### 16.1. Resilient Central Federation & Spoke Survival Mechanics
+In a distributed multi-ERP enterprise mesh where `ERP_Main` serves as the central control plane, spoke ERP instances (`Yinglima_ERP`, `Inhyma_ERP`) communicate with central for single sign-on (SSO), federation, and tenant verification.
+
+1. **Multi-URL Base Discovery (`erp_main_api_base_urls()` in `app/core/config.py`):**
+   - Automatically probes candidate URLs across `ERP_MAIN_API_BASE_URL`, `ERP_MAIN_URL`, and fallback platform URLs.
+   - Ensures continuous connectivity across custom cloud domains and internal container platforms (such as Render.com).
+2. **Explicit IPv4 Outbound Binding (`0.0.0.0`):**
+   - In `backend/app/federation/erp_main_client.py`, `httpx.AsyncClient` binds outbound traffic to `0.0.0.0`, eliminating IPv6 routing drops on container platforms.
+3. **40-Second Cold-Start Sleeping Budget:**
+   - Free/Starter cloud tiers spin down during inactivity. Federation requests allocate a 40.0-second total timeout budget (`httpx.Timeout(40.0, connect=20.0)`), allowing sleeping instances to cold-boot cleanly.
+4. **900-Second Stale Session Fallback Tolerance (`_from_cache`):**
+   - If central is undergoing deployment or experiencing network partitions, spoke backends retain active verified sessions in local memory cache for up to 900 seconds (15 minutes).
+   - The user session is authenticated with `session["_from_cache"] = True`, preventing enterprise operational lockouts.
+5. **Federation Health Diagnostic Endpoint (`GET /api/v1/health/federation`):**
+   - Provides live health and latency metrics against central endpoints without requiring a full SSO login attempt.
+   - Returns reachable candidate URL, latency in milliseconds, status code, and detailed fallback diagnosis.
+
+### 16.2. Platform-Gated Winsock DNS Resilience
+On Windows workstations and local developer environments, asynchronous DNS lookups in `asyncio` and `httpx` can trigger Winsock socket leaks (`WSAEADDRINUSE`) or silent lockups.
+- **Platform Gating (`sys.platform.startswith("win")`):**
+  - Winsock DNS caching is strictly restricted to Windows developer hosts.
+  - Production Linux containers run completely unaffected, relying on native `glibc` DNS resolvers.
+- **Port-Sensitive 5-Tuple DNS Cache:**
+  - Cache entries are keyed by `(host, port, family, type, proto)`, preserving specific port destinations and preventing localhost collisions when running multiple instances on `localhost:8000`, `8001`, and `8002`.
+
+### 16.3. Persistent Database Inbound Email Deduplication
+To completely eliminate duplicate AI quotation extraction and redundant supplier emails across worker restarts:
+- **Relational Deduplication Table (`email_inbound_processed`):**
+  - Tracks every ingested email by unique compound constraints: `message_id`, `uid`, `inquiry_id`, `supplier_id`, and `processed_at`.
+  - Before invoking OpenAI or processing mail body attachments, the worker checks `SELECT 1 FROM email_inbound_processed WHERE message_id = :mid`.
+- **Atomic Insertion Under Concurrency:**
+  - Ingestion commits a deduplication record in the same database transaction, preventing concurrent poller runs from double-billing AI extraction APIs.
+- **30-Minute Historical Baseline:**
+  - Inbound worker establishes a historical cutoff timestamp (`utcnow() - timedelta(minutes=30)`).
+  - Historical emails older than 30 minutes are stamped into the deduplication ledger without triggering repetitive quotes, ensuring newly started workers process only fresh inbound communications.
+
+### 16.4. Idempotent Deployment & First-Install Seed Protection
+Production database seeds (`backend/scripts/seed.py`) run during automated container build and start phases (e.g. `render.yaml`).
+- **First-Install Guard (`BOOTSTRAP_FORCE_RESET`):**
+  - If existing organization, user, or role records are detected in the database, `seed.py` immediately skips mutating live production accounts.
+  - Destructive re-seeding is strictly prohibited unless `BOOTSTRAP_FORCE_RESET=true` is explicitly injected into environment variables.
+- **Geography & Master Data Protection:**
+  - Countries, States, Districts, and Cities are verified for existing records before running bulk insert scripts.
+- **SSO Handover Local Account Guards:**
+  - If a user exists in the spoke ERP but has `is_active=False` or `deleted_at IS NOT NULL`, `POST /api/v1/auth/sso-handover` rejects handover with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
+  - If a user does not exist locally and `SSO_HANDOVER_AUTO_PROVISION=false`, access is cleanly rejected with `403 Forbidden`.
+
+### 16.5. Database-Backed Organization Branding & Storage Quota Protection
+Enterprise logos and branding assets are stored directly in PostgreSQL with public streaming:
+- **Endpoint `GET /api/v1/organizations/logo?v={sha1}`:**
+  - Streams high-resolution PNG/JPEG binary data with long-term `Cache-Control: public, max-age=86400, immutable`.
+  - The query parameter `v` contains a SHA-1 hash of the image content, forcing immediate browser cache refresh upon logo replacement.
+- **Client Storage Quota Protections (`try/catch` in `brand.ts` and `Organization.tsx`):**
+  - Storing massive Base64 strings in browser `localStorage` causes `QuotaExceededError` crashes on mobile or restricted webview browsers.
+  - All brand caching operations are wrapped in graceful quota guards that safely degrade to in-memory state or remote streaming without throwing unhandled exceptions.
+
+### 16.6. Universal Filter Button UI Standardization
+All module page headers utilize a uniform filter toggle button matching the Companies reference:
+- **Color Palette:** Solid `#556987` background, `#475569` on hover, permanently locked to `#556987` when active or open.
+- **Geometry & Padding:** `padding: 8px 14px; border-radius: 6px; border: none; box-shadow: 0 2px 4px rgba(0,0,0,0.1);`. Hardcoded fixed dimensions (`38px x 38px`, `min-width: 36px`) are removed to prevent distorted square buttons.
+- **Funnel Icon:** Embedded 16×16px SVG funnel icon.
+- **Clean Surface:** No internal counter badges or notification dots on the button face.
+- **Initial State Invariant:** All filter panels and drawers initialize collapsed (`useState(false)`).
+
+---
+*Maintained and verified for Inhyma Solutions Enterprise ERP (Yinglima Node). Last updated: October 2026 (Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, Database-Backed Branding, Universal Filter Standardization).*
+

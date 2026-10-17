@@ -1314,6 +1314,18 @@ Manage complete vendor team directory:
     - Inline selector to add new departments with role dropdown, assignment type, and effective dates.
     - Synchronizes changes immediately upon addition or removal without closing the drawer, eliminating the need for a separate modal.
 
+### 15.1.2. Cross-ERP User Federation, Password Synchronization & Sign-Out Everywhere
+- **Central Control Plane Sync (`ERP_Main`):**
+  - Users created or updated in `ERP_Main` with access to Yinglima are provisioned via `POST /api/v1/internal/users/sync`.
+  - Unchecking Yinglima access in `ERP_Main` soft-deletes the local user record (`is_active=False`, `deleted_at=now()`) and revokes all active sessions.
+- **Bi-Directional Password Synchronization:**
+  - Password changes initiated in Yinglima (`POST /users/{id}/reset-password` or `/auth/change-password`) asynchronously push the updated Argon2id hash to `ERP_Main` (`POST /api/v1/auth/internal/sync-password`), which then fans out to peer spokes (e.g. Inhyma).
+  - Outbound calls fail silently if `ERP_Main` is unreachable, with the Durable Access Sync Engine handling queued synchronizations.
+- **Global Sign-Out Everywhere Fanout:**
+  - When `ERP_Main` issues a global signout fanout, Yinglima receives `POST /api/v1/auth/internal/revoke-user-tokens`.
+  - **Multi-Identifier Matching:** Accurately locates local user by `id`, `user_id`, `email`, or `username`.
+  - Instantly revokes all active refresh tokens and pushes WebSocket `FORCE_LOGOUT` (`code 4001`) to connected browser sessions.
+
 ### 15.5. Test Cases for Users Module
 - [ ] Open `/users`, verify User Accounts & Passwords table loads with search bar, status dropdown filter, and `+ Create User Account` button.
 - [ ] Verify each row has a checkbox and the table header has a `select-all-checkbox`.
@@ -1329,6 +1341,8 @@ Manage complete vendor team directory:
   - User's active session is terminated in the database.
   - User's active browser tabs receive a real-time WebSocket disconnect (`code 4001`) and are immediately redirected to `/login`.
   - In-flight access tokens are invalidated via cache timestamp check (`auth_force_logout:{user_id}`).
+- [ ] **Cross-ERP Sign-Out Everywhere**: When sign-out everywhere is triggered from `ERP_Main`, verify Yinglima's `POST /api/v1/auth/internal/revoke-user-tokens` receives the call, matches the user via multi-identifier resolution, revokes tokens, and logs the user out.
+- [ ] **Bi-Directional Password Sync**: Change a user's password locally in Yinglima. Verify that `ERP_Main` receives the update via `POST /api/v1/auth/internal/sync-password` and propagates it to Inhyma without errors.
 - [ ] Click `✏️ Edit Profile` on a user row. Verify:
   - Drawer opens with identity, HR attributes, and dynamically populated **Position** dropdown.
   - **Department & Role Assignments** section is displayed directly inside the drawer.

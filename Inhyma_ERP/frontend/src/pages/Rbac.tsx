@@ -763,9 +763,6 @@ export function RbacPage() {
                   <h1 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>
                     {viewingRole.id ? `Department: ${roleDisplayName(viewingRole.name)}` : "Create New Department"}
                   </h1>
-                  <p className="page-subtitle" style={{ margin: "2px 0 0", fontSize: "13px" }}>
-                    Configure department details, assigned permissions, and user memberships.
-                  </p>
                 </div>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
@@ -1628,7 +1625,6 @@ export function RbacPage() {
             <div className="page-header">
               <div>
                 <h1>Departments &amp; Permissions</h1>
-                <div className="page-subtitle">Configure user access departments, system privileges, and permissions.</div>
               </div>
               <div className="page-header-actions">
                 {canCreateRole && (

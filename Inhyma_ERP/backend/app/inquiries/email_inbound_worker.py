@@ -84,6 +84,9 @@ class EmailInboundWorker:
             except Exception:
                 pass
         self._initialized = bool(self._seen_message_ids)
+        self._db_ready = False
+        self._table_was_empty = False
+        self._baseline_done = False
 
     def _save_seen_id(self, msg_id: str) -> None:
         if not msg_id:
@@ -95,6 +98,93 @@ class EmailInboundWorker:
                 json.dump(list(self._seen_message_ids), f, indent=2)
         except Exception:
             pass
+
+    # ------------------------------------------------------------------------------------------------------------
+    # "Already processed" memory lives in the DATABASE (table email_inbound_processed), not in a local file.
+    #
+    # Why: this worker re-reads the last mails of INBOX and Sent on every poll.  The old local JSON file was wiped on
+    # every Render restart/deploy and was not shared between workers or machines, so after each restart the same
+    # emails were processed again -- recreating quotations/messages (even deleted ones) and spending AI tokens.
+    # A message id is now CLAIMED atomically (INSERT ... ON CONFLICT DO NOTHING), so it is handled exactly once no
+    # matter how many workers/servers poll the same mailbox, and survives restarts and deploys.
+    # ------------------------------------------------------------------------------------------------------------
+    async def _ensure_seen_table(self) -> bool:
+        if self._db_ready:
+            return True
+        try:
+            async with get_sessionmaker()() as session:
+                await session.execute(
+                    text(
+                        "CREATE TABLE IF NOT EXISTS email_inbound_processed ("
+                        "message_id TEXT PRIMARY KEY, processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+                    )
+                )
+                rows = (await session.execute(text("SELECT message_id FROM email_inbound_processed"))).scalars().all()
+                self._table_was_empty = not rows
+                self._seen_message_ids.update(rows)
+                # carry over anything the old local file already knew about
+                for known in [m for m in self._seen_message_ids if m not in set(rows)]:
+                    await session.execute(
+                        text("INSERT INTO email_inbound_processed (message_id) VALUES (:m) ON CONFLICT (message_id) DO NOTHING"),
+                        {"m": known},
+                    )
+                await session.commit()
+            self._db_ready = True
+        except Exception as exc:  # never let bookkeeping stop mail handling
+            logger.warning("Could not use the database for processed-email tracking (%s); using the local file.", exc)
+            return False
+        return True
+
+    async def _claim_message_id(self, msg_id: str) -> bool:
+        """True if THIS caller is the first to claim the message (go ahead and process it); False if already handled."""
+        if not msg_id:
+            return True
+        if msg_id in self._seen_message_ids:
+            return False
+        if await self._ensure_seen_table():
+            try:
+                async with get_sessionmaker()() as session:
+                    result = await session.execute(
+                        text("INSERT INTO email_inbound_processed (message_id) VALUES (:m) ON CONFLICT (message_id) DO NOTHING"),
+                        {"m": msg_id},
+                    )
+                    await session.commit()
+                self._seen_message_ids.add(msg_id)
+                # rowcount 0 = another worker/server already claimed it.  Any other value (incl. a driver that
+                # cannot report one) means we go ahead -- a duplicate is better than a lost supplier email.
+                return getattr(result, "rowcount", 1) != 0
+            except Exception as exc:
+                logger.warning("Processed-email claim failed (%s); using the local file.", exc)
+        self._save_seen_id(msg_id)
+        return True
+
+    async def _baseline_existing_mail(self, emails: list) -> None:
+        """
+        First run against a database that has no record of processed mail: mark OLD messages as already handled (they
+        were processed before this safeguard existed) so that deploying it never re-imports history.  Mail from the
+        last 30 minutes is left alone and processed normally.
+        """
+        from datetime import timedelta, timezone
+        from email.utils import parsedate_to_datetime
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        marked = 0
+        for _eid, raw in emails:
+            try:
+                parsed = email.message_from_bytes(raw)
+                mid = (parsed.get("Message-ID") or "").strip()
+                date_header = parsed.get("Date")
+                if not mid or not date_header:
+                    continue
+                sent = parsedate_to_datetime(date_header)
+                if sent.tzinfo is None:
+                    sent = sent.replace(tzinfo=timezone.utc)
+                if sent < cutoff:
+                    await self._claim_message_id(mid)
+                    marked += 1
+            except Exception:
+                continue
+        logger.info("Email worker baseline: %d existing message(s) marked as already processed.", marked)
 
     async def start(self) -> None:
         """Start the background email poller task."""
@@ -183,6 +273,11 @@ class EmailInboundWorker:
         if not unread_emails:
             return
 
+        if not self._baseline_done and await self._ensure_seen_table():
+            self._baseline_done = True
+            if self._table_was_empty:
+                await self._baseline_existing_mail(unread_emails)
+
         for email_id, raw_bytes in unread_emails:
             try:
                 await self._process_single_email(raw_bytes)
@@ -193,10 +288,8 @@ class EmailInboundWorker:
         """Parse raw email, extract quotation via AI, and save to ERP."""
         msg = email.message_from_bytes(raw_email_bytes)
         msg_id = (msg.get("Message-ID") or "").strip()
-        if msg_id and msg_id in self._seen_message_ids:
+        if msg_id and not await self._claim_message_id(msg_id):
             return
-        if msg_id:
-            self._save_seen_id(msg_id)
 
         from_raw = clean_decode_header(msg.get("From", ""))
         sender_email = extract_email_address(from_raw)

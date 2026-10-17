@@ -11,14 +11,14 @@
  * - Fully styled with ERP native design tokens & vanilla CSS (zero unstyled Tailwind dependencies)
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPatch, apiPost, apiPostMultipart, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
+import { SearchableDropdown } from "@/components/SearchableDropdown";
 import type { LocalPurchaseDetail, LocalPurchaseItem } from "@/types/localPurchase";
 
 export function LocalPurchaseFormPage() {
@@ -70,6 +70,7 @@ export function LocalPurchaseFormPage() {
 
   // Bill file extraction
   const [billFile, setBillFile] = useState<File | null>(null);
+  const [billFileUrl, setBillFileUrl] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -96,8 +97,8 @@ export function LocalPurchaseFormPage() {
   const [initialLoading, setInitialLoading] = useState(isEdit);
 
   // Lookups
-  const supplierLookup = useLookup<{ id: string; company_name: string }>(
-    "/suppliers?page_size=1000",
+  const supplierLookup = useLookup<{ id: string; company_name: string; supplier_type?: string }>(
+    "/suppliers",
     500
   );
   const hsnLookup = useLookup<{ id: string; code: string }>("/masters/hsn", 500);
@@ -112,6 +113,55 @@ export function LocalPurchaseFormPage() {
     packaging_quantity?: number;
     minimum_order_quantity?: number;
   }>("/masters/products", 1000);
+
+  // Type-ahead Supplier search & label fetchers
+  const supplierFetcher = useCallback(
+    async (term: string) => {
+      let list = supplierLookup.items || [];
+      if (!list || list.length === 0) {
+        try {
+          const res = await apiGet<any>("/suppliers?page_size=1000");
+          const items = Array.isArray(res.data) ? res.data : res.data?.items || [];
+          list = items;
+        } catch {
+          list = [];
+        }
+      }
+      const clean = term.trim().toLowerCase();
+      const filtered = clean
+        ? list.filter((s: { id: string; company_name: string; supplier_type?: string }) => {
+            const name = (s.company_name || "").toLowerCase();
+            const type = (s.supplier_type || "").toLowerCase();
+            return name.includes(clean) || type.includes(clean);
+          })
+        : list;
+      return filtered.map((s: { id: string; company_name: string; supplier_type?: string }) => ({
+        value: s.id,
+        label: s.company_name,
+        sublabel: s.supplier_type || undefined,
+      }));
+    },
+    [supplierLookup.items]
+  );
+
+  const supplierLabelFetcher = useCallback(
+    async (supId: string) => {
+      if (!supId) return "";
+      let list = supplierLookup.items || [];
+      if (!list || list.length === 0) {
+        try {
+          const res = await apiGet<any>("/suppliers?page_size=1000");
+          const items = Array.isArray(res.data) ? res.data : res.data?.items || [];
+          list = items;
+        } catch {
+          list = [];
+        }
+      }
+      const match = list.find((s: { id: string; company_name: string }) => s.id === supId);
+      return match ? match.company_name : supplierName || supId;
+    },
+    [supplierLookup.items, supplierName]
+  );
 
   // Load existing purchase for Edit mode
   useEffect(() => {
@@ -133,6 +183,7 @@ export function LocalPurchaseFormPage() {
           setOtherExpense((data as any).other_expense || "");
           setRemarks(data.remarks || "");
           setStatus(data.status || "Confirmed");
+          setBillFileUrl(data.bill_file_url || null);
           setItems(data.items || []);
         }
       } catch (err) {
@@ -159,41 +210,49 @@ export function LocalPurchaseFormPage() {
 
     // Auto-update existing lines that have unit_rate === 0 if quotes exist for this supplier
     if (supId && items.length > 0) {
-      const pendingItems = items.filter((it) => it.product_id && (!it.unit_rate || Number(it.unit_rate) <= 0));
-      if (pendingItems.length > 0) {
-        for (let i = 0; i < items.length; i++) {
-          const it = items[i];
-          if (it.product_id && (!it.unit_rate || Number(it.unit_rate) <= 0)) {
+      const pendingIndices = items
+        .map((it, idx) => ({ it, idx }))
+        .filter(({ it }) => it.product_id && (!it.unit_rate || Number(it.unit_rate) <= 0));
+
+      if (pendingIndices.length > 0) {
+        // Fetch all quotes in parallel
+        const quoteResults = await Promise.all(
+          pendingIndices.map(async ({ it, idx }) => {
             try {
               const res = await apiGet<Array<{ supplier_id: string; unit_price?: number | null; moq?: number | null }>>(
                 `/inventory/product-prices/${it.product_id}/suppliers`
               );
               const quotes = Array.isArray(res.data) ? res.data : [];
               const match = quotes.find((q) => q.supplier_id === supId);
-              if (match && match.unit_price != null && Number(match.unit_price) > 0) {
-                setItems((prev) => {
-                  const next = [...prev];
-                  if (next[i]) {
-                    const newQty =
-                      (next[i].quantity === "" || !next[i].quantity || Number(next[i].quantity) <= 0) &&
-                      match.moq &&
-                      Number(match.moq) > 0
-                        ? Number(match.moq)
-                        : next[i].quantity;
-                    next[i] = {
-                      ...next[i],
-                      unit_rate: Number(match.unit_price),
-                      quantity: newQty,
-                    };
-                  }
-                  return next;
-                });
-              }
+              return { idx, match };
             } catch {
-              // quiet
+              return { idx, match: undefined };
+            }
+          })
+        );
+
+        setItems((prev) => {
+          const next = [...prev];
+          let changed = false;
+          for (const { idx, match } of quoteResults) {
+            if (match && match.unit_price != null && Number(match.unit_price) > 0 && next[idx]) {
+              const current = next[idx];
+              const newQty =
+                (current.quantity === "" || !current.quantity || Number(current.quantity) <= 0) &&
+                match.moq &&
+                Number(match.moq) > 0
+                  ? Number(match.moq)
+                  : current.quantity;
+              next[idx] = {
+                ...current,
+                unit_rate: Number(match.unit_price),
+                quantity: newQty,
+              };
+              changed = true;
             }
           }
-        }
+          return changed ? next : prev;
+        });
       }
     }
   };
@@ -624,17 +683,33 @@ export function LocalPurchaseFormPage() {
         const d = res.data;
         if (d.supplier_id) {
           setSupplierId(d.supplier_id);
-          setSupplierName(d.supplier_name || "");
-        } else if (d.supplier_name && !supplierId) {
-          const match = supplierLookup.items?.find((s: { id: string; company_name: string }) =>
-            s.company_name.toLowerCase().includes(d.supplier_name.toLowerCase())
-          );
+          const found = supplierLookup.items?.find((s: { id: string; company_name: string }) => s.id === d.supplier_id);
+          setSupplierName(found?.company_name || d.supplier_name || "");
+          setErrors((prev) => {
+            const next = { ...prev };
+            delete next.supplier_id;
+            return next;
+          });
+        } else if (d.supplier_name) {
+          const cleanExtracted = d.supplier_name.trim().toLowerCase();
+          const match = supplierLookup.items?.find((s: { id: string; company_name: string }) => {
+            const cn = s.company_name.trim().toLowerCase();
+            return cn === cleanExtracted || cn.includes(cleanExtracted) || cleanExtracted.includes(cn);
+          });
           if (match) {
             setSupplierId(match.id);
             setSupplierName(match.company_name);
+            setErrors((prev) => {
+              const next = { ...prev };
+              delete next.supplier_id;
+              return next;
+            });
+          } else {
+            setSupplierName(d.supplier_name);
           }
         }
 
+        if (d.bill_file_url) setBillFileUrl(d.bill_file_url);
         if (d.invoice_no) setInvoiceNo(d.invoice_no);
         if (d.invoice_date) setInvoiceDate(d.invoice_date);
         if (d.currency) setCurrency(d.currency);
@@ -840,6 +915,7 @@ export function LocalPurchaseFormPage() {
         invoice_date: invoiceDate,
         currency: currency,
         invoice_total_value: Number(invoiceTotalValue),
+        bill_file_url: billFileUrl || null,
         packing_forwarding: Number(packingForwarding) || 0,
         transport_expense: Number(transportExpense) || 0,
         offloading_expense: Number(offloadingExpense) || 0,
@@ -889,11 +965,10 @@ export function LocalPurchaseFormPage() {
     <AppShell activeKey="local-purchases">
       <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
         <form onSubmit={handleSubmit} noValidate>
-          {/* Header Breadcrumb & Back Navigation */}
+          {/* Header & Back Navigation */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
-              <Breadcrumb trail={["Purchase", "Local Purchase", isEdit ? "Edit Purchase" : "Add Purchase"]} />
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0f172a", margin: "4px 0 0 0" }}>
+              <h1 className="page-title">
                 {isEdit ? `Edit Local Purchase: ${invoiceNo || "Invoice"}` : "New Local Purchase Order"}
               </h1>
             </div>
@@ -1006,41 +1081,27 @@ export function LocalPurchaseFormPage() {
               border: "1px solid #cbd5e1",
               marginBottom: "16px",
               boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              overflow: "visible",
             }}
           >
             <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "16px", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
               <span style={{ color: "#0061f2" }}>📄</span> Procurement & Invoice Essentials
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "16px", overflow: "visible" }}>
               {/* 1. Supplier */}
-              <div>
+              <div style={{ position: "relative", zIndex: 50 }}>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Supplier <span style={{ color: "#ef4444" }}>*</span>
                 </label>
-                <select
-                  value={supplierId}
-                  onChange={(e) => handleSelectSupplier(e.target.value)}
-                  required
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: "6px",
-                    border: errors.supplier_id ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                    boxShadow: errors.supplier_id ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-                    background: errors.supplier_id ? "#fff5f5" : "#ffffff",
-                    fontSize: "13px",
-                    color: "#0f172a",
-                    fontWeight: 500,
-                  }}
-                >
-                  <option value="">Select Supplier</option>
-                  {supplierLookup.items?.map((sup: { id: string; company_name: string }) => (
-                    <option key={sup.id} value={sup.id}>
-                      {sup.company_name}
-                    </option>
-                  ))}
-                </select>
+                <SearchableDropdown
+                  value={supplierId || null}
+                  onChange={(val) => handleSelectSupplier(val || "")}
+                  placeholder="Type to search supplier (e.g. Sanlite, LT, Youngsun)..."
+                  fetchOptions={supplierFetcher}
+                  fetchLabelForValue={supplierLabelFetcher}
+                  hasError={Boolean(errors.supplier_id)}
+                />
                 {errors.supplier_id ? (
                   <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
                     <span>▲</span> {errors.supplier_id}
@@ -1186,14 +1247,14 @@ export function LocalPurchaseFormPage() {
               {/* Bill File Upload & Extract Action */}
               <div>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
-                  Bill Document File <span style={{ fontWeight: 400, color: "#64748b" }}>(PDF or Excel sheet)</span>
+                  Bill Document File <span style={{ fontWeight: 400, color: "#64748b" }}>(PDF, Image, or Excel sheet)</span>
                 </label>
                 <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                   <div style={{ position: "relative", flex: 1 }}>
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".pdf,.xlsx,.xls,.csv"
+                      accept=".pdf,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.webp"
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
                           setBillFile(e.target.files[0]);
@@ -1257,6 +1318,33 @@ export function LocalPurchaseFormPage() {
                   >
                     {extracting ? "⏳ Extracting..." : "⚡ Extract Bill Data"}
                   </button>
+
+                  {billFileUrl && (
+                    <a
+                      href={billFileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      download
+                      style={{
+                        background: "#ecfdf5",
+                        color: "#059669",
+                        border: "1px solid #a7f3d0",
+                        padding: "8px 14px",
+                        borderRadius: "6px",
+                        fontWeight: 700,
+                        fontSize: "12.5px",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        whiteSpace: "nowrap",
+                        textDecoration: "none",
+                      }}
+                      title="Download bill document stored in Supabase"
+                    >
+                      📥 Download Stored Bill
+                    </a>
+                  )}
                 </div>
               </div>
             </div>

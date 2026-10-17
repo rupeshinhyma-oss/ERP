@@ -27,8 +27,6 @@ import {
   type CompanyAutocompleteItem,
 } from "@/components/ClientNameAutocomplete";
 import { apiGet, apiPost, apiDelete } from "@/lib/api";
-import { IconFilter } from "@/components/icons";
-
 export interface FollowUpItem {
   id: string;
   company_name: string;
@@ -1338,7 +1336,7 @@ export default function FollowUpsPage() {
           }}
         >
           <div>
-            <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#1e293b" }}>Follow Ups</h1>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Follow Ups</h1>
             <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>
               Telecalling interaction logs, client follow-up classifications, and scheduled inquiry logs.
             </p>
@@ -1350,23 +1348,25 @@ export default function FollowUpsPage() {
             <button
               id="btn-toggle-filter"
               type="button"
+              className="btn btn-filter-toggle"
               onClick={() => setIsFilterOpen(!isFilterOpen)}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                width: "40px",
-                height: "38px",
                 borderRadius: "6px",
                 border: "none",
-                background: isFilterOpen ? "#0061f2" : "#5a6a85",
+                padding: "8px 14px",
+                background: "#556987",
                 color: "#ffffff",
                 cursor: "pointer",
-                transition: "all 0.15s ease",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
               title="Toggle Filter Options"
             >
-              <IconFilter style={{ width: "18px", height: "18px" }} />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
             </button>
 
             {/* + ADD NEW Button */}

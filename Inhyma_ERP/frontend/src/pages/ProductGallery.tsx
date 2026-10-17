@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { apiGet, apiPatch, API_ORIGIN } from "@/lib/api";
 import { usePendingGuard, useAuth } from "@/lib/hooks";
@@ -515,14 +514,9 @@ export function ProductGalleryPage() {
   return (
     <AppShell activeKey="product-gallery">
       <main className="page">
-        <Breadcrumb trail={["Inventory", "Product & Supplier Gallery"]} />
-
-        <div className="page-header" style={{ marginBottom: "20px" }}>
+        <div className="page-header" style={{ marginBottom: "16px" }}>
           <div>
-            <h1>Product &amp; Supplier Gallery</h1>
-            <div className="page-subtitle">
-              Visual catalog of product images, supplier factory visits, and quotation document sheets.
-            </div>
+            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Product &amp; Supplier Gallery</h1>
           </div>
         </div>
 

@@ -129,7 +129,11 @@ class ProvisioningReconciliationWorker:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.exception("Error in ProvisioningReconciliationWorker sweep: %s", exc)
+                exc_str = str(exc)
+                if "getaddrinfo" in exc_str or "gaierror" in exc_str or "11001" in exc_str or "CannotConnectError" in exc_str:
+                    logger.warning("ProvisioningReconciliationWorker sweep deferred (network/DNS transient error): %s", exc)
+                else:
+                    logger.exception("Error in ProvisioningReconciliationWorker sweep: %s", exc)
 
             # Second, independent sweep: retry access removals/restorations the ERP has not confirmed yet.
             try:
@@ -145,7 +149,11 @@ class ProvisioningReconciliationWorker:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.exception("Error in access-sync sweep: %s", exc)
+                exc_str = str(exc)
+                if "getaddrinfo" in exc_str or "gaierror" in exc_str or "11001" in exc_str or "CannotConnectError" in exc_str:
+                    logger.warning("access-sync sweep deferred (network/DNS transient error): %s", exc)
+                else:
+                    logger.exception("Error in access-sync sweep: %s", exc)
 
             # Sleep until interval expires or an external trigger/stop event occurs
             interval = settings.PROVISIONING_RECONCILIATION_INTERVAL_SECONDS

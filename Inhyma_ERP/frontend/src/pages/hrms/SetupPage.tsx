@@ -1198,9 +1198,6 @@ export function SetupPage() {
         <div className="page-header">
           <div>
             <h1>HRMS Setup</h1>
-            <div className="page-subtitle">
-              Configure HRMS global policies, leave types, expense limits, geofencing, tracking parameters, and attendance export.
-            </div>
           </div>
         </div>
 

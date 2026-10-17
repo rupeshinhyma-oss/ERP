@@ -11,10 +11,10 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Computed, Date, DateTime, ForeignKey, Numeric, SmallInteger, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 class TechnicalTask(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
@@ -23,6 +23,8 @@ class TechnicalTask(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Sof
     __tablename__ = "technical_tasks"
 
     company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # Link to the company master (company_name stays as a denormalised display value for old rows).
+    company_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
     task_type: Mapped[str] = mapped_column(String(100), nullable=False, default="In-House", index=True)
     city: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     third_party: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -43,6 +45,7 @@ class TechnicalTask(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Sof
     # Creation metadata
     created_by_name: Mapped[str] = mapped_column(String(100), nullable=False, default="Admin")
     task_created_date: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
     creator_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Service & Call details
@@ -56,14 +59,25 @@ class TechnicalTask(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Sof
     task_approved_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     task_allotted_to: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     approver_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    technician_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     scheduled_visit_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Financial & Lifecycle status
     payment_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     payment_mode: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    collected_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     payment_screenshot: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="Pending", index=True)
     cancel_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Database-maintained sort key: Pending, Approved, Payment Pending, Completed, Cancel (index-backed ordering).
+    status_rank: Mapped[int] = mapped_column(
+        SmallInteger,
+        Computed(
+            "CASE lower(status) WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 "
+            "WHEN 'payment pending' THEN 2 WHEN 'payment_pending' THEN 2 WHEN 'completed' THEN 3 ELSE 4 END",
+            persisted=True,
+        ),
+    )
     completed_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Call Logs relationship

@@ -771,8 +771,6 @@ export function GlobalUsers() {
     <AppShell
       activeKey="users"
       pageTitle="Global Users"
-      pageSubtitle="Manage global platform identities, authentication status, and ERP memberships."
-      breadcrumbs={["User & Access", "Global Users"]}
       actions={
         <button
           type="button"

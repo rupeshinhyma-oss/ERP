@@ -10,6 +10,7 @@ Business logic for:
 
 from __future__ import annotations
 
+import base64
 import csv
 import io
 import json
@@ -385,6 +386,9 @@ class LocalPurchaseService:
     async def match_product(self, name_or_code: str) -> tuple[uuid.UUID | None, str | None, str | None, float]:
         """Fuzzy match product in Product Master to inherit ID, Code, HSN, and VAT %."""
         clean = name_or_code.strip()
+        if not clean or not self.session:
+            return None, None, None, 13.0
+
         stmt = (
             select(Product)
             .where(
@@ -411,6 +415,9 @@ class LocalPurchaseService:
     async def match_supplier(self, name: str) -> tuple[uuid.UUID | None, str]:
         """Fuzzy match supplier in Supplier Master."""
         clean = name.strip()
+        if not clean or not self.session:
+            return None, name
+
         stmt = (
             select(Supplier)
             .where(
@@ -430,18 +437,41 @@ class LocalPurchaseService:
         filename: str,
     ) -> BillExtractionResponse:
         """
-        Dual Bill Extraction Engine:
+        Multi-modal Bill Extraction Engine:
         - Excel (.xlsx, .xls, .csv): parsed via openpyxl / csv
-        - PDF: parsed via pypdf text extraction + OpenAI / regex pattern matching
+        - PDF: parsed via pypdf text extraction + Vision AI fallback on scanned images
+        - Images (.png, .jpg, .jpeg, .webp): parsed via GPT-4o-mini Vision
+        - Files are automatically saved to Supabase Storage in 'purchase-bills' bucket
         """
+        # Upload bill file directly to Supabase Storage
+        bill_file_url: str | None = None
+        try:
+            from app.common.storage import upload_to_supabase, guess_content_type
+            safe_name = f"{uuid.uuid4().hex[:12]}_{filename}"
+            bill_file_url = await upload_to_supabase(
+                bucket="purchase-bills",
+                filename=safe_name,
+                content=file_bytes,
+                content_type=guess_content_type(filename),
+            )
+        except Exception as err:
+            logger.warning("Supabase storage upload failed for bill %s: %s", filename, err)
+
         ext = filename.lower().split(".")[-1]
 
         if ext in ("xlsx", "xls", "csv"):
-            return await self._extract_from_excel(file_bytes, ext)
+            result = await self._extract_from_excel(file_bytes, ext)
         elif ext == "pdf":
-            return await self._extract_from_pdf(file_bytes)
+            result = await self._extract_from_pdf(file_bytes)
+        elif ext in ("png", "jpg", "jpeg", "webp"):
+            result = await self._extract_from_image(file_bytes, ext)
         else:
-            raise BadRequestException(f"Unsupported bill file format '.{ext}'. Please upload PDF or Excel (.xlsx/.csv).")
+            raise BadRequestException(f"Unsupported bill file format '.{ext}'. Please upload PDF, Image, or Excel (.xlsx/.csv).")
+
+        if bill_file_url:
+            result.bill_file_url = bill_file_url
+
+        return result
 
     async def _extract_from_excel(self, file_bytes: bytes, ext: str) -> BillExtractionResponse:
         """Extract items from an Excel or CSV invoice."""
@@ -611,13 +641,25 @@ class LocalPurchaseService:
                 full_text += t + "\n"
 
         if not full_text.strip():
+            # Scanned PDF: Check for embedded images in pages
+            openai_key = os.getenv("OPENAI_API_KEY", "").strip() or OPENAI_API_KEY
+            if openai_key:
+                for page in reader.pages:
+                    if getattr(page, "images", None) and len(page.images) > 0:
+                        try:
+                            first_img = page.images[0]
+                            mime = "image/png" if first_img.name.lower().endswith(".png") else "image/jpeg"
+                            return await self._extract_with_vision(first_img.data, openai_key, mime_type=mime)
+                        except Exception as e:
+                            logger.warning("PDF vision extraction from embedded image failed: %s", e)
+
             return BillExtractionResponse(
-                notes="Could not extract text from PDF: The document contains no selectable digital text layer (it may be a scanned image or vector drawing). Please upload a digital text invoice or Excel sheet (.xlsx/.csv).",
+                notes="Could not extract text from PDF: The document contains no selectable digital text layer (it may be a scanned image or vector drawing). Please upload a digital text invoice, image photo, or Excel sheet (.xlsx/.csv).",
                 items=[],
             )
 
         # Attempt AI extraction if OpenAI or Gemini key is configured
-        openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+        openai_key = os.getenv("OPENAI_API_KEY", "").strip() or OPENAI_API_KEY
         if openai_key:
             try:
                 return await self._extract_with_openai(full_text, openai_key)
@@ -626,6 +668,115 @@ class LocalPurchaseService:
 
         # Regex fallback parser
         return await self._extract_with_regex(full_text)
+
+    async def _extract_from_image(self, file_bytes: bytes, ext: str) -> BillExtractionResponse:
+        """Extract invoice details and items directly from an image file using GPT-4o-mini Vision."""
+        openai_key = os.getenv("OPENAI_API_KEY", "").strip() or OPENAI_API_KEY
+        if not openai_key:
+            return BillExtractionResponse(
+                notes="OpenAI API key is not configured for image bill extraction.",
+                items=[],
+            )
+        mime_map = {
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+        }
+        mime_type = mime_map.get(ext.lower(), "image/jpeg")
+        return await self._extract_with_vision(file_bytes, openai_key, mime_type=mime_type)
+
+    async def _extract_with_vision(self, image_bytes: bytes, api_key: str, mime_type: str = "image/jpeg") -> BillExtractionResponse:
+        """Use GPT-4o-mini Vision to parse structured bill details from an invoice image."""
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        prompt = (
+            "You are an expert procurement accountant. Extract invoice details from the attached invoice image.\n"
+            "Return valid JSON matching this structure exactly:\n"
+            "{\n"
+            '  "supplier_name": "Supplier Company Name",\n'
+            '  "invoice_no": "INV-12345",\n'
+            '  "invoice_date": "YYYY-MM-DD",\n'
+            '  "currency": "INR",\n'
+            '  "invoice_total_value": 12345.67,\n'
+            '  "items": [\n'
+            '    {"product_name": "...", "product_code": "...", "hsn_code": "...", "quantity": 10, "unit_rate": 50.0, "vat_rate": 18.0, "item_total": 500.0}\n'
+            "  ]\n"
+            "}"
+        )
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{b64}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+        }
+
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+
+            # Match supplier
+            sup_name = parsed.get("supplier_name") or ""
+            sup_id, matched_sup_name = await self.match_supplier(sup_name) if sup_name else (None, None)
+
+            # Match items
+            items: list[BillExtractionItem] = []
+            for itm in parsed.get("items", []):
+                p_name = itm.get("product_name") or "Item"
+                p_code = itm.get("product_code")
+                p_id, match_code, match_hsn, match_vat = await self.match_product(p_code or p_name)
+
+                items.append(
+                    BillExtractionItem(
+                        product_name=p_name,
+                        product_code=p_code or match_code,
+                        hsn_code=itm.get("hsn_code") or match_hsn,
+                        quantity=float(itm.get("quantity") or 1),
+                        unit_rate=float(itm.get("unit_rate") or 0),
+                        vat_rate=float(itm.get("vat_rate") or match_vat),
+                        item_total=float(itm.get("item_total") or 0),
+                        matched_product_id=p_id,
+                    )
+                )
+
+            inv_date = None
+            if parsed.get("invoice_date"):
+                try:
+                    inv_date = date.fromisoformat(str(parsed["invoice_date"]).strip()[:10])
+                except ValueError:
+                    inv_date = None
+
+            return BillExtractionResponse(
+                supplier_name=matched_sup_name or sup_name,
+                supplier_id=sup_id,
+                invoice_no=parsed.get("invoice_no"),
+                invoice_date=inv_date,
+                currency=parsed.get("currency") or "RMB",
+                invoice_total_value=parsed.get("invoice_total_value"),
+                items=items,
+                confidence=0.95,
+                notes="Extracted via Vision AI bill parser.",
+            )
 
     async def _extract_with_openai(self, text: str, api_key: str) -> BillExtractionResponse:
         """Use OpenAI to parse structured bill details."""

@@ -24,7 +24,8 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { IconFilter, IconTrash, IconPlus } from "@/components/icons";
+import { IconTrash, IconPlus } from "@/components/icons";
+import { SortHeader } from "@/components/SortHeader";
 
 export interface IndustrialZoneItem {
   id: string;
@@ -91,7 +92,7 @@ export function IndustrialZonesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Filter & Search states
-  const [showFilters, setShowFilters] = useState<boolean>(true);
+  const [showFilters, setShowFilters] = useState<boolean>(false);
   const [filterDraft, setFilterDraft] = useState<FilterState>(INITIAL_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -453,52 +454,40 @@ export function IndustrialZonesPage() {
 
   return (
     <AppShell activeKey="industrial-zones">
-      <main
-        className="page"
-        style={{
-          background: "#f4f6f9",
-          minHeight: "calc(100vh - 60px)",
-          padding: "20px 28px",
-          color: "#1e293b",
-        }}
-      >
+      <main className="page">
         {/* Top Header & Breadcrumb */}
-        <div style={{ marginBottom: "16px" }}>
+        <div style={{ marginBottom: "12px" }}>
           <Breadcrumb trail={["Contact", "Industrial Zones"]} />
         </div>
 
         {/* Page Title & Action Controls */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "16px",
-          }}
-        >
+        <div className="page-header">
           <h1 style={{ fontSize: "20px", fontWeight: 700, margin: 0, color: "#1e293b" }}>
             Industrial Zones
           </h1>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            {/* Filter Toggle Button (matches screenshot 3) */}
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {/* Filter Toggle Button */}
             <button
+              className="btn-filter-toggle"
               onClick={() => setShowFilters(!showFilters)}
               style={{
-                background: showFilters ? "#475569" : "#64748b",
-                color: "#fff",
+                background: "#556987",
+                color: "#ffffff",
                 border: "none",
-                borderRadius: "4px",
-                padding: "8px 12px",
+                borderRadius: "6px",
+                padding: "8px 14px",
                 cursor: "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
               title="Toggle Filters"
             >
-              <IconFilter style={{ width: "16px", height: "16px" }} />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
             </button>
 
             {/* + ADD NEW Button (matches screenshot 3) */}
@@ -800,61 +789,75 @@ export function IndustrialZonesPage() {
                       onChange={handleSelectAll}
                     />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("zone_name");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", width: "70px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    Sr. No. ▾
+                  <th style={{ padding: "12px 14px", width: "70px", whiteSpace: "nowrap" }}>
+                    Sr. No.
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("zone_name");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    Zone Name +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Zone Name"
+                      isSorted={sortField === "zone_name"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "zone_name") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("zone_name"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("nearby_city");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    Nearby City +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Nearby City"
+                      isSorted={sortField === "nearby_city"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "nearby_city") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("nearby_city"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("district");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    Dist. / State +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Dist. / State"
+                      isSorted={sortField === "district"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "district") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("district"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("num_industries");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    No. Of Ind. +
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="No. Of Ind."
+                      isSorted={sortField === "num_industries"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "num_industries") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("num_industries"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th
-                    onClick={() => {
-                      setSortField("zone_grade");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                    style={{ padding: "12px 14px", width: "80px", cursor: "pointer" }}
-                  >
-                    Grade +
+                  <th style={{ padding: "12px 14px", width: "80px" }}>
+                    <SortHeader
+                      label="Grade"
+                      isSorted={sortField === "zone_grade"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "zone_grade") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("zone_grade"); setSortDir("asc"); }
+                      }}
+                    />
                   </th>
-                  <th style={{ padding: "12px 14px" }}>Pote. Cate. Of Machi.</th>
+                  <th style={{ padding: "12px 14px" }}>
+                    <SortHeader
+                      label="Pote. Cate. Of Machi."
+                      isSorted={sortField === "potential_machine_categories"}
+                      sortDirection={sortDir}
+                      onSort={() => {
+                        if (sortField === "potential_machine_categories") setSortDir(sortDir === "asc" ? "desc" : "asc");
+                        else { setSortField("potential_machine_categories"); setSortDir("asc"); }
+                      }}
+                    />
+                  </th>
                   <th style={{ padding: "12px 14px", width: "100px", textAlign: "center" }}>Action</th>
                 </tr>
               </thead>

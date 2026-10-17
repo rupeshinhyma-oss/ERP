@@ -34,26 +34,25 @@
 
 /* Header Action Buttons (Exact match to screenshot) */
 .page-technical-tasks .tech-btn-filter {
-  width: 38px;
-  height: 35px;
-  background-color: #3b5998;
+  background-color: #556987;
   color: #ffffff;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
+  padding: 8px 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: background-color 0.15s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .page-technical-tasks .tech-btn-filter:hover {
-  background-color: #2d4373;
+  background-color: #475569;
 }
 
 .page-technical-tasks .tech-btn-filter.active {
-  background-color: #1e3a8a;
+  background-color: #556987;
 }
 
 .page-technical-tasks .tech-btn-add {

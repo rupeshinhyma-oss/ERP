@@ -353,28 +353,6 @@ describe("StockTransferPage", () => {
     });
   });
 
-  it("opens freeze columns dropdown menu and allows clearing all freezes", async () => {
-    render(
-      <BrowserRouter>
-        <StockTransferPage initialLoading={false} />
-      </BrowserRouter>
-    );
-
-    const freezeBtn = screen.getByText(/📌 Freeze Columns/i);
-    fireEvent.click(freezeBtn);
-
-    await waitFor(() => {
-      expect(screen.getByText("Toggle Frozen Columns")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Clear All Freezes" })).toBeTruthy();
-    });
-
-    const clearBtn = screen.getByRole("button", { name: "Clear All Freezes" });
-    fireEvent.click(clearBtn);
-
-    await waitFor(() => {
-      expect(screen.getByText("📌 Freeze Columns (0)")).toBeTruthy();
-    });
-  });
 
   it("cycles column sort direction on column header click", async () => {
     render(

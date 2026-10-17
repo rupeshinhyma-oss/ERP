@@ -146,12 +146,13 @@ export function ProfilePage() {
 
   return (
     <AppShell activeKey="profile">
-      <main className="page" style={{ background: "#f8fafc", minHeight: "calc(100vh - 60px)", padding: "24px 36px" }}>
+      <main className="page">
         {/* Top Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-          <h1 style={{ color: "#0f172a", fontWeight: 700, fontSize: "22px", margin: 0 }}>
+        <div className="page-header">
+          <h1 style={{ color: "#1e293b", fontWeight: 700, fontSize: "20px", margin: 0 }}>
             Profile
           </h1>
+          <div className="page-header-actions">
           <button
             type="button"
             className="btn"
@@ -170,6 +171,7 @@ export function ProfilePage() {
             &larr; BACK
           </button>
         </div>
+      </div>
 
         <Banner error={error} />
         {successMsg && (

@@ -68,7 +68,6 @@ export function Health() {
     <AppShell
       activeKey="health"
       pageTitle="System Health & Settings"
-      breadcrumbs={["System", "Health & Settings"]}
     >
       <Banner error={error} />
 

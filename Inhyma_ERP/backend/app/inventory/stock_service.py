@@ -19,7 +19,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, ConflictException
@@ -32,12 +33,22 @@ from app.masters.taxes.models import Tax
 from app.masters.uom.models import UnitOfMeasurement
 from app.masters.warehouses.models import Warehouse
 
-# every numeric column of ProductStock except the total is a warehouse balance
+# Float columns of ProductStock that are NOT warehouse balances. (The reorder level and minimum order quantity are
+# planning settings: counting them as stock inflated Total Qty and let a "warehouse" be mapped onto them.)
+NON_WAREHOUSE_COLUMNS: frozenset[str] = frozenset({"total_qty", "reorder_level", "minimum_order_quantity"})
+
+# every other numeric column of ProductStock is a warehouse balance
 WAREHOUSE_COLUMNS: tuple[str, ...] = tuple(
     c.name
     for c in ProductStock.__table__.columns
-    if c.type.__class__.__name__ == "Float" and c.name != "total_qty"
+    if c.type.__class__.__name__ == "Float" and c.name not in NON_WAREHOUSE_COLUMNS
 )
+
+
+def recompute_total(row: ProductStock) -> float:
+    """Total Qty = grand total of every warehouse balance (physical + transit + ordered)."""
+    row.total_qty = round(sum(float(getattr(row, c) or 0.0) for c in WAREHOUSE_COLUMNS), 6)
+    return row.total_qty
 
 
 def warehouse_column(name: str) -> str:
@@ -71,22 +82,43 @@ def is_physical(warehouse: Warehouse) -> bool:
 async def find_product(db: AsyncSession, name: str) -> Product:
     lowered = name.strip().lower()
     stmt = select(Product).where(or_(func.lower(Product.product_name) == lowered, func.lower(Product.product_name_tally) == lowered))
-    product = (await db.execute(stmt)).scalars().first()
+    product = (await db.execute(stmt.order_by(Product.created_at.asc(), Product.id))).scalars().first()
     if product is None:
         raise BadRequestException(f"Product '{name}' is not in the Product Master.")
     return product
 
 
-async def _ensure_stock_row(db: AsyncSession, product: Product) -> ProductStock:
-    stmt = (
-        select(ProductStock)
-        .where(
-            ProductStock.deleted_at.is_(None),
-            or_(ProductStock.product_id == product.id, func.lower(ProductStock.product_name_tally) == product.product_name.lower()),
+async def _find_stock_row(db: AsyncSession, product: Product) -> ProductStock | None:
+    """The stock row of a product, locked for update. Looked up by product id (indexed, unique); the name is only
+    a fallback for old rows that were created before ``product_id`` was stored."""
+    by_id = (
+        await db.execute(
+            select(ProductStock).where(ProductStock.deleted_at.is_(None), ProductStock.product_id == product.id).with_for_update()
         )
-        .with_for_update()
-    )
-    row = (await db.execute(stmt)).scalars().first()
+    ).scalars().first()
+    if by_id is not None:
+        return by_id
+    legacy = (
+        await db.execute(
+            select(ProductStock)
+            .where(
+                ProductStock.deleted_at.is_(None),
+                ProductStock.product_id.is_(None),
+                func.lower(ProductStock.product_name_tally).in_(
+                    {(product.product_name_tally or "").lower(), (product.product_name or "").lower()} - {""}
+                ),
+            )
+            .with_for_update()
+        )
+    ).scalars().first()
+    if legacy is not None:
+        legacy.product_id = product.id  # adopt it, so every later lookup is by id
+        await db.flush()
+    return legacy
+
+
+async def _ensure_stock_row(db: AsyncSession, product: Product) -> ProductStock:
+    row = await _find_stock_row(db, product)
     if row is not None:
         return row
 
@@ -98,6 +130,10 @@ async def _ensure_stock_row(db: AsyncSession, product: Product) -> ProductStock:
     sub = await _scalar(select(ProductSubCategory.name).where(ProductSubCategory.id == product.sub_category_id)) if product.sub_category_id else None
     tax = await _scalar(select(Tax.hsn_number, Tax.gst_percent).where(Tax.id == product.hsn_id)) if product.hsn_id else None
     uom = await _scalar(select(func.coalesce(UnitOfMeasurement.short_name, UnitOfMeasurement.name)).where(UnitOfMeasurement.id == product.uom_id))
+
+    # Creation is rare, so it is serialised: Sr. No. is max+1 and must not be handed out twice.
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('product_stocks_create'))"))
     next_sr = (await db.execute(select(func.coalesce(func.max(ProductStock.sr_no), 0) + 1))).scalar() or 1
 
     row = ProductStock(
@@ -112,8 +148,15 @@ async def _ensure_stock_row(db: AsyncSession, product: Product) -> ProductStock:
         gst_rate=f"{float(tax[1]):g}%" if tax else None,
         uom=uom[0] if uom else "",
     )
-    db.add(row)
-    await db.flush()
+    try:
+        async with db.begin_nested():  # a lost race (unique product_id) rolls back only this insert
+            db.add(row)
+            await db.flush()
+    except IntegrityError:
+        existing = await _find_stock_row(db, product)
+        if existing is None:
+            raise
+        return existing
     return row
 
 
@@ -140,6 +183,6 @@ async def apply_stock_delta(db: AsyncSession, *, product_name: str, warehouse_na
             f"(available {before:g}, needed {abs(delta):g}). Physical warehouses cannot go negative."
         )
     setattr(row, column, after)
-    row.total_qty = round(sum(float(getattr(row, c) or 0.0) for c in WAREHOUSE_COLUMNS), 6)
+    recompute_total(row)
     await db.flush()
     return StockResult(product.product_name, warehouse.name, before, after)

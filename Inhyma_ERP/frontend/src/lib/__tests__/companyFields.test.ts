@@ -7,6 +7,9 @@ import {
   showsPotentialBusinessPerMonth,
   clearInapplicableCompanyFields,
   computeAge,
+  showsSector,
+  filterFieldVisibility,
+  computeCompanyAge,
 } from "../companyFields";
 
 describe("Company field visibility rules (Add Company spec)", () => {
@@ -53,6 +56,7 @@ describe("clearInapplicableCompanyFields: never sends a stale value from a field
 
   it("keeps every field when every condition is met", () => {
     expect(clearInapplicableCompanyFields(full)).toEqual({
+      sector: "", // the full B2B sample has no Sector (B2C only)
       monthly_turnover: "25-50 L",
       potential_business_per_month: "2-5 L",
       direct_import_from_china: "Yes",
@@ -90,7 +94,7 @@ describe("clearInapplicableCompanyFields: never sends a stale value from a field
       direct_import_from_china: "", monthly_import_volume: "", products_needed_for_imports: "",
     };
     expect(clearInapplicableCompanyFields(blank)).toEqual({
-      monthly_turnover: "", potential_business_per_month: "", direct_import_from_china: "",
+      sector: "", monthly_turnover: "", potential_business_per_month: "", direct_import_from_china: "",
       monthly_import_volume: "", products_needed_for_imports: "",
     });
   });
@@ -127,5 +131,66 @@ describe("computeAge: contact Age is computed for display, never stored (spec)",
     const future = new Date();
     future.setFullYear(future.getFullYear() + 5);
     expect(computeAge(future.toISOString().slice(0, 10))).toBeNull();
+  });
+});
+
+describe("showsSector (B2C only)", () => {
+  it("is shown only for B2C", () => {
+    expect(showsSector("B2C")).toBe(true);
+    expect(showsSector("B2B")).toBe(false);
+    expect(showsSector("")).toBe(false);
+  });
+});
+
+describe("filterFieldVisibility (spec: conditional list filters)", () => {
+  const vis = (businessType: string, potential = "", directImport = "") => filterFieldVisibility({ businessType, potential, directImport });
+  it("Business Type All / Blank shows Sector only", () => {
+    for (const bt of ["", "blank"]) expect(vis(bt)).toEqual({ potentialPerMonth: false, monthlyTurnover: false, sector: true, directImport: false, monthlyImportVolume: false });
+  });
+  it("B2B shows Monthly Turnover and Direct Import, hides Sector", () => {
+    expect(vis("B2B")).toEqual({ potentialPerMonth: false, monthlyTurnover: true, sector: false, directImport: true, monthlyImportVolume: false });
+  });
+  it("B2C shows Sector, hides Turnover and Direct Import", () => {
+    expect(vis("B2C")).toMatchObject({ monthlyTurnover: false, sector: true, directImport: false, monthlyImportVolume: false });
+  });
+  it("Monthly Import Volume needs B2B and Direct Import = Yes", () => {
+    expect(vis("B2B", "", "Yes").monthlyImportVolume).toBe(true);
+    expect(vis("B2B", "", "No").monthlyImportVolume).toBe(false);
+    expect(vis("B2C", "", "Yes").monthlyImportVolume).toBe(false);
+    expect(vis("", "", "Yes").monthlyImportVolume).toBe(false);
+  });
+  it("Potential for Business per month needs Potential = Yes", () => {
+    expect(vis("", "yes").potentialPerMonth).toBe(true);
+    for (const p of ["no", "blank", ""]) expect(vis("B2B", p).potentialPerMonth).toBe(false);
+  });
+});
+
+describe("computeCompanyAge (auto from the GST registration date)", () => {
+  const today = new Date(2026, 9, 16); // 16 Oct 2026
+  it("counts completed years", () => {
+    expect(computeCompanyAge("2019-04-10", today)).toBe("7");
+    expect(computeCompanyAge("2019-10-16", today)).toBe("7");
+    expect(computeCompanyAge("2019-10-17", today)).toBe("6");
+    expect(computeCompanyAge("10-04-2019", today)).toBe("7");
+    expect(computeCompanyAge("2026-06-01", today)).toBe("0");
+  });
+  it("is empty for no, future or unreadable dates", () => {
+    expect(computeCompanyAge("", today)).toBe("");
+    expect(computeCompanyAge(null, today)).toBe("");
+    expect(computeCompanyAge("2027-01-01", today)).toBe("");
+    expect(computeCompanyAge("not a date", today)).toBe("");
+    expect(computeCompanyAge("2019-02-31", today)).toBe("");
+  });
+});
+
+describe("clearInapplicableCompanyFields: Sector is kept for B2C only", () => {
+  const base = {
+    potential: "", monthly_turnover: "", potential_business_per_month: "", direct_import_from_china: "",
+    monthly_import_volume: "", products_needed_for_imports: "",
+  };
+  it("keeps a B2C sector, drops it for B2B or no Business Type", () => {
+    expect(clearInapplicableCompanyFields({ ...base, company_type: "B2C", sector: "Dairy" }).sector).toBe("Dairy");
+    expect(clearInapplicableCompanyFields({ ...base, company_type: "B2B", sector: "Dairy" }).sector).toBe("");
+    expect(clearInapplicableCompanyFields({ ...base, company_type: "", sector: "Dairy" }).sector).toBe("");
   });
 });

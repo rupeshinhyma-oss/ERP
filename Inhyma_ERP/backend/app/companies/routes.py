@@ -27,6 +27,7 @@ from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
 from app.rbac.dependencies import require_any_permission
+from app.companies.age import compute_company_age
 from app.companies.dependencies import get_company_service
 from app.companies.schemas import (
     CompanyContactCreate,
@@ -108,6 +109,7 @@ async def _to_company_read(service: CompanyService, company) -> dict:
         "brand_description": company.brand_description,
         "country_id": company.country_id,
         "state_id": company.state_id,
+        "district_id": company.district_id,
         "city_id": company.city_id,
         "area": company.area,
         "district": company.district,
@@ -138,7 +140,8 @@ async def _to_company_read(service: CompanyService, company) -> dict:
         "spares_buying_from": company.spares_buying_from,
         "products_interested": company.products_interested,
         "gst_registration_date": company.gst_registration_date,
-        "age_of_company": company.age_of_company,
+        # Always current: derived from the registration date when there is one (ages tick over every year).
+        "age_of_company": compute_company_age(company.gst_registration_date) or company.age_of_company,
         "social_media": company.social_media,
         "company_grade": company.company_grade,
         "current_status": company.current_status,
@@ -495,7 +498,7 @@ async def update_company(
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing company profile."""
-    company = await service.update(company_id, **payload.model_dump())
+    company = await service.update(company_id, **payload.model_dump(exclude_unset=True))
     data = await _to_company_read(service, company)
     changes = payload.model_dump(exclude_none=True, exclude={"version"}, mode="json")
     await _record_action(
@@ -745,7 +748,7 @@ async def update_company_contact(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Update an existing contact person."""
-    contact = await service.update_contact(company_id, contact_id, **payload.model_dump())
+    contact = await service.update_contact(company_id, contact_id, **payload.model_dump(exclude_unset=True))
     data = CompanyContactRead.model_validate(contact).model_dump(mode="json")
     await _record_action(
         audit_service=audit_service,

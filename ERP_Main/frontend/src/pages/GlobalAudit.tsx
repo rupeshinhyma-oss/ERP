@@ -179,7 +179,6 @@ export function GlobalAudit() {
     <AppShell
       activeKey="audit"
       pageTitle="Global Audit Log"
-      breadcrumbs={["Audit & Compliance", "Global Audit"]}
     >
       <Banner error={error} />
 

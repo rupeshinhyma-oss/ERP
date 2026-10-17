@@ -10,7 +10,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { apiGet } from "@/lib/api";
@@ -172,14 +171,9 @@ export function EffectivePermissionsPage() {
   return (
     <AppShell activeKey="effective-permissions" pageClassName="page-effective-permissions">
       <main className="page">
-        <Breadcrumb trail={["Effective Permissions"]} />
         <div className="page-header">
           <div>
             <h1>Effective Permissions Inspector</h1>
-            <div className="page-subtitle">
-              Read-only audit view explaining exact permission sources across Assigned System
-              Roles and Individual User Overrides.
-            </div>
           </div>
         </div>
         <Banner error={error} />

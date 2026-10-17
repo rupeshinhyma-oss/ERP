@@ -23,6 +23,7 @@ class PlatformLoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_at: datetime
+    session_id: str | None = None  # the central session id of THIS login (kept in the browser, put in every token)
 
 
 class PlatformAdminCreate(BaseModel):

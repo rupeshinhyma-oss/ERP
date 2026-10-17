@@ -434,37 +434,24 @@ export function PriceListPage() {
 
   return (
     <AppShell activeKey="masters-price-list">
-      <div style={{ padding: "20px 28px 40px", maxWidth: "1600px", margin: "0 auto" }}>
+      <main className="page">
         {/* Breadcrumb Navigation */}
         <Breadcrumb trail={["Masters", "Price List Management"]} />
 
         {/* Top Header Row */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginTop: "12px",
-            marginBottom: "16px",
-            flexWrap: "wrap",
-            gap: "16px",
-          }}
-        >
+        <div className="page-header">
           <div>
             <h1
               style={{
-                fontSize: "22px",
+                fontSize: "20px",
                 fontWeight: 700,
-                color: "#0f172a",
+                color: "#1e293b",
                 margin: 0,
                 letterSpacing: "-0.01em",
               }}
             >
               Price List Management
             </h1>
-            <p style={{ fontSize: "13px", color: "#64748b", margin: "4px 0 0" }}>
-              Control Panel &amp; Catalog Pricing with dual Inclusive/Exclusive GST calculation
-            </p>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
@@ -519,32 +506,26 @@ export function PriceListPage() {
             {/* Filter Toggle Button */}
             <button
               type="button"
+              className="btn btn-filter-toggle"
               onClick={() => setFilterOpen((prev) => !prev)}
+              title="Toggle Filter Options"
+              aria-label="Filter"
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "6px",
+                justifyContent: "center",
                 padding: "8px 14px",
                 borderRadius: "6px",
-                border: filterOpen ? "1px solid #0061f2" : "1px solid #cbd5e1",
-                background: filterOpen ? "#eff6ff" : "#ffffff",
-                color: filterOpen ? "#0061f2" : "#334155",
-                fontSize: "13px",
-                fontWeight: 600,
+                border: "none",
+                background: "#556987",
+                color: "#ffffff",
                 cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
             >
-              <span>🔍 Filter</span>
-              {(categoryFilter || subCategoryFilter || brandFilter || pricingStatusFilter !== "all" || gstFilter) && (
-                <span
-                  style={{
-                    width: "7px",
-                    height: "7px",
-                    borderRadius: "50%",
-                    background: "#0061f2",
-                  }}
-                />
-              )}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+              </svg>
             </button>
 
             {/* Import Button */}
@@ -2048,7 +2029,7 @@ export function PriceListPage() {
             </div>
           </form>
         </Modal>
-      </div>
+      </main>
     </AppShell>
   );
 }

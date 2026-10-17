@@ -12,6 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 
 from app.api.v1.health import router as health_router
+from app.api.v1.internal_sessions import router as internal_sessions_router
 from app.api.v1.internal_users import router as internal_users_router
 from app.audit.routes import router as audit_router
 from app.auth.routes import router as auth_router
@@ -60,7 +61,6 @@ from app.org_structure.position_routes import router as positions_router
 from app.org_structure.reporting_routes import router as reporting_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
-from app.search.routes import router as search_router
 from app.companies.routes import router as companies_router
 from app.suppliers.routes import router as suppliers_router
 from app.notifications.routes import router as notifications_router
@@ -125,14 +125,6 @@ api_router.include_router(queue_router)
 api_router.include_router(cache_router)
 api_router.include_router(audit_router)
 api_router.include_router(trash_router)
-
-# Universal Search (topbar): searches across every major entity type in
-# one call. Restored 2026-08-14 after being accidentally deleted in a
-# frontend-migration commit -- see app/search/service.py's module
-# docstring for the full history, including the 2026-08-17 update
-# removing Departments/Designations from its search scope after that
-# module was removed from the app entirely.
-api_router.include_router(search_router)
 
 # Phase 6: Core Organization & User Management.
 api_router.include_router(organizations_router)
@@ -213,6 +205,7 @@ api_router.include_router(notifications_router)
 api_router.include_router(events_router)
 api_router.include_router(federation_router)
 api_router.include_router(internal_users_router)
+api_router.include_router(internal_sessions_router)
 api_router.include_router(integration_router)
 api_router.include_router(inventory_router)
 api_router.include_router(sales_router)
@@ -235,8 +228,8 @@ async def get_public_org_info(
     except Exception:
         org = None
     name = (org.company_name.strip() if org and org.company_name else "Inhyma")
-    logo = org.logo_url if org else None
+    logo = (org.logo_url or org.logo_data) if org else None
     return build_success_response(
-        data={"id": str(org.id) if org else "default", "name": name, "company_name": name, "logo_url": logo},
+        data={"id": str(org.id) if org else "default", "name": name, "company_name": name, "logo_url": logo, "logo_data": org.logo_data if org else None},
         request_id=getattr(request.state, "request_id", "-"),
     )

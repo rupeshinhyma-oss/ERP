@@ -77,4 +77,50 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/users/{id}/reset-password` | Administrative password reset and automatic fanout push to ERP_Main | `user.manage` |
 | `PATCH` | `/api/v1/users/{id}` | Update user attributes; email is locked to central control plane | `user.update` |
 | `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and logo | Public |
+| `GET` | `/api/v1/organizations/logo` | Stream high-resolution database-persisted logo image with version hashing (`?v={sha1}`) | Public |
+| `GET` | `/api/v1/health/federation` | Run live diagnostics & latency ping against ERP_Main central registry | Super Admin / Authenticated |
+
+---
+
+## 7. Session-Scoped Tokens and Per-Session Revocation
+
+- Login (`POST /api/v1/auth/login`), refresh and SSO handover replies include `session_id` and `session_mode` (`"central"`: ERP_Main knows the session, switching ERPs works; `"local"`: this ERP only, used when ERP_Main was unreachable at login).
+- Every access and refresh token carries `sid`. `POST /api/v1/auth/logout` revokes the token's session here and reports it to ERP_Main, which ends it everywhere that login was used. Other logins of the same person keep working.
+- `POST /api/v1/internal/sessions/{session_id}/revoke` (service credential: `Authorization: Bearer <credential>`): called by ERP_Main to end one session. Idempotent. All tokens of that session stop working and its live WebSockets are closed.
+- A token without `sid` (issued before this release) keeps working and can only be ended with the per-user force logout (`POST /api/v1/internal/users/{id-or-email}/logout`).
+- Safety net: the ERP asks ERP_Main about central sessions at most every 45 seconds and ends a revoked one itself; if ERP_Main is unreachable the session is kept (fail-open).
+- `POST /api/v1/auth/sso-handover` Status Contracts:
+  - **401 Unauthorized**: Handover ticket signature invalid, expired, central session revoked, or the local user account is deactivated/deleted (`is_active=False` or `deleted_at IS NOT NULL`). Rejection message: `"Account is inactive or disabled on this ERP instance"`.
+  - **403 Forbidden**: User lacks authorization for this ERP or `SSO_HANDOVER_AUTO_PROVISION=false` blocks unauthorized creation.
+  - **503 Service Unavailable** (`EcosystemSessionUnavailable`): ERP_Main central control plane cannot be reached, and no cached session exists. The client should retry with exponential backoff (0.7s, 2.5s, 6.0s).
+  - **900s Stale Session Cache Fallback**: If ERP_Main is temporarily unreachable but the session was verified within the last 900 seconds (15 minutes), the spoke accepts the session with `session["_from_cache"] = True`.
+
+---
+
+## 8. Federation Diagnostics & Branding Endpoints
+
+### 8.1. Central Federation Diagnostics (`GET /api/v1/health/federation`)
+- Diagnostic probe executing real-time round-trip latency and connectivity checks against candidate central control plane URLs (`erp_main_api_base_urls()`).
+- Returns:
+  ```json
+  {
+    "status": "healthy",
+    "reachable_url": "https://erp-main-backend.onrender.com",
+    "latency_ms": 142.5,
+    "candidates_tested": [
+      "https://erp-main-backend.onrender.com",
+      "https://central.inhyma.com"
+    ],
+    "dns_resilience_mode": "windows_gated",
+    "timestamp": "2026-10-14T17:40:00Z"
+  }
+  ```
+
+### 8.2. Versioned Organization Logo (`GET /api/v1/organizations/logo?v={sha1}`)
+- Streams high-resolution organization logo binary data directly from PostgreSQL (`organizations.logo_data`).
+- HTTP Response Headers:
+  - `Content-Type: image/png` (or image/jpeg)
+  - `Cache-Control: public, max-age=86400, immutable`
+  - `ETag: "{sha1}"`
+- Guaranteed immediate cache invalidation via unique `?v={sha1}` query parameters upon organization settings updates.
 

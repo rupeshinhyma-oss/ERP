@@ -18,8 +18,6 @@ export function CurrenciesPage() {
       liveModule="currencies"
       entityName="currency"
       heading="Currencies"
-      subtitle="Reference currencies for pricing, invoicing, and finance."
-      breadcrumbTrail={["Master Data", "Currencies"]}
       newButtonLabel="+ New Currency"
       searchPlaceholder="Search name or code or Sr. No..."
       hideQuickAdd={true}

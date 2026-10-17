@@ -24,8 +24,6 @@ export function HsnPage() {
       liveModule="hsn"
       entityName="HSN code"
       heading="HSN Codes"
-      subtitle="Harmonized System Nomenclature codes for GST classification."
-      breadcrumbTrail={["Master Data", "HSN Codes"]}
       newButtonLabel="+ New HSN Code"
       searchPlaceholder="Search code or description or Sr. No..."
       hideQuickAdd={true}

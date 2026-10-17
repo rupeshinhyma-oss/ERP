@@ -266,15 +266,12 @@ export function InquiriesPage() {
   return (
     <AppShell activeKey="inquiries">
       <main className="page" style={{ padding: "24px" }}>
-        {/* Top Breadcrumb & Actions Bar & KPI Cards (Only on Companies Dashboard Layer) */}
+        {/* Top Header & KPI Cards (Only on Companies Dashboard Layer) */}
         {view.layer === "companies" && (
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <div>
-                <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", margin: 0 }}>Inquiry</h1>
-                <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
-                  Dashboard / Sales / Inquiries
-                </div>
+                <h1 className="page-title">Inquiry</h1>
               </div>
             </div>
 
@@ -697,7 +694,7 @@ function CompaniesView({
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: "10px" }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: "#0F172A", margin: 0 }}>Inquiries — Company Wise</h1>
+          <h1 className="page-title">Inquiries — Company Wise</h1>
           <p className="muted" style={{ margin: "4px 0 0 0" }}>
             Select a buyer company to see its consignments (e.g. FB1, FB2, ING1…).
           </p>
@@ -1031,7 +1028,7 @@ function ConsignmentsView({
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: "10px" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 600, color: "#0F172A", margin: 0 }}>{buyerName || "…"} — Consignments</h1>
+        <h1 className="page-title">{buyerName || "…"} — Consignments</h1>
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <button type="button" onClick={onBack} className="btn btn-outline" style={{ background: "#ffffff", border: "1px solid #cbd5e1", color: "#475569", fontWeight: 600, fontSize: "13px", padding: "6px 14px", borderRadius: "6px", cursor: "pointer" }}>
             ← All Companies
@@ -1711,13 +1708,13 @@ function ItemsView({
     const code = inquiry?.consignment_code || (inquiry ? codeNames[inquiry.consignment_code_id] || "Consignment" : "Consignment");
     return (
       <div style={{ padding: "0 4px" }}>
-        {/* Breadcrumb & Header */}
+        {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
           <div>
             <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 600, marginBottom: "4px" }}>
               Inquiries &gt; {_buyerName || "Buyer"} &gt; #{code} &gt; Import Products
             </div>
-            <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+            <h1 className="page-title">
               Import Inquiry Products (#{code})
             </h1>
             <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
@@ -1987,7 +1984,7 @@ function ItemsView({
       {/* ---------------- Top Consignment Header & Actions ---------------- */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-          <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+          <h1 className="page-title">
             #{inquiry?.consignment_code || (inquiry ? codeNames[inquiry.consignment_code_id] || "..." : "...")}
           </h1>
           <span

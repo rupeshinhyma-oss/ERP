@@ -95,7 +95,9 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
     area: "",
     state_id: "",
     state_name: "",
+    district_id: "",
     district: "",
+    city_id: "",
     city: "",
     contact_salutation: "Mr",
     contact_full_name: "",
@@ -107,6 +109,8 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
 
   const [statesList, setStatesList] = useState<Array<{ id: string; name: string }>>([]);
   const [districtsList, setDistrictsList] = useState<Array<{ id: string; name: string }>>([]);
+  const [citiesList, setCitiesList] = useState<Array<{ id: string; name: string }>>([]);
+  const [districtsFor, setDistrictsFor] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
@@ -127,24 +131,60 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
     })();
   }, [isOpen]);
 
+  // State -> districts
   useEffect(() => {
     if (!form.state_id) {
       setDistrictsList([]);
+      setDistrictsFor("");
       return;
     }
+    let cancelled = false;
+    const stateId = form.state_id;
     (async () => {
       try {
-        const res = await apiGet<any[]>(`/masters/districts?state_id=${form.state_id}&page_size=100`);
-        if (res?.data && Array.isArray(res.data)) {
-          setDistrictsList(res.data.map((d: any) => ({ id: String(d.id), name: d.name })));
-        } else {
-          setDistrictsList([]);
-        }
+        const res = await apiGet<any[]>(`/masters/districts/lookup?state_id=${stateId}`);
+        if (cancelled) return;
+        setDistrictsList(
+          res?.data && Array.isArray(res.data) ? res.data.map((d: any) => ({ id: String(d.id), name: d.name })) : []
+        );
       } catch {
-        setDistrictsList([]);
+        if (!cancelled) setDistrictsList([]);
+      } finally {
+        if (!cancelled) setDistrictsFor(stateId);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [form.state_id]);
+
+  // District -> cities (a state with no districts in the master falls back to its cities)
+  useEffect(() => {
+    const stateId = form.state_id;
+    const districtId = form.district_id;
+    if (!stateId || districtsFor !== stateId || (!districtId && districtsList.length > 0)) {
+      setCitiesList([]);
+      return;
+    }
+    let cancelled = false;
+    const url = districtId
+      ? `/masters/cities/lookup?district_id=${districtId}&state_id=${stateId}`
+      : `/masters/cities/lookup?state_id=${stateId}`;
+    (async () => {
+      try {
+        const res = await apiGet<any[]>(url);
+        if (cancelled) return;
+        setCitiesList(
+          res?.data && Array.isArray(res.data) ? res.data.map((x: any) => ({ id: String(x.id), name: x.name })) : []
+        );
+      } catch {
+        if (!cancelled) setCitiesList([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.state_id, form.district_id, districtsFor, districtsList.length]);
 
   if (!isOpen) return null;
 
@@ -210,9 +250,9 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
       tax_id_number: form.tax_id_number.trim().toUpperCase() || null,
       area: form.area.trim() || null,
       state_id: form.state_id || null,
-      state: resolvedStateName || null,
+      district_id: form.district_id || null,
       district: form.district.trim() || null,
-      city: form.city.trim() || null,
+      city_id: form.city_id || null,
       contact_salutation: form.contact_salutation || "Mr",
       contact_full_name: form.contact_full_name.trim() || null,
       contact_designation: form.contact_designation.trim() || null,
@@ -499,9 +539,9 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
                   const val = e.target.value;
                   const matched = statesList.find((s) => s.id === val || s.name === val);
                   if (matched) {
-                    setForm((p) => ({ ...p, state_id: matched.id, state_name: matched.name, district: "" }));
+                    setForm((p) => ({ ...p, state_id: matched.id, state_name: matched.name, district_id: "", district: "", city_id: "", city: "" }));
                   } else {
-                    setForm((p) => ({ ...p, state_id: "", state_name: val, district: "" }));
+                    setForm((p) => ({ ...p, state_id: "", state_name: val, district_id: "", district: "", city_id: "", city: "" }));
                   }
                 }}
               >
@@ -519,30 +559,26 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
               <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
                 District
               </label>
-              {districtsList.length > 0 ? (
-                <select
-                  id="form1_district"
-                  style={fInputStyle}
-                  value={form.district}
-                  onChange={(e) => setForm((p) => ({ ...p, district: e.target.value }))}
-                >
-                  <option value="">Select District</option>
-                  {districtsList.map((d) => (
-                    <option key={d.id} value={d.name}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  id="form1_district"
-                  type="text"
-                  style={fInputStyle}
-                  placeholder="Enter district"
-                  value={form.district}
-                  onChange={(e) => setForm((p) => ({ ...p, district: e.target.value }))}
-                />
-              )}
+              <select
+                id="form1_district"
+                data-testid="form1-district"
+                style={fInputStyle}
+                value={form.district_id}
+                disabled={!form.state_id || districtsList.length === 0}
+                onChange={(e) => {
+                  const d = districtsList.find((x) => x.id === e.target.value);
+                  setForm((p) => ({ ...p, district_id: d?.id || "", district: d?.name || "", city_id: "", city: "" }));
+                }}
+              >
+                <option value="">
+                  {!form.state_id ? "Select State First" : districtsList.length === 0 ? "No Districts Found" : "Select District"}
+                </option>
+                {districtsList.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* 7. City */}
@@ -550,14 +586,30 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
               <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
                 City
               </label>
-              <input
+              <select
                 id="form1_city"
-                type="text"
+                data-testid="form1-city"
                 style={fInputStyle}
-                placeholder="Enter city"
-                value={form.city}
-                onChange={(e) => setForm((p) => ({ ...p, city: e.target.value }))}
-              />
+                value={form.city_id}
+                disabled={!form.state_id || (districtsList.length > 0 && !form.district_id)}
+                onChange={(e) => {
+                  const ct = citiesList.find((x) => x.id === e.target.value);
+                  setForm((p) => ({ ...p, city_id: ct?.id || "", city: ct?.name || "" }));
+                }}
+              >
+                <option value="">
+                  {!form.state_id
+                    ? "Select State First"
+                    : districtsList.length > 0 && !form.district_id
+                      ? "Select District First"
+                      : "Select City"}
+                </option>
+                {citiesList.map((ct) => (
+                  <option key={ct.id} value={ct.id}>
+                    {ct.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* 8. Full Name & Salutation */}

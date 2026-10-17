@@ -10,7 +10,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
 import { Banner, Modal } from "@/components/ui";
 import { TextField } from "@/components/fields";
@@ -30,10 +29,10 @@ import type {
 } from "@/types";
 
 import {
-  friendlyPermissionLabel,
   groupPermissionsByModule,
-  MODULE_NAMES,
+  PERMISSION_SECTIONS,
 } from "@/lib/permissionLabels";
+import { PermissionMatrixEditor } from "@/components/PermissionMatrixEditor";
 
 /**
  * Role names that are reserved by the system and can never be created,
@@ -172,7 +171,6 @@ export function RbacPage() {
   const [overridesUsername, setOverridesUsername] = useState("");
   const [overridesBreakdown, setOverridesBreakdown] = useState<EffectivePermissionsBreakdown | null>(null);
   const [overridesChecked, setOverridesChecked] = useState<Set<string>>(new Set());
-  const [overridesSearch, setOverridesSearch] = useState("");
   const [overridesLoading, setOverridesLoading] = useState(false);
   const [overridesSaving, setOverridesSaving] = useState(false);
   const [managerActionLoading, setManagerActionLoading] = useState(false);
@@ -295,27 +293,6 @@ export function RbacPage() {
       else next.add(code);
       return next;
     });
-  }
-
-  function toggleModule(modKey: string) {
-    const items = permissionGroups[modKey] || [];
-    const anyUnchecked = items.some((p) => !checkedCodes.has(p.code));
-    setCheckedCodes((prev) => {
-      const next = new Set(prev);
-      items.forEach((p) => {
-        if (anyUnchecked) next.add(p.code);
-        else next.delete(p.code);
-      });
-      return next;
-    });
-  }
-
-  function toggleSelectAllPermissions() {
-    if (checkedCodes.size === allPermissions.length) {
-      setCheckedCodes(new Set());
-    } else {
-      setCheckedCodes(new Set(allPermissions.map((p) => p.code)));
-    }
   }
 
   /* Users currently assigned to viewingRole */
@@ -441,7 +418,6 @@ export function RbacPage() {
   async function openUserOverridesModal(userId: string, username: string) {
     setOverridesUserId(userId);
     setOverridesUsername(username);
-    setOverridesSearch("");
     setOverridesLoading(true);
     setOverridesBreakdown(null);
     setOverridesChecked(new Set());
@@ -744,8 +720,6 @@ export function RbacPage() {
   return (
     <AppShell activeKey="rbac" pageClassName="page-rbac">
       <main className="page">
-        <Breadcrumb trail={["Departments & Permissions"]} />
-
         {viewingRole ? (
           /* Merged View / Edit Department Screen */
           <div className="view-edit-role-container">
@@ -760,12 +734,9 @@ export function RbacPage() {
                   ← Back to Departments
                 </button>
                 <div>
-                  <h1 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>
+                  <h1 className="page-title">
                     {viewingRole.id ? `Department: ${roleDisplayName(viewingRole.name)}` : "Create New Department"}
                   </h1>
-                  <p className="page-subtitle" style={{ margin: "2px 0 0", fontSize: "13px" }}>
-                    Configure department details, assigned permissions, and user memberships.
-                  </p>
                 </div>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
@@ -1555,70 +1526,41 @@ export function RbacPage() {
                       Toggle permissions granted to anyone in this department.
                     </span>
                   </div>
-                  {canManageOrCreate && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      onClick={toggleSelectAllPermissions}
-                    >
-                      {checkedCodes.size === allPermissions.length ? "Deselect All" : "Select All"}
-                    </button>
-                  )}
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                  {Object.keys(permissionGroups)
-                    .sort()
-                    .map((modKey) => {
-                      const items = permissionGroups[modKey];
-                      const allCheckedInMod = items.every((p) => checkedCodes.has(p.code));
-                      const checkedCountInMod = items.filter((p) => checkedCodes.has(p.code)).length;
-
-                      return (
-                        <div className="permission-group" key={modKey}>
-                          <div className="permission-group-header">
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span className="permission-group-title">
-                                {MODULE_NAMES[modKey] || modKey.toUpperCase()}
-                              </span>
-                              <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
-                                {checkedCountInMod} / {items.length} active
-                              </span>
-                            </div>
-                            {canManageOrCreate && (
-                              <button
-                                type="button"
-                                className="toggle-btn"
-                                onClick={() => toggleModule(modKey)}
-                              >
-                                {allCheckedInMod ? "Deselect Group" : "Select Group"}
-                              </button>
-                            )}
-                          </div>
-                          <div className="permission-checks">
-                            {items.map((p) => (
-                              <label key={p.code}>
-                                <input
-                                  type="checkbox"
-                                  checked={checkedCodes.has(p.code)}
-                                  disabled={!canManageOrCreate}
-                                  onChange={() => toggleCode(p.code)}
-                                />
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
-                                    {friendlyPermissionLabel(p.code)}
-                                  </div>
-                                  <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
-                                    {p.code}
-                                  </div>
-                                </div>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
+                <PermissionMatrixEditor
+                  allPermissions={allPermissions}
+                  checkedCodes={checkedCodes}
+                  onToggleCode={toggleCode}
+                  onSelectAllInModule={(modKey, selectAll) => {
+                    const items = permissionGroups[modKey] || [];
+                    setCheckedCodes((prev) => {
+                      const next = new Set(prev);
+                      items.forEach((p) => {
+                        if (selectAll) next.add(p.code);
+                        else next.delete(p.code);
+                      });
+                      return next;
+                    });
+                  }}
+                  onSelectAllInSection={(sectionId, selectAll) => {
+                    const sec = PERMISSION_SECTIONS.find((s) => s.id === sectionId);
+                    if (!sec) return;
+                    setCheckedCodes((prev) => {
+                      const next = new Set(prev);
+                      for (const modKey of sec.modules) {
+                        const items = permissionGroups[modKey] || [];
+                        items.forEach((p) => {
+                          if (selectAll) next.add(p.code);
+                          else next.delete(p.code);
+                        });
+                      }
+                      return next;
+                    });
+                  }}
+                  onSetAllCodes={(codes) => setCheckedCodes(codes)}
+                  isReadOnly={!canManageOrCreate}
+                />
               </div>
             </div>
           </div>
@@ -1628,7 +1570,6 @@ export function RbacPage() {
             <div className="page-header">
               <div>
                 <h1>Departments &amp; Permissions</h1>
-                <div className="page-subtitle">Configure user access departments, system privileges, and permissions.</div>
               </div>
               <div className="page-header-actions">
                 {canCreateRole && (
@@ -2063,7 +2004,7 @@ export function RbacPage() {
         open={Boolean(overridesUserId)}
         title={`🔑 Manage Permission Overrides — ${overridesUsername}`}
         onClose={() => setOverridesUserId(null)}
-        cardStyle={{ maxWidth: "820px", width: "100%", height: "100vh", maxHeight: "100vh", display: "flex", flexDirection: "column", padding: 0 }}
+        cardStyle={{ maxWidth: "920px", width: "100%", height: "100vh", maxHeight: "100vh", display: "flex", flexDirection: "column", padding: 0 }}
       >
         {overridesLoading || !overridesBreakdown ? (
           <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
@@ -2107,217 +2048,49 @@ export function RbacPage() {
                 </div>
               </div>
 
-              {/* Search & Bulk Action Toolbar */}
-              <div
-                style={{
-                  display: "flex",
-                  gap: "10px",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
+              {/* Permission Groups & Categorized Matrix Editor */}
+              <PermissionMatrixEditor
+                allPermissions={allPermissions}
+                checkedCodes={overridesChecked}
+                onToggleCode={(code) => {
+                  setOverridesChecked((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(code)) next.delete(code);
+                    else next.add(code);
+                    return next;
+                  });
                 }}
-              >
-                <div style={{ position: "relative", flex: 1, minWidth: "240px" }}>
-                  <input
-                    type="text"
-                    placeholder="🔍 Search permission code or description..."
-                    style={{
-                      width: "100%",
-                      padding: "8px 30px 8px 12px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "6px",
-                      fontSize: "13.5px",
-                      background: "#ffffff",
-                      boxSizing: "border-box",
-                    }}
-                    value={overridesSearch}
-                    onChange={(e) => setOverridesSearch(e.target.value)}
-                  />
-                  {overridesSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setOverridesSearch("")}
-                      style={{
-                        position: "absolute",
-                        right: 8,
-                        top: "50%",
-                        transform: "translateY(-50%)",
-                        background: "none",
-                        border: "none",
-                        color: "#94a3b8",
-                        cursor: "pointer",
-                        fontSize: 14,
-                      }}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    style={{ background: "#dcfce7", color: "#166534", border: "1px solid #bbf7d0", fontWeight: 600 }}
-                    onClick={() => setOverridesChecked(new Set(allPermissions.map((p) => p.code)))}
-                  >
-                    🟢 Grant All
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", fontWeight: 600 }}
-                    onClick={() => setOverridesChecked(new Set())}
-                  >
-                    🔴 Deny All
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", fontWeight: 600 }}
-                    onClick={() => {
-                      setOverridesChecked(new Set(overridesBreakdown.role_permissions || []));
-                    }}
-                  >
-                    🔄 Reset to Departments
-                  </button>
-                </div>
-              </div>
-
-              {/* Permission Groups */}
-              {(() => {
-                const groups = groupPermissionsByModule(allPermissions);
-                const q = overridesSearch.trim().toLowerCase();
-                const roleGranted = new Set(overridesBreakdown.role_permissions || []);
-                const modKeys = Object.keys(groups)
-                  .sort()
-                  .filter((modKey) =>
-                    !q
-                      ? true
-                      : groups[modKey].some(
-                        (p) =>
-                          p.code.toLowerCase().includes(q) ||
-                          (p.description || "").toLowerCase().includes(q) ||
-                          modKey.toLowerCase().includes(q)
-                      )
-                  );
-
-                if (modKeys.length === 0) {
-                  return (
-                    <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
-                      No permissions match your search query.
-                    </div>
-                  );
-                }
-
-                return modKeys.map((modKey) => {
-                  const items = q
-                    ? groups[modKey].filter(
-                      (p) =>
-                        p.code.toLowerCase().includes(q) ||
-                        (p.description || "").toLowerCase().includes(q) ||
-                        modKey.toLowerCase().includes(q)
-                    )
-                    : groups[modKey];
-                  const allCheckedInMod = items.every((p) => overridesChecked.has(p.code));
-                  const checkedCountInMod = items.filter((p) => overridesChecked.has(p.code)).length;
-
-                  return (
-                    <div className="permission-group" key={modKey}>
-                      <div className="permission-group-header">
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span className="permission-group-title">
-                            {MODULE_NAMES[modKey] || modKey.toUpperCase()}
-                          </span>
-                          <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
-                            {checkedCountInMod} / {items.length} active
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          className="toggle-btn"
-                          onClick={() => {
-                            setOverridesChecked((prev) => {
-                              const next = new Set(prev);
-                              items.forEach((p) => {
-                                if (allCheckedInMod) next.delete(p.code);
-                                else next.add(p.code);
-                              });
-                              return next;
-                            });
-                          }}
-                        >
-                          {allCheckedInMod ? "Deselect Group" : "Select Group"}
-                        </button>
-                      </div>
-                      <div className="permission-checks">
-                        {items.map((p) => {
-                          const checked = overridesChecked.has(p.code);
-                          const isRoleGranted = roleGranted.has(p.code);
-                          return (
-                            <label
-                              key={p.code}
-                              style={{
-                                border: checked
-                                  ? isRoleGranted
-                                    ? "1px solid #bfdbfe"
-                                    : "1px solid #86efac"
-                                  : isRoleGranted
-                                    ? "1px solid #fca5a5"
-                                    : "1px solid #e2e8f0",
-                                background: checked
-                                  ? isRoleGranted
-                                    ? "#eff6ff"
-                                    : "#f0fdf4"
-                                  : isRoleGranted
-                                    ? "#fef2f2"
-                                    : "#ffffff",
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => {
-                                  setOverridesChecked((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(p.code)) next.delete(p.code);
-                                    else next.add(p.code);
-                                    return next;
-                                  });
-                                }}
-                              />
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
-                                    {friendlyPermissionLabel(p.code)}
-                                  </span>
-                                  {checked && !isRoleGranted && (
-                                    <span className="chip-grant" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
-                                      + EXTRA GRANTED
-                                    </span>
-                                  )}
-                                  {!checked && isRoleGranted && (
-                                    <span className="chip-deny" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
-                                      ✕ DIRECT DENIED
-                                    </span>
-                                  )}
-                                  {checked && isRoleGranted && (
-                                    <span className="chip-role" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
-                                      FROM DEPARTMENT
-                                    </span>
-                                  )}
-                                </div>
-                                <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
-                                  {p.code}
-                                </div>
-                              </div>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
+                onSelectAllInModule={(modKey, selectAll) => {
+                  const groups = groupPermissionsByModule(allPermissions);
+                  const items = groups[modKey] || [];
+                  setOverridesChecked((prev) => {
+                    const next = new Set(prev);
+                    items.forEach((p) => {
+                      if (selectAll) next.add(p.code);
+                      else next.delete(p.code);
+                    });
+                    return next;
+                  });
+                }}
+                onSelectAllInSection={(sectionId, selectAll) => {
+                  const sec = PERMISSION_SECTIONS.find((s) => s.id === sectionId);
+                  if (!sec) return;
+                  const groups = groupPermissionsByModule(allPermissions);
+                  setOverridesChecked((prev) => {
+                    const next = new Set(prev);
+                    for (const modKey of sec.modules) {
+                      const items = groups[modKey] || [];
+                      items.forEach((p) => {
+                        if (selectAll) next.add(p.code);
+                        else next.delete(p.code);
+                      });
+                    }
+                    return next;
+                  });
+                }}
+                onSetAllCodes={(codes) => setOverridesChecked(codes)}
+                rolePermissions={new Set(overridesBreakdown.role_permissions || [])}
+              />
             </div>
 
             {/* Sticky Drawer Footer */}

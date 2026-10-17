@@ -10,7 +10,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
@@ -52,7 +51,7 @@ export function LocalPurchasesPage() {
 
   // Lookups
   const supplierLookup = useLookup<{ id: string; company_name: string }>(
-    "/suppliers?page_size=1000",
+    "/suppliers",
     500
   );
 
@@ -166,22 +165,16 @@ export function LocalPurchasesPage() {
   return (
     <AppShell activeKey="local-purchases">
       <main className="page" style={{ width: "100%", padding: "16px 24px" }}>
-        {/* Header Breadcrumb */}
-        <Breadcrumb trail={["Purchase", "Local Purchase"]} />
-
         {/* Page Header Bar */}
         <div className="page-header" style={{ marginBottom: "16px" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#0f172a" }}>
+              <h1 className="page-title">
                 Local Purchases
               </h1>
               <span className="badge badge-info" style={{ fontSize: "12px", padding: "3px 8px", fontWeight: 600 }}>
                 {total} Records
               </span>
-            </div>
-            <div className="page-subtitle" style={{ marginTop: "4px", color: "#64748b", fontSize: "13px" }}>
-              Domestic vendor procurement, factory invoices, landing costs & bill extractions
             </div>
           </div>
 
@@ -687,28 +680,54 @@ export function LocalPurchasesPage() {
 
                         {/* Invoice No & Date */}
                         <td>
-                          <button
-                            type="button"
-                            onClick={() => setViewPurchaseId(p.id)}
-                            title="Click to view purchase details"
-                            style={{
-                              background: "none",
-                              border: "none",
-                              padding: 0,
-                              fontWeight: 700,
-                              color: "#0061f2",
-                              cursor: "pointer",
-                              textAlign: "left",
-                              fontSize: "13px",
-                              display: "block",
-                              textDecoration: "underline",
-                              textUnderlineOffset: "2px",
-                            }}
-                            onMouseEnter={(e) => (e.currentTarget.style.color = "#0041a8")}
-                            onMouseLeave={(e) => (e.currentTarget.style.color = "#0061f2")}
-                          >
-                            {p.invoice_no}
-                          </button>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              onClick={() => setViewPurchaseId(p.id)}
+                              title="Click to view purchase details"
+                              style={{
+                                background: "none",
+                                border: "none",
+                                padding: 0,
+                                fontWeight: 700,
+                                color: "#0061f2",
+                                cursor: "pointer",
+                                textAlign: "left",
+                                fontSize: "13px",
+                                display: "inline-block",
+                                textDecoration: "underline",
+                                textUnderlineOffset: "2px",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.color = "#0041a8")}
+                              onMouseLeave={(e) => (e.currentTarget.style.color = "#0061f2")}
+                            >
+                              {p.invoice_no}
+                            </button>
+                            {p.bill_file_url && (
+                              <a
+                                href={p.bill_file_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                download
+                                title="Download bill file from Supabase"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "3px",
+                                  fontSize: "11px",
+                                  fontWeight: 700,
+                                  color: "#059669",
+                                  background: "#ecfdf5",
+                                  border: "1px solid #a7f3d0",
+                                  borderRadius: "4px",
+                                  padding: "1px 6px",
+                                  textDecoration: "none",
+                                }}
+                              >
+                                📥 Bill
+                              </a>
+                            )}
+                          </div>
                           <span style={{ fontSize: "11px", color: "#64748b" }}>{p.invoice_date}</span>
                         </td>
 
@@ -834,6 +853,62 @@ export function LocalPurchasesPage() {
                               >
                                 👁️ View Details
                               </button>
+                              {p.bill_file_url ? (
+                                <a
+                                  href={p.bill_file_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  download
+                                  onClick={() => setOpenActionId(null)}
+                                  style={{
+                                    width: "100%",
+                                    boxSizing: "border-box",
+                                    textAlign: "left",
+                                    padding: "8px 12px",
+                                    fontSize: "12.5px",
+                                    color: "#059669",
+                                    background: "none",
+                                    border: "none",
+                                    borderTop: "1px solid #f1f5f9",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                    textDecoration: "none",
+                                    fontWeight: 600,
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#ecfdf5")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                >
+                                  📥 Download Bill
+                                </a>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenActionId(null);
+                                    toast("No bill document was uploaded for this purchase.", "warning");
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    padding: "8px 12px",
+                                    fontSize: "12.5px",
+                                    color: "#94a3b8",
+                                    background: "none",
+                                    border: "none",
+                                    borderTop: "1px solid #f1f5f9",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                >
+                                  📥 Download Bill (None)
+                                </button>
+                              )}
                               {hasPermission("local_purchase.update") && (
                               <button
                                 type="button"

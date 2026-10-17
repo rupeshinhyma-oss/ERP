@@ -25,8 +25,6 @@ export function CountriesPage() {
       liveModule="countries"
       entityName="country"
       heading="Countries (National Level)"
-      subtitle="National-level administrative divisions — People's Republic of China and international trading partners."
-      breadcrumbTrail={["Master Data", "Countries"]}
       newButtonLabel="+ New Country"
       searchPlaceholder="Search code or name or Sr. No..."
       hideQuickAdd={true}

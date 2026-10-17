@@ -4,6 +4,8 @@
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import type {
+  TechnicalCallLogReportRow,
+  TechnicalMonthlySummary,
   TechnicalTask,
   TechnicalTaskCallLog,
   TechnicalTaskCounts,
@@ -20,7 +22,11 @@ export interface TechnicalTaskListParams {
   service_type?: string;
   call_type?: string;
   city?: string;
+  third_party_city?: string;
   task_allotted_to?: string;
+  payment_collected?: string;
+  date_from?: string;
+  date_to?: string;
   serial_number?: string;
   search?: string;
   sort_by?: string;
@@ -43,6 +49,10 @@ export async function fetchTechnicalTasks(
   if (params.service_type) query.set("service_type", params.service_type);
   if (params.call_type) query.set("call_type", params.call_type);
   if (params.city) query.set("city", params.city);
+  if (params.third_party_city) query.set("third_party_city", params.third_party_city);
+  if (params.payment_collected) query.set("payment_collected", params.payment_collected);
+  if (params.date_from) query.set("date_from", params.date_from);
+  if (params.date_to) query.set("date_to", params.date_to);
   if (params.task_allotted_to) {
     query.set("task_allotted_to", params.task_allotted_to);
     query.set("technician", params.task_allotted_to);
@@ -50,7 +60,10 @@ export async function fetchTechnicalTasks(
   if (params.serial_number) query.set("serial_number", params.serial_number);
   if (params.search) query.set("search", params.search);
   if (params.sort_by) query.set("sort_by", params.sort_by);
-  if (params.sort_desc !== undefined) query.set("sort_desc", String(params.sort_desc));
+  if (params.sort_desc !== undefined) {
+    query.set("sort_desc", String(params.sort_desc));
+    query.set("sort_dir", params.sort_desc ? "desc" : "asc");
+  }
   if (params.page !== undefined) query.set("page", String(params.page));
   if (params.page_size !== undefined) {
     query.set("page_size", String(params.page_size));
@@ -126,6 +139,13 @@ export async function updateTechnicalTaskStatus(
     payment_mode?: string;
     payment_screenshot?: string;
     cancel_remarks?: string;
+    payment_collected?: boolean;
+    collected_amount?: number;
+    /** Approver overrides (applied only when approving). */
+    task_type?: string;
+    service_type?: string;
+    service_charge?: number;
+    payment_terms?: string;
   }
 ): Promise<TechnicalTask> {
   const res = await apiPatch<TechnicalTask>(
@@ -184,4 +204,32 @@ export async function uploadPaymentScreenshot(
     throw new Error(json.message || "Failed to upload payment screenshot");
   }
   return json.data;
+}
+
+export interface CallLogReportParams {
+  date_from?: string;
+  date_to?: string;
+  call_type?: string;
+  created_by?: string;
+  search?: string;
+  page?: number;
+  page_size?: number;
+}
+
+/** Separate Technical Call Log report (all logs across tasks). */
+export async function fetchCallLogReport(
+  params: CallLogReportParams = {}
+): Promise<ApiResult<TechnicalCallLogReportRow[]>> {
+  const query = new URLSearchParams();
+  (Object.entries(params) as Array<[string, string | number | undefined]>).forEach(([k, v]) => {
+    if (v !== undefined && v !== "") query.set(k, String(v));
+  });
+  const qs = query.toString();
+  return apiGet<TechnicalCallLogReportRow[]>(`/technical-tasks/call-log-report${qs ? `?${qs}` : ""}`);
+}
+
+/** Open vs Closed month-wise dashboard data. */
+export async function fetchMonthlySummary(months = 12): Promise<TechnicalMonthlySummary> {
+  const res = await apiGet<TechnicalMonthlySummary>(`/technical-tasks/monthly-summary?months=${months}`);
+  return res.data;
 }

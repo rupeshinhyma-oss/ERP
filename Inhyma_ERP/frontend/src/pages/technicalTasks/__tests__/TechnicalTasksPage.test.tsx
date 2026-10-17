@@ -3,6 +3,21 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { TechnicalTasksPage } from "../TechnicalTasksPage";
 import * as technicalTasksApi from "@/lib/technicalTasksApi";
+import { apiGet } from "@/lib/api";
+
+// Auth state the page reads through useAuth (admin by default; individual tests switch to a normal user).
+const authState = vi.hoisted(() => ({ isSuperAdmin: true, username: "admin", perms: [] as string[] }));
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useAuth: () => ({
+      profile: { username: authState.username },
+      isSuperAdmin: authState.isSuperAdmin,
+      hasPermission: (code?: string | null) => !code || authState.perms.includes(code),
+    }),
+  };
+});
 
 // Mock AppShell to render children simply
 vi.mock("@/components/AppShell", () => ({
@@ -339,6 +354,11 @@ describe("TechnicalTasksPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /\+ ADD NEW/i }));
 
     await waitFor(() => {
+      expect(screen.getByTestId("radio-product-serial")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("radio-product-serial"));
+
+    await waitFor(() => {
       expect(screen.getByTestId("field-serial-number")).toBeTruthy();
     });
 
@@ -416,6 +436,256 @@ describe("TechnicalTasksPage", () => {
       );
     });
   });
+
+  it("sends date range, service type, third-party city and payment filters to the API", async () => {
+    const spy = vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+      data: sampleTasks as any,
+      meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+    });
+
+    render(
+      <MemoryRouter>
+        <TechnicalTasksPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByTitle("Toggle Filter Options"));
+    fireEvent.change(screen.getByLabelText("Created from"), { target: { value: "2026-10-01" } });
+    fireEvent.change(screen.getByLabelText("Created to"), { target: { value: "2026-10-15" } });
+    expect(screen.getByText("Third-Party Site City")).toBeTruthy();
+    expect(screen.getByText("Payment Collected")).toBeTruthy();
+
+    await waitFor(() => {
+      const last = spy.mock.calls[spy.mock.calls.length - 1][0] as Record<string, unknown>;
+      expect(last.date_from).toBe("2026-10-01");
+      expect(last.date_to).toBe("2026-10-15");
+    });
+  });
+
+  const openMenuFor = async (text: string) => {
+    await waitFor(() => expect(screen.getByText(text)).toBeTruthy());
+    fireEvent.click(screen.getByText("⋮"));
+  };
+
+  it("lets the approver override task type, service type, amount and payment terms when approving", async () => {
+    const pending = { ...sampleTasks[0], status: "Pending", task_allotted_to: "Devendra Marade", task_approved_by: null };
+    vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+      data: [pending] as any,
+      meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+    });
+    const statusSpy = vi.spyOn(technicalTasksApi, "updateTechnicalTaskStatus").mockResolvedValue({ ...pending, status: "Approved" } as any);
+
+    render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+    await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+    fireEvent.click(screen.getByText("Approve"));
+
+    const amount = (await screen.findByTestId("approve-amount")) as HTMLInputElement;
+    expect(amount.value).toBe("4500");
+    fireEvent.change(amount, { target: { value: "5200" } });
+    fireEvent.change(screen.getByTestId("approve-terms"), { target: { value: "Pay on visit" } });
+    fireEvent.click(screen.getByTestId("btn-save-status"));
+
+    await waitFor(() => {
+      expect(statusSpy).toHaveBeenCalledWith(
+        "task-1",
+        "Approved",
+        expect.anything(),
+        expect.objectContaining({
+          task_type: "In-House", service_type: "Chargeable", service_charge: 5200, payment_terms: "Pay on visit",
+        })
+      );
+    });
+  });
+
+  it("blocks approval of a chargeable task without an amount", async () => {
+    const pending = { ...sampleTasks[0], status: "Pending", task_allotted_to: "Devendra Marade", service_charge: 0 };
+    vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+      data: [pending] as any,
+      meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+    });
+    const statusSpy = vi.spyOn(technicalTasksApi, "updateTechnicalTaskStatus").mockResolvedValue({} as any);
+
+    render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+    await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+    fireEvent.click(screen.getByText("Approve"));
+    await screen.findByTestId("approve-amount");
+    fireEvent.click(screen.getByTestId("btn-save-status"));
+
+    await waitFor(() => expect(screen.getByText(/Amount is required for chargeable tasks/i)).toBeTruthy());
+    expect(statusSpy).not.toHaveBeenCalled();
+  });
+
+  it("hides admin-level actions (edit approved by others, delete after Pending) from normal users", async () => {
+    authState.isSuperAdmin = false;
+    authState.username = "sales1";
+    try {
+      vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+        data: [sampleTasks[0]] as any, // Approved by "Sushant Dhawade"
+        meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+      });
+      render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+      await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+      expect(screen.getByText("Call Logs")).toBeTruthy();
+      expect(screen.getByText("Complete Task")).toBeTruthy();
+      expect(screen.queryByText("Edit")).toBeNull();
+      expect(screen.queryByText("Delete")).toBeNull();
+    } finally {
+      authState.isSuperAdmin = true;
+      authState.username = "admin";
+    }
+  });
+
+  it("shows Edit and Delete for a Pending task to normal users, and Delete for admins on any stage", async () => {
+    authState.isSuperAdmin = false;
+    authState.username = "sales1";
+    try {
+      vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+        data: [{ ...sampleTasks[0], status: "Pending", task_approved_by: null }] as any,
+        meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+      });
+      render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+      await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+      expect(screen.getByText("Edit")).toBeTruthy();
+      expect(screen.getByText("Delete")).toBeTruthy();
+    } finally {
+      authState.isSuperAdmin = true;
+      authState.username = "admin";
+    }
+  });
+
+  it("offers 'Payment Collected' (not Reopen) for Payment Pending tasks", async () => {
+    vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+      data: [{ ...sampleTasks[0], status: "Payment Pending", payment_status: "Pending" }] as any,
+      meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+    });
+    render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+    await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+    expect(screen.getByText("Payment Collected")).toBeTruthy();
+    expect(screen.queryByText("Reopen / Reassign")).toBeNull();
+  });
+
+  it("shows the Contact Person dropdown with the company's contacts and fills designation + number", async () => {
+    (apiGet as any).mockImplementation(async (path: string) =>
+      path.includes("/contacts")
+        ? {
+          data: [
+            { person_name: "Rajesh Patel", designation: "Manager", calling_number: "9825011223" },
+            { person_name: "Meena Shah", designation: "Accounts", calling_number: "9825099999" },
+          ]
+        }
+        : { data: [] }
+    );
+    try {
+      vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+        data: [{ ...sampleTasks[0], status: "Pending", company_id: "company-1", task_approved_by: null }] as any,
+        meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+      });
+      render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+      await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+      fireEvent.click(screen.getByText("Edit"));
+      const select = (await screen.findByTestId("contact-person-select")) as HTMLSelectElement;
+      fireEvent.change(select, { target: { value: "Meena Shah" } });
+      await waitFor(() => {
+        expect((screen.getByPlaceholderText("Designation e.g. Manager") as HTMLInputElement).value).toBe("Accounts");
+        expect((screen.getByPlaceholderText("Mobile / Calling Number") as HTMLInputElement).value).toBe("9825099999");
+      });
+    } finally {
+      (apiGet as any).mockImplementation(async () => ({ data: [] }));
+    }
+  });
+
+  it("toggles Product Option between All Products and Product by Serial No. in Add Task form", async () => {
+    vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+      data: [] as any,
+      meta: { total: 0, page: 1, page_size: 50, total_pages: 1 } as any,
+    });
+    const lookupSpy = vi.spyOn(technicalTasksApi, "lookupTaskSerialNumber").mockResolvedValue({
+      serial_number: "INH-2026-MC001",
+      machine_model: "AP-500 Sealer",
+      company_name: "ALPHA PACKAGING",
+      city: "Ahmedabad",
+      contact_person: "Mr. Patel",
+      contact_phone: "9876543210",
+      warranty_status: "Active",
+      past_tasks_count: 0,
+      past_tasks: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <TechnicalTasksPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByText("+ ADD NEW"));
+    expect(screen.getByText("Product Option")).toBeTruthy();
+
+    // Default mode is All Products -> shows Search Product placeholder
+    expect((screen.getByTestId("radio-product-all") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByPlaceholderText("Search Product...")).toBeTruthy();
+    expect(screen.queryByTestId("field-serial-number")).toBeNull();
+
+    // Switch to Product by Serial No.
+    fireEvent.click(screen.getByTestId("radio-product-serial"));
+    expect((screen.getByTestId("radio-product-serial") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId("field-serial-number")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Enter Product Name")).toBeTruthy();
+    expect(screen.getByTestId("btn-lookup-serial")).toBeTruthy();
+
+    // Type serial number and perform lookup
+    fireEvent.change(screen.getByTestId("field-serial-number"), { target: { value: "INH-2026-MC001" } });
+    fireEvent.click(screen.getByTestId("btn-lookup-serial"));
+
+    await waitFor(() => {
+      expect(lookupSpy).toHaveBeenCalledWith("INH-2026-MC001");
+      expect(screen.getByText("AP-500 Sealer")).toBeTruthy();
+    });
+
+    // Switch back to All Products
+    fireEvent.click(screen.getByTestId("radio-product-all"));
+    expect(screen.getByPlaceholderText("Search Product...")).toBeTruthy();
+    expect(screen.queryByTestId("field-serial-number")).toBeNull();
+  });
+
+  it("opens Machine & Model dropdown when clicked and supports both write and dropdown selection", async () => {
+    vi.mocked(technicalTasksApi.fetchTechnicalTasks).mockResolvedValueOnce({
+      data: sampleTasks,
+      meta: { pagination: { total_items: sampleTasks.length } },
+    });
+
+    render(
+      <MemoryRouter>
+        <TechnicalTasksPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByText("+ ADD NEW"));
+    const machineInput = screen.getByPlaceholderText("Search Product...") as HTMLInputElement;
+    expect(machineInput).toBeTruthy();
+
+    // Clicking the input opens the dropdown list
+    fireEvent.click(machineInput);
+    expect(screen.getByTestId("field-machine-model-dropdown")).toBeTruthy();
+    expect(screen.getByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
+
+    // Clicking an option selects it
+    fireEvent.click(screen.getByText("ISL150 Rotary PFS 4 Stations"));
+    expect(machineInput.value).toBe("ISL150 Rotary PFS 4 Stations");
+    expect(screen.queryByTestId("field-machine-model-dropdown")).toBeNull();
+
+    // Typing custom text works and keeps dropdown open for matching/custom options
+    fireEvent.change(machineInput, { target: { value: "Custom Model 9000" } });
+    expect(machineInput.value).toBe("Custom Model 9000");
+    expect(screen.getByTestId("field-machine-model-dropdown")).toBeTruthy();
+    expect(screen.getByText('Use "Custom Model 9000" as custom machine/model')).toBeTruthy();
+
+    // Clicking the toggle button closes dropdown
+    const toggleBtn = screen.getByTestId("field-machine-model-toggle");
+    fireEvent.click(toggleBtn);
+    expect(screen.queryByTestId("field-machine-model-dropdown")).toBeNull();
+
+    // Clicking toggle button again re-opens dropdown
+    fireEvent.click(toggleBtn);
+    expect(screen.getByTestId("field-machine-model-dropdown")).toBeTruthy();
+  });
 });
-
-

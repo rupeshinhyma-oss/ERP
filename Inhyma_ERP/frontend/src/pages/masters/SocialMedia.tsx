@@ -24,8 +24,6 @@ export function SocialMediaPage() {
       liveModule="social_media"
       entityName="social media"
       heading="Social Media"
-      subtitle="Configure and manage social media platforms and communication channels."
-      breadcrumbTrail={["Settings", "Masters", "Social Media"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search Name or Sr. No..."
       hideQuickAdd={true}

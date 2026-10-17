@@ -52,7 +52,9 @@ class InvalidPlatformTokenError(Exception):
     """Raised when a platform-admin JWT fails signature verification, has expired, or is malformed."""
 
 
-def create_platform_access_token(admin_id: uuid.UUID, *, role: str) -> IssuedPlatformToken:
+def create_platform_access_token(
+    admin_id: uuid.UUID, *, role: str, session_id: str | None = None
+) -> IssuedPlatformToken:
     """
     Issue a short-lived control-plane session token for a platform admin.
 
@@ -73,6 +75,9 @@ def create_platform_access_token(admin_id: uuid.UUID, *, role: str) -> IssuedPla
         "iss": settings.PLATFORM_JWT_ISSUER,
         "type": "platform_access",
     }
+    if session_id:
+        # The central session this login belongs to.  Signing out revokes exactly this session.
+        payload["sid"] = str(session_id)
     token = jwt.encode(payload, settings.PLATFORM_JWT_SECRET_KEY, algorithm=settings.PLATFORM_JWT_ALGORITHM)
     return IssuedPlatformToken(token=token, expires_at=expires_at)
 

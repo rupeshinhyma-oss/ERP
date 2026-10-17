@@ -14,7 +14,7 @@
  * results, not the full related tables.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -434,129 +434,28 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerSupplier, setDrawerSupplier] = useState<Supplier | null>(null);
-  const [pinnedCols] = useState<Record<number, "left" | "right">>(() => {
-    const saved = localStorage.getItem("suppliers_pinned_cols_v2");
-    if (saved !== null) {
-      try {
-        const parsed = JSON.parse(saved);
-        const valid: Record<number, "left" | "right"> = {};
-        for (const k of Object.keys(parsed)) {
-          const num = Number(k);
-          if (num >= 0 && num < 10) valid[num] = parsed[k];
-        }
-        return valid;
-      } catch {
-        // fallback
-      }
-    }
-    return { 0: "left", 1: "left" };
-  });
+  // Column freezing removed per user request
+  const displayOrder = useMemo(() => Array.from({ length: 10 }, (_, i) => i), []);
 
   useEffect(() => {
-    localStorage.setItem("suppliers_pinned_cols_v2", JSON.stringify(pinnedCols));
-  }, [pinnedCols]);
-
-  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
-  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
+    try {
+      localStorage.removeItem("suppliers_pinned_cols_v2");
+    } catch {}
+  }, []);
 
   const tableRef = useRef<HTMLTableElement>(null);
 
-
-  const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: 10 }, (_, i) => i);
-    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
-    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
-    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
-    return [...lefts, ...unpinned, ...rights];
-  }, [pinnedCols]);
-
-  useLayoutEffect(() => {
-    if (!tableRef.current) return;
-    const tableEl = tableRef.current;
-
-    const updateOffsets = () => {
-      const ths = tableEl.querySelectorAll("thead th");
-      if (!ths.length) return;
-
-      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-      let accumLeft = 0;
-      const nextLefts: Record<number, number> = {};
-      for (const idx of lefts) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextLefts[idx] = accumLeft;
-          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
-      let accumRight = 0;
-      const nextRights: Record<number, number> = {};
-      for (const idx of rights) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextRights[idx] = accumRight;
-          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      setColLeftOffsets(nextLefts);
-      setColRightOffsets(nextRights);
-    };
-
-    updateOffsets();
-
-    if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => updateOffsets());
-      ro.observe(tableEl);
-      return () => ro.disconnect();
-    }
-  }, [pinnedCols, rows, loading, displayOrder]);
-
-  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
-    const dir = pinnedCols[colIdx];
-    const headerTopStyle: React.CSSProperties = isHeader
+  const getFreezeStyle = useCallback((_colIdx: number, isHeader = false): React.CSSProperties => {
+    return isHeader
       ? {
         position: "sticky",
         top: 0,
-        zIndex: dir ? 30 : 15,
+        zIndex: 15,
         backgroundColor: "#f8fafc",
         boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
       }
       : {};
-
-    if (!dir) return headerTopStyle;
-
-    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
-
-    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
-    const isFirstRight = dir === "right" && colIdx === rights[0];
-
-    if (dir === "left") {
-      const left = colLeftOffsets[colIdx] ?? 0;
-      return {
-        ...headerTopStyle,
-        position: "sticky",
-        left: `${left}px`,
-        zIndex: isHeader ? 35 : 10,
-        backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
-      };
-    }
-
-    const right = colRightOffsets[colIdx] ?? 0;
-    return {
-      ...headerTopStyle,
-      position: "sticky",
-      right: `${right}px`,
-      zIndex: isHeader ? 35 : 10,
-      backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
-    };
-  }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
+  }, []);
 
 
 
@@ -1885,13 +1784,13 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   if (isImportPageOpen) {
     return (
       <AppShell activeKey="suppliers" pageClassName="page-suppliers">
-        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+        <main className="page">
           <Breadcrumb trail={["Purchase", "Suppliers", "Import Suppliers"]} />
 
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>Import Suppliers</h1>
+              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>Import Suppliers</h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
                 Upload bulk supplier accounts, contacts, and sourcing capabilities from Excel (.xlsx, .xls) or CSV.
               </div>
@@ -2160,11 +2059,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   return (
     <AppShell activeKey="suppliers" pageClassName="page-suppliers">
       {modalOpen ? (
-        <main className="page" style={{ width: "100%", padding: "20px 24px" }}>
+        <main className="page">
           {/* Header Bar with Back Button */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+              <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
                 {modalMode === "quick" ? "Add Supplier (Quick)" : (currentSupplierId ? "Edit Supplier" : "Add Supplier")}
               </h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
@@ -3495,9 +3394,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
             <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <button
                 type="button"
-                className="btn"
+                className="btn btn-filter-toggle"
                 style={{
-                  background: filterOpen ? "#0061f2" : "#556987",
+                  background: "#556987",
                   color: "#ffffff",
                   padding: "8px 14px",
                   borderRadius: "6px",

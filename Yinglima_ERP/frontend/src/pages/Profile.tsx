@@ -149,7 +149,7 @@ export function ProfilePage() {
       <main className="page" style={{ background: "#f8fafc", minHeight: "calc(100vh - 60px)", padding: "24px 36px" }}>
         {/* Top Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-          <h1 style={{ color: "#0f172a", fontWeight: 700, fontSize: "22px", margin: 0 }}>
+          <h1 className="page-title">
             Profile
           </h1>
           <button

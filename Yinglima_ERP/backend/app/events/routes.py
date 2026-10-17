@@ -111,7 +111,7 @@ async def live_events(
         await websocket.close(code=4401, reason="Invalid or expired token.")
         return
 
-    await connection_manager.connect(websocket, current_user.id)
+    await connection_manager.connect(websocket, current_user.id, getattr(current_user, "session_id", ""))
 
     try:
         while True:

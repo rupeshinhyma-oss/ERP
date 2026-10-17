@@ -59,8 +59,7 @@ class OrganizationService:
         organization = await self.repository.get_singleton()
         if organization is None:
             raise NotFoundException(self.not_found_message)
-        changes = {k: v for k, v in field_values.items() if v is not None}
-        if changes:
-            await self.repository.update(organization, **changes)
+        if field_values:
+            await self.repository.update(organization, **field_values)
         await self.cache_manager.invalidate_settings()
         return organization

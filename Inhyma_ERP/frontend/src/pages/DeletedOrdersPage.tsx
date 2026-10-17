@@ -171,10 +171,10 @@ const SALES_PERSONS = [
   "Rupesh Inhyma",
 ];
 
-export function DeletedOrdersPage() {
+export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilterOpen?: boolean } = {}) {
   const [items, setItems] = useState<DeletedOrderItem[]>(INITIAL_DELETED_ORDERS);
   const [loading, setLoading] = useState<boolean>(false);
-  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(true);
+  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(defaultFilterOpen);
 
   // Filter state
   const [orderDateRange, setOrderDateRange] = useState<string>("");
@@ -303,26 +303,20 @@ export function DeletedOrdersPage() {
         return false;
       }
 
-      // State filter
-      if (!appliedStates.includes("All") && appliedStates.length > 0) {
-        const matchState = appliedStates.some((s) => order.state.toLowerCase().includes(s.toLowerCase()));
-        if (!matchState) return false;
+      // Order Date Range filter
+      if (appliedOrderDateRange.trim() && order.order_date && !order.order_date.includes(appliedOrderDateRange.trim())) {
+        return false;
+      }
+
+      // Expected Delivery Date Range filter
+      if (appliedExpDeliveryDateRange.trim() && order.expected_delivery_date && !order.expected_delivery_date.includes(appliedExpDeliveryDateRange.trim())) {
+        return false;
       }
 
       return true;
     });
-  }, [items, searchTerm, appliedWarehouse, appliedSalesPerson, appliedStates]);
+  }, [items, searchTerm, appliedWarehouse, appliedSalesPerson, appliedStates, appliedOrderDateRange, appliedExpDeliveryDateRange]);
 
-  // Active filter count
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (appliedWarehouse !== "All") count++;
-    if (appliedSalesPerson !== "All") count++;
-    if (!appliedStates.includes("All")) count++;
-    if (appliedOrderDateRange) count++;
-    if (appliedExpDeliveryDateRange) count++;
-    return count;
-  }, [appliedWarehouse, appliedSalesPerson, appliedStates, appliedOrderDateRange, appliedExpDeliveryDateRange]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
@@ -399,15 +393,26 @@ export function DeletedOrdersPage() {
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <button
               type="button"
-              className={`deleted-orders-btn-filter ${showFilterPanel ? "active" : ""}`}
+              className="btn btn-filter-toggle"
               onClick={() => setShowFilterPanel((v) => !v)}
               title="Toggle filter panel"
               aria-label="Filter"
+              style={{
+                background: "#556987",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "6px",
+                padding: "8px 14px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFilterCount > 0 && <span className="deleted-orders-filter-badge">{activeFilterCount}</span>}
             </button>
           </div>
         </div>

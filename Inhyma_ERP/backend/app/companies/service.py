@@ -15,6 +15,8 @@ from app.common.list_query import ListQueryParams
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.masters.cities.repository import CityRepository
 from app.masters.countries.repository import CountryRepository
+from app.companies.age import compute_company_age
+from app.masters.districts.repository import DistrictRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
 from app.masters.products.repository import ProductRepository
@@ -51,6 +53,7 @@ class CompanyService:
         sub_category_repository: ProductSubCategoryRepository,
         cache_manager: CacheManager,
         product_repository: ProductRepository | None = None,
+        district_repository: DistrictRepository | None = None,
     ) -> None:
         """Bind this service to its repository, every referenced master's repository, and cache manager."""
         self.repository = repository
@@ -62,6 +65,7 @@ class CompanyService:
         self.sub_category_repository = sub_category_repository
         self.cache_manager = cache_manager
         self.product_repository = product_repository
+        self.district_repository = district_repository
 
     # ------------------------------------------------------------------
     # Reads
@@ -164,6 +168,78 @@ class CompanyService:
             if state_id is not None and city.state_id != state_id:
                 raise BadRequestException("The specified city does not belong to the specified state.")
 
+    async def _normalize_geography(
+        self,
+        *,
+        country_id: uuid.UUID | None,
+        state_id: uuid.UUID | None,
+        district_id: uuid.UUID | None,
+        district_text: str | None,
+        city_id: uuid.UUID | None,
+    ) -> dict[str, Any]:
+        """
+        Validate the State -> District -> City hierarchy and return the normalised geography columns.
+
+        * a district must belong to the state; a city must belong to the state (and to the district when the
+          city is assigned to one) -- an inconsistent combination is refused instead of being saved;
+        * the state / country are derived from the district / city / state when they are not supplied;
+        * a city that belongs to a district fills in the district;
+        * a legacy free-text ``district`` is resolved to the district master by name (within the state); a name
+          that is not in the master is kept as text so older callers keep working.
+        """
+        district = None
+        if district_id is not None and self.district_repository is not None:
+            district = await self.district_repository.get_by_id(district_id)
+            if district is None:
+                raise BadRequestException("The specified district does not exist.")
+        city = None
+        if city_id is not None:
+            city = await self.city_repository.get_by_id(city_id)
+            if city is None:
+                raise BadRequestException("The specified city does not exist.")
+
+        if state_id is None:
+            if district is not None:
+                state_id = district.state_id
+            elif city is not None:
+                state_id = city.state_id
+
+        if state_id is not None:
+            state = await self.state_repository.get_by_id(state_id)
+            if state is None:
+                raise BadRequestException("The specified state/province does not exist.")
+            if country_id is None:
+                country_id = state.country_id
+            elif state.country_id != country_id:
+                raise BadRequestException("The specified state does not belong to the specified country.")
+        elif country_id is not None and await self.country_repository.get_by_id(country_id) is None:
+            raise BadRequestException("The specified country does not exist.")
+
+        if district is not None and state_id is not None and district.state_id != state_id:
+            raise BadRequestException("The specified district does not belong to the specified state.")
+        if city is not None and state_id is not None and city.state_id != state_id:
+            raise BadRequestException("The specified city does not belong to the specified state.")
+        if city is not None and city.district_id is not None and self.district_repository is not None:
+            if district is None:
+                district = await self.district_repository.get_by_id(city.district_id)
+            elif city.district_id != district.id:
+                raise BadRequestException("The specified city does not belong to the specified district.")
+
+        text = (district_text or "").strip() or None
+        if district is None and text and state_id is not None and self.district_repository is not None:
+            for candidate in await self.district_repository.list_by_state(state_id):
+                if candidate.name.strip().lower() == text.lower():
+                    district = candidate
+                    break
+
+        return {
+            "country_id": country_id,
+            "state_id": state_id,
+            "district_id": district.id if district is not None else None,
+            "district": district.name if district is not None else text,
+            "city_id": city_id,
+        }
+
     async def _validate_categories(self, category_ids: list[uuid.UUID]) -> None:
         """Ensure every given product category exists."""
         if not category_ids:
@@ -202,11 +278,13 @@ class CompanyService:
 
     def _validate_status_transition(self, existing_status: Any, new_status: Any) -> None:
         """Status may not move from Existing back to New (one-way status lock per spec)."""
-        if not existing_status or not new_status:
+        if not existing_status:
             return
         ex_str = (existing_status.value if hasattr(existing_status, "value") else str(existing_status)).strip().lower()
-        new_str = (new_status.value if hasattr(new_status, "value") else str(new_status)).strip().lower()
-        if ex_str == "existing" and new_str == "new":
+        new_str = (
+            "" if new_status is None else (new_status.value if hasattr(new_status, "value") else str(new_status))
+        ).strip().lower()
+        if ex_str == "existing" and new_str in ("new", "", "none"):
             raise ConflictException(
                 "Current Status cannot be changed from 'Existing' back to 'New'. Once a company transitions to Existing, status is locked from returning to New."
             )
@@ -287,22 +365,27 @@ class CompanyService:
     async def create(self, **field_values: Any) -> Company:
         """Create a new company profile."""
         company_name = field_values["company_name"]
-        country_id = field_values.get("country_id")
-        state_id = field_values.get("state_id")
-        city_id = field_values.get("city_id")
         category_ids = field_values.pop("category_ids", []) or []
         sub_category_ids = field_values.pop("sub_category_ids", []) or []
         product_ids = field_values.pop("product_ids", []) or []
         emails = field_values.pop("emails", []) or []
 
-        # Auto-resolve country from state if not supplied
-        if not country_id and state_id:
-            state = await self.state_repository.get_by_id(state_id)
-            if state:
-                country_id = state.country_id
-                field_values["country_id"] = country_id
+        geo = await self._normalize_geography(
+            country_id=field_values.get("country_id"),
+            state_id=field_values.get("state_id"),
+            district_id=field_values.get("district_id"),
+            district_text=field_values.get("district"),
+            city_id=field_values.get("city_id"),
+        )
+        field_values.update(geo)
+        country_id = geo["country_id"]
+        city_id = geo["city_id"]
 
-        await self._validate_geography(country_id, state_id, city_id)
+        # Age of Company is derived from the GST registration date (never trusted from the client).
+        computed_age = compute_company_age(field_values.get("gst_registration_date"))
+        if computed_age is not None:
+            field_values["age_of_company"] = computed_age
+
         await self._validate_categories(category_ids)
         await self._validate_sub_categories(sub_category_ids)
         await self._validate_products(product_ids)
@@ -360,10 +443,44 @@ class CompanyService:
         emails = field_values.pop("emails", None)
 
         country_id = field_values.get("country_id") or company.country_id
-        state_id = field_values.get("state_id") or company.state_id
-        city_id = field_values.get("city_id") or company.city_id
-        if any(k in field_values for k in ("country_id", "state_id", "city_id")):
-            await self._validate_geography(country_id, state_id, city_id)
+        if any(k in field_values for k in ("country_id", "state_id", "district_id", "district", "city_id")):
+            # Effective values: what the client sent, else what is stored -- except that changing a parent level
+            # (state -> district -> city) clears the stale children instead of failing on them.
+            state_changed = "state_id" in field_values and field_values["state_id"] != company.state_id
+            district_changed = state_changed or (
+                "district_id" in field_values and field_values["district_id"] != company.district_id
+            ) or (
+                "district" in field_values
+                and "district_id" not in field_values
+                and (field_values["district"] or None) != (company.district or None)
+            )
+            eff_state = field_values["state_id"] if "state_id" in field_values else company.state_id
+            if "district_id" in field_values:
+                eff_district_id = field_values["district_id"]
+                eff_district_text = None if eff_district_id is not None else field_values.get("district")
+            elif "district" in field_values:
+                eff_district_id, eff_district_text = None, field_values["district"]
+            elif state_changed:
+                eff_district_id, eff_district_text = None, None
+            else:
+                eff_district_id, eff_district_text = company.district_id, company.district
+            if "city_id" in field_values:
+                eff_city = field_values["city_id"]
+            elif district_changed:
+                eff_city = None
+            else:
+                eff_city = company.city_id
+            geo = await self._normalize_geography(
+                country_id=field_values.get("country_id") if "country_id" in field_values else (
+                    None if state_changed else company.country_id
+                ),
+                state_id=eff_state,
+                district_id=eff_district_id,
+                district_text=eff_district_text,
+                city_id=eff_city,
+            )
+            field_values.update(geo)
+            country_id = geo["country_id"]
 
         if category_ids is not None:
             await self._validate_categories(category_ids)
@@ -378,8 +495,8 @@ class CompanyService:
             await self._ensure_calling_number_unique(field_values["contact_calling_number"], exclude_id=company_id)
 
         new_company_name = field_values.get("company_name") or company.company_name
-        new_city_id = field_values.get("city_id") or company.city_id
-        if field_values.get("company_name") is not None or field_values.get("city_id") is not None:
+        new_city_id = field_values["city_id"] if "city_id" in field_values else company.city_id
+        if field_values.get("company_name") is not None or "city_id" in field_values:
             if await self.repository.name_city_exists(new_company_name, new_city_id, exclude_id=company_id):
                 existing = await self.repository.get_by_name_city(
                     new_company_name, new_city_id, exclude_id=company_id
@@ -399,7 +516,46 @@ class CompanyService:
         if "current_status" in field_values:
             self._validate_status_transition(company.current_status, field_values["current_status"])
 
-        changes = {k: v for k, v in field_values.items() if v is not None}
+        if "gst_registration_date" in field_values:
+            computed_age = compute_company_age(field_values["gst_registration_date"])
+            if computed_age is not None:
+                field_values["age_of_company"] = computed_age
+            elif not (field_values["gst_registration_date"] or "").strip():
+                field_values["age_of_company"] = None  # date cleared -> age cleared
+            else:
+                field_values.pop("age_of_company", None)  # unreadable / future date: do not keep a client-made age
+
+        # Conditional-field consistency (Potential / Business Type / Direct Import) on the merged values.
+        def _eff(name: str) -> Any:
+            return field_values[name] if name in field_values else getattr(company, name)
+
+        def _val(x: Any) -> str:
+            return (x.value if hasattr(x, "value") else str(x or "")).strip().lower()
+
+        if _val(_eff("potential")) == "no" and not (_eff("potential_reason") or "").strip():
+            raise BadRequestException("A reason is required when Potential is 'No'.")
+        if _val(_eff("potential")) != "yes" and "potential_business_per_month" not in field_values:
+            if company.potential_business_per_month:
+                field_values["potential_business_per_month"] = None
+        if _val(_eff("potential")) != "no" and "potential_reason" not in field_values and company.potential_reason:
+            if "potential" in field_values:
+                field_values["potential_reason"] = None
+        if (_eff("company_type") or "").strip().upper() == "B2B" and company.sector and "sector" not in field_values:
+            field_values["sector"] = None  # Sector belongs to B2C companies only
+        if (_eff("company_type") or "").strip().upper() != "B2B":
+            for dep in ("direct_import_from_china", "monthly_import_volume", "products_needed_for_imports"):
+                if getattr(company, dep) and dep not in field_values:
+                    field_values[dep] = None
+        elif (_eff("direct_import_from_china") or "").strip().lower() != "yes":
+            for dep in ("monthly_import_volume", "products_needed_for_imports"):
+                if getattr(company, dep) and dep not in field_values:
+                    field_values[dep] = None
+
+        # Only what the client sent is applied, and an explicit null CLEARS the field (a blank form field used to be
+        # silently ignored, so a cleared city / email / remark came back after save). Columns that can never be
+        # blank are protected.
+        not_nullable = {"company_name", "visited_factory_office", "is_active"}
+        changes = {k: v for k, v in field_values.items() if v is not None or k not in not_nullable}
         if changes:
             await self.repository.update(company, **changes)
 
@@ -461,7 +617,10 @@ class CompanyService:
     async def update_potential(self, company_id: uuid.UUID, potential: Any) -> Company:
         """List-view inline editable dropdown for Potential."""
         company = await self.get_by_id_or_raise(company_id)
-        await self.repository.update(company, potential=potential)
+        extra: dict[str, Any] = {}
+        if (potential.value if hasattr(potential, "value") else str(potential or "")).strip().lower() != "yes":
+            extra["potential_business_per_month"] = None
+        await self.repository.update(company, potential=potential, **extra)
         await self._invalidate_cache()
         return company
 
@@ -508,8 +667,32 @@ class CompanyService:
                 raise BadRequestException("The specified country does not exist.")
         if field_values.get("calling_number"):
             await self._ensure_calling_number_unique(field_values["calling_number"])
+        # Spec: Whatsapp Number is "by default - same as calling" when it is left blank.
+        if not (field_values.get("whatsapp_number") or "").strip() and (field_values.get("calling_number") or "").strip():
+            field_values["whatsapp_number"] = field_values["calling_number"]
+        make_primary = bool(field_values.pop("is_primary", False))
         contact = await self.contact_repository.create(company_id=company_id, is_primary=False, **field_values)
+        if make_primary:
+            await self._set_primary_contact(company_id, contact)
         return contact
+
+    async def _set_primary_contact(self, company_id: uuid.UUID, contact: CompanyContact) -> None:
+        """Make ``contact`` the company's single primary contact and mirror it into the company profile fields."""
+        for other in await self.contact_repository.list_for_company(company_id):
+            if other.id != contact.id and other.is_primary:
+                await self.contact_repository.update(other, is_primary=False)
+        await self.contact_repository.update(contact, is_primary=True)
+        company = await self.get_by_id_or_raise(company_id)
+        await self.repository.update(
+            company,
+            contact_salutation=contact.salutation,
+            contact_full_name=contact.person_name,
+            contact_designation=contact.designation,
+            contact_calling_number=contact.calling_number,
+            contact_whatsapp_number=contact.whatsapp_number,
+            contact_wechat_number=contact.wechat_number,
+        )
+        await self._invalidate_cache()
 
     async def get_contact_or_raise(self, company_id: uuid.UUID, contact_id: uuid.UUID) -> CompanyContact:
         """Fetch a single contact by ID, scoped to company, or raise :class:`NotFoundException`."""
@@ -529,9 +712,29 @@ class CompanyService:
                 field_values["calling_number"],
                 exclude_contact_id=contact_id,
             )
-        changes = {k: v for k, v in field_values.items() if v is not None}
+        is_primary = field_values.pop("is_primary", None)
+        if is_primary is False and contact.is_primary:
+            raise ConflictException(
+                "A company must keep one primary contact. Mark another contact as primary instead."
+            )
+        # Explicit nulls clear a field (e.g. removing an email); the person's name can never be blank.
+        changes = {k: v for k, v in field_values.items() if v is not None or k != "person_name"}
         if changes:
             await self.contact_repository.update(contact, **changes)
+        if is_primary:
+            await self._set_primary_contact(company_id, contact)
+        elif contact.is_primary and changes:
+            company = await self.get_by_id_or_raise(company_id)
+            await self.repository.update(
+                company,
+                contact_salutation=contact.salutation,
+                contact_full_name=contact.person_name,
+                contact_designation=contact.designation,
+                contact_calling_number=contact.calling_number,
+                contact_whatsapp_number=contact.whatsapp_number,
+                contact_wechat_number=contact.wechat_number,
+            )
+            await self._invalidate_cache()
         return contact
 
     async def delete_contact(self, company_id: uuid.UUID, contact_id: uuid.UUID) -> None:

@@ -152,7 +152,100 @@ To achieve complete decoupling between infrastructure routing and organizational
 ## 6. Database Connection Resilience & Production Security
 
 1. **PgBouncer / Supabase Transaction Pooler Statement Cache Auto-Disable:**
-   - In [`app/database/engine.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/database/engine.py), `_statement_cache_must_be_disabled()` automatically detects port 6543 / PgBouncer and sets `statement_cache_size=0` on asyncpg, preventing PostgreSQL `DuplicatePreparedStatementError`.
+   - In `app/database/engine.py`, `_statement_cache_must_be_disabled()` automatically detects port 6543 / PgBouncer and sets `statement_cache_size=0` on asyncpg, preventing PostgreSQL `DuplicatePreparedStatementError`.
 2. **Production HTTPS Origin Protection & Mixed Content Elimination:**
-   - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/frontend/src/lib/ssoBridge.ts), `isLocalhost()` guards prevent fallback to insecure `http://localhost:*` URLs when served on HTTPS domains (Render, custom domains).
+   - In `ecosystemSession.ts` and `ssoBridge.ts`, `isLocalhost()` guards prevent fallback to insecure `http://localhost:*` URLs when served on HTTPS domains (Render, custom domains).
+
+---
+
+## 7. Central Ecosystem Federation & Spoke Resilience
+
+In a multi-ERP topology where `ERP_Main` serves as the central identity authority and control plane, `Yinglima_ERP` operates as a resilient spoke capable of surviving upstream cloud cold-starts and transient network partitions.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Browser / User
+    participant Spoke as Yinglima_ERP (:8001)
+    participant Cache as In-Memory Cache (900s)
+    participant Central as ERP_Main Control Plane (:8000)
+
+    User->>Spoke: POST /api/v1/auth/sso-handover {ticket}
+    Spoke->>Central: POST /api/v1/federation/verify (IPv4 0.0.0.0, 40s Budget)
+    alt Central Responds OK (200)
+        Central-->>Spoke: {valid: true, user: {...}, sid: "sid-123"}
+        Spoke->>Cache: Cache Central Session (TTL: 900s)
+        Spoke-->>User: 200 OK + Local TokenPair (sid: "sid-123")
+    else Central Down / Partitioned
+        Spoke->>Cache: Lookup Cached Session
+        alt Cached Session Exists (< 900s)
+            Cache-->>Spoke: Cached Session Data
+            Spoke-->>User: 200 OK (session["_from_cache"] = True)
+        else No Cached Session
+            Spoke-->>User: 503 Service Unavailable (EcosystemSessionUnavailable)
+        end
+    end
+```
+
+### 7.1. Architectural Safeguards
+1. **Multi-URL Base Candidate Discovery (`erp_main_api_base_urls()`):**
+   - Automatically probes `ERP_MAIN_API_BASE_URL`, `ERP_MAIN_URL`, and fallback platform URLs.
+2. **IPv4 Outbound Socket Binding (`local_address="0.0.0.0"`):**
+   - Forces IPv4 socket binding in all `httpx.AsyncClient` federation connections to prevent broken IPv6 routing in cloud containers.
+3. **40-Second Cold-Start Sleeping Budget:**
+   - Cloud container hibernation wake-up allowance (`httpx.Timeout(40.0, connect=20.0)`).
+4. **900-Second Stale Session Cache Fallback:**
+   - Spoke instances maintain local memory cache for verified central sessions up to 15 minutes, maintaining operational continuity during control plane maintenance.
+5. **Platform-Gated Winsock DNS Isolation:**
+   - In `backend/app/core/dns_resilience.py`, asynchronous DNS caching is platform-gated to Windows developer machines (`sys.platform.startswith("win")`), preventing Winsock exhaustion without affecting production Linux glibc resolvers.
+   - Caches 5-tuple `(host, port, family, type, proto)`, preserving distinct port mappings for local developer testing.
+
+---
+
+## 8. Inbound Email Processing & Atomic Database Deduplication
+
+```mermaid
+flowchart TD
+    POLL["IMAP Poller Wakes (30s)"] --> FETCH["Fetch Unread Emails"]
+    FETCH --> CHECK{"SELECT 1 FROM email_inbound_processed WHERE message_id = :mid"}
+    CHECK -- "Found (Already Processed)" --> SKIP["Skip (Zero LLM API Cost)"]
+    CHECK -- "Not Found" --> HIST{"Email > 30 mins old (Startup Baseline)?"}
+    HIST -- "Yes" --> STAMP["Insert into email_inbound_processed (No Quote Generated)"]
+    HIST -- "No" --> DIR{"Sender Direction?"}
+    DIR -- "Outbound Company Email" --> TIMELINE["Append to Email Thread Timeline (0 LLM Cost)"]
+    DIR -- "Supplier Inbound Reply" --> FIRST{"First Quote for Inquiry Item?"}
+    FIRST -- "No (Follow-up / Discussion)" --> TIMELINE
+    FIRST -- "Yes" --> AI["Invoke OpenAI GPT Extraction (Exactly ONCE)"]
+    AI --> ATOM["Atomic DB Commit: Quotation + email_inbound_processed"]
+```
+
+- **Table `email_inbound_processed`:** Compound uniqueness on `(message_id, uid, inquiry_id, supplier_id)` prevents race conditions and redundant extraction across restarts.
+- **Cost Discipline:** Quotations extract exactly once (`QT-AUTO-01`); subsequent negotiation emails bypass AI completely.
+
+---
+
+## 9. Idempotent Deployment & First-Install Seed Protection
+
+Automated container deployment platforms (Render, Docker, Kubernetes) execute build and pre-deploy scripts sequentially.
+
+1. **Bootstrap Force Reset Guard (`BOOTSTRAP_FORCE_RESET`):**
+   - In `backend/scripts/seed.py`, existing user, organization, or role data halts seeding automatically.
+   - Live production records are never overwritten unless `BOOTSTRAP_FORCE_RESET=true` is explicitly provided.
+2. **Geography & Master Data Protection:**
+   - Verifies existing records in `countries`, `states`, `districts`, and `cities` before inserting defaults.
+3. **SSO Handover Deactivated Account Rejection:**
+   - In `backend/app/api/v1/auth.py`, incoming federated SSO requests for users with `is_active=False` or `deleted_at IS NOT NULL` are rejected with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
+   - Respects `SSO_HANDOVER_AUTO_PROVISION=false` to block unauthorized account creation.
+
+---
+
+## 10. Database-Backed Organization Branding & Storage Quota Protection
+
+1. **Database Persistence & Public Binary Streaming:**
+   - Organization logo image binary is persisted directly in PostgreSQL (`organizations.logo_data`).
+   - Served via `GET /api/v1/organizations/logo?v={sha1}` with `Cache-Control: public, max-age=86400, immutable`.
+   - Content hash `?v={sha1}` forces instant cache invalidation upon logo replacement.
+2. **Client Quota Protection:**
+   - `try/catch` wrappers around `localStorage.setItem` in `brand.ts` and `Organization.tsx` eliminate browser `QuotaExceededError` crashes on mobile devices when storing high-resolution image strings.
+
 

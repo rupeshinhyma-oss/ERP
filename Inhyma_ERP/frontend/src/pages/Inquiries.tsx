@@ -243,19 +243,19 @@ export function InquiriesPage() {
 
   return (
     <AppShell activeKey="inquiries">
-      <main className="page" style={{ padding: "24px" }}>
+      <main className="page">
         {/* Top Breadcrumb & Actions Bar & KPI Cards (Only on Companies Dashboard Layer) */}
         {view.layer === "companies" && (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <div className="page-header">
               <div>
-                <h1 style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", margin: 0 }}>Inquiry</h1>
+                <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>Inquiry</h1>
                 <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
                   Dashboard / Sales / Inquiries
                 </div>
               </div>
 
-              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                 <button
                   type="button"
                   onClick={() => { setQuickAddInitialBuyerId(""); setQuickAddOpen(true); }}

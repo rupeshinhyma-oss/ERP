@@ -15,6 +15,7 @@ federation_keys/
 *.crt
 !**/certifi/cacert.pem
 *.zip
+*.tgz
 app/reporting/exports/
 **/reporting/exports/*
 
@@ -61,4 +62,9 @@ scratch/
 backups/
 **/backups/
 *.sql
+
+# Exported test spreadsheets in root
+/Attendance_Export_*.xlsx
+/Attendance_Matrix_*.xlsx
+
 

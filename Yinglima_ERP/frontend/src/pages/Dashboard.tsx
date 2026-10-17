@@ -12,7 +12,7 @@ export function DashboardPage() {
     <AppShell activeKey="dashboard">
       <main className="page" style={{ background: "#f8fafc", minHeight: "calc(100vh - 60px)", padding: "24px 32px" }}>
         <div style={{ marginBottom: "24px" }}>
-          <h1 style={{ color: "#0f172a", fontWeight: 600, fontSize: "20px", margin: 0 }}>
+          <h1 className="page-title">
             {`Welcome To ${titleName}`}
           </h1>
         </div>

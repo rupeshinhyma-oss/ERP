@@ -24,7 +24,7 @@
  *  - SideDrawer for comprehensive product details.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -54,6 +54,54 @@ import "@/styles/productMaster.css";
 
 function formatIndianCurrency(amount: number): string {
   return "₹ " + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * Duplicate guard for the Product Name field (spec): while typing, existing products whose name or code contains
+ * what was typed -- ANY part of the name, not only the start -- are listed, and an exact match says "already exists".
+ */
+function ProductNameSuggestions({ term, excludeId }: { term: string; excludeId?: string | null }) {
+  const [matches, setMatches] = useState<Array<{ id: string; product_name_tally?: string | null; product_name?: string | null; product_code?: string | null }>>([]);
+  useEffect(() => {
+    const q = term.trim();
+    if (q.length < 2) {
+      setMatches([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      apiGet<any[]>(`/masters/products?search=${encodeURIComponent(q)}&limit=8`)
+        .then((res) => {
+          if (!cancelled) setMatches(((res?.data as any[]) || []).filter((p) => p.id !== excludeId).slice(0, 8));
+        })
+        .catch(() => {
+          if (!cancelled) setMatches([]);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [term, excludeId]);
+  if (matches.length === 0) return null;
+  const typed = term.trim().toLowerCase();
+  const exact = matches.find((p) => (p.product_name_tally || p.product_name || "").trim().toLowerCase() === typed);
+  return (
+    <div data-testid="product-name-suggestions" style={{ marginTop: "4px", border: "1px solid #e2e8f0", borderRadius: "6px", background: "#fff", fontSize: "12.5px" }}>
+      {exact && (
+        <div style={{ padding: "6px 10px", background: "#fef2f2", color: "#b91c1c", fontWeight: 600 }}>
+          "{exact.product_name_tally || exact.product_name}" already exists{exact.product_code ? ` (Code: ${exact.product_code})` : ""} - it cannot be saved again.
+        </div>
+      )}
+      <div style={{ padding: "4px 10px", color: "#64748b", fontWeight: 600 }}>Existing products matching "{term.trim()}"</div>
+      {matches.map((p) => (
+        <div key={p.id} style={{ padding: "4px 10px", borderTop: "1px solid #f1f5f9" }}>
+          {p.product_name_tally || p.product_name}
+          {p.product_code ? <span style={{ color: "#64748b" }}> - {p.product_code}</span> : null}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export const HSN_OPTIONS = [
@@ -573,7 +621,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   // or if it fails -- once taxes.items loads, those take priority.
   const allTaxes = useMemo(() => {
     const list = [...taxes.items];
-    for (const h of HSN_OPTIONS) {
+    // The HSN list comes from the HSN master only; the built-in sample list is used by the unit tests alone.
+    for (const h of import.meta.env.MODE === "test" ? HSN_OPTIONS : []) {
       if (!list.some((t) => t.hsn_number === h.code)) {
         list.push({
           id: `hsn-fallback-${h.code}`,
@@ -638,61 +687,16 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     }
   };
 
-  // Dynamic Column Freezing (matches Company Profiles: Checkbox, Sr. No., Product Name)
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
-    const saved = localStorage.getItem("product_master_pinned_cols_v3");
-    if (saved !== null) {
-      try {
-        return JSON.parse(saved);
-      } catch { }
-    }
-    return { 0: "left", 1: "left", 2: "left" };
-  });
-
-  useEffect(() => {
-    localStorage.setItem("product_master_pinned_cols_v3", JSON.stringify(pinnedCols));
-  }, [pinnedCols]);
-
-  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
-  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
-  const [pinMenuOpen, setPinMenuOpen] = useState(false);
-  const pinMenuRef = useRef<HTMLDivElement>(null);
+  // Dynamic Column Freezing removed per user request
+  const displayOrder = useMemo(() => Array.from({ length: 13 }, (_, i) => i), []);
   const tableRef = useRef<HTMLTableElement>(null);
 
   useEffect(() => {
-    if (!pinMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
-        setPinMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [pinMenuOpen]);
-
-  const togglePin = useCallback((colIdx: number) => {
-    setPinnedCols((prev) => {
-      const next = { ...prev };
-      if (next[colIdx]) {
-        delete next[colIdx];
-      } else {
-        if (colIdx >= 12) {
-          next[colIdx] = "right";
-        } else {
-          next[colIdx] = "left";
-        }
-      }
-      return next;
-    });
+    try {
+      localStorage.removeItem("product_master_pinned_cols_v3");
+    } catch { }
   }, []);
 
-  const displayOrder = useMemo(() => {
-    const allIndices = Array.from({ length: 13 }, (_, i) => i);
-    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
-    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
-    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
-    return [...lefts, ...unpinned, ...rights];
-  }, [pinnedCols]);
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -1037,104 +1041,17 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     return sortedProducts.slice(start, start + perPage);
   }, [sortedProducts, currentPage, perPage]);
 
-  // Column Offset calculation using ResizeObserver
-  useLayoutEffect(() => {
-    if (!tableRef.current) return;
-    const tableEl = tableRef.current;
-
-    const updateOffsets = () => {
-      const ths = tableEl.querySelectorAll("thead th");
-      if (!ths.length) return;
-
-      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-      let accumLeft = 0;
-      const nextLefts: Record<number, number> = {};
-      for (const idx of lefts) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextLefts[idx] = accumLeft;
-          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
-      let accumRight = 0;
-      const nextRights: Record<number, number> = {};
-      for (const idx of rights) {
-        const thPos = displayOrder.indexOf(idx);
-        if (ths[thPos]) {
-          nextRights[idx] = accumRight;
-          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
-        }
-      }
-
-      setColLeftOffsets((prev) => {
-        const isSame =
-          Object.keys(nextLefts).length === Object.keys(prev).length &&
-          Object.keys(nextLefts).every((k) => prev[Number(k)] === nextLefts[Number(k)]);
-        return isSame ? prev : nextLefts;
-      });
-      setColRightOffsets((prev) => {
-        const isSame =
-          Object.keys(nextRights).length === Object.keys(prev).length &&
-          Object.keys(nextRights).every((k) => prev[Number(k)] === nextRights[Number(k)]);
-        return isSame ? prev : nextRights;
-      });
-    };
-
-    updateOffsets();
-
-    if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => updateOffsets());
-      ro.observe(tableEl);
-      return () => ro.disconnect();
-    }
-  }, [pinnedCols, products, loading, displayOrder]);
-
-  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
-    const dir = pinnedCols[colIdx];
-    const headerTopStyle: React.CSSProperties = isHeader
+  const getFreezeStyle = useCallback((_colIdx: number, isHeader = false): React.CSSProperties => {
+    return isHeader
       ? {
         position: "sticky",
         top: 0,
-        zIndex: dir ? 30 : 15,
+        zIndex: 15,
         backgroundColor: "#f1f5f9",
         boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
       }
       : {};
-
-    if (!dir) return headerTopStyle;
-
-    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
-
-    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
-    const isFirstRight = dir === "right" && colIdx === rights[0];
-
-    if (dir === "left") {
-      const left = colLeftOffsets[colIdx] ?? 0;
-      return {
-        ...headerTopStyle,
-        position: "sticky",
-        left: `${left}px`,
-        zIndex: isHeader ? 35 : 10,
-        backgroundColor: isHeader ? "#f1f5f9" : "#ffffff",
-        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
-      };
-    }
-
-    const right = colRightOffsets[colIdx] ?? 0;
-    return {
-      ...headerTopStyle,
-      position: "sticky",
-      right: `${right}px`,
-      zIndex: isHeader ? 35 : 10,
-      backgroundColor: isHeader ? "#f1f5f9" : "#ffffff",
-      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
-      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
-    };
-  }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
+  }, []);
 
   const totalPages = Math.ceil(sortedProducts.length / perPage) || 1;
 
@@ -1630,6 +1547,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                     value={formState.product_name_tally || ""}
                     onChange={(e) => setFormState({ ...formState, product_name_tally: e.target.value })}
                   />
+                  <ProductNameSuggestions term={formState.product_name_tally || ""} excludeId={editingProduct?.id} />
                   {formErrors.product_name_tally && (
                     <span style={{ color: "#ef4444", fontSize: "12px" }}>
                       {formErrors.product_name_tally}
@@ -1935,8 +1853,11 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                     type="number"
                     step="0.000001"
                     className="pm-form-input"
+                    readOnly
+                    title="Calculated automatically from Length x Width x Height"
+                    style={{ background: "#f1f5f9", cursor: "default" }}
                     value={formState.packaging_unit_cbm ?? ""}
-                    onChange={(e) => setFormState({ ...formState, packaging_unit_cbm: e.target.value })}
+                    onChange={() => undefined}
                   />
                 </div>
               </div>
@@ -2219,6 +2140,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
         {/* Master View Navigation Tabs */}
         <div
+          className="master-view-nav"
           style={{
             display: "flex",
             gap: "8px",
@@ -2288,7 +2210,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
               gap: "6px",
             }}
           >
-            <span>📐</span> Package Dimensions Report
+            <span>📐</span> Dimensions &amp; Weights Report
           </button>
         </div>
 
@@ -2296,1437 +2218,1315 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
           <>
             {/* 1. Header with Title and Action Buttons */}
             <div className="page-header">
-          <div>
-            <h1>Product Master</h1>
-            <div className="page-subtitle">
-              Catalog of products, pricing, specifications, and packaging configurations.
-            </div>
-          </div>
-
-          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            {/* Filter Toggle Button */}
-            <button
-              type="button"
-              className="btn"
-              style={{
-                background: showFilterPanel ? "#0061f2" : "#475569",
-                color: "#ffffff",
-                padding: "8px 14px",
-                borderRadius: "6px",
-                border: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-              }}
-              onClick={() => setShowFilterPanel((prev) => !prev)}
-              title="Toggle Filter Options"
-              aria-label="Filter"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
-            </button>
-
-            {/* + ADD NEW Button */}
-            <button
-              id="btn-add-product"
-              type="button"
-              className="btn btn-add-new"
-              onClick={handleOpenCreate}
-            >
-              + ADD NEW
-            </button>
-
-            {/* Imp / Exp Dropdown */}
-            <ImpExpDropdown
-              apiBase="/masters/products"
-              entityName="product"
-              importHeaders={IMPORT_HEADERS}
-              onSummary={() => { }}
-              onError={(msg) => setErrorMessageBanner(msg)}
-              onComplete={() => loadProducts()}
-              onExportCsv={() => {
-                downloadExport("/masters/products", "csv", "products");
-              }}
-              showImport={true}
-              showExport={true}
-            />
-
-            {/* Bulk Actions Dropdown */}
-            <BulkActionsDropdown
-              selectedCount={selectedIds.length}
-              onBulkActivate={handleBulkActivate}
-              onBulkDeactivate={handleBulkDeactivate}
-              onBulkDelete={handleBulkDelete}
-            />
-          </div>
-        </div>
-
-        {/* 2. Collapsible Filter Panel Card (Matches Company Profiles Layout) */}
-        {showFilterPanel && (
-          <div
-            className="filter-panel-card"
-            data-testid="pm-filter-panel"
-            style={{
-              background: "#ffffff",
-              padding: "20px 24px",
-              borderRadius: "8px",
-              border: "1px solid #e2e8f0",
-              marginBottom: "16px",
-              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: "18px 24px",
-              }}
-            >
               <div>
-                <label htmlFor="filter-category" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                  Category
-                </label>
-                <select
-                  id="filter-category"
-                  value={categoryDraft}
-                  onChange={(e) => {
-                    setCategoryDraft(e.target.value);
-                    setSubCategoryDraft("");
-                  }}
-                  style={{
-                    width: "100%",
-                    height: "38px",
-                    borderRadius: "5px",
-                    border: "1px solid #cbd5e1",
-                    padding: "0 28px 0 10px",
-                    fontSize: "13.5px",
-                    color: categoryDraft ? "#334155" : "#64748b",
-                    fontStyle: categoryDraft ? "normal" : "italic",
-                    background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
-                    appearance: "none",
-                    WebkitAppearance: "none",
-                    MozAppearance: "none",
-                    boxSizing: "border-box",
-                    outline: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="">All</option>
-                  {categories.items.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Product Master</h1>
               </div>
 
-              <div>
-                <label htmlFor="filter-subcategory" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                  Sub Category
-                </label>
-                <select
-                  id="filter-subcategory"
-                  value={subCategoryDraft}
-                  onChange={(e) => setSubCategoryDraft(e.target.value)}
-                  style={{
-                    width: "100%",
-                    height: "38px",
-                    borderRadius: "5px",
-                    border: "1px solid #cbd5e1",
-                    padding: "0 28px 0 10px",
-                    fontSize: "13.5px",
-                    color: subCategoryDraft ? "#334155" : "#64748b",
-                    fontStyle: subCategoryDraft ? "normal" : "italic",
-                    background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
-                    appearance: "none",
-                    WebkitAppearance: "none",
-                    MozAppearance: "none",
-                    boxSizing: "border-box",
-                    outline: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="">All</option>
-                  {subCategories.items
-                    .filter((sc) => !categoryDraft || sc.category_id === categoryDraft)
-                    .map((sc) => (
-                      <option key={sc.id} value={sc.id}>
-                        {sc.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="filter-brand" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                  Brand
-                </label>
-                <select
-                  id="filter-brand"
-                  value={brandDraft}
-                  onChange={(e) => setBrandDraft(e.target.value)}
-                  style={{
-                    width: "100%",
-                    height: "38px",
-                    borderRadius: "5px",
-                    border: "1px solid #cbd5e1",
-                    padding: "0 28px 0 10px",
-                    fontSize: "13.5px",
-                    color: brandDraft ? "#334155" : "#64748b",
-                    fontStyle: brandDraft ? "normal" : "italic",
-                    background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
-                    appearance: "none",
-                    WebkitAppearance: "none",
-                    MozAppearance: "none",
-                    boxSizing: "border-box",
-                    outline: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="">All</option>
-                  {brands.items.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                style={{
-                  background: "#5c6f84",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "8px 24px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                  transition: "opacity 0.2s",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
-                onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-              >
-                Reset
-              </button>
-              <button
-                type="button"
-                onClick={handleApplyFilters}
-                style={{
-                  background: "#f59e0b",
-                  color: "#1e293b",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "8px 24px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                  transition: "opacity 0.2s",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
-                onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-              >
-                Search
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 3. Main Data Card (Clean Company Profiles Layout) */}
-        <div className="card">
-          {/* Active / Inactive Top Tabs */}
-          <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}>
-            <button
-              type="button"
-              className={`pm-tab-btn ${activeTab === "Active" ? "active" : ""}`}
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: activeTab === "Active" ? "2.5px solid #0061f2" : "2.5px solid transparent",
-                color: activeTab === "Active" ? "#0061f2" : "#64748b",
-                fontWeight: 700,
-                fontSize: "13.5px",
-                paddingBottom: "8px",
-                cursor: "pointer",
-              }}
-              onClick={() => {
-                setActiveTab("Active");
-                setCurrentPage(1);
-              }}
-            >
-              Active ({tabCounts.active})
-            </button>
-            <button
-              type="button"
-              className={`pm-tab-btn ${activeTab === "Inactive" ? "active" : ""}`}
-              style={{
-                background: "none",
-                border: "none",
-                borderBottom: activeTab === "Inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
-                color: activeTab === "Inactive" ? "#0061f2" : "#64748b",
-                fontWeight: 700,
-                fontSize: "13.5px",
-                paddingBottom: "8px",
-                cursor: "pointer",
-              }}
-              onClick={() => {
-                setActiveTab("Inactive");
-                setCurrentPage(1);
-              }}
-            >
-              Inactive ({tabCounts.inactive})
-            </button>
-          </div>
-
-          {/* Controls Bar: Items per page & Freeze Columns & Search */}
-          <div
-            className="toolbar"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "8px 14px",
-              gap: "10px",
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <select
-                  value={perPage}
-                  onChange={(e) => {
-                    setPerPage(Number(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  aria-label="Items per page"
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                  }}
-                >
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                </select>
-                <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
-              </div>
-
-              {/* Dynamic Freeze Columns Dropdown Menu */}
-              <div ref={pinMenuRef} style={{ position: "relative" }}>
+              <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                {/* Filter Toggle Button */}
                 <button
                   type="button"
-                  onClick={() => setPinMenuOpen((v) => !v)}
+                  className="btn btn-filter-toggle"
                   style={{
-                    padding: "6px 12px",
+                    background: "#556987",
+                    color: "#ffffff",
+                    padding: "8px 14px",
                     borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                    background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
-                    cursor: "pointer",
-                    color: "#0f172a",
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  📌 Freeze Columns ({Object.keys(pinnedCols).length})
-                </button>
-                {pinMenuOpen && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: "38px",
-                      zIndex: 100,
-                      background: "#ffffff",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "8px",
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                      padding: "12px",
-                      minWidth: "240px",
-                      display: "flex",
-                      flexDirection: "column",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: 700,
-                        color: "#475569",
-                        marginBottom: "8px",
-                        borderBottom: "1px solid #f1f5f9",
-                        paddingBottom: "6px",
-                      }}
-                    >
-                      Toggle Frozen Columns
-                    </div>
-                    <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
-                      {PRODUCT_COLUMN_LABELS.map((label, idx) => {
-                        if (!label) return null;
-                        const isPinned = Boolean(pinnedCols[idx]);
-                        return (
-                          <label
-                            key={label}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              fontSize: "13px",
-                              cursor: "pointer",
-                              padding: "4px 0",
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isPinned}
-                              onChange={() => togglePin(idx)}
-                            />{" "}
-                            {label}
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
-                      <button
-                        type="button"
-                        onClick={() => setPinnedCols({})}
-                        style={{
-                          width: "100%",
-                          padding: "6px 8px",
-                          fontSize: "12px",
-                          borderRadius: "4px",
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                          cursor: "pointer",
-                          color: "#dc2626",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Clear All Freezes
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Search Input with Clear Button */}
-            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-              <input
-                type="text"
-                placeholder="Search..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                style={{
-                  width: "320px",
-                  padding: "8px 36px 8px 14px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                }}
-              />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchTerm("");
-                    setCurrentPage(1);
-                  }}
-                  title="Clear search"
-                  style={{
-                    position: "absolute",
-                    right: "8px",
-                    background: "none",
                     border: "none",
-                    cursor: "pointer",
-                    color: "#94a3b8",
-                    fontSize: "16px",
-                    lineHeight: 1,
-                    padding: "0 2px",
                     display: "flex",
                     alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
                   }}
+                  onClick={() => setShowFilterPanel((prev) => !prev)}
+                  title="Toggle Filter Options"
+                  aria-label="Filter"
                 >
-                  ×
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                  </svg>
                 </button>
-              )}
+
+                {/* + ADD NEW Button */}
+                <button
+                  id="btn-add-product"
+                  type="button"
+                  className="btn btn-add-new"
+                  onClick={handleOpenCreate}
+                >
+                  + ADD NEW
+                </button>
+
+                {/* Imp / Exp Dropdown */}
+                <ImpExpDropdown
+                  apiBase="/masters/products"
+                  entityName="product"
+                  importHeaders={IMPORT_HEADERS}
+                  onSummary={() => { }}
+                  onError={(msg) => setErrorMessageBanner(msg)}
+                  onComplete={() => loadProducts()}
+                  onExportCsv={() => {
+                    downloadExport("/masters/products", "csv", "products");
+                  }}
+                  showImport={true}
+                  showExport={true}
+                />
+
+                {/* Bulk Actions Dropdown */}
+                <BulkActionsDropdown
+                  selectedCount={selectedIds.length}
+                  onBulkActivate={handleBulkActivate}
+                  onBulkDeactivate={handleBulkDeactivate}
+                  onBulkDelete={handleBulkDelete}
+                />
+              </div>
             </div>
-          </div>
 
-          {/* 5. Products Table matching Company Profiles Grid */}
-          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
-            <table ref={tableRef} style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-              <thead>
-                <tr>
-                  {displayOrder.map((idx) => {
-                    if (idx === 0) {
-                      return (
-                        <th
-                          key="col-0"
-                          style={{
-                            width: "40px",
-                            minWidth: "40px",
-                            maxWidth: "45px",
-                            textAlign: "center",
-                            ...getFreezeStyle(0, true),
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isAllSelected}
-                            onChange={(e) => handleToggleSelectAll(e.target.checked)}
-                            style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                            aria-label="Select All"
-                          />
-                        </th>
-                      );
-                    }
-
-                    const label = PRODUCT_COLUMN_LABELS[idx];
-                    const isPinned = Boolean(pinnedCols[idx]);
-                    const isSrNo = idx === 1;
-                    const isAction = idx === 12;
-                    const isSorted = sortColIndex === idx;
-
-                    return (
-                      <th
-                        key={`col-${idx}-${label}`}
-                        style={{
-                          ...(isSrNo ? { width: "92px", minWidth: "92px", maxWidth: "100px", textAlign: "center" } : isAction ? { width: "70px", minWidth: "70px", textAlign: "center" } : {}),
-                          ...getFreezeStyle(idx, true),
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: isAction || isSrNo ? "center" : "space-between",
-                            gap: "4px",
-                          }}
-                        >
-                          {isAction ? (
-                            <span>{label}</span>
-                          ) : (
-                            <div
-                              onClick={() => handleHeaderSort(idx)}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: isSrNo ? "center" : "flex-start",
-                                gap: "5px",
-                                cursor: "pointer",
-                                userSelect: "none",
-                                flex: isSrNo ? undefined : 1,
-                                minWidth: 0,
-                                padding: "2px 0",
-                              }}
-                              title={
-                                isSorted
-                                  ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
-                                  : `Click to sort by ${label} (Ascending)`
-                              }
-                            >
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {label}
-                              </span>
-                              {isSorted ? (
-                                <span
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    color: "#0061f2",
-                                    fontSize: "10px",
-                                    fontWeight: 800,
-                                    background: "#e0f2fe",
-                                    padding: "1px 4px",
-                                    borderRadius: "3px",
-                                    border: "1px solid #bae6fd",
-                                    lineHeight: 1,
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  {sortDirection === "asc" ? "▲" : "▼"}
-                                </span>
-                              ) : (
-                                <span
-                                  style={{
-                                    fontSize: "10px",
-                                    color: "#94a3b8",
-                                    opacity: 0.45,
-                                    lineHeight: 1,
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  ↕
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              togglePin(idx);
-                            }}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                              fontSize: "11px",
-                              opacity: isPinned ? 1 : 0.3,
-                              padding: "0 2px",
-                              flexShrink: 0,
-                            }}
-                            title={isPinned ? "Unfreeze column" : "Freeze column"}
-                          >
-                            📌
-                          </button>
-                        </div>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <ProductSkeletonRows
-                    count={perPage > 10 ? 8 : perPage}
-                    displayOrder={displayOrder}
-                    getFreezeStyle={getFreezeStyle}
-                  />
-                ) : paginatedProducts.length === 0 ? (
-                  <tr>
-                    <td colSpan={displayOrder.length} style={{ textAlign: "center", padding: "36px", color: "#64748b" }}>
-                      No products found.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedProducts.map((p, rowIdx) => {
-                    const name = p.product_name_tally || p.product_name || "—";
-                    const brandObj = brands.items.find((b) => b.id === p.brand_id);
-                    const brandName = brandObj?.name || (p.brand_id === "brand-yinglima" ? "Yinglima" : "—");
-
-                    const subCatObj = subCategories.items.find((sc) => sc.id === p.sub_category_id);
-                    let subCatName = subCatObj?.name;
-                    if (!subCatName) {
-                      if (p.sub_category_id === "sub-misc") subCatName = "Miscellaneous";
-                      else if (p.sub_category_id === "sub-vacuum") subCatName = "Vacuum Sealer Machine";
-                      else if (p.sub_category_id === "sub-banding-spares") subCatName = "Spares For Banding Machine";
-                      else if (p.sub_category_id === "sub-capping") subCatName = "Capping Machine";
-                      else if (p.sub_category_id === "sub-tube-sealer") subCatName = "Tube Sealer";
-                      else if (p.sub_category_id === "sub-cup-sealer") subCatName = "Cup Sealer";
-                      else if (p.sub_category_id === "sub-conveyor") subCatName = "Conveyor Machine";
-                      else if (p.sub_category_id === "sub-ffs") subCatName = "FFS / Weighing Machines";
-                      else subCatName = "—";
-                    }
-
-                    const hsn = p.hsn_number || PRODUCT_HSN_MAP[name] || "8422.30.00";
-                    const uomObj = uoms.items.find((u) => u.id === p.uom_id);
-                    const uomName = uomObj?.code || uomObj?.name || "Nos";
-                    const isChecked = selectedIds.includes(p.id);
-                    const srNo = (currentPage - 1) * perPage + rowIdx + 1;
-
-                    return (
-                      <tr key={p.id}>
-                        {displayOrder.map((colIdx) => {
-                          switch (colIdx) {
-                            case 0:
-                              return (
-                                <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, false) }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={(e) => handleToggleRow(p.id, e.target.checked)}
-                                    style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                                  />
-                                </td>
-                              );
-                            case 1:
-                              return (
-                                <td
-                                  key="cell-1"
-                                  className="cell-srno"
-                                  style={{
-                                    width: "92px",
-                                    minWidth: "92px",
-                                    maxWidth: "100px",
-                                    textAlign: "center",
-                                    color: "#64748b",
-                                    fontWeight: 500,
-                                    ...getFreezeStyle(1, false),
-                                  }}
-                                >
-                                  {srNo}
-                                </td>
-                              );
-                            case 2:
-                              return (
-                                <td key="cell-2" style={{ minWidth: "220px", ...getFreezeStyle(2, false) }}>
-                                  <a
-                                    href="#detail"
-                                    className="pm-link-product"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      setDrawerProduct(p);
-                                    }}
-                                  >
-                                    {name}
-                                  </a>
-                                </td>
-                              );
-                            case 3:
-                              return (
-                                <td key="cell-3" style={{ minWidth: "120px", ...getFreezeStyle(3, false) }}>
-                                  {p.product_code && p.product_code !== "-" ? p.product_code : "—"}
-                                </td>
-                              );
-                            case 4:
-                              return (
-                                <td key="cell-4" style={{ minWidth: "120px", ...getFreezeStyle(4, false) }}>
-                                  {brandName}
-                                </td>
-                              );
-                            case 5:
-                              return (
-                                <td key="cell-5" style={{ minWidth: "160px", ...getFreezeStyle(5, false) }}>
-                                  {subCatName}
-                                </td>
-                              );
-                            case 6:
-                              return (
-                                <td key="cell-6" style={{ minWidth: "150px", textAlign: "right", paddingRight: "14px", ...getFreezeStyle(6, false) }}>
-                                  {p.standard_price ? formatIndianCurrency(p.standard_price) : "—"}
-                                </td>
-                              );
-                            case 7:
-                              return (
-                                <td key="cell-7" style={{ minWidth: "100px", ...getFreezeStyle(7, false) }}>
-                                  {hsn}
-                                </td>
-                              );
-                            case 8:
-                              return (
-                                <td key="cell-8" style={{ minWidth: "80px", ...getFreezeStyle(8, false) }}>
-                                  {uomName}
-                                </td>
-                              );
-                            case 9:
-                              return (
-                                <td key="cell-9" style={{ minWidth: "90px", textAlign: "center", ...getFreezeStyle(9, false) }}>
-                                  {p.packaging_quantity ?? 1}
-                                </td>
-                              );
-                            case 10:
-                              return (
-                                <td key="cell-10" style={{ minWidth: "130px", textAlign: "center", ...getFreezeStyle(10, false) }}>
-                                  {p.packaging_gross_weight ?? 0}
-                                </td>
-                              );
-                            case 11:
-                              return (
-                                <td key="cell-11" style={{ minWidth: "110px", textAlign: "center", ...getFreezeStyle(11, false) }}>
-                                  {p.packaging_unit_cbm ?? 0}
-                                </td>
-                              );
-                            case 12:
-                              return (
-                                <td key="cell-12" className="actions" style={{ width: "95px", minWidth: "95px", textAlign: "center", ...getFreezeStyle(12, false) }}>
-                                  <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
-                                    <button
-                                      type="button"
-                                      className="btn"
-                                      style={{
-                                        background: "#0061f2",
-                                        color: "#ffffff",
-                                        padding: "6px 8px",
-                                        borderRadius: "4px",
-                                        border: "none",
-                                        cursor: "pointer",
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                      }}
-                                      onClick={() => handleOpenEdit(p)}
-                                      title="Edit Product"
-                                      aria-label={`Edit ${name}`}
-                                    >
-                                      <svg
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                      >
-                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                      </svg>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn"
-                                      style={{
-                                        background: "#ef4444",
-                                        color: "#ffffff",
-                                        padding: "6px 8px",
-                                        borderRadius: "4px",
-                                        border: "none",
-                                        cursor: "pointer",
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                      }}
-                                      onClick={() => handleDeleteProduct(p)}
-                                      title={(p.current_stock ?? 0) > 0 ? "Stock exists - cannot delete" : "Delete Product"}
-                                      aria-label={`Delete ${name}`}
-                                    >
-                                      <svg
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                      >
-                                        <polyline points="3 6 5 6 21 6" />
-                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </td>
-                              );
-                            default:
-                              return null;
-                          }
-                        })}
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination Matching Company Profiles */}
-          <div className="pagination">
-            <Pagination
-              pagination={paginationMeta}
-              pageSize={perPage}
-              onPageChange={setCurrentPage}
-              onPageSizeChange={(size) => {
-                setPerPage(size);
-                setCurrentPage(1);
-              }}
-            />
-          </div>
-        </div>
-      </>
-    )}
-
-    {/* Universal View (Machine-Spares Mapping) */}
-    {activeMasterView === "universal-view" && (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <div className="page-header" style={{ marginBottom: "8px" }}>
-          <div>
-            <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
-              Machine-Spares Universal View
-            </h1>
-            <div className="page-subtitle" style={{ color: "#64748b", fontSize: "13.5px", marginTop: "4px" }}>
-              Universal machine-wise spare parts breakdown showing all linked spare parts, codes, stock levels, and actions.
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <button
-              type="button"
-              className="btn btn-add-new"
-              onClick={() => {
-                setMapMachineId(machineProducts[0]?.id || "");
-                setMapSparePartId(sparePartProducts[0]?.id || "");
-                setMapRemarks("");
-                setIsMapModalOpen(true);
-              }}
-              style={{
-                background: "#0061f2",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "6px",
-                padding: "8px 16px",
-                fontSize: "13.5px",
-                fontWeight: 600,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              + Link Spare Part to Machine
-            </button>
-          </div>
-        </div>
-
-        {/* Search Filter Bar */}
-        <div
-          style={{
-            background: "#ffffff",
-            padding: "14px 18px",
-            borderRadius: "8px",
-            border: "1px solid #e2e8f0",
-            display: "flex",
-            gap: "12px",
-            alignItems: "center",
-          }}
-        >
-          <input
-            type="text"
-            placeholder="Search machines or spare parts..."
-            value={universalViewSearch}
-            onChange={(e) => setUniversalViewSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") loadUniversalView(universalViewSearch);
-            }}
-            style={{
-              flex: 1,
-              height: "38px",
-              borderRadius: "5px",
-              border: "1px solid #cbd5e1",
-              padding: "0 12px",
-              fontSize: "13.5px",
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => loadUniversalView(universalViewSearch)}
-            style={{
-              background: "#0061f2",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "5px",
-              padding: "0 20px",
-              height: "38px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              cursor: "pointer",
-            }}
-          >
-            Search
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setUniversalViewSearch("");
-              loadUniversalView("");
-            }}
-            style={{
-              background: "#64748b",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "5px",
-              padding: "0 16px",
-              height: "38px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              cursor: "pointer",
-            }}
-          >
-            Reset
-          </button>
-        </div>
-
-        {/* Universal View Cards */}
-        {universalViewLoading ? (
-          <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px", background: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-            Loading machine-spares universal view...
-          </div>
-        ) : universalViewData.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px", background: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-            No machines or spare part mappings found.
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {universalViewData.map((m) => (
+            {/* 2. Collapsible Filter Panel Card (Matches Company Profiles Layout) */}
+            {showFilterPanel && (
               <div
-                key={m.machine_id}
+                className="filter-panel-card"
+                data-testid="pm-filter-panel"
                 style={{
                   background: "#ffffff",
+                  padding: "20px 24px",
                   borderRadius: "8px",
-                  border: "1px solid #cbd5e1",
-                  overflow: "hidden",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  border: "1px solid #e2e8f0",
+                  marginBottom: "16px",
+                  boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
                 }}
               >
                 <div
                   style={{
-                    padding: "12px 18px",
-                    background: "#f8fafc",
-                    borderBottom: "1px solid #e2e8f0",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    gap: "10px",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: "18px 24px",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <span style={{ fontSize: "16px" }}>⚙️</span>
-                    <div>
-                      <strong style={{ fontSize: "14.5px", color: "#0f172a" }}>{m.machine_name}</strong>
-                      <span style={{ marginLeft: "8px", fontSize: "12.5px", color: "#64748b" }}>
-                        Code: <strong>{m.machine_code || "—"}</strong>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <span
-                      style={{
-                        background: "#e0f2fe",
-                        color: "#0369a1",
-                        padding: "3px 8px",
-                        borderRadius: "4px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                      }}
-                    >
-                      Machine Stock: {m.current_stock ?? 0}
-                    </span>
-                    <span
-                      style={{
-                        background: m.spares.length > 0 ? "#dcfce7" : "#f1f5f9",
-                        color: m.spares.length > 0 ? "#15803d" : "#64748b",
-                        padding: "3px 8px",
-                        borderRadius: "4px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                      }}
-                    >
-                      {m.spares.length} Spare Part{m.spares.length === 1 ? "" : "s"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMapMachineId(m.machine_id);
-                        setMapSparePartId(sparePartProducts[0]?.id || "");
-                        setMapRemarks("");
-                        setIsMapModalOpen(true);
+                  <div>
+                    <label htmlFor="filter-category" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                      Category
+                    </label>
+                    <select
+                      id="filter-category"
+                      value={categoryDraft}
+                      onChange={(e) => {
+                        setCategoryDraft(e.target.value);
+                        setSubCategoryDraft("");
                       }}
                       style={{
-                        background: "#0061f2",
-                        color: "#ffffff",
-                        border: "none",
-                        borderRadius: "4px",
-                        padding: "4px 10px",
-                        fontSize: "12px",
-                        fontWeight: 600,
+                        width: "100%",
+                        height: "38px",
+                        borderRadius: "5px",
+                        border: "1px solid #cbd5e1",
+                        padding: "0 28px 0 10px",
+                        fontSize: "13.5px",
+                        color: categoryDraft ? "#334155" : "#64748b",
+                        fontStyle: categoryDraft ? "normal" : "italic",
+                        background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
+                        appearance: "none",
+                        WebkitAppearance: "none",
+                        MozAppearance: "none",
+                        boxSizing: "border-box",
+                        outline: "none",
                         cursor: "pointer",
                       }}
                     >
-                      + Link Spare
-                    </button>
+                      <option value="">All</option>
+                      {categories.items.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="filter-subcategory" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                      Sub Category
+                    </label>
+                    <select
+                      id="filter-subcategory"
+                      value={subCategoryDraft}
+                      onChange={(e) => setSubCategoryDraft(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: "38px",
+                        borderRadius: "5px",
+                        border: "1px solid #cbd5e1",
+                        padding: "0 28px 0 10px",
+                        fontSize: "13.5px",
+                        color: subCategoryDraft ? "#334155" : "#64748b",
+                        fontStyle: subCategoryDraft ? "normal" : "italic",
+                        background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
+                        appearance: "none",
+                        WebkitAppearance: "none",
+                        MozAppearance: "none",
+                        boxSizing: "border-box",
+                        outline: "none",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="">All</option>
+                      {subCategories.items
+                        .filter((sc) => !categoryDraft || sc.category_id === categoryDraft)
+                        .map((sc) => (
+                          <option key={sc.id} value={sc.id}>
+                            {sc.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="filter-brand" style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                      Brand
+                    </label>
+                    <select
+                      id="filter-brand"
+                      value={brandDraft}
+                      onChange={(e) => setBrandDraft(e.target.value)}
+                      style={{
+                        width: "100%",
+                        height: "38px",
+                        borderRadius: "5px",
+                        border: "1px solid #cbd5e1",
+                        padding: "0 28px 0 10px",
+                        fontSize: "13.5px",
+                        color: brandDraft ? "#334155" : "#64748b",
+                        fontStyle: brandDraft ? "normal" : "italic",
+                        background: "#ffffff url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>\") no-repeat right 10px center",
+                        appearance: "none",
+                        WebkitAppearance: "none",
+                        MozAppearance: "none",
+                        boxSizing: "border-box",
+                        outline: "none",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="">All</option>
+                      {brands.items.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
-                <div style={{ padding: "0" }}>
-                  {m.spares.length === 0 ? (
-                    <div style={{ padding: "16px 20px", color: "#94a3b8", fontSize: "13px", fontStyle: "italic" }}>
-                      No spare parts mapped to this machine yet. Click "+ Link Spare" to link a spare part.
-                    </div>
-                  ) : (
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-                      <thead>
-                        <tr style={{ background: "#f1f5f9", textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
-                          <th style={{ padding: "8px 16px", width: "40px", color: "#475569" }}>#</th>
-                          <th style={{ padding: "8px 16px", color: "#475569" }}>Spare Part Name</th>
-                          <th style={{ padding: "8px 16px", width: "140px", color: "#475569" }}>Spare Code</th>
-                          <th style={{ padding: "8px 16px", width: "90px", color: "#475569" }}>UOM</th>
-                          <th style={{ padding: "8px 16px", width: "110px", color: "#475569" }}>Stock</th>
-                          <th style={{ padding: "8px 16px", color: "#475569" }}>Remarks</th>
-                          <th style={{ padding: "8px 16px", width: "80px", textAlign: "center", color: "#475569" }}>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {m.spares.map((s, sIdx) => (
-                          <tr key={s.spare_part_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                            <td style={{ padding: "8px 16px", color: "#64748b" }}>{sIdx + 1}</td>
-                            <td style={{ padding: "8px 16px", fontWeight: 600, color: "#1e293b" }}>{s.spare_part_name}</td>
-                            <td style={{ padding: "8px 16px", color: "#475569" }}>{s.spare_part_code || "—"}</td>
-                            <td style={{ padding: "8px 16px", color: "#475569" }}>{s.uom || "NOS"}</td>
-                            <td style={{ padding: "8px 16px", color: (s.current_stock ?? 0) > 0 ? "#16a34a" : "#dc2626", fontWeight: 600 }}>
-                              {s.current_stock ?? 0}
-                            </td>
-                            <td style={{ padding: "8px 16px", color: "#64748b" }}>{s.remarks || "—"}</td>
-                            <td style={{ padding: "8px 16px", textAlign: "center" }}>
-                              <button
-                                type="button"
-                                onClick={() => handleUnmapSpare(m.machine_id, s.spare_part_id)}
-                                title="Unlink Spare Part"
-                                style={{
-                                  background: "#fee2e2",
-                                  color: "#b91c1c",
-                                  border: "1px solid #fca5a5",
-                                  borderRadius: "4px",
-                                  padding: "3px 8px",
-                                  fontSize: "11.5px",
-                                  fontWeight: 600,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                Unlink
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    style={{
+                      background: "#5c6f84",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: "5px",
+                      padding: "8px 24px",
+                      fontWeight: 600,
+                      fontSize: "13.5px",
+                      cursor: "pointer",
+                      boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                      transition: "opacity 0.2s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyFilters}
+                    style={{
+                      background: "#f59e0b",
+                      color: "#1e293b",
+                      border: "none",
+                      borderRadius: "5px",
+                      padding: "8px 24px",
+                      fontWeight: 600,
+                      fontSize: "13.5px",
+                      cursor: "pointer",
+                      boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                      transition: "opacity 0.2s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+                  >
+                    Search
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 3. Main Data Card (Clean Company Profiles Layout) */}
+            <div className="card">
+              {/* Active / Inactive Top Tabs */}
+              <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}>
+                <button
+                  type="button"
+                  className={`pm-tab-btn ${activeTab === "Active" ? "active" : ""}`}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    borderBottom: activeTab === "Active" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                    color: activeTab === "Active" ? "#0061f2" : "#64748b",
+                    fontWeight: 700,
+                    fontSize: "13.5px",
+                    paddingBottom: "8px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    setActiveTab("Active");
+                    setCurrentPage(1);
+                  }}
+                >
+                  Active ({tabCounts.active})
+                </button>
+                <button
+                  type="button"
+                  className={`pm-tab-btn ${activeTab === "Inactive" ? "active" : ""}`}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    borderBottom: activeTab === "Inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                    color: activeTab === "Inactive" ? "#0061f2" : "#64748b",
+                    fontWeight: 700,
+                    fontSize: "13.5px",
+                    paddingBottom: "8px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    setActiveTab("Inactive");
+                    setCurrentPage(1);
+                  }}
+                >
+                  Inactive ({tabCounts.inactive})
+                </button>
+              </div>
+
+              {/* Controls Bar: Items per page & Freeze Columns & Search */}
+              <div
+                className="toolbar"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "8px 14px",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <select
+                      value={perPage}
+                      onChange={(e) => {
+                        setPerPage(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      aria-label="Items per page"
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                      }}
+                    >
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                    <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+                  </div>
+                </div>
+
+                {/* Search Input with Clear Button */}
+                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    style={{
+                      width: "320px",
+                      padding: "8px 36px 8px 14px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                    }}
+                  />
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchTerm("");
+                        setCurrentPage(1);
+                      }}
+                      title="Clear search"
+                      style={{
+                        position: "absolute",
+                        right: "8px",
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "#94a3b8",
+                        fontSize: "16px",
+                        lineHeight: 1,
+                        padding: "0 2px",
+                        display: "flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      ×
+                    </button>
                   )}
                 </div>
               </div>
-            ))}
-          </div>
+
+              {/* 5. Products Table matching Company Profiles Grid */}
+              <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
+                <table ref={tableRef} style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+                  <thead>
+                    <tr>
+                      {displayOrder.map((idx) => {
+                        if (idx === 0) {
+                          return (
+                            <th
+                              key="col-0"
+                              style={{
+                                width: "40px",
+                                minWidth: "40px",
+                                maxWidth: "45px",
+                                textAlign: "center",
+                                ...getFreezeStyle(0, true),
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isAllSelected}
+                                onChange={(e) => handleToggleSelectAll(e.target.checked)}
+                                style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                                aria-label="Select All"
+                              />
+                            </th>
+                          );
+                        }
+
+                        const label = PRODUCT_COLUMN_LABELS[idx];
+                        const isSrNo = idx === 1;
+                        const isAction = idx === 12;
+                        const isSorted = sortColIndex === idx;
+
+                        return (
+                          <th
+                            key={`col-${idx}-${label}`}
+                            style={{
+                              ...(isSrNo ? { width: "92px", minWidth: "92px", maxWidth: "100px", textAlign: "center" } : isAction ? { width: "70px", minWidth: "70px", textAlign: "center" } : {}),
+                              ...getFreezeStyle(idx, true),
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: isAction || isSrNo ? "center" : "space-between",
+                                gap: "4px",
+                              }}
+                            >
+                              {isAction ? (
+                                <span>{label}</span>
+                              ) : (
+                                <div
+                                  onClick={() => handleHeaderSort(idx)}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: isSrNo ? "center" : "flex-start",
+                                    gap: "5px",
+                                    cursor: "pointer",
+                                    userSelect: "none",
+                                    flex: isSrNo ? undefined : 1,
+                                    minWidth: 0,
+                                    padding: "2px 0",
+                                  }}
+                                  title={
+                                    isSorted
+                                      ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                                      : `Click to sort by ${label} (Ascending)`
+                                  }
+                                >
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {label}
+                                  </span>
+                                  {isSorted ? (
+                                    <span
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        color: "#0061f2",
+                                        fontSize: "10px",
+                                        fontWeight: 800,
+                                        background: "#e0f2fe",
+                                        padding: "1px 4px",
+                                        borderRadius: "3px",
+                                        border: "1px solid #bae6fd",
+                                        lineHeight: 1,
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      {sortDirection === "asc" ? "▲" : "▼"}
+                                    </span>
+                                  ) : (
+                                    <span
+                                      style={{
+                                        fontSize: "10px",
+                                        color: "#94a3b8",
+                                        opacity: 0.45,
+                                        lineHeight: 1,
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      ↕
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <ProductSkeletonRows
+                        count={perPage > 10 ? 8 : perPage}
+                        displayOrder={displayOrder}
+                        getFreezeStyle={getFreezeStyle}
+                      />
+                    ) : paginatedProducts.length === 0 ? (
+                      <tr>
+                        <td colSpan={displayOrder.length} style={{ textAlign: "center", padding: "36px", color: "#64748b" }}>
+                          No products found.
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedProducts.map((p, rowIdx) => {
+                        const name = p.product_name_tally || p.product_name || "—";
+                        const brandObj = brands.items.find((b) => b.id === p.brand_id);
+                        const brandName = brandObj?.name || (p.brand_id === "brand-yinglima" ? "Yinglima" : "—");
+
+                        const subCatObj = subCategories.items.find((sc) => sc.id === p.sub_category_id);
+                        let subCatName = subCatObj?.name;
+                        if (!subCatName) {
+                          if (p.sub_category_id === "sub-misc") subCatName = "Miscellaneous";
+                          else if (p.sub_category_id === "sub-vacuum") subCatName = "Vacuum Sealer Machine";
+                          else if (p.sub_category_id === "sub-banding-spares") subCatName = "Spares For Banding Machine";
+                          else if (p.sub_category_id === "sub-capping") subCatName = "Capping Machine";
+                          else if (p.sub_category_id === "sub-tube-sealer") subCatName = "Tube Sealer";
+                          else if (p.sub_category_id === "sub-cup-sealer") subCatName = "Cup Sealer";
+                          else if (p.sub_category_id === "sub-conveyor") subCatName = "Conveyor Machine";
+                          else if (p.sub_category_id === "sub-ffs") subCatName = "FFS / Weighing Machines";
+                          else subCatName = "—";
+                        }
+
+                        const hsn = p.hsn_number || PRODUCT_HSN_MAP[name] || "—";
+                        const uomObj = uoms.items.find((u) => u.id === p.uom_id);
+                        const uomName = uomObj?.code || uomObj?.name || "Nos";
+                        const isChecked = selectedIds.includes(p.id);
+                        const srNo = (currentPage - 1) * perPage + rowIdx + 1;
+
+                        return (
+                          <tr key={p.id}>
+                            {displayOrder.map((colIdx) => {
+                              switch (colIdx) {
+                                case 0:
+                                  return (
+                                    <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, false) }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => handleToggleRow(p.id, e.target.checked)}
+                                        style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                                      />
+                                    </td>
+                                  );
+                                case 1:
+                                  return (
+                                    <td
+                                      key="cell-1"
+                                      className="cell-srno"
+                                      style={{
+                                        width: "92px",
+                                        minWidth: "92px",
+                                        maxWidth: "100px",
+                                        textAlign: "center",
+                                        color: "#64748b",
+                                        fontWeight: 500,
+                                        ...getFreezeStyle(1, false),
+                                      }}
+                                    >
+                                      {srNo}
+                                    </td>
+                                  );
+                                case 2:
+                                  return (
+                                    <td key="cell-2" style={{ minWidth: "220px", ...getFreezeStyle(2, false) }}>
+                                      <a
+                                        href="#detail"
+                                        className="pm-link-product"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          setDrawerProduct(p);
+                                        }}
+                                      >
+                                        {name}
+                                      </a>
+                                    </td>
+                                  );
+                                case 3:
+                                  return (
+                                    <td key="cell-3" style={{ minWidth: "120px", ...getFreezeStyle(3, false) }}>
+                                      {p.product_code && p.product_code !== "-" ? p.product_code : "—"}
+                                    </td>
+                                  );
+                                case 4:
+                                  return (
+                                    <td key="cell-4" style={{ minWidth: "120px", ...getFreezeStyle(4, false) }}>
+                                      {brandName}
+                                    </td>
+                                  );
+                                case 5:
+                                  return (
+                                    <td key="cell-5" style={{ minWidth: "160px", ...getFreezeStyle(5, false) }}>
+                                      {subCatName}
+                                    </td>
+                                  );
+                                case 6:
+                                  return (
+                                    <td key="cell-6" style={{ minWidth: "150px", textAlign: "right", paddingRight: "14px", ...getFreezeStyle(6, false) }}>
+                                      {p.standard_price ? formatIndianCurrency(p.standard_price) : "—"}
+                                    </td>
+                                  );
+                                case 7:
+                                  return (
+                                    <td key="cell-7" style={{ minWidth: "100px", ...getFreezeStyle(7, false) }}>
+                                      {hsn}
+                                    </td>
+                                  );
+                                case 8:
+                                  return (
+                                    <td key="cell-8" style={{ minWidth: "80px", ...getFreezeStyle(8, false) }}>
+                                      {uomName}
+                                    </td>
+                                  );
+                                case 9:
+                                  return (
+                                    <td key="cell-9" style={{ minWidth: "90px", textAlign: "center", ...getFreezeStyle(9, false) }}>
+                                      {p.packaging_quantity ?? 1}
+                                    </td>
+                                  );
+                                case 10:
+                                  return (
+                                    <td key="cell-10" style={{ minWidth: "130px", textAlign: "center", ...getFreezeStyle(10, false) }}>
+                                      {p.packaging_gross_weight ?? 0}
+                                    </td>
+                                  );
+                                case 11:
+                                  return (
+                                    <td key="cell-11" style={{ minWidth: "110px", textAlign: "center", ...getFreezeStyle(11, false) }}>
+                                      {p.packaging_unit_cbm ?? 0}
+                                    </td>
+                                  );
+                                case 12:
+                                  return (
+                                    <td key="cell-12" className="actions" style={{ width: "95px", minWidth: "95px", textAlign: "center", ...getFreezeStyle(12, false) }}>
+                                      <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                                        <button
+                                          type="button"
+                                          className="btn"
+                                          style={{
+                                            background: "#0061f2",
+                                            color: "#ffffff",
+                                            padding: "6px 8px",
+                                            borderRadius: "4px",
+                                            border: "none",
+                                            cursor: "pointer",
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                          }}
+                                          onClick={() => handleOpenEdit(p)}
+                                          title="Edit Product"
+                                          aria-label={`Edit ${name}`}
+                                        >
+                                          <svg
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          >
+                                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                          </svg>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn"
+                                          style={{
+                                            background: "#ef4444",
+                                            color: "#ffffff",
+                                            padding: "6px 8px",
+                                            borderRadius: "4px",
+                                            border: "none",
+                                            cursor: "pointer",
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                          }}
+                                          onClick={() => handleDeleteProduct(p)}
+                                          title={(p.current_stock ?? 0) > 0 ? "Stock exists - cannot delete" : "Delete Product"}
+                                          aria-label={`Delete ${name}`}
+                                        >
+                                          <svg
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          >
+                                            <polyline points="3 6 5 6 21 6" />
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                          </svg>
+                                        </button>
+                                      </div>
+                                    </td>
+                                  );
+                                default:
+                                  return null;
+                              }
+                            })}
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Matching Company Profiles */}
+              <div className="pagination">
+                <Pagination
+                  pagination={paginationMeta}
+                  pageSize={perPage}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={(size) => {
+                    setPerPage(size);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+            </div>
+          </>
         )}
-      </div>
-    )}
 
-    {/* Package Dimensions Report */}
-    {activeMasterView === "dimensions-report" && (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <div className="page-header" style={{ marginBottom: "8px" }}>
-          <div>
-            <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
-              Multi-Package Dimensions Report
-            </h1>
-            <div className="page-subtitle" style={{ color: "#64748b", fontSize: "13.5px", marginTop: "4px" }}>
-              Separate report for dimensions and weights of each package across multi-box products.
+        {/* Universal View (Machine-Spares Mapping) */}
+        {activeMasterView === "universal-view" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="page-header" style={{ marginBottom: "8px" }}>
+              <div>
+                <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
+                  Machine-Spares Universal View
+                </h1>
+                <div className="page-subtitle" style={{ color: "#64748b", fontSize: "13.5px", marginTop: "4px" }}>
+                  Universal machine-wise spare parts breakdown showing all linked spare parts, codes, stock levels, and actions.
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="btn btn-add-new"
+                  onClick={() => {
+                    setMapMachineId(machineProducts[0]?.id || "");
+                    setMapSparePartId(sparePartProducts[0]?.id || "");
+                    setMapRemarks("");
+                    setIsMapModalOpen(true);
+                  }}
+                  style={{
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    padding: "8px 16px",
+                    fontSize: "13.5px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  + Link Spare Part to Machine
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <button
-              type="button"
-              onClick={() => downloadExport("/masters/products/package-dimensions", "csv", "package_dimensions")}
+            {/* Search Filter Bar */}
+            <div
               style={{
-                background: "#059669",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "6px",
-                padding: "8px 14px",
-                fontSize: "13px",
-                fontWeight: 600,
-                cursor: "pointer",
-                display: "inline-flex",
+                background: "#ffffff",
+                padding: "14px 18px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                display: "flex",
+                gap: "12px",
                 alignItems: "center",
-                gap: "6px",
               }}
             >
-              📥 Export CSV
-            </button>
-            <button
-              type="button"
-              onClick={() => downloadExport("/masters/products/package-dimensions", "xlsx", "package_dimensions")}
-              style={{
-                background: "#0284c7",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "6px",
-                padding: "8px 14px",
-                fontSize: "13px",
-                fontWeight: 600,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              📥 Export Excel
-            </button>
-          </div>
-        </div>
-
-        {/* Search Filter Bar */}
-        <div
-          style={{
-            background: "#ffffff",
-            padding: "14px 18px",
-            borderRadius: "8px",
-            border: "1px solid #e2e8f0",
-            display: "flex",
-            gap: "12px",
-            alignItems: "center",
-          }}
-        >
-          <input
-            type="text"
-            placeholder="Search by product name, code, box title..."
-            value={dimensionsReportSearch}
-            onChange={(e) => setDimensionsReportSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") loadDimensionsReport(dimensionsReportSearch);
-            }}
-            style={{
-              flex: 1,
-              height: "38px",
-              borderRadius: "5px",
-              border: "1px solid #cbd5e1",
-              padding: "0 12px",
-              fontSize: "13.5px",
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => loadDimensionsReport(dimensionsReportSearch)}
-            style={{
-              background: "#0061f2",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "5px",
-              padding: "0 20px",
-              height: "38px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              cursor: "pointer",
-            }}
-          >
-            Search
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDimensionsReportSearch("");
-              loadDimensionsReport("");
-            }}
-            style={{
-              background: "#64748b",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "5px",
-              padding: "0 16px",
-              height: "38px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              cursor: "pointer",
-            }}
-          >
-            Reset
-          </button>
-        </div>
-
-        {/* Table Container */}
-        <div
-          style={{
-            background: "#ffffff",
-            borderRadius: "8px",
-            border: "1px solid #e2e8f0",
-            overflow: "hidden",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          }}
-        >
-          {dimensionsReportLoading ? (
-            <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px" }}>
-              Loading package dimensions report...
-            </div>
-          ) : dimensionsReportData.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px" }}>
-              No package dimensions configured.
-            </div>
-          ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-              <thead>
-                <tr style={{ background: "#f8fafc", textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={{ padding: "10px 14px", width: "40px", color: "#475569" }}>#</th>
-                  <th style={{ padding: "10px 14px", color: "#475569" }}>Product Name</th>
-                  <th style={{ padding: "10px 14px", width: "120px", color: "#475569" }}>Product Code</th>
-                  <th style={{ padding: "10px 14px", width: "110px", color: "#475569" }}>Product Type</th>
-                  <th style={{ padding: "10px 14px", width: "130px", color: "#475569" }}>Package (Box)</th>
-                  <th style={{ padding: "10px 14px", color: "#475569" }}>Dimension / Description</th>
-                  <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>L (cm)</th>
-                  <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>W (cm)</th>
-                  <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>H (cm)</th>
-                  <th style={{ padding: "10px 14px", width: "90px", color: "#475569" }}>Unit CBM</th>
-                  <th style={{ padding: "10px 14px", width: "100px", color: "#475569" }}>Net Wt (kg)</th>
-                  <th style={{ padding: "10px 14px", width: "105px", color: "#475569" }}>Gross Wt (kg)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dimensionsReportData.map((row, rIdx) => (
-                  <tr key={row.dimension_id || rIdx} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "10px 14px", color: "#64748b" }}>{rIdx + 1}</td>
-                    <td style={{ padding: "10px 14px", fontWeight: 600, color: "#1e293b" }}>{row.product_name}</td>
-                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.product_code || "—"}</td>
-                    <td style={{ padding: "10px 14px" }}>
-                      <span
-                        style={{
-                          background: row.product_type === "Spare Part" ? "#fef3c7" : "#e0e7ff",
-                          color: row.product_type === "Spare Part" ? "#92400e" : "#3730a3",
-                          padding: "2px 7px",
-                          borderRadius: "4px",
-                          fontSize: "11.5px",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {row.product_type}
-                      </span>
-                    </td>
-                    <td style={{ padding: "10px 14px", fontWeight: 600, color: "#0061f2" }}>{row.package_name || "—"}</td>
-                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.title || "—"}</td>
-                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.length ?? "—"}</td>
-                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.width ?? "—"}</td>
-                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.height ?? "—"}</td>
-                    <td style={{ padding: "10px 14px", fontWeight: 600, color: "#0f172a" }}>{row.cbm != null ? row.cbm : "—"}</td>
-                    <td style={{ padding: "10px 14px", color: "#475569" }}>{row.net_weight != null ? row.net_weight : "—"}</td>
-                    <td style={{ padding: "10px 14px", fontWeight: 600, color: "#166534" }}>{row.gross_weight != null ? row.gross_weight : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    )}
-
-    {/* Map Spare Part Modal */}
-    {isMapModalOpen && (
-      <div
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: "rgba(15, 23, 42, 0.6)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 9999,
-          padding: "16px",
-        }}
-      >
-        <div
-          style={{
-            background: "#ffffff",
-            borderRadius: "8px",
-            width: "100%",
-            maxWidth: "520px",
-            padding: "24px",
-            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-          }}
-        >
-          <h3 style={{ margin: "0 0 16px 0", fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
-            Link Spare Part to Machine
-          </h3>
-          <form onSubmit={handleSaveMap}>
-            <div style={{ marginBottom: "14px" }}>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                Select Machine <span style={{ color: "#ef4444" }}>*</span>
-              </label>
-              <select
-                required
-                value={mapMachineId}
-                onChange={(e) => setMapMachineId(e.target.value)}
-                style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
-              >
-                <option value="">-- Choose Machine --</option>
-                {machineProducts.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.product_name_tally || m.product_name} {m.product_code && m.product_code !== "-" ? `(${m.product_code})` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ marginBottom: "14px" }}>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                Select Spare Part <span style={{ color: "#ef4444" }}>*</span>
-              </label>
-              <select
-                required
-                value={mapSparePartId}
-                onChange={(e) => setMapSparePartId(e.target.value)}
-                style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
-              >
-                <option value="">-- Choose Spare Part --</option>
-                {(sparePartProducts.length > 0 ? sparePartProducts : products).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.product_name_tally || s.product_name} {s.product_code && s.product_code !== "-" ? `(${s.product_code})` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ marginBottom: "20px" }}>
-              <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
-                Remarks / Compatibility Notes
-              </label>
               <input
                 type="text"
-                placeholder="e.g. Standard 220V motor replacement"
-                value={mapRemarks}
-                onChange={(e) => setMapRemarks(e.target.value)}
-                style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+                placeholder="Search machines or spare parts..."
+                value={universalViewSearch}
+                onChange={(e) => setUniversalViewSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") loadUniversalView(universalViewSearch);
+                }}
+                style={{
+                  flex: 1,
+                  height: "38px",
+                  borderRadius: "5px",
+                  border: "1px solid #cbd5e1",
+                  padding: "0 12px",
+                  fontSize: "13.5px",
+                }}
               />
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
               <button
                 type="button"
-                onClick={() => {
-                  setIsMapModalOpen(false);
-                  setMapMachineId("");
-                  setMapSparePartId("");
-                  setMapRemarks("");
-                }}
+                onClick={() => loadUniversalView(universalViewSearch)}
                 style={{
-                  padding: "8px 16px",
-                  background: "#f1f5f9",
-                  color: "#475569",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={mapSubmitting || !mapMachineId || !mapSparePartId}
-                style={{
-                  padding: "8px 18px",
                   background: "#0061f2",
                   color: "#ffffff",
                   border: "none",
                   borderRadius: "5px",
-                  cursor: "pointer",
-                  fontSize: "13px",
+                  padding: "0 20px",
+                  height: "38px",
                   fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
                 }}
               >
-                {mapSubmitting ? "Linking..." : "Save Link"}
+                Search
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUniversalViewSearch("");
+                  loadUniversalView("");
+                }}
+                style={{
+                  background: "#64748b",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "0 16px",
+                  height: "38px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+              >
+                Reset
               </button>
             </div>
-          </form>
-        </div>
-      </div>
-    )}
+
+            {/* Universal View Cards */}
+            {universalViewLoading ? (
+              <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px", background: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                Loading machine-spares universal view...
+              </div>
+            ) : universalViewData.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px", background: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                No machines or spare part mappings found.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {universalViewData.map((m) => (
+                  <div
+                    key={m.machine_id}
+                    style={{
+                      background: "#ffffff",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      overflow: "hidden",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: "12px 18px",
+                        background: "#f8fafc",
+                        borderBottom: "1px solid #e2e8f0",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: "10px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <span style={{ fontSize: "16px" }}>⚙️</span>
+                        <div>
+                          <strong style={{ fontSize: "14.5px", color: "#0f172a" }}>{m.machine_name}</strong>
+                          <span style={{ marginLeft: "8px", fontSize: "12.5px", color: "#64748b" }}>
+                            Code: <strong>{m.machine_code || "—"}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <span
+                          style={{
+                            background: "#e0f2fe",
+                            color: "#0369a1",
+                            padding: "3px 8px",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Machine Stock: {m.current_stock ?? 0}
+                        </span>
+                        <span
+                          style={{
+                            background: m.spares.length > 0 ? "#dcfce7" : "#f1f5f9",
+                            color: m.spares.length > 0 ? "#15803d" : "#64748b",
+                            padding: "3px 8px",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {m.spares.length} Spare Part{m.spares.length === 1 ? "" : "s"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMapMachineId(m.machine_id);
+                            setMapSparePartId(sparePartProducts[0]?.id || "");
+                            setMapRemarks("");
+                            setIsMapModalOpen(true);
+                          }}
+                          style={{
+                            background: "#0061f2",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "4px",
+                            padding: "4px 10px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}
+                        >
+                          + Link Spare
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: "0" }}>
+                      {m.spares.length === 0 ? (
+                        <div style={{ padding: "16px 20px", color: "#94a3b8", fontSize: "13px", fontStyle: "italic" }}>
+                          No spare parts mapped to this machine yet. Click "+ Link Spare" to link a spare part.
+                        </div>
+                      ) : (
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                          <thead>
+                            <tr style={{ background: "#f1f5f9", textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+                              <th style={{ padding: "8px 16px", width: "40px", color: "#475569" }}>#</th>
+                              <th style={{ padding: "8px 16px", color: "#475569" }}>Spare Part Name</th>
+                              <th style={{ padding: "8px 16px", width: "140px", color: "#475569" }}>Spare Code</th>
+                              <th style={{ padding: "8px 16px", width: "90px", color: "#475569" }}>UOM</th>
+                              <th style={{ padding: "8px 16px", width: "110px", color: "#475569" }}>Stock</th>
+                              <th style={{ padding: "8px 16px", color: "#475569" }}>Remarks</th>
+                              <th style={{ padding: "8px 16px", width: "80px", textAlign: "center", color: "#475569" }}>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {m.spares.map((s, sIdx) => (
+                              <tr key={s.spare_part_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                                <td style={{ padding: "8px 16px", color: "#64748b" }}>{sIdx + 1}</td>
+                                <td style={{ padding: "8px 16px", fontWeight: 600, color: "#1e293b" }}>{s.spare_part_name}</td>
+                                <td style={{ padding: "8px 16px", color: "#475569" }}>{s.spare_part_code || "—"}</td>
+                                <td style={{ padding: "8px 16px", color: "#475569" }}>{s.uom || "NOS"}</td>
+                                <td style={{ padding: "8px 16px", color: (s.current_stock ?? 0) > 0 ? "#16a34a" : "#dc2626", fontWeight: 600 }}>
+                                  {s.current_stock ?? 0}
+                                </td>
+                                <td style={{ padding: "8px 16px", color: "#64748b" }}>{s.remarks || "—"}</td>
+                                <td style={{ padding: "8px 16px", textAlign: "center" }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUnmapSpare(m.machine_id, s.spare_part_id)}
+                                    title="Unlink Spare Part"
+                                    style={{
+                                      background: "#fee2e2",
+                                      color: "#b91c1c",
+                                      border: "1px solid #fca5a5",
+                                      borderRadius: "4px",
+                                      padding: "3px 8px",
+                                      fontSize: "11.5px",
+                                      fontWeight: 600,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    Unlink
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Package Dimensions Report */}
+        {activeMasterView === "dimensions-report" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="page-header" style={{ marginBottom: "8px" }}>
+              <div>
+                <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
+                  Multi-Package Dimensions Report
+                </h1>
+                <div className="page-subtitle" style={{ color: "#64748b", fontSize: "13.5px", marginTop: "4px" }}>
+                  Separate report for dimensions and weights of each package across multi-box products.
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => downloadExport("/masters/products/package-dimensions", "csv", "package_dimensions")}
+                  style={{
+                    background: "#059669",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    padding: "8px 14px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  📥 Export CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadExport("/masters/products/package-dimensions", "xlsx", "package_dimensions")}
+                  style={{
+                    background: "#0284c7",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    padding: "8px 14px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  📥 Export Excel
+                </button>
+              </div>
+            </div>
+
+            {/* Search Filter Bar */}
+            <div
+              style={{
+                background: "#ffffff",
+                padding: "14px 18px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                display: "flex",
+                gap: "12px",
+                alignItems: "center",
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Search by product name, code, box title..."
+                value={dimensionsReportSearch}
+                onChange={(e) => setDimensionsReportSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") loadDimensionsReport(dimensionsReportSearch);
+                }}
+                style={{
+                  flex: 1,
+                  height: "38px",
+                  borderRadius: "5px",
+                  border: "1px solid #cbd5e1",
+                  padding: "0 12px",
+                  fontSize: "13.5px",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => loadDimensionsReport(dimensionsReportSearch)}
+                style={{
+                  background: "#0061f2",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "0 20px",
+                  height: "38px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+              >
+                Search
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDimensionsReportSearch("");
+                  loadDimensionsReport("");
+                }}
+                style={{
+                  background: "#64748b",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "0 16px",
+                  height: "38px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+              >
+                Reset
+              </button>
+            </div>
+
+            {/* Table Container */}
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                overflow: "hidden",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+              }}
+            >
+              {dimensionsReportLoading ? (
+                <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px" }}>
+                  Loading package dimensions report...
+                </div>
+              ) : dimensionsReportData.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px", color: "#64748b", fontSize: "14px" }}>
+                  No package dimensions configured.
+                </div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc", textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+                      <th style={{ padding: "10px 14px", width: "40px", color: "#475569" }}>#</th>
+                      <th style={{ padding: "10px 14px", color: "#475569" }}>Product Name</th>
+                      <th style={{ padding: "10px 14px", width: "120px", color: "#475569" }}>Product Code</th>
+                      <th style={{ padding: "10px 14px", width: "110px", color: "#475569" }}>Product Type</th>
+                      <th style={{ padding: "10px 14px", width: "130px", color: "#475569" }}>Package (Box)</th>
+                      <th style={{ padding: "10px 14px", color: "#475569" }}>Dimension / Description</th>
+                      <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>L (cm)</th>
+                      <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>W (cm)</th>
+                      <th style={{ padding: "10px 14px", width: "80px", color: "#475569" }}>H (cm)</th>
+                      <th style={{ padding: "10px 14px", width: "90px", color: "#475569" }}>Unit CBM</th>
+                      <th style={{ padding: "10px 14px", width: "100px", color: "#475569" }}>Net Wt (kg)</th>
+                      <th style={{ padding: "10px 14px", width: "105px", color: "#475569" }}>Gross Wt (kg)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dimensionsReportData.map((row, rIdx) => (
+                      <tr key={row.dimension_id || rIdx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "10px 14px", color: "#64748b" }}>{rIdx + 1}</td>
+                        <td style={{ padding: "10px 14px", fontWeight: 600, color: "#1e293b" }}>{row.product_name}</td>
+                        <td style={{ padding: "10px 14px", color: "#475569" }}>{row.product_code || "—"}</td>
+                        <td style={{ padding: "10px 14px" }}>
+                          <span
+                            style={{
+                              background: row.product_type === "Spare Part" ? "#fef3c7" : "#e0e7ff",
+                              color: row.product_type === "Spare Part" ? "#92400e" : "#3730a3",
+                              padding: "2px 7px",
+                              borderRadius: "4px",
+                              fontSize: "11.5px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {row.product_type}
+                          </span>
+                        </td>
+                        <td style={{ padding: "10px 14px", fontWeight: 600, color: "#0061f2" }}>{row.package_name || "—"}</td>
+                        <td style={{ padding: "10px 14px", color: "#475569" }}>{row.title || "—"}</td>
+                        <td style={{ padding: "10px 14px", color: "#475569" }}>{row.length ?? "—"}</td>
+                        <td style={{ padding: "10px 14px", color: "#475569" }}>{row.width ?? "—"}</td>
+                        <td style={{ padding: "10px 14px", color: "#475569" }}>{row.height ?? "—"}</td>
+                        <td style={{ padding: "10px 14px", fontWeight: 600, color: "#0f172a" }}>{row.cbm != null ? row.cbm : "—"}</td>
+                        <td style={{ padding: "10px 14px", color: "#475569" }}>{row.net_weight != null ? row.net_weight : "—"}</td>
+                        <td style={{ padding: "10px 14px", fontWeight: 600, color: "#166534" }}>{row.gross_weight != null ? row.gross_weight : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Map Spare Part Modal */}
+        {isMapModalOpen && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 9999,
+              padding: "16px",
+            }}
+          >
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "8px",
+                width: "100%",
+                maxWidth: "520px",
+                padding: "24px",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+              }}
+            >
+              <h3 style={{ margin: "0 0 16px 0", fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
+                Link Spare Part to Machine
+              </h3>
+              <form onSubmit={handleSaveMap}>
+                <div style={{ marginBottom: "14px" }}>
+                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                    Select Machine <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <select
+                    required
+                    value={mapMachineId}
+                    onChange={(e) => setMapMachineId(e.target.value)}
+                    style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+                  >
+                    <option value="">-- Choose Machine --</option>
+                    {machineProducts.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.product_name_tally || m.product_name} {m.product_code && m.product_code !== "-" ? `(${m.product_code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: "14px" }}>
+                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                    Select Spare Part <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <select
+                    required
+                    value={mapSparePartId}
+                    onChange={(e) => setMapSparePartId(e.target.value)}
+                    style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+                  >
+                    <option value="">-- Choose Spare Part --</option>
+                    {(sparePartProducts.length > 0 ? sparePartProducts : products).map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.product_name_tally || s.product_name} {s.product_code && s.product_code !== "-" ? `(${s.product_code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: "20px" }}>
+                  <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}>
+                    Remarks / Compatibility Notes
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Standard 220V motor replacement"
+                    value={mapRemarks}
+                    onChange={(e) => setMapRemarks(e.target.value)}
+                    style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMapModalOpen(false);
+                      setMapMachineId("");
+                      setMapSparePartId("");
+                      setMapRemarks("");
+                    }}
+                    style={{
+                      padding: "8px 16px",
+                      background: "#f1f5f9",
+                      color: "#475569",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={mapSubmitting || !mapMachineId || !mapSparePartId}
+                    style={{
+                      padding: "8px 18px",
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {mapSubmitting ? "Linking..." : "Save Link"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* 6. SideDrawer for Viewing Product Details */}
         <SideDrawer

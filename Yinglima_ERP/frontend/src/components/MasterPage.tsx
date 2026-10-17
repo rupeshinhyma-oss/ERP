@@ -35,7 +35,6 @@ import {
   type SheetRow,
 } from "./ImportWizard";
 import { SideDrawer, DetailFieldGrid, type DetailField } from "./SideDrawer";
-import { Breadcrumb } from "./Breadcrumb";
 import { TrashConflictModal, type TrashConflictInfo } from "./TrashConflictModal";
 import {
   apiDelete,
@@ -93,9 +92,6 @@ export interface MasterPageProps<T extends MasterRecord> {
   /** Lower-case singular used in modal titles and the delete confirm. */
   entityName: string;
   heading: string;
-  subtitle: ReactNode;
-  /** Breadcrumb segments after "Dashboard". */
-  breadcrumbTrail: string[];
   newButtonLabel: string;
   searchPlaceholder: string;
   columns: MasterColumn<T>[];
@@ -529,8 +525,6 @@ export function MasterPage<T extends MasterRecord>({
   permissionPrefix,
   entityName,
   heading,
-  subtitle,
-  breadcrumbTrail,
   newButtonLabel: _newButtonLabel,
   searchPlaceholder,
   columns,
@@ -1427,10 +1421,9 @@ export function MasterPage<T extends MasterRecord>({
     return (
       <AppShell activeKey={activeKey}>
         <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
-          <Breadcrumb trail={[...breadcrumbTrail, `Import ${pluralizeEntity(entityName)}`]} />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <div>
-              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+              <h1 className="page-title">
                 Import {pluralizeEntity(entityName)}
               </h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
@@ -1882,7 +1875,6 @@ export function MasterPage<T extends MasterRecord>({
     return (
       <AppShell activeKey={activeKey}>
         <main className="page">
-          <Breadcrumb trail={[...breadcrumbTrail, editingId ? `Edit ${entityName}` : `Add ${entityName}`]} />
           <div className="page-header" style={{ marginBottom: "20px" }}>
             <div>
               <h1 style={{ textTransform: "capitalize" }}>{editingId ? `Edit ${entityName}` : `Add ${entityName}`}</h1>
@@ -2319,11 +2311,9 @@ export function MasterPage<T extends MasterRecord>({
     <AppShell activeKey={activeKey}>
 
       <main className="page">
-        <Breadcrumb trail={breadcrumbTrail} />
         <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginBottom: "8px" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1>{heading}</h1>
-            <div className="page-subtitle">{subtitle}</div>
           </div>
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
             {headerExtras}

@@ -17,14 +17,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add detailed tracking columns to hrms_tracking_settings
-    op.add_column(
-        'hrms_tracking_settings',
-        sa.Column('is_detailed_tracking_enabled', sa.Boolean(), server_default='false', nullable=False)
+    # Safe to run whether or not the columns already exist.  They can already be present when the database was
+    # changed outside Alembic (a manual ALTER TABLE, another environment, a hot-fix); a plain ADD COLUMN would then
+    # fail with DuplicateColumn and the deploy would loop forever on this migration.
+    op.execute(
+        "ALTER TABLE hrms_tracking_settings "
+        "ADD COLUMN IF NOT EXISTS is_detailed_tracking_enabled BOOLEAN NOT NULL DEFAULT false"
     )
-    op.add_column(
-        'hrms_tracking_settings',
-        sa.Column('detailed_interval_minutes', sa.Integer(), server_default='5', nullable=False)
+    op.execute(
+        "ALTER TABLE hrms_tracking_settings "
+        "ADD COLUMN IF NOT EXISTS detailed_interval_minutes INTEGER NOT NULL DEFAULT 5"
     )
 
     # Set organization default return timer to 30 seconds
@@ -34,5 +36,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('hrms_tracking_settings', 'detailed_interval_minutes')
-    op.drop_column('hrms_tracking_settings', 'is_detailed_tracking_enabled')
+    op.execute("ALTER TABLE hrms_tracking_settings DROP COLUMN IF EXISTS detailed_interval_minutes")
+    op.execute("ALTER TABLE hrms_tracking_settings DROP COLUMN IF EXISTS is_detailed_tracking_enabled")

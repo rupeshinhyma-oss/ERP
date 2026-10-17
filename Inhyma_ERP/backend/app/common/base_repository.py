@@ -42,7 +42,7 @@ from sqlalchemy import Boolean, Select, String, Text, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, ConflictException
-from app.database.base import Base, SoftDeleteMixin
+from app.database.base import Base, GUID, SoftDeleteMixin
 
 if TYPE_CHECKING:
     from app.common.list_query import ListQueryParams
@@ -175,7 +175,11 @@ class BaseRepository(Generic[ModelT]):
             column = getattr(self.model, column_name)
             is_uuid_col = False
             try:
-                if hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID:
+                if (
+                    isinstance(column.type, GUID)
+                    or getattr(column.type, "__name__", "") == "GUID"
+                    or (hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID)
+                ):
                     is_uuid_col = True
             except (NotImplementedError, AttributeError):
                 is_uuid_col = False
@@ -188,18 +192,16 @@ class BaseRepository(Generic[ModelT]):
                 is_bool_col = False
 
             is_str_col = (
-                isinstance(column.type, (String, Text))
-                or isinstance(getattr(column.type, "impl", None), (String, Text))
-                or hasattr(column.type, "enum_class")
+                not is_uuid_col
+                and (
+                    isinstance(column.type, (String, Text))
+                    or isinstance(getattr(column.type, "impl", None), (String, Text))
+                    or hasattr(column.type, "enum_class")
+                )
             )
             if is_bool_col:
                 bool_val = value.lower() in ("true", "1", "t", "yes") if isinstance(value, str) else bool(value)
                 stmt = stmt.where(column == bool_val)
-            elif isinstance(value, str) and is_str_col:
-                if value.lower() == "blank":
-                    stmt = stmt.where(or_(column.is_(None), column == "", func.lower(column) == "blank"))
-                else:
-                    stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
                 if value.lower() == "blank":
                     stmt = stmt.where(column.is_(None))
@@ -208,6 +210,11 @@ class BaseRepository(Generic[ModelT]):
                         stmt = stmt.where(column == uuid.UUID(value))
                     except ValueError:
                         stmt = stmt.where(column == value)
+            elif isinstance(value, str) and is_str_col:
+                if value.lower() == "blank":
+                    stmt = stmt.where(or_(column.is_(None), column == "", func.lower(column) == "blank"))
+                else:
+                    stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and value.lower() == "blank":
                 stmt = stmt.where(column.is_(None))
             else:
@@ -302,7 +309,11 @@ class BaseRepository(Generic[ModelT]):
             column = getattr(self.model, column_name)
             is_uuid_col = False
             try:
-                if hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID:
+                if (
+                    isinstance(column.type, GUID)
+                    or getattr(column.type, "__name__", "") == "GUID"
+                    or (hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID)
+                ):
                     is_uuid_col = True
             except (NotImplementedError, AttributeError):
                 is_uuid_col = False
@@ -315,18 +326,16 @@ class BaseRepository(Generic[ModelT]):
                 is_bool_col = False
 
             is_str_col = (
-                isinstance(column.type, (String, Text))
-                or isinstance(getattr(column.type, "impl", None), (String, Text))
-                or hasattr(column.type, "enum_class")
+                not is_uuid_col
+                and (
+                    isinstance(column.type, (String, Text))
+                    or isinstance(getattr(column.type, "impl", None), (String, Text))
+                    or hasattr(column.type, "enum_class")
+                )
             )
             if is_bool_col:
                 bool_val = value.lower() in ("true", "1", "t", "yes") if isinstance(value, str) else bool(value)
                 stmt = stmt.where(column == bool_val)
-            elif isinstance(value, str) and is_str_col:
-                if value.lower() == "blank":
-                    stmt = stmt.where(or_(column.is_(None), column == "", func.lower(column) == "blank"))
-                else:
-                    stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
                 if value.lower() == "blank":
                     stmt = stmt.where(column.is_(None))
@@ -335,6 +344,11 @@ class BaseRepository(Generic[ModelT]):
                         stmt = stmt.where(column == uuid.UUID(value))
                     except ValueError:
                         stmt = stmt.where(column == value)
+            elif isinstance(value, str) and is_str_col:
+                if value.lower() == "blank":
+                    stmt = stmt.where(or_(column.is_(None), column == "", func.lower(column) == "blank"))
+                else:
+                    stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and value.lower() == "blank":
                 stmt = stmt.where(column.is_(None))
             else:

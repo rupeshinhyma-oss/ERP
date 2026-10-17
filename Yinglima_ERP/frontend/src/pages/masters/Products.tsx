@@ -583,8 +583,6 @@ export function ProductsPage() {
       entityName="product"
       clientSideSearch={false}
       heading="Products Master"
-      subtitle="Manage items, packaging weights, CBM, refund VAT, and license warnings."
-      breadcrumbTrail={["Master Data", "Products"]}
       newButtonLabel="+ New Product"
       searchPlaceholder="Search code, name, barcode, or Sr. No..."
       reloadToken={String(liveReloadToken)}

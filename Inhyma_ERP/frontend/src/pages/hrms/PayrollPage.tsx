@@ -893,9 +893,6 @@ export function PayrollPage() {
               <h1 style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <IconCoins /> Payroll — My Salary Slips
               </h1>
-              <div className="page-subtitle">
-                <span>My Approved Salary Slips</span> — View and download your official approved monthly salary statements.
-              </div>
             </div>
           </div>
 
@@ -1145,9 +1142,6 @@ export function PayrollPage() {
             <h1 style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <IconCoins /> Payroll Management
             </h1>
-            <div className="page-subtitle">
-              Configuration-driven rules, employee Annual CTC, authoritative attendance & LOP calculation, pre-approval audit corrections, and approval locking.
-            </div>
           </div>
         </div>
 

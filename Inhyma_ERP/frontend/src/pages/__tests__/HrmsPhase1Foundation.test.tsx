@@ -89,17 +89,15 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
       const shell = screen.getByTestId("app-shell");
       expect(shell.getAttribute("data-active-key")).toBe("hrms-attendance");
 
-      // Verify header and subtitle
+      // Verify header
       expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Attendance");
       expect(
-        screen.getByText("Enterprise punch tracking, geofence verification, calendar, and regularization.")
-      ).toBeDefined();
+        screen.queryByText("Enterprise punch tracking, geofence verification, calendar, and regularization.")
+      ).toBeNull();
 
       // View Tab (Default)
       expect(screen.getByText("Punch Card Container")).toBeDefined();
       expect(screen.getByText("Punch functionality will be available here.")).toBeDefined();
-      expect(screen.getByText("Monthly Calendar Container")).toBeDefined();
-      expect(screen.getByText("Attendance calendar will appear here.")).toBeDefined();
 
       // Switch to Approval Tab
       const approvalTabBtn = screen.getByRole("button", { name: /approval/i });

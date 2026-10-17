@@ -9,7 +9,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
-import { Breadcrumb } from "@/components/Breadcrumb";
 import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Banner, Modal } from "@/components/ui";
@@ -1045,19 +1044,14 @@ export function ProductPricesPage() {
   return (
     <AppShell activeKey="product-prices">
       <main className="page">
-        <Breadcrumb trail={["Inventory", "Product Prices"]} />
-
         {/* Page Header */}
         <div className="page-header" style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <h1 style={{ margin: 0 }}>Product Price Directory</h1>
+              <h1 className="page-title">Product Prices</h1>
               <span className="badge badge-info" style={{ fontSize: "12px", padding: "4px 8px" }}>
                 {totalItems} Products
               </span>
-            </div>
-            <div className="page-subtitle" style={{ marginTop: "4px" }}>
-              Search, compare, and inline-edit supplier purchase prices across all catalog items.
             </div>
           </div>
 

@@ -27,8 +27,6 @@ export function TransportPage() {
       liveModule="transports"
       entityName="Transport"
       heading="Transport"
-      subtitle="Manage logistics carriers, transport agencies, GST numbers, and contact details."
-      breadcrumbTrail={["Settings", "Masters", "Transport"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search..."
       hideQuickAdd={true}

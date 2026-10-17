@@ -40,6 +40,99 @@ export const MODULE_NAMES: Record<string, string> = {
   local_purchase: "Local Purchase",
 };
 
+/** Icons for every module in the ERP system. */
+export const MODULE_ICONS: Record<string, string> = {
+  supplier: "🚚",
+  buyer: "🤝",
+  planning: "🚢",
+  inquiry: "📩",
+  local_purchase: "🛒",
+  product: "📦",
+  product_price: "🏷️",
+  productgallery: "🖼️",
+  user: "👤",
+  position: "🎖️",
+  roles_permissions: "🛡️",
+  city: "🏙️",
+  state: "🗺️",
+  country: "🌍",
+  currency: "💱",
+  uom: "⚖️",
+  hsn: "🔢",
+  category: "📂",
+  subcategory: "📁",
+  brand: "🏷️",
+  suppliertype: "🏭",
+  buyertype: "🏢",
+  organizationlist: "🏛️",
+  organization: "⚙️",
+  audit: "📜",
+  trash: "🗑️",
+  dashboard: "📊",
+};
+
+export interface PermissionSection {
+  id: "core" | "inventory" | "admin" | "masters";
+  title: string;
+  icon: string;
+  description: string;
+  modules: string[];
+}
+
+export const PERMISSION_SECTIONS: PermissionSection[] = [
+  {
+    id: "core",
+    title: "Core Business & Operations",
+    icon: "🏢",
+    description: "Suppliers, Buyers, Planning, Inquiries, and Local Purchase",
+    modules: ["supplier", "buyer", "planning", "inquiry", "local_purchase"],
+  },
+  {
+    id: "inventory",
+    title: "Inventory & Catalog",
+    icon: "📦",
+    description: "Product Master, Product Prices, and Gallery",
+    modules: ["product", "product_price", "productgallery"],
+  },
+  {
+    id: "admin",
+    title: "User & Department Management",
+    icon: "👥",
+    description: "User Accounts, Designations, and Department Permissions",
+    modules: ["user", "position", "roles_permissions"],
+  },
+  {
+    id: "masters",
+    title: "Settings & Masters",
+    icon: "⚙️",
+    description: "12 Lookup Tables, Organization Profile, Audit Logs, and Trash",
+    modules: [
+      "city",
+      "state",
+      "country",
+      "currency",
+      "uom",
+      "hsn",
+      "category",
+      "subcategory",
+      "brand",
+      "suppliertype",
+      "buyertype",
+      "organizationlist",
+      "organization",
+      "audit",
+      "trash",
+    ],
+  },
+];
+
+export function getSectionForModule(modKey: string): "core" | "inventory" | "admin" | "masters" {
+  for (const s of PERMISSION_SECTIONS) {
+    if (s.modules.includes(modKey)) return s.id;
+  }
+  return "masters";
+}
+
 const ACTION_LABELS: Record<string, string> = {
   read: "View",
   view: "View",
@@ -58,6 +151,26 @@ const ACTION_LABELS: Record<string, string> = {
   currentstatus: "Current Status",
   potential: "Potential",
   clientgrade: "Client Grade",
+};
+
+export const ACTION_ICONS: Record<string, string> = {
+  view: "👁️",
+  read: "👁️",
+  create: "➕",
+  update: "✏️",
+  delete: "🗑️",
+  export: "📤",
+  import: "📥",
+  approve: "✅",
+  send_message: "💬",
+  manage: "⚙️",
+  action: "⚡",
+  bulk_action: "📑",
+  grade_edit: "⭐",
+  potential_edit: "📈",
+  currentstatus: "📊",
+  potential: "📈",
+  clientgrade: "⭐",
 };
 
 /**
@@ -85,6 +198,16 @@ export function friendlyPermissionLabel(code: string): string {
   const parts = code.split(".");
   const action = parts[parts.length - 1];
   return ACTION_LABELS[action] || parts.slice(1).join(" ") || code;
+}
+
+export function friendlyActionIcon(code: string): string {
+  if (code.includes("colorstatusred")) return "🔴";
+  if (code.includes("colorstatusgreen")) return "🟢";
+  if (code.includes("approvaldate")) return "📅";
+  if (code.includes("textyn")) return "🧪";
+  const parts = code.split(".");
+  const action = parts[parts.length - 1];
+  return ACTION_ICONS[action] || "🔹";
 }
 
 export function groupPermissionsByModule(permissions: Permission[]): Record<string, Permission[]> {

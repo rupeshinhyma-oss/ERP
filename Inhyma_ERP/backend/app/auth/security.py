@@ -166,7 +166,9 @@ def _encode_token(
     return IssuedToken(token=token, jti=jti, expires_at=expires_at)
 
 
-def create_access_token(user_id: uuid.UUID, *, permissions: list[str] | None = None) -> IssuedToken:
+def create_access_token(
+    user_id: uuid.UUID, *, permissions: list[str] | None = None, session_id: str | None = None
+) -> IssuedToken:
     """
     Issue a short-lived access token for the given user.
 
@@ -177,20 +179,25 @@ def create_access_token(user_id: uuid.UUID, *, permissions: list[str] | None = N
     edited in the database -- this is a cache of that data with a 15-minute
     natural expiry, not a second source of truth.
     """
+    claims: dict[str, Any] = {"perms": sorted(permissions) if permissions is not None else []}
+    if session_id:
+        # The login (session) this token belongs to.  Signing out revokes exactly this session id.
+        claims["sid"] = session_id
     return _encode_token(
         subject=user_id,
         token_type=TokenType.ACCESS,
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-        extra_claims={"perms": sorted(permissions) if permissions is not None else []},
+        extra_claims=claims,
     )
 
 
-def create_refresh_token(user_id: uuid.UUID) -> IssuedToken:
+def create_refresh_token(user_id: uuid.UUID, *, session_id: str | None = None) -> IssuedToken:
     """Issue a long-lived refresh token for the given user."""
     return _encode_token(
         subject=user_id,
         token_type=TokenType.REFRESH,
         expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        extra_claims={"sid": session_id} if session_id else None,
     )
 
 

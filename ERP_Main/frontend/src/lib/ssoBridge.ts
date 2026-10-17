@@ -11,6 +11,8 @@ import {
   getEcosystemCookie,
   setEcosystemCookie,
   isExplicitlyLoggedOut,
+  clearEcosystemCookie,
+  verifyCentralEcosystemSession,
   type EcosystemSessionData,
 } from "./ecosystemSession";
 import type { PlatformAdmin } from "@/types";
@@ -233,9 +235,44 @@ interface ExchangeResult {
  * whole login -> establish -> fetch sequence forever. Only "logged-in"
  * (a real state change) should ever trigger a reload/navigation.
  */
-export async function processIncomingSsoHandover(): Promise<
-  "logged-in" | "already-logged-in" | "not-logged-in"
-> {
+type HandoverResult = "logged-in" | "already-logged-in" | "not-logged-in";
+let handoverInFlight: Promise<HandoverResult> | null = null;
+
+/**
+ * App, AppShell and Login all ask for the handover on the same page load (and React's development mode runs effects
+ * twice).  The exchange runs ONCE per arrival and every caller shares its result, so one caller's redirect can never
+ * abort another caller's request.
+ */
+export function processIncomingSsoHandover(): Promise<HandoverResult> {
+  if (!handoverInFlight) {
+    // Let the login page show "Signing you in..." while a ticket is being exchanged (a sleeping service can take a while).
+    try {
+      if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover")) {
+        sessionStorage.setItem("ihm_handover_pending", "1");
+      }
+    } catch {
+      /* storage unavailable: no progress banner */
+    }
+    handoverInFlight = runIncomingSsoHandover().finally(() => {
+      try {
+        sessionStorage.removeItem("ihm_handover_pending");
+      } catch {
+        /* ignore */
+      }
+      setTimeout(() => {
+        handoverInFlight = null;
+      }, 1500);
+    });
+  }
+  return handoverInFlight;
+}
+
+/** Tests only: forget the shared result so the next call runs a fresh exchange. */
+export function resetIncomingSsoHandoverForTests(): void {
+  handoverInFlight = null;
+}
+
+async function runIncomingSsoHandover(): Promise<HandoverResult> {
   if (typeof window === "undefined") return "not-logged-in";
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -304,17 +341,27 @@ export async function processIncomingSsoHandover(): Promise<
     const currentLocalEmail = (
       (profile && ("primary_email" in profile ? profile.primary_email : profile.email)) || ""
     ).toLowerCase();
-    if (targetEmail && currentLocalEmail && currentLocalEmail !== targetEmail.toLowerCase()) {
-      Auth.clear();
-    } else {
-      if (targetSessionId && !Auth.getSessionId()) {
-        const currentProfile = Auth.getProfile();
-        const currentToken = Auth.getAccessToken();
-        if (currentToken) {
-          Auth.setSession(currentToken, currentProfile || undefined, Auth.getPrincipalType() || undefined, undefined, targetSessionId);
+    const currentSessionId = Auth.getSessionId();
+    const sameEmail = !targetEmail || !currentLocalEmail || currentLocalEmail === targetEmail.toLowerCase();
+    if (!hasValidToken) {
+      // Only the shared cookie is present (no new ticket).
+      if (sameEmail) {
+        if (targetSessionId && !currentSessionId) {
+          const currentProfile = Auth.getProfile();
+          const currentToken = Auth.getAccessToken();
+          if (currentToken) {
+            Auth.setSession(currentToken, currentProfile || undefined, Auth.getPrincipalType() || undefined, undefined, targetSessionId);
+          }
         }
+        return "already-logged-in";
       }
-      return "already-logged-in";
+      Auth.clear(); // User isolation: the cookie belongs to a different person
+    } else if (sameEmail && targetSessionId && currentSessionId === targetSessionId) {
+      return "already-logged-in"; // this very login is already open here
+    } else {
+      // A fresh handover ALWAYS wins: it is a new login (or a different person).  Stale or foreign saved state is
+      // cleared so an old, ended session can never block -- or silently replace -- the sign-in just made.
+      Auth.clear();
     }
   }
 
@@ -325,10 +372,25 @@ export async function processIncomingSsoHandover(): Promise<
     return "not-logged-in";
   }
   try {
-    const res = await apiPost<ExchangeResult>("/global/ecosystem-session/exchange", {
-      session_id: targetSessionId,
-      email: targetEmail,
-    });
+    const exchange = () =>
+      apiPost<ExchangeResult>("/global/ecosystem-session/exchange", {
+        session_id: targetSessionId as string,
+        email: targetEmail,
+      });
+    // Retry only TEMPORARY failures (network, 5xx/503) with growing waits; a clear answer (401/403) is final.
+    let res: Awaited<ReturnType<typeof exchange>> | undefined;
+    const retryDelaysMs = [700, 2500, 6000];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await exchange();
+        break;
+      } catch (attemptError) {
+        const attemptStatus = (attemptError as { status?: number })?.status;
+        const retryable = attemptStatus === undefined || attemptStatus >= 500;
+        if (!retryable || attempt >= retryDelaysMs.length) throw attemptError;
+        await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
+      }
+    }
     const data = (res as { data?: ExchangeResult })?.data || (res as unknown as ExchangeResult);
     if (data?.access_token) {
       const principal = data.principal_type === "platform_admin" ? "platform_admin" : "global_user";
@@ -358,8 +420,65 @@ export async function processIncomingSsoHandover(): Promise<
       return "logged-in";
     }
   } catch (err) {
-    console.warn("Could not sign in to ERP_Main from the central session:", err);
+    const status = (err as { status?: number })?.status;
+    // Another caller may have completed this very sign-in in the meantime: nothing to report then.
+    if (Auth.isLoggedIn() && Auth.getSessionId() === targetSessionId) return "already-logged-in";
+    console.warn("Could not sign in to ERP_Main from the central session:", status, err);
+    const transient = status === undefined || status >= 500;
+    let notice: string;
+    if (transient) notice = "The sign-in service is temporarily unavailable. Please try again in a moment.";
+    else if (status === 401 || status === 403) notice = "Your session has ended or could not be verified. Please sign in again.";
+    else {
+      const reason = String((err as { message?: string })?.message || "").trim();
+      notice = reason ? `Automatic sign-in did not complete: ${reason}` : "Automatic sign-in did not complete. Please sign in.";
+    }
+    try {
+      sessionStorage.setItem("ihm_login_notice", notice);
+    } catch {
+      /* storage unavailable: the login page simply shows no notice */
+    }
+    if (status === 401) clearEcosystemCookie(targetSessionId); // that central session is gone: do not try it again
   }
 
   return "not-logged-in";
+}
+
+export type SwitchPlan = { ok: true; url: string } | { ok: false; message: string; sessionEnded?: boolean };
+
+/**
+ * Check BEFORE leaving the page that a switch can work, so the person gets a clear message here instead of landing on
+ * the other ERP's login page: the address must be configured, the sign-in must be a central session, and that
+ * session must not have ended.
+ */
+export async function planSwitch(targetBaseUrl: string, targetPath?: string): Promise<SwitchPlan> {
+  if (!targetBaseUrl) {
+    return { ok: false, message: "This ERP's address is not configured for this site. Please contact your administrator." };
+  }
+  const sid = Auth.getSessionId() || getEcosystemCookie()?.session_id;
+  if (!sid || sid.startsWith("ihm-sess-") || sid.startsWith("loc-")) {
+    return { ok: false, message: "This sign-in is only valid here. Sign out and sign in again to switch between ERPs." };
+  }
+  const state = await verifyCentralEcosystemSession(sid);
+  if (state.revoked === true) {
+    return { ok: false, sessionEnded: true, message: "Your session has ended. Please sign in again." };
+  }
+  let url = "";
+  try {
+    url = createSsoHandoverUrl(targetBaseUrl, targetPath);
+  } catch {
+    url = "";
+  }
+  if (!url || url === "#") return { ok: false, message: "Could not prepare the switch. Please try again." };
+  return { ok: true, url };
+}
+
+/** Best-effort wake-up of the other services (hosted free tiers sleep) while the switcher is open. */
+export function warmPeerServices(): void {
+  try {
+    for (const erp of ECOSYSTEM_ERPS) {
+      if (erp.apiUrl) void fetch(`${erp.apiUrl}/health/live`, { mode: "no-cors", cache: "no-store" }).catch(() => undefined);
+    }
+  } catch {
+    /* warming is optional */
+  }
 }

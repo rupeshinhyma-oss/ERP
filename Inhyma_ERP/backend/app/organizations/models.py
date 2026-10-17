@@ -34,7 +34,10 @@ class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin):
 
     company_name: Mapped[str] = mapped_column(String(200), nullable=False)
     legal_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logo_data: Mapped[str | None] = mapped_column(
+        Text, nullable=True, doc="Base64 data URI of the logo stored directly in DB storage"
+    )
 
     gst_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     pan_number: Mapped[str | None] = mapped_column(String(50), nullable=True)

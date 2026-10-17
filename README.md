@@ -23,6 +23,7 @@ The ecosystem comprises three autonomous systems:
    - Autonomous Production Planning & Distribution ERP (India Domestic Distribution)
    - FastAPI Backend (Port `8002`), React + TypeScript SPA Frontend (Port `5174`)
    - Complete visual uniqueness across all 39 sidebar routes with dedicated SVG icons.
+   - Standardized universal UI design system: uniform header filter toggle buttons across all modules (`#556987`, 8×14px, badge-less, default collapsed state).
    - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
    - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, escalations, holds), Master Data, Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker.
 
@@ -71,7 +72,60 @@ Located in **[`Yinglima_ERP/doc/`](Yinglima_ERP/doc/)**:
 
 ---
 
-## 4. Quick Start & Operational Commands
+## 4. Federated Identity & Enterprise User Management Architecture
+
+The platform implements an enterprise-grade, distributed user management and identity federation system spanning `ERP_Main` (Central Control Plane) and autonomous spoke instances (`Inhyma_ERP` and `Yinglima_ERP`):
+
+```mermaid
+flowchart TD
+    subgraph ControlPlane["Central Control Plane (ERP_Main)"]
+        GU["Global Users Directory<br/>(/access/users)"]
+        PA["Platform Admins<br/>(per-session tokens: sid)"]
+        SOE["Per-Session Sign-Out<br/>(/global/ecosystem-session/{sid}/revoke)"]
+        PWS["Central Password Federation<br/>(/auth/internal/sync-password)"]
+    end
+
+    subgraph Spoke1["Inhyma_ERP (India Spoke)"]
+        INH_U["Local Users & HR Profiles"]
+        INH_REV["Inbound Session Revocation<br/>(/internal/sessions/{sid}/revoke)"]
+        INH_PW["Outbound Password Sync"]
+    end
+
+    subgraph Spoke2["Yinglima_ERP (China Spoke)"]
+        YNG_U["Local Users & HR Profiles"]
+        YNG_REV["Inbound Token Revocation<br/>(/auth/internal/revoke-user-tokens)"]
+        YNG_PW["Outbound Password Sync"]
+    end
+
+    GU -- "Dynamic Provisioning & Deprovisioning" --> INH_U
+    GU -- "Dynamic Provisioning & Deprovisioning" --> YNG_U
+    SOE -- "Fanout Token Revocation (X-Service-Key)" --> INH_REV
+    SOE -- "Fanout Token Revocation (X-Service-Key)" --> YNG_REV
+    INH_PW -- "Inbound Sync" --> PWS
+    YNG_PW -- "Inbound Sync" --> PWS
+    PWS -- "Fanout Password" --> INH_U
+    PWS -- "Fanout Password" --> YNG_U
+```
+
+### Key User Management Pillars
+1. **Triple-Tier Identity Model:**
+   - **Platform Admins (`platform_admins`):** Central control-plane operators with instant token invalidation boundaries via `admin_tokens_revoked_before`.
+   - **Global Users (`global_users`):** Authoritative enterprise-wide identity directory with unified Argon2id password hashing, lowercase email index, and active state tracking.
+   - **ERP Memberships (`erp_memberships`):** Granular access grants linking global identities to spoke ERP instances with tenant-specific roles.
+   - **Autonomous Spoke Users (`users`):** Local tenant directories preserving departmental hierarchies, employee profiles, and operational permissions.
+2. **Bi-Directional Password Synchronization:**
+   - Passwords changed centrally or locally on any spoke automatically propagate across all active ecosystem accounts without credential drift.
+3. **Session-Scoped Login & Logout:**
+   - Every login has its own session id, carried by all of that login's tokens (dashboard and each ERP). Logging out anywhere ends *that* session in the dashboard and the ERPs it used; other logins of the same account and other people are unaffected. "Sign out everywhere" is a separate, explicit action (`POST /api/v1/global/auth/sign-out-everywhere`, `/global/user-auth/sign-out-everywhere`).
+   - Built-in fallbacks: a login still works if ERP_Main is down (clearly labelled local session), and ERPs re-check central sessions themselves so a lost sign-out message cannot leave a session alive (about 45 s). See `ERP_Main/docs/API_DESIGN_AND_ENDPOINTS.md` section 1.
+4. **Multi-Identifier Spoke Resolution:**
+   - Spoke synchronization and revocation endpoints resolve users safely across `id`, `user_id`, `email`, or `username`, eliminating distributed primary key collision issues.
+5. **Platform Role Preservation:**
+   - Spoke provisioning operations preserve platform administrative privileges, maintaining strict least-privilege separation between central control-plane and tenant-level roles.
+
+---
+
+## 5. Quick Start & Operational Commands
 
 ### A. Run Automated Backend Test Suites (675 Tests Total)
 ```bash
@@ -141,5 +195,35 @@ A comprehensive, production-tested deployment manual is available in **[`DEPLOYM
 - **Cross-Subdomain SSO & Cookie Sync:** Unified session propagation via `VITE_COOKIE_DOMAIN` and central ecosystem sessions (`ihm_ecosystem_session`).
 - **Disambiguated Session Verification & False Logout Prevention:** 3-way status contract (`valid` vs `notFound` vs `revoked`) ensuring client background watchers do not falsely terminate sessions on network blips or server restarts.
 - **Multi-Identifier Spoke Resolution:** Bidirectional resolution of machine keys (`erp-01` / `inhyma`, `erp-02` / `yinglima`) enabling uninterrupted SSO switching and centralized access governance across spokes.
+
+---
+
+## 6. Ecosystem Resilience, Email Deduplication & Production Safeguards
+
+### A. Central Federation Multi-URL Discovery & Spoke Resilience
+- **Multi-Candidate Resolution (`erp_main_api_base_urls()`):** Spoke backends resolve candidate URLs sequentially (`ERP_MAIN_API_BASE_URL`, `ERP_MAIN_URL`, and defaults), ensuring resilience when switching between custom domains and cloud platform endpoints.
+- **Outbound IPv4 Binding (`0.0.0.0`):** Outbound `httpx.AsyncClient` connections bind explicitly to `0.0.0.0`, eliminating broken IPv6 routing in cloud container meshes.
+- **40-Second Cold-Start Sleeping Budget:** Cloud container instances (e.g. Render starter tiers) are allocated a 40.0s timeout budget (`httpx.Timeout(40.0, connect=20.0)`), allowing sleeping upstream containers to cold-boot cleanly during SSO handovers.
+- **900s Stale Session Tolerance (`_from_cache`):** If the central control plane is temporarily unreachable or undergoing deployment, verified sessions are served from spoke local memory cache for up to 15 minutes, preventing user lockouts.
+- **Live Federation Diagnostics (`GET /api/v1/health/federation`):** Diagnostic endpoint providing real-time ping latency and connectivity verification between spoke nodes and central control.
+
+### B. Platform-Gated Winsock DNS Isolation
+- **Windows Gating (`sys.platform.startswith("win")`):** Asynchronous DNS caching in `dns_resilience.py` runs exclusively on Windows developer workstations, preventing Winsock socket leaks (`WSAEADDRINUSE`) without affecting production Linux containers.
+- **Port-Sensitive 5-Tuple DNS Cache Key:** Keyed by `(host, port, family, type, proto)`, preserving exact port destinations and preventing localhost cross-port routing collisions across `localhost:8000`, `8001`, and `8002`.
+
+### C. Persistent Inbound Email Deduplication
+- **Atomic Relational Ledger (`email_inbound_processed`):** Stores compound unique keys `(message_id, uid, inquiry_id, supplier_id)`. Checks `SELECT 1 FROM email_inbound_processed WHERE message_id = :mid` before invoking OpenAI extraction APIs, completely eliminating duplicate quotes across worker restarts.
+- **30-Minute Historical Baseline:** On worker startup, historical messages older than 30 minutes are stamped into the deduplication ledger without creating duplicate quotes.
+- **Zero-Cost Follow-ups:** Supplier quotation extraction runs strictly once (`QT-AUTO-01`); subsequent negotiation emails bypass LLM extraction and append directly to the thread timeline.
+
+### D. Idempotent Deployment & Seed First-Install Protection
+- **Bootstrap Guard (`BOOTSTRAP_FORCE_RESET`):** All `seed.py` scripts across `Inhyma_ERP`, `Yinglima_ERP`, and `ERP_Main` halt automatically if existing records are detected. Live accounts, credentials, and master geographies are never overwritten unless `BOOTSTRAP_FORCE_RESET=true` is explicitly provided.
+- **Registry Host Safety (`seed_registry.py`):** Spoke instance URLs are updated only if explicit environment variables (`INHYMA_ERP_URL`, `YINGLIMA_ERP_URL`) are provided, preventing local developer runs from overwriting production cloud URLs with localhost.
+- **SSO Handover Inactive User Guards:** `POST /api/v1/auth/sso-handover` verifies local account status; incoming SSO handovers for users with `is_active=False` or `deleted_at IS NOT NULL` are rejected with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
+
+### E. Database-Backed Organization Branding & Storage Quota Guards
+- **Versioned Logo Streaming (`GET /api/v1/organizations/logo?v={sha1}`):** Streams high-resolution organization logos directly from PostgreSQL with `Cache-Control: public, max-age=86400, immutable`. The `v` query hash forces immediate browser cache refresh on logo update.
+- **Client Storage Quota Protection:** `try/catch` handlers around `localStorage.setItem` in `brand.ts` and `Organization.tsx` eliminate mobile browser `QuotaExceededError` crashes when handling large base64 logo strings.
+
 
 

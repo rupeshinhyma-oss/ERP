@@ -337,7 +337,6 @@ export function PlatformAuthz() {
     <AppShell
       activeKey={sectionActiveKey}
       pageTitle={pageTitle}
-      breadcrumbs={["Users & Access", pageTitle]}
       actions={
         <div style={{ display: "flex", gap: "8px" }}>
           <button

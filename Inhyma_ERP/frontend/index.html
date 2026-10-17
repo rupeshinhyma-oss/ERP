@@ -26,6 +26,14 @@
           page = path.charAt(0).toUpperCase() + path.slice(1).replace(/[-_]/g, " ");
         }
         document.title = page + " - " + company;
+
+        var storedLogo = localStorage.getItem("erp_org_company_logo") || sessionStorage.getItem("erp_org_company_logo") || localStorage.getItem("erp_brand_logo");
+        if (storedLogo && storedLogo.trim()) {
+          var fav = document.getElementById("dynamic-favicon");
+          if (fav) {
+            fav.href = storedLogo.trim();
+          }
+        }
       } catch (e) {}
     })();
   </script>

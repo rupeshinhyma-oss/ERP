@@ -55,6 +55,13 @@ export function Login() {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [signingIn, setSigningIn] = useState(() => {
+    try {
+      return sessionStorage.getItem("ihm_handover_pending") === "1";
+    } catch {
+      return false;
+    }
+  });
   const identifierRef = useRef<HTMLInputElement>(null);
 
   const queryParams = new URLSearchParams(location.search);
@@ -63,7 +70,18 @@ export function Login() {
   useEffect(() => {
     document.title = `Sign In — ${BRAND_NAME}`;
     identifierRef.current?.focus();
+    // If an automatic sign-in (arriving from another ERP) could not complete, say why instead of a bare login page.
+    try {
+      const notice = sessionStorage.getItem("ihm_login_notice");
+      if (notice) {
+        sessionStorage.removeItem("ihm_login_notice");
+        setError(new Error(notice));
+      }
+    } catch {
+      /* storage unavailable */
+    }
     processIncomingSsoHandover().then((result) => {
+      setSigningIn(false);
       // Unlike AppShell/App, being on the Login page itself means either
       // outcome ("logged-in" or "already-logged-in") should move on --
       // there's no reason to stay on the login form once we know the user
@@ -99,6 +117,20 @@ export function Login() {
       }
     }
     return <Navigate to={redirectUrl} replace />;
+  }
+
+  if (signingIn) {
+    return (
+      <div
+        role="status"
+        style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", color: "#334155", fontFamily: "inherit" }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "18px", fontWeight: 600 }}>Signing you in…</div>
+          <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>Connecting to the ERP. This can take a few seconds.</div>
+        </div>
+      </div>
+    );
   }
 
   async function handleSubmit(e: FormEvent) {

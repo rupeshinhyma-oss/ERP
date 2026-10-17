@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { SortHeader } from "@/components/SortHeader";
 import { DatePicker } from "@/components/DatePicker";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { apiGet, apiPatch } from "@/lib/api";
@@ -550,15 +551,76 @@ export function DiscountPaymentsPage({
     appliedDateRange,
   ]);
 
-  // Active filter count
-  const activeFiltersCount = useMemo(() => {
-    let cnt = 0;
-    if (appliedWarehouse && appliedWarehouse !== "All.") cnt++;
-    if (appliedSalesPerson && appliedSalesPerson !== "All.") cnt++;
-    if (appliedDispatch && appliedDispatch !== "All") cnt++;
-    if (appliedDateRange) cnt++;
-    return cnt;
-  }, [appliedWarehouse, appliedSalesPerson, appliedDispatch, appliedDateRange]);
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = (colIdx: number) => {
+    if (sortColIndex === colIdx) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else {
+        setSortColIndex(null);
+        setSortDirection("asc");
+      }
+    } else {
+      setSortColIndex(colIdx);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortedOrders = useMemo(() => {
+    if (sortColIndex === null) return filteredOrders;
+    const list = [...filteredOrders];
+    list.sort((a, b) => {
+      let vA: any = "";
+      let vB: any = "";
+      switch (sortColIndex) {
+        case 0: // Order No
+          vA = a.order_no || "";
+          vB = b.order_no || "";
+          break;
+        case 1: // Warehouse
+          vA = a.warehouse || "";
+          vB = b.warehouse || "";
+          break;
+        case 2: // Company
+          vA = a.company_name || "";
+          vB = b.company_name || "";
+          break;
+        case 3: // Contact Person
+          vA = a.contact_person_name || a.contact_name || "";
+          vB = b.contact_person_name || b.contact_name || "";
+          break;
+        case 4: // Sales Person
+          vA = a.sales_person || "";
+          vB = b.sales_person || "";
+          break;
+        case 5: // Total Discount
+          vA = Number(a.total_discount) || 0;
+          vB = Number(b.total_discount) || 0;
+          break;
+        case 6: // Paid/Due Dis. Amount
+          vA = Number(a.paid_discount) || 0;
+          vB = Number(b.paid_discount) || 0;
+          break;
+        case 7: // Status
+          vA = a.status || "";
+          vB = b.status || "";
+          break;
+        default:
+          return 0;
+      }
+      if (typeof vA === "number" && typeof vB === "number") {
+        return sortDirection === "asc" ? vA - vB : vB - vA;
+      }
+      const sA = String(vA).toLowerCase();
+      const sB = String(vB).toLowerCase();
+      if (sA < sB) return sortDirection === "asc" ? -1 : 1;
+      if (sA > sB) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [filteredOrders, sortColIndex, sortDirection]);
+
 
   // Top KPI Metrics
   const metrics = useMemo(() => {
@@ -683,7 +745,7 @@ export function DiscountPaymentsPage({
 
   return (
     <AppShell activeKey="discount-payments">
-      <main className="page" style={{ padding: "16px 24px", maxWidth: "100%", background: "#f8fafc" }}>
+      <main className="page">
         {/* Breadcrumb */}
         <div style={{ marginBottom: "12px" }}>
           <Breadcrumb trail={["SALE", "Discount Payments"]} />
@@ -708,6 +770,7 @@ export function DiscountPaymentsPage({
             {/* Filter Toggle Button */}
             <button
               type="button"
+              className="btn btn-filter-toggle"
               data-testid="btn-toggle-filter"
               aria-label="Filter"
               title="Toggle Filter Panel"
@@ -716,45 +779,27 @@ export function DiscountPaymentsPage({
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: "#475569",
+                background: "#556987",
                 color: "#ffffff",
                 border: "none",
-                borderRadius: "4px",
+                borderRadius: "6px",
+                padding: "8px 14px",
                 cursor: "pointer",
-                height: "36px",
-                width: "38px",
-                padding: 0,
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                position: "relative",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
             >
               <svg
-                width="15"
-                height="15"
+                width="16"
+                height="16"
                 viewBox="0 0 24 24"
-                fill="currentColor"
-                stroke="none"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
               </svg>
-              {activeFiltersCount > 0 && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "-4px",
-                    right: "-4px",
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    borderRadius: "10px",
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    padding: "1px 5px",
-                    lineHeight: 1,
-                  }}
-                >
-                  {activeFiltersCount}
-                </span>
-              )}
             </button>
           </div>
         </div>
@@ -1332,28 +1377,28 @@ export function DiscountPaymentsPage({
             <thead>
               <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "13%" }}>
-                  Order No
+                  <SortHeader label="Order No" isSorted={sortColIndex === 0} sortDirection={sortDirection} onSort={() => handleHeaderSort(0)} />
                 </th>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "10%" }}>
-                  Warehouse
+                  <SortHeader label="Warehouse" isSorted={sortColIndex === 1} sortDirection={sortDirection} onSort={() => handleHeaderSort(1)} />
                 </th>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "16%" }}>
-                  Company
+                  <SortHeader label="Company" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} />
                 </th>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "12%" }}>
-                  Contact Person
+                  <SortHeader label="Contact Person" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} />
                 </th>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "11%" }}>
-                  Sales Person
+                  <SortHeader label="Sales Person" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} />
                 </th>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "11%" }}>
-                  Total Discount
+                  <SortHeader label="Total Discount" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} />
                 </th>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "14%" }}>
-                  Paid/Due Dis. Amount
+                  <SortHeader label="Paid/Due Dis. Amount" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} />
                 </th>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "12%" }}>
-                  Status
+                  <SortHeader label="Status" isSorted={sortColIndex === 7} sortDirection={sortDirection} onSort={() => handleHeaderSort(7)} />
                 </th>
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "9%" }}>
                   Gatepass
@@ -1364,14 +1409,14 @@ export function DiscountPaymentsPage({
               </tr>
             </thead>
             <tbody>
-              {filteredOrders.length === 0 ? (
+              {sortedOrders.length === 0 ? (
                 <tr>
                   <td colSpan={10} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
                     No discount records found matching current criteria.
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((o, idx) => {
+                sortedOrders.map((o, idx) => {
                   return (
                     <tr
                       key={o.id || idx}

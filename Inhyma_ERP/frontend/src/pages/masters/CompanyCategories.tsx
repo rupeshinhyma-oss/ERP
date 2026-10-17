@@ -27,8 +27,6 @@ export function CompanyCategoriesPage() {
       liveModule="company_categories"
       entityName="company category"
       heading="Company Categories"
-      subtitle="Manage corporate tiers, business classifications (B2B/B2C), and company categories."
-      breadcrumbTrail={["Settings", "Masters", "Company Categories"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search Name, Business Type or Sr. No..."
       hideQuickAdd={true}

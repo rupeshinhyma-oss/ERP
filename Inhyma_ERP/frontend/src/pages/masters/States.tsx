@@ -24,8 +24,6 @@ export function StatesPage() {
       liveModule="states"
       entityName="state"
       heading="State Master"
-      subtitle="Administrative states, provinces, and first-level divisions."
-      breadcrumbTrail={["Master Data", "States"]}
       newButtonLabel="+ ADD NEW STATE"
       searchPlaceholder="Search state name or code or Sr. No..."
       hideQuickAdd={true}

@@ -330,7 +330,7 @@ class Settings(BaseSettings):
         "Set False only as a temporary emergency rollback.",
     )
     SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS: float = Field(
-        default=20.0,
+        default=40.0,
         description="How long to wait for ERP_Main when verifying a handover (it may be waking from sleep).",
     )
     FEDERATION_CLIENT_ID: str = Field(
@@ -374,6 +374,34 @@ class Settings(BaseSettings):
         if not creds and self.FEDERATION_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.FEDERATION_SERVICE_CREDENTIAL:
             creds.append(self.FEDERATION_SERVICE_CREDENTIAL)
         return creds
+
+    ERP_MAIN_URL: str = Field(
+        default="",
+        description="Optional single public URL of ERP_Main (e.g. https://erp-main-backend.onrender.com). When set it "
+        "is tried first for session verification, so one variable is enough on Render.",
+    )
+    SSO_HANDOVER_STALE_OK_SECONDS: float = Field(
+        default=900.0,
+        description="If ERP_Main is unreachable, accept a session this ERP verified as active within this many seconds.",
+    )
+
+    def federation_config_problems(self) -> list[str]:
+        """Human-readable problems that make cross-ERP sign-in impossible in this environment (empty list = fine)."""
+        problems: list[str] = []
+        if not self.is_production:
+            return problems
+        local = ("localhost", "127.0.0.1", "0.0.0.0")
+        base = (self.ERP_MAIN_API_BASE_URL or "")
+        if not (getattr(self, "ERP_MAIN_URL", "") or "").strip() and any(h in base for h in local):
+            problems.append(
+                "ERP_MAIN_API_BASE_URL still points to localhost. Set ERP_MAIN_API_BASE_URL (or ERP_MAIN_URL) to the "
+                "public ERP_Main address, e.g. https://<erp-main-backend>.onrender.com/api/v1"
+            )
+        if not self.get_expected_erp_main_credentials():
+            problems.append("No ERP_Main service credential is configured (ERP_MAIN_SERVICE_CREDENTIAL).")
+        if any(h in (self.ERP_MAIN_ISSUER or "") for h in local) and not (getattr(self, "ERP_MAIN_URL", "") or "").strip():
+            problems.append("ERP_MAIN_ISSUER still points to localhost.")
+        return problems
 
     FEDERATION_JWKS_CACHE_TTL_SECONDS: int = 300
     ENFORCE_CENTRAL_MEMBERSHIP_ON_LOGIN: bool = Field(
@@ -477,6 +505,10 @@ class Settings(BaseSettings):
                 "Missing or placeholder ERP_MAIN_SERVICE_CREDENTIAL in production environment. "
                 "Set ERP_MAIN_SERVICE_CREDENTIAL via the environment."
             )
+        for _problem in self.federation_config_problems():
+            import logging as _logging
+
+            _logging.getLogger("app.core.config").error("FEDERATION CONFIG PROBLEM: %s", _problem)
         if self.is_production and "sqlite" in str(self.DATABASE_URL).lower():
             raise RuntimeError(
                 "DATABASE_URL cannot use SQLite in a production environment. Configure Supabase PostgreSQL."

@@ -25,8 +25,6 @@ export function AdjustmentPurposesPage() {
       liveModule="adjustment_purposes"
       entityName="Adjustment Purpose"
       heading="Adjustment Purpose"
-      subtitle="Manage stock reconciliation reasons, inventory adjustment categories, and write-offs."
-      breadcrumbTrail={["Settings", "Masters", "Adjustment Purpose"]}
       newButtonLabel="+ ADD NEW"
       searchPlaceholder="Search..."
       hideQuickAdd={true}

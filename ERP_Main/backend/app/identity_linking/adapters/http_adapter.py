@@ -338,6 +338,29 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
             )
             return None
 
+    async def revoke_session(self, erp: ErpInstance, session_id: str, *, reason: str | None = "central_logout") -> bool:
+        """
+        Tell an ERP that ONE central session ended: every token issued under that session id stops working there.
+        Other sessions of the same person (other browsers/devices) are not touched.
+        Soft-fails (returns False) if the ERP is unreachable -- the ERP also re-checks central sessions itself, so a
+        missed message cannot leave the session alive for long.
+        """
+        if not erp.base_url:
+            logger.warning("ERP instance %s has no base_url configured; cannot revoke session %s.", erp.key, session_id)
+            return False
+        url = f"{self._resolve_erp_api_url(erp)}/api/v1/internal/sessions/{session_id}/revoke"
+        try:
+            headers = self._get_headers(erp)
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, json={"reason": reason}, headers=headers)
+            if response.status_code == 200:
+                return True
+            logger.warning("ERP %s rejected revoke of session %s: HTTP %s", erp.key, session_id, response.status_code)
+            return False
+        except Exception as exc:
+            logger.warning("Could not reach ERP %s to revoke session %s: %s", erp.key, session_id, exc)
+            return False
+
     async def logout_local_user(
         self, erp: ErpInstance, local_user_id_or_email: str, *, reason: str | None = "global_logout"
     ) -> dict[str, Any] | None:

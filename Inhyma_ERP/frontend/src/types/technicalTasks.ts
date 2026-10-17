@@ -1,6 +1,7 @@
 export interface TechnicalTask {
   id: string;
   company_name: string;
+  company_id?: string | null;
   task_type: string;
   city: string;
   third_party?: string | null;
@@ -25,9 +26,11 @@ export interface TechnicalTask {
   task_approved_date?: string | null;
   task_allotted_to?: string | null;
   approver_remarks?: string | null;
+  technician_remarks?: string | null;
   scheduled_visit_date?: string | null;
   payment_status?: string | null;
   payment_mode?: string | null;
+  collected_amount?: number | null;
   payment_screenshot?: string | null;
   status: string;
   cancel_remarks?: string | null;
@@ -58,6 +61,9 @@ export interface TechnicalTaskCounts {
 
 export interface TechnicalTaskCreatePayload {
   company_name: string;
+  company_id?: string | null;
+  /** Optimistic-concurrency token: sent on edit so a stale save is rejected instead of overwriting. */
+  version?: number;
   task_type?: string;
   city: string;
   third_party?: string | null;
@@ -104,4 +110,27 @@ export interface SerialLookupResult {
     technician?: string | null;
     task_description?: string;
   }>;
+}
+
+export interface TechnicalCallLogReportRow {
+  id: string;
+  task_id: string;
+  call_date: string;
+  call_type: string;
+  remarks: string;
+  created_by: string;
+  created_at: string;
+  company_name: string;
+  city: string;
+  machine_model: string;
+  contact_person_name?: string | null;
+  contact_phone?: string | null;
+  task_status: string;
+  task_allotted_to?: string | null;
+}
+
+export interface TechnicalMonthlySummary {
+  months: Array<{ month: string; created: number; completed: number }>;
+  open_now: number;
+  closed_now: number;
 }

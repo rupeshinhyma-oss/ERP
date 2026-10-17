@@ -102,9 +102,18 @@ html {
   scroll-padding-top: 80px;
 }
 
+body,
+button,
+input,
+optgroup,
+select,
+textarea,
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
 body {
   margin: 0;
-  font-family: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 14px;
   color: var(--color-text);
   background: var(--color-bg);
@@ -495,7 +504,7 @@ svg {
 }
 
 .breadcrumb {
-  display: flex;
+  display: none !important;
   align-items: center;
   gap: 6px;
   color: var(--color-muted);
@@ -518,18 +527,27 @@ svg {
 
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
   gap: 8px;
   flex-wrap: wrap;
 }
 
+.page-header:has(.page-subtitle) {
+  align-items: flex-start;
+}
+
 .page-header h1 {
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 700;
+  color: #1e293b;
   margin: 0 0 2px;
   letter-spacing: -0.01em;
+}
+
+.page-header:not(:has(.page-subtitle)) h1 {
+  margin: 0;
 }
 
 .page-header .page-subtitle {
@@ -541,6 +559,68 @@ svg {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+/* --- Universal Filter Toggle Button (Matching Companies.tsx standard) --- */
+.btn-filter-toggle,
+.btn-filter,
+.tech-btn-filter,
+.reorder-btn-filter,
+.stock-btn-filter,
+.transfer-btn-filter,
+.adjustment-btn-filter,
+.deleted-orders-btn-filter {
+  background: #556987 !important;
+  color: #ffffff !important;
+  padding: 8px 14px !important;
+  border-radius: 6px !important;
+  border: none !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: unset !important;
+  min-height: unset !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+  transition: background 0.15s ease !important;
+}
+
+.btn-filter-toggle:hover,
+.btn-filter:hover,
+.tech-btn-filter:hover,
+.reorder-btn-filter:hover,
+.stock-btn-filter:hover,
+.transfer-btn-filter:hover,
+.adjustment-btn-filter:hover,
+.deleted-orders-btn-filter:hover {
+  background: #475569 !important;
+}
+
+.btn-filter-toggle.active,
+.btn-filter.active,
+.tech-btn-filter.active,
+.reorder-btn-filter.active,
+.stock-btn-filter.active,
+.transfer-btn-filter.active,
+.adjustment-btn-filter.active,
+.deleted-orders-btn-filter.active {
+  background: #556987 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+}
+
+.btn-filter-toggle svg,
+.btn-filter svg,
+.tech-btn-filter svg,
+.reorder-btn-filter svg,
+.stock-btn-filter svg,
+.transfer-btn-filter svg,
+.adjustment-btn-filter svg,
+.deleted-orders-btn-filter svg {
+  width: 16px !important;
+  height: 16px !important;
 }
 
 .card {

@@ -78,6 +78,16 @@ class RoleRepository(BaseRepository[Role]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_all_with_permissions(self) -> list[Role]:
+        """Return every non-deleted role with permission links eagerly loaded in one batched query."""
+        stmt = (
+            self._base_select()
+            .options(selectinload(Role.permission_links).selectinload(RolePermission.permission))
+            .order_by(Role.name)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def code_exists(self, code: str, *, exclude_id: uuid.UUID | None = None) -> bool:
         """Return True if another (non-deleted) role already uses this department code."""
         stmt = self._base_select().with_only_columns(Role.id).where(Role.code == code)

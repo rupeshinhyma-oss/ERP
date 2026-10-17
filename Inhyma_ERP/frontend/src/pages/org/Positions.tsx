@@ -20,8 +20,6 @@ export function PositionsPage() {
       liveModule="positions"
       entityName="position"
       heading="Positions & Designations"
-      subtitle="Job titles employees can hold. Does not determine reporting hierarchy or software permissions."
-      breadcrumbTrail={["User & Organization Management", "Positions"]}
       newButtonLabel="+ New Position"
       hideQuickAdd
       searchPlaceholder="Search position name..."

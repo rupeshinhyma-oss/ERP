@@ -193,3 +193,64 @@ To achieve complete decoupling between infrastructure routing and organizational
 2. **Production HTTPS Origin Protection & Mixed Content Elimination:**
    - In [`ecosystemSession.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ecosystemSession.ts) and [`ssoBridge.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/ssoBridge.ts), `isLocalhost()` guards prevent fallback to insecure `http://localhost:*` URLs when served on HTTPS domains (Render, custom domains).
 
+---
+
+## 7. Frontend UI Standard: Universal Filter Control Architecture
+
+To ensure consistent ergonomics, styling, and predictable state across all ERP modules:
+
+1. **Benchmark Reference ([`Companies.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Companies.tsx#L5628)):**
+   - Header filter toggle buttons across all 20+ modules conform to the exact visual specification of the Companies page filter.
+2. **Design Tokens & Constraints:**
+   - **Color:** `#556987` solid background (hover `#475569`), invariant across active/open states (never changes to primary blue).
+   - **Geometry:** `padding: 8px 14px; border-radius: 6px; border: none; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);`.
+   - **Dimensions:** Auto width and height (`width: auto; height: auto; min-width: unset`). Removed fixed square dimensions (`38px x 38px`, `min-width: 36px`, etc.).
+   - **Iconography:** 16×16px SVG funnel polygon (`points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"`).
+   - **Clean Button Model:** Counter badges and notification dots inside buttons are eliminated to preserve uniform dimensions.
+3. **State Invariant:**
+   - All filter panels, cards, and drawers are initialized closed (`useState(false)`). Filter panels only expand upon explicit user interaction.
+
+---
+
+## 8. Central Ecosystem Federation & Spoke Resilience
+
+To ensure high availability across multi-ERP control planes (Central ERP_Main, Inhyma, Yinglima):
+
+1. **Candidate URL Discovery (`erp_main_api_base_urls()`):**
+   - Combines `ERP_MAIN_URL`, `ERP_MAIN_API_BASE_URL`, `ERP_MAIN_ISSUER`, and `ERP_MAIN_JWKS_URL`.
+   - In production, localhost defaults are deprioritized in favor of remote URLs to eliminate configuration drift.
+2. **Outbound IPv4 Binding (`_client_for_erp_main`):**
+   - Outbound HTTP transports bind to IPv4 (`0.0.0.0`) to avoid unreachable AAAA routing failures on platforms (such as Render) lacking outbound IPv6.
+3. **Sleeping Free-Tier Wake-Up Budget:**
+   - `SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS` is set to **40 seconds**, accommodating the cold-start spin-up latency of sleeping free-tier control plane containers.
+   - Retry loops apply exponential backoff (0.6s to 5.0s) exclusively for transient network errors and 5xx/429 status codes; definite answers (200, 404) terminate immediately.
+4. **Stale Session Tolerance (`SSO_HANDOVER_STALE_OK_SECONDS = 900`):**
+   - If ERP_Main remains unreachable after exhaustive retries, previously active sessions verified by this ERP within the last 15 minutes are honored from in-memory cache (`_from_cache: True`), preventing user lockouts during transient network blips.
+5. **Observability Endpoint (`GET /api/v1/health/federation`):**
+   - Provides runtime inspection of live ERP_Main connectivity, probe latencies, environment, and configuration warnings without leaking secrets.
+
+---
+
+## 9. Inbound Email Processing & Atomic Database Deduplication
+
+1. **Database-Backed State (`email_inbound_processed`):**
+   - Mail polling deduplication is persisted directly in PostgreSQL (`message_id TEXT PRIMARY KEY, processed_at TIMESTAMP`).
+   - Volatile local JSON files are completely eliminated, preventing historical quotation re-creation and runaway AI token consumption upon container reboots.
+2. **Atomic Inbound Claiming (`_claim_message_id`):**
+   - Uses `INSERT INTO email_inbound_processed ... ON CONFLICT (message_id) DO NOTHING`.
+   - Thread-safe and process-safe across multiple background workers.
+3. **Cold-Start Baseline:**
+   - On the first deployment against a fresh database, emails older than 30 minutes are automatically marked processed to prevent historical message flooding.
+
+---
+
+## 10. Idempotent Deployment & First-Install Seed Protection
+
+1. **Deploy Guard (`BOOTSTRAP_FORCE_RESET`):**
+   - On container startup or deployment, [`scripts/seed.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/scripts/seed.py) verifies if user accounts already exist.
+   - If users are present, bootstrap admin creation, password updates, status toggles, and role link overrides are skipped completely. The active database state is treated as authoritative.
+   - Emergency resets require setting `BOOTSTRAP_FORCE_RESET=true` explicitly in environment variables.
+2. **Master Geography Protection:**
+   - Geography seed scripts verify whether country records already exist, avoiding redundant re-seeding cycles on every release.
+
+

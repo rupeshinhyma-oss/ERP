@@ -1211,15 +1211,12 @@ export function AttendancePage() {
 
   return (
     <AppShell activeKey="hrms-attendance">
-      <main className="page" style={{ paddingBottom: 60 }}>
+      <main className="page">
         <Breadcrumb trail={["HRMS", "Attendance"]} />
 
         <div className="page-header">
           <div>
             <h1>Attendance</h1>
-            <div className="page-subtitle">
-              Enterprise punch tracking, geofence verification, calendar, and regularization.
-            </div>
           </div>
         </div>
 

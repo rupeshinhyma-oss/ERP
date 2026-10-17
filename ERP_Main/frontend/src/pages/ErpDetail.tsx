@@ -56,7 +56,6 @@ export function ErpDetail() {
     <AppShell
       activeKey="erps"
       pageTitle={erp ? `${erp.name} Details` : "ERP Details"}
-      breadcrumbs={["ERP Management", "ERP Registry", erp ? erp.name : "Details"]}
       actions={
         erp && (
           <div style={{ display: "flex", gap: "8px" }}>

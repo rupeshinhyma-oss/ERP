@@ -15,11 +15,37 @@ export interface CompanyFieldsInput {
   direct_import_from_china: string;
   monthly_import_volume: string;
   products_needed_for_imports: string;
+  /** B2C only (optional so older callers / tests that do not know about Sector keep working). */
+  sector?: string;
 }
 
 /** Monthly Turnover is shown once a Business Type (B2B or B2C) is chosen. */
 export function showsMonthlyTurnover(companyType: string): boolean {
   return companyType === "B2B" || companyType === "B2C";
+}
+
+/** Sector is a B2C-only field (spec: "Sector (if B2C)"). */
+export function showsSector(companyType: string): boolean {
+  return companyType === "B2C";
+}
+
+/**
+ * Which of the conditional LIST FILTERS are shown (spec, "In Top, Filter Fields"):
+ *  - Potential for Business per month: only when Potential = Yes
+ *  - Monthly Turnover / Direct Import from China?: only for B2B
+ *  - Sector: for B2C, and also when Business Type is All or Blank ("then this filter to show")
+ *  - Monthly Import Volume: only when Direct Import = Yes (which itself needs B2B)
+ * `businessType` is the filter value: "" (All), "B2B", "B2C" or "blank".
+ */
+export function filterFieldVisibility(f: { businessType: string; potential: string; directImport: string }) {
+  const b2b = f.businessType === "B2B";
+  return {
+    potentialPerMonth: f.potential === "yes",
+    monthlyTurnover: b2b,
+    sector: !b2b,
+    directImport: b2b,
+    monthlyImportVolume: b2b && f.directImport === "Yes",
+  };
 }
 
 /** The Direct Import from China cluster is its own section, shown only for B2B. */
@@ -49,10 +75,11 @@ export function clearInapplicableCompanyFields<T extends CompanyFieldsInput>(
 ): Pick<
   T,
   "monthly_turnover" | "potential_business_per_month" | "direct_import_from_china" | "monthly_import_volume" | "products_needed_for_imports"
-> {
+> & { sector: string } {
   const directImportShown = showsDirectImportCluster(form.company_type);
   const importSubFieldsShown = showsImportSubFields(form.company_type, form.direct_import_from_china);
   return {
+    sector: showsSector(form.company_type) ? (form.sector ?? "") : "",
     monthly_turnover: (showsMonthlyTurnover(form.company_type) ? form.monthly_turnover : "") as T["monthly_turnover"],
     potential_business_per_month: (showsPotentialBusinessPerMonth(form.potential)
       ? form.potential_business_per_month
@@ -91,3 +118,26 @@ export function computeAge(birthDate?: string | null): number | null {
   return age >= 0 ? age : null;
 }
 
+/**
+ * Completed years since the GST registration date (calendar input `YYYY-MM-DD`, or `DD-MM-YYYY`), as text.
+ * Mirrors the server's `compute_company_age`: "0" under a year, "" when there is no usable / a future date.
+ */
+export function computeCompanyAge(registration?: string | null, today: Date = new Date()): string {
+  const text = (registration ?? "").trim();
+  if (!text) return "";
+  let y: number, m: number, d: number;
+  let hit = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (hit) {
+    y = +hit[1]; m = +hit[2]; d = +hit[3];
+  } else {
+    hit = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (!hit) return "";
+    d = +hit[1]; m = +hit[2]; y = +hit[3];
+  }
+  const reg = new Date(y, m - 1, d);
+  if (reg.getFullYear() !== y || reg.getMonth() !== m - 1 || reg.getDate() !== d) return "";
+  const ty = today.getFullYear(), tm = today.getMonth() + 1, td = today.getDate();
+  if (reg > new Date(ty, tm - 1, td)) return "";
+  const years = ty - y - (tm < m || (tm === m && td < d) ? 1 : 0);
+  return String(years);
+}

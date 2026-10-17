@@ -28,7 +28,18 @@ function notify(profile: Profile | null): void {
   listeners.forEach((listener) => listener(profile));
 }
 
+let lastProfileSyncTime = 0;
+
 export const Auth = {
+  /** Check if profile sync is needed (throttled to at most once per 60 seconds). */
+  shouldSyncProfile(): boolean {
+    return Date.now() - lastProfileSyncTime > 60000;
+  },
+
+  markProfileSynced(): void {
+    lastProfileSyncTime = Date.now();
+  },
+
   /** Subscribe to profile/permission changes. Returns an unsubscribe fn. */
   subscribe(listener: Listener): () => void {
     listeners.add(listener);
@@ -73,6 +84,7 @@ export const Auth = {
   },
 
   updateProfile(profile: Profile): void {
+    lastProfileSyncTime = Date.now();
     const oldRaw = localStorage.getItem(PROFILE_KEY);
     const nextRaw = JSON.stringify(profile);
     localStorage.setItem(PROFILE_KEY, nextRaw);
@@ -86,6 +98,7 @@ export const Auth = {
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(PROFILE_KEY);
     localStorage.removeItem(SESSION_ID_KEY);
+    lastProfileSyncTime = 0;
     notify(null);
   },
 

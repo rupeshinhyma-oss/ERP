@@ -133,6 +133,12 @@ def main() -> None:
 
     _check_env_file()
 
+    try:
+        from app.core.dns_resilience import install_dns_resilience
+        install_dns_resilience()
+    except Exception:
+        pass
+
     python = sys.executable
 
     if not args.skip_migrate:

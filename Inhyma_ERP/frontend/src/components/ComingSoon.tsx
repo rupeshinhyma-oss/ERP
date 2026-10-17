@@ -19,18 +19,18 @@ export function ComingSoonPage({
 }: {
   activeKey: string;
   title: string;
-  subtitle: string;
-  breadcrumbLabel: string;
+  subtitle?: string;
+  breadcrumbLabel?: string;
   featureName: string;
 }) {
   return (
     <AppShell activeKey={activeKey}>
       <main className="page">
-        <Breadcrumb trail={[breadcrumbLabel]} />
+        {breadcrumbLabel ? <Breadcrumb trail={[breadcrumbLabel]} /> : null}
         <div className="page-header">
           <div>
             <h1>{title}</h1>
-            <div className="page-subtitle">{subtitle}</div>
+            {subtitle ? <div className="page-subtitle">{subtitle}</div> : null}
           </div>
         </div>
 

@@ -3,6 +3,186 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-16] — Product Master Multi-View Navigation, Inventory DB Integrity, Server-Authoritative Stock Adjustments & E2E Testing Protocol
+
+### 1. Product Master Multi-View Navigation & Warning Elimination
+- **Navigation Tabs Restored in [`frontend/src/pages/masters/Products.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/masters/Products.tsx):**
+  - Restored the `.master-view-nav` tab strip directly below the breadcrumb bar, enabling seamless switching between:
+    1. **`📦 Product Master` (`catalog`):** Main product catalog grid with filters, column pinning, inline stock info, and bulk actions.
+    2. **`⚙️ Machine-Spares Universal View` (`universal-view`):** Machine-wise spare parts breakdown showing linked parts, compatibility notes, and dedicated link modal (`/masters/products/machine-spares/universal-view`).
+    3. **`📐 Dimensions & Weights Report` (`dimensions-report`):** Package-level breakdown for multi-box products, displaying Length, Width, Height, CBM, Net Weight, Gross Weight, with CSV and XLSX export triggers.
+  - Eliminated the TypeScript/IDE warning: `'setActiveMasterView' is declared but its value is never read`.
+- **Real-Time Duplicate Prevention Guard (`ProductNameSuggestions`):**
+  - Integrated real-time query searching active product catalog names as the operator types, displaying an instant suggestion dropdown to prevent duplicate SKU entries.
+- **Dimensional CBM Auto-Calculation:**
+  - Enforced read-only packaging unit CBM calculated dynamically from millimeter inputs:
+    $$\text{CBM} = \frac{L \times W \times H}{1,000,000}$$
+
+### 2. Inventory Core Engine, Database Integrity & Concurrency Hardening
+- **Schema Migration (`m9c0d1e2f3a4_inventory_integrity_and_indexes.py`):**
+  - Created unique constraint index `uq_product_stocks_product_id` on `product_stocks(product_id)` to prevent duplicate inventory records per product.
+  - Added performance index on `product_stocks(brand)`.
+  - Added `adjustment_dt` (`Date` column) on `stock_adjustments` for indexed date range filtering.
+- **Concurrency & Advisory Locks in [`stock_service.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/inventory/stock_service.py):**
+  - Added PostgreSQL session transaction advisory lock (`pg_advisory_xact_lock`) around stock row initialization.
+  - Implemented nested transaction rollback (`begin_nested()`) to recover gracefully from concurrent insert collisions.
+  - Defined `NON_WAREHOUSE_COLUMNS = {"reorder_level", "moq"}` to ensure reorder metadata fields are never erroneously summed into physical stock totals.
+- **Server-Authoritative Stock Adjustments in [`routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/inventory/routes.py):**
+  - Completely excised legacy in-memory mock fallbacks; all stock adjustment listings and creations execute against real database transactions.
+  - Added atomic stock reversal when a stock adjustment is deleted (soft-deleted), ensuring quantities are refunded back to the warehouse immediately.
+- **Stock Adjustment Pages Hardening ([`StockAdjustmentPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/StockAdjustmentPage.tsx), [`AddAdjustmentOrderPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/AddAdjustmentOrderPage.tsx)):**
+  - Removed local-storage offline bypassing; forms enforce server-side validation and optimistic feedback.
+  - Auto-complete company extraction for client names in stock adjustments.
+
+### 3. Universal Column Ascending & Descending Sorting
+- **Inhyma Standard Header Sorting ([`SortHeader.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/SortHeader.tsx)):**
+  - Implemented universal ascending (`▲`) and descending (`▼`) sorting component across Inhyma module tables.
+  - Applied across Product Master, Product Stock, Stock Adjustment, Stock Transfer, Companies, and Sales Process list views.
+- **TypeScript Type Safety & Sorting Accessor Harmonization:**
+  - Standardized model-field accessors in table sorting pipelines to achieve strict 0-error TypeScript compilation (`tsc --noEmit`):
+    - **Industrial Zones ([`IndustrialZonesPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/IndustrialZonesPage.tsx)):** Aligned sort key to `potential_machine_categories` on `IndustrialZoneItem`.
+    - **Proforma Invoices ([`ProformaInvoicesPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ProformaInvoicesPage.tsx)):** Corrected numeric sorting accessors to canonical model fields `amount_inc_gst` and `discount`.
+    - **Discount Payments ([`DiscountPaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/DiscountPaymentsPage.tsx)):** Standardized contact person fallback using `a.contact_person_name || a.contact_name || ""`.
+    - **Sales Process List ([`SaleProcessList.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/SaleProcessList.tsx)):** Updated PO column sort to `a.po ? String(a.po) : ""` and Amount sort to `includingGst ? (a.amount_inc_gst ?? a.total_amount) : (a.amount_exc_gst ?? a.total_basic ?? a.total_amount)`.
+
+### 4. Technical Tasks & Company Geography Integration
+- **Migrations `k7a8b9c0d1e2` & `l8b9c0d1e2f3`:**
+  - Added scale, payment tracking, and technician call log infrastructure in `backend/app/technical_tasks`.
+  - Linked companies to District master records (`district_id`) with 4-tier cascading address selector: Country ➔ State ➔ District ➔ City.
+  - Created standalone pages [`TechnicalCallLogsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/TechnicalCallLogsPage.tsx) and [`TechnicalTaskMonthlySummary.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/TechnicalTaskMonthlySummary.tsx).
+
+### 5. Unified System Testing Specification & Dependency Roadmap
+- Documented the strict 6-stage operational test sequence:
+  1. **Master Foundation:** Billing Company ➔ Warehouses ➔ Taxes ➔ Product Master (CBM/MOQ) ➔ Suppliers ➔ Buyers.
+  2. **Inward Purchase:** Local Purchase (Confirm triggers physical stock) & Import Purchase (Transit stock allocation & dual landing cost).
+  3. **Inventory Management:** 15-column stock table, `(i)` reservation / PO popup, container inwarding via Stock Transfer (`Receive to Main WH`), and Stock Adjustment (+IN / -OUT).
+  4. **Sales Cycle:** Proforma Invoice (Min Price alert, negative stock check) ➔ Confirmed SO (physical stock deduction) ➔ Accounts Confirmation (Tally Invoice, E-Way Bill).
+  5. **Logistics & Gate Pass:** Transport configuration (Godown/Door, To Pay/Paid) ➔ Gate Pass generation ➔ LR upload with photo attachments.
+  6. **Reorder & Settlement:** Tally Re-order Level calculations & Discount Payment under-invoicing settlement.
+
+---
+
+## [Release 2026-10-14] — Seed First-Install Guards, Inbound Email DB Deduplication & Handover Account Protection
+
+### 1. Database-Backed Bootstrap Seed Guards (`BOOTSTRAP_FORCE_RESET`)
+- **First-Install Protection in [`scripts/seed.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/scripts/seed.py):**
+  - Added guard counting existing users (`select(func.count()).select_from(User)`); if users exist and `BOOTSTRAP_FORCE_RESET` is not set, seeding leaves existing admin passwords, status, memberships, and role assignments completely untouched.
+  - Prevents automated container restarts or CI/CD redeployments from overwriting operator password changes or re-activating suspended/soft-deleted users.
+  - Emergency one-off reset enabled strictly when `BOOTSTRAP_FORCE_RESET=true` (or `1`, `yes`) is explicitly provided in the environment.
+  - Country and geography seeding in [`seed_china_geo.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/scripts/seed_china_geo.py) skips redundant insertion if master records already exist.
+
+### 2. Persistent Inbound Email Deduplication
+- **Atomic Database Claim in [`email_inbound_worker.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/inquiries/email_inbound_worker.py):**
+  - Replaced volatile local JSON file tracking with dedicated database table `email_inbound_processed (message_id TEXT PRIMARY KEY, processed_at TIMESTAMP)`.
+  - Atomically claims incoming message IDs via `INSERT INTO email_inbound_processed ... ON CONFLICT (message_id) DO NOTHING`.
+  - Prevents duplicate quotation creation, repeat AI token consumption, and ghost quotations when containers restart or when multiple workers poll the mailbox.
+  - Includes baseline initialisation routine marking pre-existing mail (>30 minutes old) as processed on first deployment.
+
+### 3. SSO Handover Local Account Status Enforcement
+- **Account State Validation in [`auth/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/auth/routes.py):**
+  - If a user is deleted (`deleted_at IS NOT NULL`), inactive (`is_active=False`), or login-prohibited (`can_login=False`) in Inhyma's local database, incoming SSO handover now raises `401 Unauthorized` ("This account was deleted or disabled in this ERP. Ask an administrator to restore it.") rather than silently re-activating the account.
+  - Added environment switch `SSO_HANDOVER_AUTO_PROVISION=false` to reject provisioning when an account does not already exist locally.
+
+---
+
+## [Release 2026-10-14] — Resilient Central Federation, DNS Winsock Isolation & Live Diagnostics
+
+### 1. Multi-URL Discovery & IPv4 Outbound Enforcement
+- **Dynamic Candidate Resolution in [`federation/erp_main_client.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/federation/erp_main_client.py):**
+  - Implemented `erp_main_api_base_urls()` combining `ERP_MAIN_URL`, `ERP_MAIN_API_BASE_URL`, `ERP_MAIN_ISSUER`, and `ERP_MAIN_JWKS_URL`.
+  - In production, skips localhost defaults if remote candidates exist.
+  - Outbound HTTP client enforces IPv4 transport (`local_address="0.0.0.0"`) via `_client_for_erp_main()`, preventing broken AAAA IPv6 resolution attempts on cloud environments (Render) that lack outbound IPv6 routing.
+
+### 2. Sleeping Instance Wake-Up Budget & Stale Session Resilience
+- **Exponential Retry Backoff:**
+  - Extended handover verification timeout to **40 seconds** (`SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS = 40.0`), allowing sleeping free-tier control plane instances to boot.
+  - Implemented retry loop with progressive backoff (0.6s to 5.0s) for retryable HTTP errors (429, 500, 502, 503, 504) and network timeouts. Definite codes (200, 404) terminate immediately.
+- **Stale Session Tolerance (`SSO_HANDOVER_STALE_OK_SECONDS`):**
+  - In the event of temporary ERP_Main downtime, sessions previously verified as active within the last 900 seconds (15 minutes) are accepted from local memory cache and flagged `_from_cache: True`.
+
+### 3. Live Federation Health Probing Endpoint
+- **Inspection Route in [`api/v1/health.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/api/v1/health.py):**
+  - Added `GET /api/v1/health/federation` endpoint reporting live reachability, latency in milliseconds, environment key, configuration validation problems, and last session verification diagnostics without exposing service credentials.
+  - Added startup configuration check in [`core/config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/core/config.py) logging explicit errors if production endpoints point to localhost or missing credentials.
+
+### 4. Winsock DNS Resilience Scoping
+- **Platform-Gated Socket Interception in [`core/dns_resilience.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/core/dns_resilience.py):**
+  - Restricted socket resolution monkeypatching strictly to Windows systems (`sys.platform.startswith("win")`), preventing harmful side-effects on Linux/Docker production hosts.
+  - Keyed internal resolution cache by complete socket tuple `(host, family, type, proto, flags)` with port adaptation helper `_with_port()`.
+
+---
+
+## [Release 2026-10-14] — Database-Backed Organization Branding & Storage Quota Protection
+
+### 1. Database-Backed Logo Source of Truth
+- **Versioned Public Endpoint in [`organizations/routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/organizations/routes.py):**
+  - When `logo_data` exists in the database, `/organizations/public` now serves a versioned, immutable URL `/api/v1/organizations/logo?v={sha1}`.
+  - Solves the problem where transient server file paths stored in `logo_url` were lost upon container restart or deployment on ephemeral filesystems.
+  - Implemented loop-prevention check on `/api/v1/organizations/logo` to avoid redirecting back to itself.
+
+### 2. Frontend LocalStorage Quota Safeguard
+- **Exception Protection in [`brand.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/brand.ts) & [`Organization.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Organization.tsx):**
+  - Wrapped `localStorage` and `sessionStorage` caching in `try/catch` handlers. High-resolution base64 logo data exceeding browser storage quotas no longer crashes the application shell.
+  - Standardized resolution priority to prefer database `logo_data` over `logo_url`.
+
+---
+
+## [Release 2026-10-14] — Universal Filter Button UI Standardization Across All Modules
+
+### 1. Unified Visual & Behavioral Filter Standard (Companies Benchmark)
+- **Reference Benchmark:** Standardized all module filter toggle buttons across Inhyma to strictly match the styling, dimensions, and interaction pattern of the [Companies](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Companies.tsx#L5628) filter toggle button.
+- **Color Palette & State Invariance:**
+  - Standard background: `#556987` (solid slate/navy).
+  - Hover background: `#475569`.
+  - Active/Open state: `#556987` (retains the exact base color when active or panel is expanded, preventing unintended bright-blue or accent state switches).
+  - Text & Icon color: `#ffffff`.
+- **Dimensions & Box Model:**
+  - Padding: `8px 14px`.
+  - Border radius: `6px`.
+  - Border: `none`.
+  - Box Shadow: `0 2px 4px rgba(0, 0, 0, 0.1)`.
+  - Display: `inline-flex; align-items: center; justify-content: center; cursor: pointer`.
+  - Auto-sizing: Removed all hardcoded `width`, `height`, `min-width`, and `min-height` constraints (such as `38px x 38px`, `38px x 35px`, or `min-width: 36px`) across all module stylesheets, preventing awkward squarish distortion.
+- **Icon Standard:**
+  - Embedded 16×16px SVG funnel icon (`viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"` with `<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />`).
+- **Clean Badge-Less Surface:**
+  - Removed internal counter badges (`activeFilterCount`, `reorder-filter-badge`, `stock-filter-badge`, etc.) and indicator dots from the filter toggle buttons, maintaining an identical, clean rectangular footprint matching Companies.
+- **Default State Invariant:**
+  - All filter drawers and collapsible panels remain strictly **off by default** (`useState(false)`) across all pages, ensuring clean initial view loads.
+
+### 2. Stylesheets & Module Scope
+- **Global & Module Stylesheets Updated:**
+  - `style.css`: Enforced universal `.btn-filter-toggle`, `.btn-filter`, `.tech-btn-filter`, `.reorder-btn-filter`, `.stock-btn-filter`, `.transfer-btn-filter`, `.adjustment-btn-filter`, `.deleted-orders-btn-filter` with `!important` color, auto dimensions, and `.active` state locks.
+  - `deletedOrders.css`: Standardized `.deleted-orders-btn-filter` (`#556987`, padding `8px 14px`, removed `36px` dimensions).
+  - `productReorder.css`: Standardized `.reorder-btn-filter` (`#556987`, padding `8px 14px`, removed `38px` dimensions).
+  - `productStock.css`: Standardized `.stock-btn-filter` (`#556987`, padding `8px 14px`, removed `38px` dimensions).
+  - `stockAdjustment.css`: Standardized `.adjustment-btn-filter` (`#556987`, padding `8px 14px`, removed `38px` dimensions).
+  - `stockTransfer.css`: Standardized `.transfer-btn-filter` (`#556987`, padding `8px 14px`, removed `38px` dimensions).
+  - `technicalTasks.css`: Standardized `.page-technical-tasks .tech-btn-filter` (`#556987`, padding `8px 14px`, removed `38px x 35px` dimensions).
+- **Modules Verified & Harmonized:**
+  - Contact: `Companies.tsx`, `Suppliers.tsx`, `AgentsPage.tsx`, `FollowUpsPage.tsx`, `IndustrialZonesPage.tsx`, `LeadsPage.tsx`.
+  - Inventory: `ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx`, `ProductReorderPage.tsx`, `PriceListPage.tsx`, `masters/Products.tsx`.
+  - Sales & Orders: `sales/SaleProcessList.tsx`, `sales/DiscountPaymentsPage.tsx`, `ProformaInvoicesPage.tsx`, `DeletedOrdersPage.tsx`.
+  - Tasks & Engineering: `technicalTasks/TechnicalTasksPage.tsx`.
+  - Core Masters: `components/MasterPage.tsx` (all generic master catalogs).
+- **TypeScript & Build Integrity:**
+  - Removed unused filter counter declarations (`activeFilterCount` / `activeFiltersCount`) across 7 files to adhere strictly to `noUnusedLocals` in `tsconfig.json`.
+  - Wired in-memory date range filtering (`appliedOrderDateRange`, `appliedExpDeliveryDateRange`) into `DeletedOrdersPage.tsx`.
+  - Full Vite build verification passed with 0 errors; 25/25 unit & integration tests passing.
+
+---
+
+## [Release 2026-10-14] — Session-Scoped Tokens (one login = one session id)
+
+- Access and refresh tokens carry a `sid` claim (`auth/security.py`). `AuthService._issue_token_pair` binds both tokens to one session id; refresh keeps it. `TokenResponse` gains `session_id` and `session_mode` (`"central"` or `"local"`).
+- **Login** opens the login's central session via ERP_Main (`federation/erp_main_client.open_central_session`) only *after* the password is verified. If ERP_Main cannot be reached or refuses, the login still succeeds with a local session id `loc-<uuid>`.
+- **SSO handover** issues tokens carrying the verified central `sid`.
+- **Per-session revocation:** `AuthService.revoke_session` stores `sid:<sid>` in `token_blacklist` (cached), closes that session's WebSockets (`ConnectionManager.disconnect_session`). `verify_access_token` and `refresh` reject a revoked `sid` and, for central sessions, ask ERP_Main at most every 45 s (`central_session_state`, fail-open) so a lost message cannot leave a session alive.
+- **New endpoint:** `POST /api/v1/internal/sessions/{sid}/revoke` (service credential). `POST /auth/logout` now revokes the token's session and reports it to ERP_Main (`push_session_signout_to_erp_main`); it no longer signs the person out of their other logins.
+- **Frontend:** the login page uses the session id from the login reply; a fresh handover always replaces a saved session; no stored default-admin login; scoped cookie clearing; visible reason when an automatic sign-in fails.
+- **Reliability hardening:** when ERP_Main cannot be reached during a handover the ERP now answers **503** (`EcosystemSessionUnavailable`) instead of 401, so the browser retries instead of treating it as "session ended"; the login's central call uses short timeouts (connect 1.5 s, read 3 s) so a login never hangs. Browser: one shared handover exchange per arrival, retries 0.7/2.5/6 s, per-status messages, "Signing you in..." state, a switcher that validates before navigating (and no longer declares hooks after an early return), and a watcher that checks immediately then every 30 s / 2 min (was 2.5 s).
+- **Tests:** `test_session_scoped_tokens.py`; frontend `ssoHandoverSession.test.ts`.
+
 ## [Release 2026-10-10] — Cross-Ecosystem Single Sign-Out (SLO), M2M Force Logout API & WebSocket Disconnect
 
 ### 1. Internal Machine-to-Machine Force-Logout API

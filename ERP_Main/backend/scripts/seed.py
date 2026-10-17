@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timezone
 import uuid
 
@@ -46,6 +47,24 @@ async def seed_bootstrap_accounts() -> None:
     session_factory = get_sessionmaker()
     async with session_factory() as db:
         audit = GlobalAuditService(repository=GlobalAuditRepository(db))
+
+        # ------------------------------------------------------------------
+        # FIRST-INSTALL GUARD.  This script runs on EVERY start/deploy.  Bootstrap accounts are created once, on a
+        # fresh database only.  After that it must never reset a password, re-activate a suspended account, re-create
+        # a deleted membership or re-assign a role -- whatever is in the database is the truth.
+        # One-off recovery (e.g. locked out): start once with BOOTSTRAP_FORCE_RESET=true.
+        # ------------------------------------------------------------------
+        from sqlalchemy import func as _func
+
+        _existing_admins = await db.scalar(select(_func.count()).select_from(PlatformAdmin))
+        _force = os.environ.get("BOOTSTRAP_FORCE_RESET", "").strip().lower() in {"1", "true", "yes"}
+        if _existing_admins and not _force:
+            print(
+                "Bootstrap accounts already exist -- leaving passwords, status, memberships and role assignments "
+                "exactly as they are in the database. (BOOTSTRAP_FORCE_RESET=true forces a one-off reset.)"
+            )
+            await dispose_engine()
+            return
 
         # ------------------------------------------------------------------
         # 1. Platform Super Admin (Control Plane Admin)
@@ -215,7 +234,7 @@ async def main() -> None:
     print("ERP_Main Bootstrap Complete!")
     print(f"  Platform Admin:    {BOOTSTRAP_EMAIL}")
     print(f"  Global User:       {BOOTSTRAP_EMAIL}")
-    print(f"  Initial Password:  {BOOTSTRAP_PASSWORD}")
+    print("  Initial Password:  (BOOTSTRAP_ADMIN_PASSWORD from the environment; applied on first install only)")
     print("=" * 70 + "\n")
 
 

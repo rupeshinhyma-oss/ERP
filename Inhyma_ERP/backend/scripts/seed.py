@@ -38,6 +38,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timezone
 
 from app.auth.security import hash_password
@@ -481,9 +482,7 @@ async def seed() -> None:
                 session.add(RolePermission(role_id=role.id, permission_id=permission.id))
             await session.flush()
         else:
-            if role.deleted_at is not None:
-                role.deleted_at = None
-                await session.flush()
+            # (a soft-deleted role is NOT un-deleted here -- the database is the truth)
             # Idempotent top-up: make sure any newly-added bootstrap permission
             # (e.g. organization.manage) is granted even if this role already existed.
             existing_codes = {link.permission.code for link in role.permission_links}
@@ -508,9 +507,6 @@ async def seed() -> None:
                 if permission:
                     session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
             await session.flush()
-        elif user_role.deleted_at is not None:
-            user_role.deleted_at = None
-            await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------
         from app.rbac.models import UserRole, RoleAssignmentType, RoleAssignmentStatus
@@ -520,7 +516,18 @@ async def seed() -> None:
         if admin is None:
             admin = await user_repo.get_by_email(settings.BOOTSTRAP_ADMIN_EMAIL)
 
-        if admin is None:
+        # FIRST-INSTALL GUARD (runs on every start/deploy): create bootstrap data only on a fresh database.  Whatever is in
+        # the database afterwards is the truth -- never reset a password, un-delete, or re-create what was deleted.
+        # One-off recovery: start once with BOOTSTRAP_FORCE_RESET=true.
+        from sqlalchemy import func as _func
+        from app.users.models import User as _UserRow
+
+        _any_user = (await session.scalar(select(_func.count()).select_from(_UserRow))) or 0
+        _force = os.environ.get("BOOTSTRAP_FORCE_RESET", "").strip().lower() in {"1", "true", "yes"}
+
+        if admin is None and _any_user and not _force:
+            logger.info("Users already exist; the bootstrap admin was not re-created (it may have been deleted on purpose).")
+        elif admin is None:
             admin = await user_repo.create(
                 username=settings.BOOTSTRAP_ADMIN_USERNAME,
                 email=settings.BOOTSTRAP_ADMIN_EMAIL,
@@ -542,7 +549,7 @@ async def seed() -> None:
             )
             await session.flush()
             logger.info("Seeded bootstrap admin user.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
-        else:
+        elif _force:
             admin.email = settings.BOOTSTRAP_ADMIN_EMAIL
             admin.password_hash = hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD)
             admin.status = UserStatus.ACTIVE
@@ -572,10 +579,17 @@ async def seed() -> None:
                 existing_ur.is_primary = True
             await session.flush()
             logger.info("Updated bootstrap admin user to match standard credentials.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
+        else:
+            logger.info("Bootstrap admin already exists; left completely untouched.")
 
-        # Seed China provinces and major cities
-        from scripts.seed_china_geo import seed_china
-        await seed_china(session)
+        # Seed China provinces and major cities (fresh database only)
+        from scripts import seed_china_geo as _geo
+
+        _country_rows = (await session.scalar(select(_func.count()).select_from(_geo.Country))) or 0
+        if _country_rows == 0 or _force:
+            await _geo.seed_china(session)
+        else:
+            logger.info("Country master data already present; geography seed skipped.")
 
         await session.commit()
 
@@ -584,7 +598,7 @@ async def seed() -> None:
         "Seed complete.\n"
         f"  Admin username: {settings.BOOTSTRAP_ADMIN_USERNAME}\n"
         f"  Admin email: {settings.BOOTSTRAP_ADMIN_EMAIL}\n"
-        f"  Admin password: {settings.BOOTSTRAP_ADMIN_PASSWORD}\n"
+        "  Admin password: (BOOTSTRAP_ADMIN_PASSWORD from the environment; applied on first install only)\n"
     )
 
 
