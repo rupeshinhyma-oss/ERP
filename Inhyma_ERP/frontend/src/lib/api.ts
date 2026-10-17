@@ -384,6 +384,10 @@ async function performRequestOnce<T>(path: string, options: RequestInit): Promis
     throw new ApiError(message, 401, body?.errors || []);
   }
 
+  if (response.status === 204) {
+    return { data: undefined as unknown as T };
+  }
+
   if (!body) {
     throw new ApiError(
       `Request failed with status ${response.status}.`,
@@ -556,6 +560,73 @@ export async function apiPostMultipart<T>(
   return { data: body.data as T, meta: body.meta };
 }
 
+/**
+ * Download a binary / raw file stream (e.g. CSV template or exported PDF/report).
+ * Automatically injects authentication tokens and handles token refresh on 401.
+ */
+export async function apiDownloadBlob(
+  path: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<{ blob: Blob; filename: string | null }> {
+  const doFetch = async (): Promise<Response> => {
+    const token = Auth.getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const cleanPath = path.startsWith("/") ? path : `/${path}`;
+    const normalizedPath = cleanPath.startsWith("/api/v1") ? cleanPath.slice(7) : cleanPath;
+    try {
+      return await fetch(`${API_BASE}${normalizedPath}`, {
+        method: "GET",
+        headers,
+        signal: options.signal,
+      });
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      throw new ApiError(defaultMessageForStatus(NETWORK_ERROR_STATUS), NETWORK_ERROR_STATUS, []);
+    }
+  };
+
+  let response = await doFetch();
+
+  if (response.status === 401 && Auth.getRefreshToken()) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      response = await doFetch();
+    }
+  }
+
+  if (response.status === 401) {
+    handleSessionExpired();
+    throw new ApiError(defaultMessageForStatus(401), 401, []);
+  }
+
+  if (!response.ok) {
+    let msg = `Download failed with status ${response.status}.`;
+    try {
+      const errBody = await response.json();
+      if (errBody?.message) msg = errBody.message;
+      else if (errBody?.detail) {
+        msg = typeof errBody.detail === "string" ? errBody.detail : JSON.stringify(errBody.detail);
+      }
+    } catch {
+      // not a json error
+    }
+    throw new ApiError(msg, response.status, []);
+  }
+
+  let filename: string | null = null;
+  const disposition = response.headers.get("Content-Disposition");
+  if (disposition) {
+    const match = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+    if (match && match[1]) {
+      filename = match[1].replace(/['"]/g, "").trim();
+    }
+  }
+
+  const blob = await response.blob();
+  return { blob, filename };
+}
+
 export function apiPatch<T>(
   path: string,
   payload?: unknown,
@@ -615,6 +686,13 @@ export function errorMessage(err: unknown): string {
     return err.message;
   }
   if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === "object") {
+    const anyErr = err as any;
+    if (typeof anyErr.message === "string" && anyErr.message) return anyErr.message;
+    if (anyErr.data && typeof anyErr.data.message === "string" && anyErr.data.message) {
+      return anyErr.data.message;
+    }
+  }
   return String(err);
 }
 

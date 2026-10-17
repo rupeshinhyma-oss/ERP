@@ -866,13 +866,16 @@ select::-ms-expand {
   width: 100%;
   max-width: 600px;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
   box-shadow: -8px 0 30px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
   padding: 0;
   border-radius: 0;
   animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  overflow: hidden;
 }
 
 @keyframes slideInRight {
@@ -891,6 +894,7 @@ select::-ms-expand {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
 }
 
 .modal-card .modal-header h2 {
@@ -905,7 +909,7 @@ select::-ms-expand {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  height: calc(100vh - 60px);
+  height: 100%;
   overflow: hidden;
 }
 
@@ -958,6 +962,26 @@ select::-ms-expand {
   align-items: center;
   justify-content: center;
   margin: 0;
+}
+
+/* Dedicated drawer scrolling and fixed footer utilities */
+.drawer-content-scroll {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.drawer-footer-fixed {
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+  background: #ffffff !important;
+  border-top: 1px solid #e2e8f0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  z-index: 10;
 }
 
 .modal-close {
@@ -2633,4 +2657,14 @@ tbody tr {
 
 .date-range-btn-apply:hover {
   background-color: #0369a1;
+}
+
+/* CRM Salesperson Configuration Drawer Styles */
+.crm-salesperson-drawer-card {
+  width: 100%;
+  max-width: 560px;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
 }

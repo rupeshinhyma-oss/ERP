@@ -84,8 +84,18 @@ from app.hrms.expense_routes import router as hrms_expense_router
 from app.hrms.site_visit_routes import router as hrms_site_visit_router
 from app.hrms.payroll_routes import router as hrms_payroll_router
 from app.hrms.employee_routes import router as hrms_employee_router
+from app.crm.routes import router as crm_router
+from app.crm.distribution_routes import router as crm_distribution_router
+from app.crm.import_routes import router as crm_import_router
+from app.crm.lead_routes import router as crm_lead_router
+from app.crm.quotation_routes import router as crm_quotation_router
 
 api_router = APIRouter()
+api_router.include_router(crm_router)
+api_router.include_router(crm_distribution_router)
+api_router.include_router(crm_import_router)
+api_router.include_router(crm_lead_router)
+api_router.include_router(crm_quotation_router)
 api_router.include_router(hrms_router)
 api_router.include_router(hrms_employee_router)
 api_router.include_router(hrms_attendance_router)

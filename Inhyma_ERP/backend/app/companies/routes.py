@@ -372,7 +372,16 @@ async def lookup_companies(
     q: str = "",
     limit: int = 50,
     db: AsyncSession = Depends(get_db_session),
-    _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.create", "supplier.view", "supplier.create")),
+    _current_user: CurrentUser = Depends(
+        require_any_permission(
+            "company.view",
+            "company.create",
+            "supplier.view",
+            "supplier.create",
+            "crm.leads.view",
+            "crm.leads.manage",
+        )
+    ),
 ) -> dict:
     """Return matching company names and details for typeahead autocomplete."""
     from app.companies.models import Company

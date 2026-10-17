@@ -18,6 +18,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -26,6 +27,7 @@ from sqlalchemy import (
     Index,
     Integer,
     JSON,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -41,6 +43,9 @@ from app.database.base import (
     VersionMixin,
     _utcnow,
 )
+from app.companies.models import Company
+from app.masters.products.models import Product
+from app.masters.states.models import State
 from app.users.models import User
 
 
@@ -148,6 +153,9 @@ class CrmLead(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Versio
     normalized_phone: Mapped[str] = mapped_column(String(50), nullable=False)
     email: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
     company_name: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Campaign and Source Attribution
     campaign: Mapped[str | None] = mapped_column(String(150), nullable=True)
@@ -201,6 +209,7 @@ class CrmLead(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Versio
     # Relationships
     pipeline: Mapped[CrmPipeline | None] = relationship("CrmPipeline", back_populates="leads")
     stage: Mapped[CrmPipelineStage | None] = relationship("CrmPipelineStage", back_populates="leads")
+    company = relationship("Company", foreign_keys=[company_id])
     creator = relationship("User", foreign_keys=[created_by])
     assignee = relationship("User", foreign_keys=[assigned_to])
 
@@ -227,6 +236,18 @@ class CrmLead(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Versio
         back_populates="lead",
         cascade="all, delete-orphan",
         order_by="desc(CrmStageHistory.created_at)",
+    )
+    associated_products: Mapped[list[CrmLeadProduct]] = relationship(
+        "CrmLeadProduct",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        order_by="desc(CrmLeadProduct.created_at)",
+    )
+    quotations: Mapped[list[CrmSalesQuotation]] = relationship(
+        "CrmSalesQuotation",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        order_by="desc(CrmSalesQuotation.created_at)",
     )
 
     def __repr__(self) -> str:
@@ -381,6 +402,12 @@ class CrmImportBatch(Base, UUIDPrimaryKeyMixin):
     """
 
     __tablename__ = "crm_import_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'completed', 'failed')",
+            name="ck_crm_import_batch_status",
+        ),
+    )
 
     batch_name: Mapped[str] = mapped_column(String(200), nullable=False)
     import_source: Mapped[str] = mapped_column(String(100), nullable=False, default="csv")
@@ -395,7 +422,7 @@ class CrmImportBatch(Base, UUIDPrimaryKeyMixin):
         nullable=False,
         default="pending",
         index=True,
-        doc="pending, processing, completed, failed, partially_completed",
+        doc="pending, processing, completed, failed",
     )
     total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -452,3 +479,244 @@ class CrmRoundRobinCursor(Base, UUIDPrimaryKeyMixin):
     )
 
     last_assigned_user = relationship("User", foreign_keys=[last_assigned_user_id])
+
+
+class CrmSalespersonConfig(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Salesperson Lead Assignment Configuration.
+
+    Configures eligibility, priority, capacity, and active status for an existing ERP User
+    to receive automatically assigned CRM leads without modifying the user record itself.
+    """
+
+    __tablename__ = "crm_salesperson_configs"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_crm_salesperson_config_user"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    is_eligible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    max_lead_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    user: Mapped[User] = relationship("User", foreign_keys=[user_id])
+    territories: Mapped[list[CrmSalespersonTerritory]] = relationship(
+        "CrmSalespersonTerritory",
+        back_populates="salesperson_config",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<CrmSalespersonConfig user_id={self.user_id} is_eligible={self.is_eligible} priority={self.priority}>"
+
+
+class CrmSalespersonTerritory(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    State/Territory coverage mapping for a Salesperson.
+
+    Maps a salesperson's configuration to one or more geographic states from the
+    existing `states` master table.
+    """
+
+    __tablename__ = "crm_salesperson_territories"
+    __table_args__ = (
+        UniqueConstraint("salesperson_config_id", "state_id", name="uq_crm_salesperson_territory"),
+    )
+
+    salesperson_config_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("crm_salesperson_configs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    state_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("states.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Relationships
+    salesperson_config: Mapped[CrmSalespersonConfig] = relationship(
+        "CrmSalespersonConfig", back_populates="territories"
+    )
+    state: Mapped[State] = relationship("State", foreign_keys=[state_id])
+
+    def __repr__(self) -> str:
+        return f"<CrmSalespersonTerritory config_id={self.salesperson_config_id} state_id={self.state_id}>"
+
+
+class CrmLeadProduct(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Lead-Product interest association.
+
+    Tracks products of interest for a CRM lead prior to or alongside
+    formal sales quotations.
+    """
+
+    __tablename__ = "crm_lead_products"
+    __table_args__ = (
+        UniqueConstraint("lead_id", "product_id", name="uq_crm_lead_product"),
+    )
+
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("crm_leads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Relationships
+    lead: Mapped[CrmLead] = relationship("CrmLead", back_populates="associated_products")
+    product: Mapped[Product] = relationship("Product", foreign_keys=[product_id])
+    creator: Mapped[User | None] = relationship("User", foreign_keys=[created_by])
+
+
+class CrmSalesQuotation(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """
+    Sales Quotation Header.
+
+    Represents a formal commercial proposal issued to a lead.
+    Supports versioning, snapshotting, and multiple quotations per lead.
+    """
+
+    __tablename__ = "crm_sales_quotations"
+    __table_args__ = (
+        Index("ix_crm_sales_quotations_lead_status", "lead_id", "status"),
+    )
+
+    quotation_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("crm_leads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False, index=True)
+    quotation_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
+
+    # Immutable contact/company snapshot
+    customer_name_snapshot: Mapped[str] = mapped_column(String(255), nullable=False)
+    customer_phone_snapshot: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    customer_email_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    company_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Commercial Totals (Persisted using Decimal/Numeric, strictly rounded)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    discount_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+
+    # Commercial Terms
+    payment_terms: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    delivery_terms: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    terms_and_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Audit & User attribution
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_by_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Relationships
+    lead: Mapped[CrmLead] = relationship("CrmLead", back_populates="quotations")
+    company: Mapped[Company | None] = relationship("Company", foreign_keys=[company_id])
+    items: Mapped[list[CrmQuotationItem]] = relationship(
+        "CrmQuotationItem",
+        back_populates="quotation",
+        cascade="all, delete-orphan",
+        order_by="CrmQuotationItem.position",
+        lazy="selectin",
+    )
+    revisions: Mapped[list[CrmQuotationVersion]] = relationship(
+        "CrmQuotationVersion",
+        back_populates="quotation",
+        cascade="all, delete-orphan",
+        order_by="CrmQuotationVersion.version.desc()",
+        lazy="selectin",
+    )
+
+
+class CrmQuotationItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Line item for a CRM Sales Quotation.
+
+    Stores immutable snapshots of Product Master details along with
+    manually confirmed commercial inputs and decimal-safe line totals.
+    """
+
+    __tablename__ = "crm_quotation_items"
+
+    quotation_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("crm_sales_quotations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    # Product Master Snapshot
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    product_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    specification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uom: Mapped[str] = mapped_column(String(50), default="Nos", nullable=False)
+
+    # Optional Selected Content
+    include_images: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    selected_image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    include_specifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    demo_link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Commercial Inputs (Explicitly confirmed, no silent defaults)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("1.000"), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    unit_discount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.00"), nullable=False)
+
+    # Calculated Line Totals
+    taxable_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+
+    # Relationships
+    quotation: Mapped[CrmSalesQuotation] = relationship("CrmSalesQuotation", back_populates="items")
+    product: Mapped[Product] = relationship("Product", foreign_keys=[product_id])
+
+
+class CrmQuotationVersion(Base, UUIDPrimaryKeyMixin):
+    """
+    Immutable Revision Snapshot for a CRM Sales Quotation.
+
+    Whenever a quotation revision is finalized or incremented,
+    a complete historical snapshot is archived here to prevent
+    historical revision drift.
+    """
+
+    __tablename__ = "crm_quotation_versions"
+
+    quotation_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("crm_sales_quotations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    revision_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    # Relationships
+    quotation: Mapped[CrmSalesQuotation] = relationship("CrmSalesQuotation", back_populates="revisions")
+

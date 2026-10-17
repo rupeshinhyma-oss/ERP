@@ -15,9 +15,9 @@ const stroke = {
   strokeLinejoin: "round" as const,
 };
 
-function NavSvg({ children, className = "nav-icon", ...rest }: IconProps) {
+function NavSvg({ children, className = "nav-icon", width = 18, height = 18, ...rest }: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" {...stroke} className={className} {...rest}>
+    <svg viewBox="0 0 24 24" {...stroke} width={width} height={height} className={className} {...rest}>
       {children}
     </svg>
   );
@@ -509,6 +509,16 @@ export function IconCheckSquare(props: IconProps) {
   );
 }
 
+export function IconBarChart(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+    </NavSvg>
+  );
+}
+
 export function IconRefresh(props: IconProps) {
   return (
     <NavSvg {...props}>
@@ -786,11 +796,36 @@ export function IconAnchor(props: IconProps) {
   );
 }
 
+/** CRM Pipeline Setup (Connected sequential stages / pipeline workflow) */
+export function IconPipeline(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <circle cx="5" cy="6" r="3" />
+      <path d="M5 9v12" />
+      <path d="M5 15h9a3 3 0 0 0 3-3V7" />
+      <circle cx="17" cy="5" r="3" />
+      <path d="M17 8v8a3 3 0 0 0 3 3h1" />
+    </NavSvg>
+  );
+}
+
+export function IconUpload(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </NavSvg>
+  );
+}
+
 /** Icon lookup by the string keys the nav config uses. */
 export const ICONS = {
   // Core Navigation Icons
   dashboard: IconDashboard,
   anchor: IconAnchor,
+  pipeline: IconPipeline,
+  upload: IconUpload,
   task: IconTask,
   wrench: IconWrench,
   messageSquare: IconMessageSquare,
@@ -857,6 +892,7 @@ export const ICONS = {
   sitemap: IconOrgChart,
   grid: IconImage,
   folder: IconLayers,
+  barChart: IconBarChart,
 } as const;
 
 export type IconKey = keyof typeof ICONS;

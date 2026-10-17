@@ -64,6 +64,12 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("hrms.update", "hrms", "hrms", "update", "ALL", "Edit HRMS records, leave types, holidays, and policies."),
     ("hrms.approve", "hrms", "hrms", "approve", "ALL", "Approve or reject leave requests and attendance regularizations."),
     ("hrms.manage", "hrms", "hrms", "manage", "ALL", "Full administrative control over HRMS setup, leave types, adjustments, and approvals."),
+    # CRM Module
+    ("crm.pipelines.view", "crm", "crm-pipelines", "view", "ALL", "View CRM pipelines and stage configuration"),
+    ("crm.pipelines.manage", "crm", "crm-pipelines", "manage", "ALL", "Create, update, reorder and manage CRM pipelines and stages"),
+    ("crm.leads.import", "crm", "crm-leads", "import", "ALL", "Import CRM leads via CSV files"),
+    ("crm.leads.view", "crm", "crm-leads", "view", "ALL", "View CRM leads and import batches"),
+    ("crm.leads.manage", "crm", "crm-leads", "manage", "ALL", "Full administrative control over CRM leads"),
     # Employee was merged into User (Organization/Employee/IAM upgrade,
     # merge phase) -- there is no separate employee.* permission family
     # anymore. Managing "the employee directory" now means managing users
@@ -369,6 +375,14 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("saleorder.accounts", "saleorder", "sales-process", "accounts", "ALL", "Confirm a sale order at the accounts stage (invoice)."),
     ("saleorder.warehouse", "saleorder", "sales-process", "warehouse", "ALL", "Create gatepass, dispatch and attach LR (warehouse)."),
     ("saleorder.delete", "saleorder", "sales-process", "delete", "ALL", "Delete a pending sale order."),
+    # CRM & Lead Management
+    ("crm.pipelines.view", "crm", "crm-pipelines", "view", "ALL", "View CRM pipelines and stage configuration."),
+    ("crm.pipelines.manage", "crm", "crm-pipelines", "manage", "ALL", "Create, update, reorder and manage CRM pipelines and stages."),
+    ("crm.distribution.view", "crm", "crm-distribution", "view", "ALL", "View CRM salesperson distribution and territory assignments."),
+    ("crm.distribution.manage", "crm", "crm-distribution", "manage", "ALL", "Configure salesperson lead assignment eligibility, territories, and priorities."),
+    ("crm.leads.import", "crm", "crm-leads", "import", "ALL", "Import CRM leads via CSV files."),
+    ("crm.leads.view", "crm", "crm-leads", "view", "ALL", "View CRM leads and import batches."),
+    ("crm.leads.manage", "crm", "crm-leads", "manage", "ALL", "Full administrative control over CRM leads."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"

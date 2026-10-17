@@ -56,6 +56,15 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: "CRM",
+    items: [
+      { key: "crm-leads", label: "Lead Database", path: "/crm/leads", icon: "lead", permission: "crm.leads.view" },
+      { key: "crm-pipelines", label: "Pipeline Setup", path: "/crm/pipelines", icon: "pipeline", permission: "crm.pipelines.manage" },
+      { key: "crm-distribution", label: "Salesperson Configuration", path: "/crm/distribution", icon: "users", permission: "crm.distribution.view" },
+      { key: "crm-reports", label: "Reports & Analytics", path: "/crm/reports", icon: "barChart", permission: "crm.leads.view" },
+    ],
+  },
+  {
     label: "INVENTORY",
     items: [
       { key: "product-stock", label: "Product Stock", path: "/product-stock/list", icon: "stock", permission: "product.view" },
@@ -159,6 +168,10 @@ export const NAV_SECTIONS: NavSection[] = [
 ];
 
 export const PAGE_TITLES: Record<string, string> = {
+  "crm-leads": "Lead Database",
+  "crm/leads": "Lead Database",
+  "crm-reports": "CRM Reports & Analytics",
+  "crm/reports": "CRM Reports & Analytics",
   agents: "Agents",
   "industrial-zones": "Industrial Zones",
   leads: "Leads",
@@ -179,6 +192,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "reports-general": "General Reports",
   planning: "Shipment Planning",
   crm: "Customer Relationship Management",
+  "crm-pipelines": "Pipeline Setup",
   sales: "Sales Process",
   purchase: "Purchasing",
   inventory: "Inventory & Stock",
@@ -219,6 +233,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "technical-tasks": "Technical Task List",
   "tasks-kanban": "Tasks Kanban Board",
   "tasks-calendar": "Tasks Calendar",
+  "crm-distribution": "Salesperson Configuration",
 
   // Masters from screenshot
   "masters-taxes": "Taxes",
