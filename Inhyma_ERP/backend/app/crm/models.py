@@ -177,7 +177,7 @@ class CrmLead(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Versio
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     pipeline_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("crm_pipelines.id", ondelete="RESTRICT"), nullable=True, index=True
