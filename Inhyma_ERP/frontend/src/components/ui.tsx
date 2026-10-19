@@ -6,31 +6,95 @@
  * declarative components. The rendered markup and class names are unchanged.
  */
 
-import { type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { isAbortError, errorMessage } from "@/lib/api";
 import { useAuth, useBodyScrollLock } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 
 /* ------------------------------------------------------------------ */
-/* Banners                                                            */
+/* Banners -> Floating Toast Notifications Standard                   */
 /* ------------------------------------------------------------------ */
 
 /**
- * Dismissible-style error banner. Renders nothing for an aborted request --
- * a cancelled fetch is not a real error and never showed a banner before.
+ * Error notification component. Automatically dispatches a top-right floating
+ * toast notification. Never renders a disruptive static block in the page layout.
  */
 export function ErrorBanner({ error }: { error: unknown }) {
-  if (!error || isAbortError(error)) return null;
-  return <div className="error-banner">{errorMessage(error)}</div>;
-}
+  const showToast = useToast();
+  const lastErrorRef = useRef<unknown>(null);
 
-export function SuccessBanner({ message }: { message?: string | null }) {
-  if (!message) return null;
-  return <div className="success-banner">{message}</div>;
+  useEffect(() => {
+    if (!error || isAbortError(error)) return;
+    if (error !== lastErrorRef.current) {
+      lastErrorRef.current = error;
+      showToast(errorMessage(error), "error");
+    }
+  }, [error, showToast]);
+
+  if (!error || isAbortError(error)) return null;
+  return (
+    <div
+      className="error-banner"
+      role="alert"
+      style={{
+        position: "absolute",
+        width: "1px",
+        height: "1px",
+        padding: 0,
+        margin: "-1px",
+        overflow: "hidden",
+        clip: "rect(0, 0, 0, 0)",
+        whiteSpace: "nowrap",
+        border: 0,
+      }}
+    >
+      {errorMessage(error)}
+    </div>
+  );
 }
 
 /**
- * The `<div id="banner">` slot every page had, holding whichever of the two
- * banners is currently active.
+ * Success notification component. Automatically dispatches a top-right floating
+ * toast notification matching Department CRM standard.
+ */
+export function SuccessBanner({ message }: { message?: string | null }) {
+  const showToast = useToast();
+  const lastMsgRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!message) return;
+    if (message !== lastMsgRef.current) {
+      lastMsgRef.current = message;
+      showToast(message, "success");
+    }
+  }, [message, showToast]);
+
+  if (!message) return null;
+  return (
+    <div
+      className="success-banner"
+      role="status"
+      style={{
+        position: "absolute",
+        width: "1px",
+        height: "1px",
+        padding: 0,
+        margin: "-1px",
+        overflow: "hidden",
+        clip: "rect(0, 0, 0, 0)",
+        whiteSpace: "nowrap",
+        border: 0,
+      }}
+    >
+      {message}
+    </div>
+  );
+}
+
+/**
+ * Universal feedback banner slot. Routes errors and successes directly to the
+ * top-right floating toast notification engine instead of rendering disruptive
+ * in-page static green/red banners.
  */
 export function Banner({
   error,
@@ -40,10 +104,10 @@ export function Banner({
   success?: string | null;
 }) {
   return (
-    <div>
+    <>
       <ErrorBanner error={error} />
       {!error && <SuccessBanner message={success} />}
-    </div>
+    </>
   );
 }
 
@@ -191,14 +255,28 @@ export function Can({
 export function TableMessageRow({
   colSpan,
   children,
+  className = "",
+  style,
 }: {
   colSpan: number;
-  children: ReactNode;
+  children?: ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
 }) {
   return (
     <tr>
-      <td colSpan={colSpan} className="muted">
-        {children}
+      <td
+        colSpan={colSpan}
+        className={`muted ${className}`.trim()}
+        style={{
+          textAlign: "center",
+          padding: "36px 16px",
+          color: "#64748b",
+          fontSize: "14px",
+          ...style,
+        }}
+      >
+        {children ?? "No Data"}
       </td>
     </tr>
   );

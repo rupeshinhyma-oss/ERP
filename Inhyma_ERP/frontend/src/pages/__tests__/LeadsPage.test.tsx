@@ -209,7 +209,7 @@ describe("LeadsPage", () => {
       expect(screen.getByText("No Data Available In Table")).toBeTruthy();
     });
 
-    expect(screen.getByText("Showing 0 To 0 Of 0 Entries")).toBeTruthy();
+    expect(document.querySelector(".pagination")?.textContent).toContain("Showing 0–0 of 0 total");
     expect(screen.getByRole("button", { name: "Previous" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
   });

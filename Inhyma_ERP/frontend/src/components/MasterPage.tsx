@@ -46,6 +46,7 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { toggleMasterStatus } from "@/lib/masters";
+import { invalidateLookupCache } from "@/lib/lookups";
 import { useAuth, useSrNoJump, useModalHistorySync } from "@/lib/hooks";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { ImportHeader, ImportSummary, MasterRecord, PaginationMeta } from "@/types";
@@ -1090,6 +1091,7 @@ export function MasterPage<T extends MasterRecord>({
           reload();
         }
       }
+      invalidateLookupCache(apiBase);
       setError(null);
       setAlertPopup(null);
       setValidationErrors({});
@@ -1136,6 +1138,7 @@ export function MasterPage<T extends MasterRecord>({
     if (!confirm(`Delete this ${entityName}? This cannot be undone.`)) return;
     try {
       await apiDelete(`${apiBase}/${id}`);
+      invalidateLookupCache(apiBase);
       setRows((prev) => prev.filter((row) => row.id !== id));
       setAllRecords((prev) => prev.filter((row) => row.id !== id));
       setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
@@ -2264,7 +2267,7 @@ export function MasterPage<T extends MasterRecord>({
                     columns={columns}
                   />
                 ) : displayedRows.length === 0 ? (
-                  <TableMessageRow colSpan={colCount}>No records found.</TableMessageRow>
+                  <TableMessageRow colSpan={colCount}>No Data</TableMessageRow>
                 ) : (
                   displayedRows.map((item, index) => (
                     <tr

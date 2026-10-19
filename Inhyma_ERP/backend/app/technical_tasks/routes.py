@@ -35,6 +35,7 @@ from app.technical_tasks.schemas import (
     TechnicalCallLogReportRow,
     TechnicalTaskCountsResponse,
     TechnicalTaskCreate,
+    TechnicalTaskPaymentRecordRequest,
     TechnicalTaskRead,
     TechnicalTaskStatusUpdate,
     TechnicalTaskUpdate,
@@ -170,6 +171,15 @@ async def get_task_counts(
     return {"success": True, "data": counts}
 
 
+@router.get("/payment-summary", summary="Get payment summary KPIs (total, paid, due, pending/completed counts)")
+async def get_payment_summary(
+    service: TechnicalTaskService = Depends(get_service),
+    current_user: CurrentUser | None = Depends(get_current_user),
+) -> dict:
+    summary = await service.get_payment_summary(**_scope_for(current_user))
+    return {"success": True, "data": summary}
+
+
 @router.get("/call-log-report", summary="Technical call log report (all logs, separate from the call log form)")
 async def call_log_report(
     date_from: date | None = Query(default=None),
@@ -302,6 +312,31 @@ async def reopen_technical_task(
         "success": True,
         "data": _to_dict(task),
         "message": f"Technical task reopened successfully (Status: {task.status}).",
+    }
+
+
+@router.post("/{task_id}/record-payment", summary="Record a payment for a technical task")
+async def record_technical_task_payment(
+    task_id: uuid.UUID,
+    payload: TechnicalTaskPaymentRecordRequest,
+    service: TechnicalTaskService = Depends(get_service),
+    current_user: CurrentUser | None = Depends(get_current_user),
+) -> dict:
+    user_name = current_user.username if current_user else "Accounts"
+    task = await service.record_payment(
+        task_id=task_id,
+        amount=payload.amount,
+        payment_mode=payload.payment_mode,
+        payment_date=payload.payment_date,
+        reference_no=payload.reference_no,
+        payment_screenshot=payload.payment_screenshot,
+        remarks=payload.remarks,
+        user_name=user_name,
+    )
+    return {
+        "success": True,
+        "data": _to_dict(task),
+        "message": f"Payment of ₹{payload.amount:,.2f} recorded successfully.",
     }
 
 

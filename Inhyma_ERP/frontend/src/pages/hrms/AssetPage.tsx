@@ -138,6 +138,51 @@ const STATUS_OPTIONS = [
 
 const CONDITION_OPTIONS = ["NEW", "EXCELLENT", "GOOD", "FAIR", "POOR", "DAMAGED"];
 
+function AssetTableSkeletonRows({ rowCount = 6 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`asset-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td style={{ minWidth: 100 }}>
+            <span className="skeleton-line" style={{ width: 65, height: 14 }} />
+          </td>
+          <td style={{ minWidth: 160 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="skeleton-line" style={{ width: index % 2 === 0 ? "85%" : "65%", height: 14 }} />
+              <span className="skeleton-line" style={{ width: "45%", height: 11 }} />
+            </div>
+          </td>
+          <td style={{ minWidth: 120 }}>
+            <span className="skeleton-line" style={{ width: 70, height: 14 }} />
+          </td>
+          <td style={{ minWidth: 130 }}>
+            <span className="skeleton-line" style={{ width: 85, height: 14 }} />
+          </td>
+          <td style={{ minWidth: 160 }}>
+            <span className="skeleton-line" style={{ width: 90, height: 14 }} />
+          </td>
+          <td style={{ minWidth: 130 }}>
+            <span className="skeleton-line" style={{ width: 75, height: 14 }} />
+          </td>
+          <td style={{ minWidth: 110 }}>
+            <span className="skeleton-badge" style={{ width: 60, height: 20 }} />
+          </td>
+          <td style={{ minWidth: 100 }}>
+            <span className="skeleton-badge" style={{ width: 55, height: 20 }} />
+          </td>
+          <td style={{ minWidth: 180, textAlign: "right" }}>
+            <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
+              <span className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+              <span className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+              <span className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+            </div>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
@@ -268,8 +313,26 @@ export function AssetPage() {
     }
 
     try {
-      const userRes = await apiGet<any[]>("/hrms/employees");
-      const activeUsers = (userRes.data || []).filter((u: any) => u.is_active !== false);
+      let rawData: any[] = [];
+      try {
+        const userRes = await apiGet<any[]>("/hrms/employees");
+        if (userRes.data && userRes.data.length > 0) {
+          rawData = userRes.data;
+        }
+      } catch {
+        // fallback
+      }
+      if (rawData.length === 0) {
+        try {
+          const fallbackRes = await apiGet<any[]>("/users/all");
+          if (fallbackRes.data && fallbackRes.data.length > 0) {
+            rawData = fallbackRes.data;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      const activeUsers = rawData.filter((u: any) => u.is_active !== false);
       setEmployees(activeUsers);
     } catch (err) {
       console.warn("Could not load database users:", err);
@@ -781,9 +844,24 @@ export function AssetPage() {
         {/* Main Asset Table */}
         <div className="hrms-table-container">
           {loading ? (
-            <div style={{ padding: "50px 24px", textAlign: "center", color: "var(--color-muted, #64748b)" }}>
-              <div style={{ fontSize: 14, fontWeight: 500 }}>Loading assets from PostgreSQL database...</div>
-            </div>
+            <table className="hrms-table">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 100 }}>Asset Code</th>
+                  <th style={{ minWidth: 160 }}>Asset Name</th>
+                  <th style={{ minWidth: 120 }}>Category</th>
+                  <th style={{ minWidth: 130 }}>Serial Number</th>
+                  <th style={{ minWidth: 160 }}>Assigned To</th>
+                  <th style={{ minWidth: 130 }}>Branch</th>
+                  <th style={{ minWidth: 110 }}>Status</th>
+                  <th style={{ minWidth: 100 }}>Condition</th>
+                  <th style={{ minWidth: 180, textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <AssetTableSkeletonRows />
+              </tbody>
+            </table>
           ) : filteredAssets.length === 0 ? (
             <div className="hrms-placeholder-box" style={{ margin: 24 }}>
               <div className="hrms-placeholder-icon">

@@ -42,7 +42,20 @@ export function TechnicalTaskMonthlySummary() {
         </div>
       </div>
       {error && <div role="alert" style={{ color: "#991b1b", fontSize: 13 }}>{error}</div>}
-      {!data && !error && <div style={{ color: "#64748b", fontSize: 13 }}>Loading...</div>}
+      {!data && !error && (
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", overflowX: "auto", paddingBottom: 4, height: 140 }} aria-hidden="true">
+          {[45, 75, 60, 90, 40, 70, 85, 55, 65, 80, 50, 75].slice(0, months).map((h, i) => (
+            <div key={i} style={{ minWidth: 46, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              <div style={{ height: 110, display: "flex", gap: 3, alignItems: "flex-end", justifyContent: "center" }}>
+                <span className="skeleton-box" style={{ width: 16, height: `${h}%`, borderRadius: "3px 3px 0 0" }} />
+                <span className="skeleton-box" style={{ width: 16, height: `${Math.round(h * 0.7)}%`, borderRadius: "3px 3px 0 0" }} />
+              </div>
+              <span className="skeleton-line" style={{ width: 32, height: 10 }} />
+              <span className="skeleton-line" style={{ width: 24, height: 10 }} />
+            </div>
+          ))}
+        </div>
+      )}
       {data && (
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", overflowX: "auto", paddingBottom: 4 }}>
           {data.months.map((m) => (

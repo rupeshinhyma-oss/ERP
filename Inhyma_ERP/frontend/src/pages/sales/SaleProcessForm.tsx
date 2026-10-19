@@ -1739,20 +1739,28 @@ export function SaleProcessFormPage() {
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <div
+                          className="calc-locked-cell"
+                          title="Calculated automatically (Qty × Unit Rate)"
                           style={{
                             height: "32px",
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            background: "#e9ecef",
                             borderRadius: "3px",
                             display: "flex",
                             alignItems: "center",
+                            justifyContent: "space-between",
                             padding: "0 8px",
                             fontSize: "12.5px",
-                            color: "#1e293b",
+                            color: "#334155",
                             fontWeight: 600,
+                            cursor: "not-allowed",
                           }}
                         >
-                          {row.taxable_amount ? row.taxable_amount.toFixed(2) : "0.00"}
+                          <span>{row.taxable_amount ? row.taxable_amount.toFixed(2) : "0.00"}</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
                         </div>
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
@@ -1796,38 +1804,54 @@ export function SaleProcessFormPage() {
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <div
+                          className="calc-locked-cell"
+                          title="Calculated automatically (Taxable × GST %)"
                           style={{
                             height: "32px",
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            background: "#e9ecef",
                             borderRadius: "3px",
                             display: "flex",
                             alignItems: "center",
+                            justifyContent: "space-between",
                             padding: "0 8px",
                             fontSize: "12.5px",
-                            color: "#1e293b",
+                            color: "#334155",
                             fontWeight: 600,
+                            cursor: "not-allowed",
                           }}
                         >
-                          {row.gst_amount ? row.gst_amount.toFixed(2) : "0.00"}
+                          <span>{row.gst_amount ? row.gst_amount.toFixed(2) : "0.00"}</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
                         </div>
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <div
+                          className="calc-locked-cell"
+                          title="Calculated automatically (Taxable + GST)"
                           style={{
                             height: "32px",
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            background: "#e9ecef",
                             borderRadius: "3px",
                             display: "flex",
                             alignItems: "center",
+                            justifyContent: "space-between",
                             padding: "0 8px",
                             fontSize: "12.5px",
-                            color: "#1e293b",
+                            color: "#334155",
                             fontWeight: 600,
+                            cursor: "not-allowed",
                           }}
                         >
-                          {row.total ? row.total.toFixed(2) : "0.00"}
+                          <span>{row.total ? row.total.toFixed(2) : "0.00"}</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
                         </div>
                       </td>
                       <td style={{ padding: "6px 4px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>

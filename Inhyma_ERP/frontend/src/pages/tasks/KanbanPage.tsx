@@ -241,8 +241,34 @@ export const KanbanPage: React.FC = () => {
 
       {/* Kanban Board Container */}
       {loading && tasks.length === 0 ? (
-        <div className="task-card-container">
-          <div className="task-empty-state">Loading Kanban board...</div>
+        <div className="task-kanban-board" aria-hidden="true">
+          {COLUMNS.map((col) => (
+            <div key={col.key} className="task-kanban-column">
+              <div className="task-kanban-column-header">
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: col.color }} />
+                  <span style={{ fontWeight: 600 }}>{col.label}</span>
+                </div>
+                <span className="skeleton-badge" style={{ width: 24, height: 18 }} />
+              </div>
+              <div className="task-kanban-cards">
+                {[1, 2, 3].map((n) => (
+                  <div key={n} className="task-kanban-card skeleton-box" style={{ padding: "12px", background: "var(--card-bg, #ffffff)", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span className="skeleton-badge" style={{ width: 50, height: 16 }} />
+                      <span className="skeleton-badge" style={{ width: 45, height: 16 }} />
+                    </div>
+                    <span className="skeleton-line" style={{ width: "85%", height: 14 }} />
+                    <span className="skeleton-line" style={{ width: "60%", height: 12 }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                      <span className="skeleton-circle" style={{ width: 22, height: 22 }} />
+                      <span className="skeleton-line" style={{ width: 40, height: 12 }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="task-kanban-board">

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { TechnicalTaskTypesPage } from "../TechnicalTaskTypes";
+import { TechnicalTaskTypesPage } from "./TechnicalTaskTypes";
 import { apiGet, apiPost, apiPut } from "@/lib/api";
 
 vi.mock("@/components/AppShell", () => ({

@@ -6633,7 +6633,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   {loading ? (
                     <CompanySkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : sortedRows.length === 0 ? (
-                    <TableMessageRow colSpan={COMPANY_TABLE_COLUMNS.length}>No companies found.</TableMessageRow>
+                    <TableMessageRow colSpan={COMPANY_TABLE_COLUMNS.length}>No Data</TableMessageRow>
                   ) : (
                     sortedRows.map((s, index) => (
                       <tr key={s.id}>

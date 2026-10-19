@@ -15,8 +15,9 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can } from "@/components/ui";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, ApiError } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, ApiError, errorMessage } from "@/lib/api";
 import { invalidateBrandNameCache, resolveImageUrl, setBrandLogo, setBrandName } from "@/lib/brand";
+import { useToast } from "@/lib/toast";
 import type { Organization, OrganizationFieldId } from "@/types";
 
 const FIELD_IDS: OrganizationFieldId[] = [
@@ -91,6 +92,7 @@ function OrganizationDetailSkeleton() {
 }
 
 export function OrganizationPage() {
+  const showToast = useToast();
   const [org, setOrg] = useState<Organization | null>(null);
   const [form, setForm] = useState<OrgForm>(EMPTY_FORM);
   const [mode, setMode] = useState<"create" | "update">("create");
@@ -207,10 +209,11 @@ export function OrganizationPage() {
         setBrandLogo(res.data.logo_data || res.data.logo_url || null);
         setPendingLogoFile(null);
         setPendingLogoPreview(null);
-        setSuccess("Company logo successfully uploaded and saved in database storage.");
+        showToast("Company logo successfully uploaded and saved in database storage.", "success");
       }
     } catch (err) {
       setError(err);
+      showToast(errorMessage(err), "error");
     } finally {
       setLogoUploading(false);
     }
@@ -235,9 +238,10 @@ export function OrganizationPage() {
       setBrandLogo(null);
       setPendingLogoFile(null);
       setPendingLogoPreview(null);
-      setSuccess("Custom logo removed successfully. Default ERP logo restored.");
+      showToast("Custom logo removed successfully. Default ERP logo restored.", "success");
     } catch (err) {
       setError(err);
+      showToast(errorMessage(err), "error");
     } finally {
       setLogoUploading(false);
     }
@@ -293,10 +297,11 @@ export function OrganizationPage() {
       if (data?.logo_data || data?.logo_url) {
         setBrandLogo(data.logo_data || data.logo_url || null);
       }
-      setSuccess("Settings and branding saved successfully.");
+      showToast("Settings and branding saved successfully.", "success");
       setEditing(false);
     } catch (err) {
       setError(err);
+      showToast(errorMessage(err), "error");
     } finally {
       setSaving(false);
     }

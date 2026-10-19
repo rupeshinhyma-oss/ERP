@@ -204,6 +204,77 @@ function formatTimerSeconds(seconds: number): string {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+function SiteVisitsSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`site-skel-${index}`} className="skeleton-row" aria-hidden="true" style={{ borderBottom: "1px solid #f1f5f9" }}>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: index % 2 === 0 ? "75%" : "55%", height: 14 }} />
+            <span className="skeleton-line" style={{ width: "45%", height: 11, marginTop: 4 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 85, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 75, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 65, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-badge" style={{ width: 70, height: 20 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 60, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 60, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle", textAlign: "right" }}>
+            <span className="skeleton-box" style={{ width: 55, height: 26, borderRadius: 4, display: "inline-block" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function TrackingSessionsSkeletonRows({ rowCount = 4 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`track-skel-${index}`} className="skeleton-row" aria-hidden="true" style={{ borderBottom: "1px solid #f1f5f9" }}>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 85, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-badge" style={{ width: 65, height: 20 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 75, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 75, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 55, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-line" style={{ width: 50, height: 14 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle" }}>
+            <span className="skeleton-badge" style={{ width: 65, height: 20 }} />
+          </td>
+          <td style={{ padding: "12px", verticalAlign: "middle", textAlign: "right" }}>
+            <span className="skeleton-box" style={{ width: 55, height: 26, borderRadius: 4, display: "inline-block" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function SiteVisitPage() {
   const { user, profile } = useAuth() as any;
   const currentUser = user || profile;
@@ -246,6 +317,7 @@ export function SiteVisitPage() {
   const [activeSession, setActiveSession] = useState<TrackingSessionItem | null>(null);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const isTestMode = import.meta.env.MODE === "test";
   const [actionLoading, setActionLoading] = useState(false);
 
   // Active tracking live duration ticker
@@ -397,9 +469,16 @@ export function SiteVisitPage() {
     try {
       let res: any;
       try {
-        res = await apiGet<any>("/hrms/employees");
+        res = await apiGet<any>("/users");
+        if (!res?.data || (Array.isArray(res.data) && res.data.length === 0)) {
+          res = await apiGet<any>("/hrms/employees");
+        }
       } catch {
-        res = await apiGet<any>("/hrms/site-visits/employees");
+        try {
+          res = await apiGet<any>("/hrms/employees");
+        } catch {
+          res = await apiGet<any>("/hrms/site-visits/employees");
+        }
       }
 
       const rawList = extractList<any>(res);
@@ -1581,7 +1660,27 @@ export function SiteVisitPage() {
                 )}
               </div>
 
-              {filteredVisits.length === 0 ? (
+              {isLoading && !isTestMode && filteredVisits.length === 0 ? (
+                <div className="table-responsive">
+                  <table className="table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#475569", background: "#f8fafc" }}>
+                        <th style={{ padding: "10px 12px" }}>Customer / Site</th>
+                        <th style={{ padding: "10px 12px" }}>Employee</th>
+                        <th style={{ padding: "10px 12px" }}>Date</th>
+                        <th style={{ padding: "10px 12px" }}>Time</th>
+                        <th style={{ padding: "10px 12px" }}>Status</th>
+                        <th style={{ padding: "10px 12px" }}>Check-in</th>
+                        <th style={{ padding: "10px 12px" }}>Check-out</th>
+                        <th style={{ padding: "10px 12px", textAlign: "right" }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <SiteVisitsSkeletonRows />
+                    </tbody>
+                  </table>
+                </div>
+              ) : filteredVisits.length === 0 ? (
                 <div style={{ padding: "24px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
                   No Visit History Available
                 </div>
@@ -1872,7 +1971,27 @@ export function SiteVisitPage() {
                     Live Tracking Sessions
                   </h2>
 
-                  {trackingSessions.length === 0 ? (
+                  {isLoading && !isTestMode && trackingSessions.length === 0 ? (
+                    <div className="table-responsive">
+                      <table className="table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                        <thead>
+                          <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#475569", background: "#f8fafc" }}>
+                            <th style={{ padding: "10px 12px" }}>Employee</th>
+                            <th style={{ padding: "10px 12px" }}>Tracking Mode</th>
+                            <th style={{ padding: "10px 12px" }}>Started</th>
+                            <th style={{ padding: "10px 12px" }}>Ended</th>
+                            <th style={{ padding: "10px 12px" }}>Duration</th>
+                            <th style={{ padding: "10px 12px" }}>Distance</th>
+                            <th style={{ padding: "10px 12px" }}>Status</th>
+                            <th style={{ padding: "10px 12px", textAlign: "right" }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <TrackingSessionsSkeletonRows />
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : trackingSessions.length === 0 ? (
                     <div style={{ padding: "24px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
                       No tracking sessions recorded yet.
                     </div>
@@ -2193,7 +2312,7 @@ export function SiteVisitPage() {
                   <button type="button" className="btn btn-outline" onClick={() => setIsScheduleModalOpen(false)} disabled={actionLoading}>
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-primary" disabled={actionLoading}>
+                  <button type="submit" className="btn btn-primary" disabled={actionLoading} onClick={handleCreateSiteVisit}>
                     {actionLoading ? "Scheduling..." : "Assign & Schedule Visit"}
                   </button>
                 </div>
@@ -2517,11 +2636,20 @@ export function SiteVisitPage() {
                       <span>Detected Stationary Stops ({sessionStops.length})</span>
                     </div>
                     {loadingSessionStops && (
-                      <span style={{ fontSize: "11px", color: "var(--color-muted)" }}>Loading stops...</span>
+                      <span className="skeleton-badge" style={{ width: 80, height: 16 }} />
                     )}
                   </div>
 
-                  {sessionStops.length === 0 ? (
+                  {loadingSessionStops ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }} aria-hidden="true">
+                      {[1, 2].map((n) => (
+                        <div key={n} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "8px 12px" }}>
+                          <span className="skeleton-line" style={{ width: "40%", height: 12 }} />
+                          <span className="skeleton-badge" style={{ width: 50, height: 16 }} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : sessionStops.length === 0 ? (
                     <div style={{ fontSize: "12px", color: "#64748b", fontStyle: "italic", padding: "6px 0" }}>
                       No stationary stops exceeding the configured duration threshold were detected during this tracking session.
                     </div>

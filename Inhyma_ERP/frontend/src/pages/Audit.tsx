@@ -336,7 +336,7 @@ export function AuditPage() {
                 {loading ? (
                   <AuditTableSkeletonRows count={8} />
                 ) : rows.length === 0 ? (
-                  <TableMessageRow colSpan={8}>No audit entries found.</TableMessageRow>
+                  <TableMessageRow colSpan={8}>No Data</TableMessageRow>
                 ) : (
                   rows.map((entry) => (
                     <tr key={entry.id}>

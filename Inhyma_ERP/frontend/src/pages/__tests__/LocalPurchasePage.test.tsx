@@ -175,7 +175,7 @@ describe("LocalPurchasePage list (data comes from the API)", () => {
     expect(screen.getAllByText("S B Inks & Packaging Co.").length).toBeGreaterThan(0);
     expect(screen.getByText("Pending")).toBeTruthy();
     expect(screen.getAllByText("Confirmed").length).toBeGreaterThan(0);
-    expect(screen.getByText(/Showing 1 To 2 Of 2 Entries/i)).toBeTruthy();
+    expect(document.querySelector(".pagination")?.textContent).toContain("Showing 1–2 of 2 total");
     expect(screen.getByRole("button", { name: "Previous" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
     // nothing is kept in the browser any more
@@ -189,7 +189,7 @@ describe("LocalPurchasePage list (data comes from the API)", () => {
     renderPurchasePage();
     expect(await screen.findByText(/Database is down/)).toBeTruthy();
     expect(screen.queryByText("INV-1001")).toBeNull();
-    expect(screen.getByText(/Showing 0 To 0 Of 0 Entries/i)).toBeTruthy();
+    expect(document.querySelector(".pagination")?.textContent).toContain("Showing 0–0 of 0 total");
   });
 
   it("filters purchase records when typing in search box", async () => {
@@ -197,7 +197,7 @@ describe("LocalPurchasePage list (data comes from the API)", () => {
     fireEvent.change(screen.getByPlaceholderText("Search..."), { target: { value: "Darsh" } });
     expect(screen.queryByText("INV-1001")).toBeNull();
     expect(screen.getByText("INV-1002")).toBeTruthy();
-    expect(screen.getByText(/Showing 1 To 1 Of 1 Entries/i)).toBeTruthy();
+    expect(document.querySelector(".pagination")?.textContent).toContain("Showing 1–1 of 1 total");
   });
 
   it("opens the details modal with the real supplier and buyer details from the masters", async () => {

@@ -1086,7 +1086,7 @@ export function StockAdjustmentPage({
                 ) : filteredItems.length === 0 ? (
                   <tr>
                     <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
-                      No stock adjustment records found.
+                      No Data
                     </td>
                   </tr>
                 ) : (

@@ -22,6 +22,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { IconTrash, IconPlus } from "@/components/icons";
@@ -82,6 +84,31 @@ const EMPTY_FORM: FormState = {
   potential_machine_categories: "",
   remarks: "",
 };
+
+const IndustrialZonesSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`zone-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ padding: "12px 14px", textAlign: "center" }}>
+          <div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 4, margin: "0 auto" }} />
+        </td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: 28 }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "65%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: 36 }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 45 }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "75%" }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}>
+          <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+            <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+            <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+          </div>
+        </td>
+      </tr>
+    ))}
+  </>
+);
 
 export function IndustrialZonesPage() {
   const showToast = useToast();
@@ -297,6 +324,15 @@ export function IndustrialZonesPage() {
   // Pagination
   const totalRecords = filteredZones.length;
   const totalPages = Math.ceil(totalRecords / pageSize) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: totalRecords,
+    page_size: pageSize,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, totalRecords, pageSize]);
+
   const paginatedZones = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return filteredZones.slice(start, start + pageSize);
@@ -863,11 +899,7 @@ export function IndustrialZonesPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
-                      Loading Industrial Zones...
-                    </td>
-                  </tr>
+                  <IndustrialZonesSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
                 ) : paginatedZones.length === 0 ? (
                   <tr>
                     <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#94a3b8" }}>
@@ -982,53 +1014,17 @@ export function IndustrialZonesPage() {
             </table>
           </div>
 
-          {/* Pagination Footer */}
-          <div
-            style={{
-              padding: "14px 20px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              borderTop: "1px solid #f1f5f9",
-              fontSize: "13px",
-              color: "#64748b",
-            }}
-          >
-            <div>
-              Showing {totalRecords === 0 ? 0 : (currentPage - 1) * pageSize + 1} To{" "}
-              {Math.min(currentPage * pageSize, totalRecords)} Of {totalRecords} Entries
-            </div>
-
-            <div style={{ display: "flex", gap: "6px" }}>
-              <button
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => p - 1)}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: "4px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage <= 1 ? "#f8fafc" : "#fff",
-                  color: currentPage <= 1 ? "#94a3b8" : "#334155",
-                  cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-                }}
-              >
-                Previous
-              </button>
-              <button
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => p + 1)}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: "4px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage >= totalPages ? "#f8fafc" : "#fff",
-                  color: currentPage >= totalPages ? "#94a3b8" : "#334155",
-                  cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
-                }}
-              >
-                Next
-              </button>
-            </div>
+          {/* Pagination Footer matching Companies design */}
+          <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

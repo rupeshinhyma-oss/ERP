@@ -28,6 +28,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { SortHeader } from "@/components/SortHeader";
 import { DatePicker } from "@/components/DatePicker";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -351,19 +353,62 @@ export const INITIAL_DISCOUNT_ORDERS: DiscountOrderRecord[] = [
   },
 ];
 
+const DiscountPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`disc-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "80%" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "65%" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "55%" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "70%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-badge" style={{ width: 75 }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-badge" style={{ width: 85 }} /></td>
+        <td style={{ padding: "12px", textAlign: "center" }}>
+          <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 6, margin: "0 auto" }} />
+        </td>
+      </tr>
+    ))}
+  </>
+);
+
+const DiscountClientSummarySkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`disc-client-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: 24 }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "75%" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "55%" }} /></td>
+        <td style={{ padding: "12px", textAlign: "center" }}><div className="skeleton-line" style={{ width: 30, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 80, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px", textAlign: "center" }}>
+          <div className="skeleton-box" style={{ width: 80, height: 26, borderRadius: 4, margin: "0 auto" }} />
+        </td>
+      </tr>
+    ))}
+  </>
+);
+
 export interface DiscountPaymentsPageProps {
   initialFilterOpen?: boolean;
+  initialLoading?: boolean;
 }
 
 export function DiscountPaymentsPage({
   initialFilterOpen = false,
+  initialLoading,
 }: DiscountPaymentsPageProps = {}) {
   const navigate = useNavigate();
   const toast = useToast();
 
   const isTestMode = import.meta.env.MODE === "test";
   const [orders, setOrders] = useState<DiscountOrderRecord[]>(isTestMode ? INITIAL_DISCOUNT_ORDERS : []);
-  const [_loading, setLoading] = useState<boolean>(!isTestMode);
+  const [loading, setLoading] = useState<boolean>(initialLoading !== undefined ? initialLoading : !isTestMode);
   const [activeTab, setActiveTab] = useState<"all" | "pending" | "completed" | "client_summary">("pending");
   const [search, setSearch] = useState("");
   const [perPage, setPerPage] = useState<number>(50);
@@ -620,6 +665,21 @@ export function DiscountPaymentsPage({
     });
     return list;
   }, [filteredOrders, sortColIndex, sortDirection]);
+
+  const totalPages = Math.ceil(sortedOrders.length / perPage) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: sortedOrders.length,
+    page_size: perPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, sortedOrders.length, perPage]);
+
+  const paginatedOrders = useMemo(() => {
+    const start = (currentPage - 1) * perPage;
+    return sortedOrders.slice(start, start + perPage);
+  }, [sortedOrders, currentPage, perPage]);
 
 
   // Top KPI Metrics
@@ -1273,10 +1333,12 @@ export function DiscountPaymentsPage({
                 </tr>
               </thead>
               <tbody>
-                {clientSummaries.length === 0 ? (
+                {loading ? (
+                  <DiscountClientSummarySkeletonRows count={perPage > 10 ? 8 : perPage} />
+                ) : clientSummaries.length === 0 ? (
                   <tr>
                     <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
-                      No client discount records found.
+                      No Data
                     </td>
                   </tr>
                 ) : (
@@ -1409,14 +1471,16 @@ export function DiscountPaymentsPage({
               </tr>
             </thead>
             <tbody>
-              {sortedOrders.length === 0 ? (
+              {loading ? (
+                <DiscountPaymentsSkeletonRows count={perPage > 10 ? 8 : perPage} />
+              ) : sortedOrders.length === 0 ? (
                 <tr>
                   <td colSpan={10} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
                     No discount records found matching current criteria.
                   </td>
                 </tr>
               ) : (
-                sortedOrders.map((o, idx) => {
+                paginatedOrders.map((o, idx) => {
                   return (
                     <tr
                       key={o.id || idx}
@@ -1873,68 +1937,17 @@ export function DiscountPaymentsPage({
         </div>
         )}
 
-        {/* Bottom Pagination Info matching Screenshot */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "10px",
-            fontSize: "12.5px",
-            color: "#64748b",
-          }}
-        >
-          <div>
-            Showing 1 To {filteredOrders.length} Of {filteredOrders.length} Entries
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
-            <button
-              type="button"
-              disabled={currentPage === 1}
-              style={{
-                padding: "6px 12px",
-                border: "1px solid #cbd5e1",
-                background: "#f1f5f9",
-                color: "#64748b",
-                borderRadius: "4px 0 0 4px",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              style={{
-                padding: "6px 12px",
-                border: "1px solid #0061f2",
-                background: "#0061f2",
-                color: "#ffffff",
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              1
-            </button>
-            <button
-              type="button"
-              disabled={true}
-              style={{
-                padding: "6px 12px",
-                border: "1px solid #cbd5e1",
-                background: "#f1f5f9",
-                color: "#64748b",
-                borderRadius: "0 4px 4px 0",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              Next
-            </button>
-          </div>
+        {/* Pagination Footer matching Companies design */}
+        <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+          <Pagination
+            pagination={paginationMeta}
+            pageSize={perPage}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={(size) => {
+              setPerPage(size);
+              setCurrentPage(1);
+            }}
+          />
         </div>
 
         {/* Remark Modal */}

@@ -1713,7 +1713,32 @@ function ItemsView({
           {/* Products Cards List */}
           <div style={{ display: "flex", flexDirection: "column", gap: "10px", flex: 1, maxHeight: "calc(100vh - 360px)", overflowY: "auto", paddingRight: "4px" }}>
             {loading ? (
-              <div style={{ padding: "20px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Loading products...</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }} aria-hidden="true">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <div
+                    key={n}
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: "10px",
+                      border: "1px solid #e2e8f0",
+                      background: "#ffffff",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span className="skeleton-line" style={{ width: "60%", height: 14 }} />
+                      <span className="skeleton-badge" style={{ width: 50, height: 18 }} />
+                    </div>
+                    <span className="skeleton-line" style={{ width: "80%", height: 12 }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                      <span className="skeleton-line" style={{ width: 40, height: 12 }} />
+                      <span className="skeleton-line" style={{ width: 55, height: 12 }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : filteredProducts.length === 0 ? (
               <div style={{ padding: "24px 12px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
                 No products found.

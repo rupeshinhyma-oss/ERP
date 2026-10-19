@@ -3868,7 +3868,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   {loading ? (
                     <SupplierSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : sortedRows.length === 0 ? (
-                    <TableMessageRow colSpan={10}>No suppliers found.</TableMessageRow>
+                    <TableMessageRow colSpan={10}>No Data</TableMessageRow>
                   ) : (
                     sortedRows.map((s) => (
                       <tr key={s.id}>

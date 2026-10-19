@@ -70,6 +70,35 @@ export const EXPENSE_CATEGORIES = [
 const ALLOWED_RECEIPT_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "pdf"];
 const MAX_RECEIPT_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 
+function ExpensesTableSkeletonRows({ viewMode = "my", rowCount = 5 }: { viewMode?: "my" | "approvals"; rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`exp-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          {viewMode === "approvals" && (
+            <td>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="skeleton-line" style={{ width: "70%", height: 14 }} />
+                <span className="skeleton-line" style={{ width: "40%", height: 11 }} />
+              </div>
+            </td>
+          )}
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 80, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: index % 2 === 0 ? "80%" : "60%", height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 60, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 65, height: 20 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 45, height: 14 }} /></td>
+          <td style={{ textAlign: "right" }}>
+            <span className="skeleton-box" style={{ width: 50, height: 26, borderRadius: 4, display: "inline-block" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 // ===========================================================================
 // Main Expense Management Component
 // ===========================================================================
@@ -776,8 +805,25 @@ export function ExpensesPage() {
           </div>
 
           {isLoading ? (
-            <div style={{ padding: "40px", textAlign: "center", color: "var(--color-muted, #64748b)" }}>
-              Loading expenses from database...
+            <div className="hrms-table-container" style={{ margin: 0, border: "none" }}>
+              <table className="hrms-table">
+                <thead>
+                  <tr>
+                    <th>Expense ID</th>
+                    {viewMode === "approvals" && <th>Employee</th>}
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Receipt</th>
+                    <th style={{ textAlign: "right" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <ExpensesTableSkeletonRows viewMode={viewMode} />
+                </tbody>
+              </table>
             </div>
           ) : expenses.length === 0 ? (
             /* Empty State */

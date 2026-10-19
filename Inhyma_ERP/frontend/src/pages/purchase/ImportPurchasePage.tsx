@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
 import { SortHeader } from "@/components/SortHeader";
+import type { PaginationMeta } from "@/types";
 import { useToast } from "@/lib/toast";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, apiPut, errorMessage as apiErrorText } from "@/lib/api";
 import { DatePicker } from "@/components/DatePicker";
@@ -71,6 +73,100 @@ function Field({ label, required, error, children }: { label: string; required?:
   );
 }
 
+// Shimmer Skeleton Rows for Import Purchase Table
+export function ImportPurchaseSkeletonRows({ count = 8 }: { count?: number }) {
+  const widths = ["110px", "140px", "90px", "130px", "100px", "120px"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`import-purchase-sk-${idx}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          {/* Checkbox */}
+          <td style={{ textAlign: "center", padding: "10px 14px", width: "40px" }}>
+            <div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          {/* Inv / Con No & Date */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "95px", height: "14px", borderRadius: "4px", marginBottom: "4px" }} />
+            <div className="skeleton-line" style={{ width: "70px", height: "11px", borderRadius: "3px" }} />
+          </td>
+          {/* Supplier */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: widths[idx % widths.length], height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Warehouse */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "80px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Ordered Date */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* ETD Origin Date */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* ETA Port Date */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Arrival Date */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Inv. Total ($) */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "70px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Inv. Total (₹) */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "85px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Total CBM */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "50px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Total Exp */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* % Loading Exp */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "55px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Loading Exp CB */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "65px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Gross Total Landing */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "85px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Created By */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "65px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Added On */}
+          <td style={{ padding: "10px 14px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          {/* Status */}
+          <td style={{ padding: "10px 14px", textAlign: "center" }}>
+            <div className="skeleton-badge" style={{ width: "70px", height: "22px", borderRadius: "12px", margin: "0 auto" }} />
+          </td>
+          {/* Bill Upload */}
+          <td style={{ padding: "10px 14px", textAlign: "center" }}>
+            <div className="skeleton-line" style={{ width: "24px", height: "24px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          {/* Action */}
+          <td style={{ padding: "10px 14px", textAlign: "center", width: "70px" }}>
+            <div className="skeleton-line" style={{ width: "28px", height: "28px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -127,11 +223,13 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const { id: routeOrderId } = useParams<{ id: string }>();
 
   const [orders, setOrders] = useState<ImportPurchaseRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [statusRules, setStatusRules] = useState<WorkflowRules>({});
   const [pageError, setPageError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const loadOrders = async () => {
+    setLoading(true);
     try {
       const { orders: rows, rules } = await fetchImportPurchases();
       setOrders(rows);
@@ -139,6 +237,8 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       setPageError(null);
     } catch (err) {
       setPageError(apiErrorText(err));
+    } finally {
+      setLoading(false);
     }
   };
   useEffect(() => {
@@ -147,11 +247,20 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
   // dropdowns and form defaults come from the database
   const supplierList = useLookup<{ id: string; company_name: string }>("/suppliers", 500);
-  const warehouseList = useLookup<{ name: string; main_warehouse_id?: string | null }>("/masters/warehouses", 250);
+  const warehouseList = useLookup<{ id: string; name: string; main_warehouse_id?: string | null; is_primary?: boolean; status?: string }>("/masters/warehouses", 250);
   const supplierNames = useMemo(() => supplierList.items.map((x) => x.company_name), [supplierList.items]);
   const warehouseNames = useMemo(() => warehouseList.items.map((x) => x.name), [warehouseList.items]);
   const physicalWarehouses = useMemo(
-    () => new Set(warehouseList.items.filter((w) => !w.main_warehouse_id).map((w) => w.name)),
+    () =>
+      new Set(
+        warehouseList.items
+          .filter((w) => {
+            if (w.status && w.status !== "active") return false;
+            if (typeof w.is_primary === "boolean") return w.is_primary;
+            return !w.main_warehouse_id && !w.name.toLowerCase().includes("transit") && !w.name.toLowerCase().includes("ordered");
+          })
+          .map((w) => w.name)
+      ),
     [warehouseList.items]
   );
   const { options: optionGroups } = useOptions(IMPORT_OPTION_GROUPS);
@@ -321,6 +430,15 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   }, [filteredOrders, sortField, sortOrder]);
 
   const totalPages = Math.ceil(sortedOrders.length / perPage) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: sortedOrders.length,
+    page_size: perPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, sortedOrders.length, perPage]);
+
   const paginatedOrders = useMemo(() => {
     const start = (currentPage - 1) * perPage;
     return sortedOrders.slice(start, start + perPage);
@@ -751,7 +869,39 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     );
     const readOnlyField = (label: string, value: string) => (
       <Field label={label}>
-        <input aria-label={label} readOnly value={value} style={{ ...FIELD_INPUT, background: "#f8fafc", fontWeight: 600 }} />
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+          <input
+            aria-label={label}
+            readOnly
+            tabIndex={-1}
+            value={value}
+            title="Calculated automatically (Locked)"
+            style={{
+              ...FIELD_INPUT,
+              background: "#e9ecef",
+              borderColor: "#cbd5e1",
+              color: "#334155",
+              fontWeight: 600,
+              cursor: "not-allowed",
+              paddingRight: "26px",
+            }}
+          />
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#64748b"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ position: "absolute", right: "8px", pointerEvents: "none" }}
+            aria-hidden="true"
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </div>
       </Field>
     );
     const th: React.CSSProperties = { padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, color: "#475569", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" };
@@ -778,8 +928,21 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
           </div>
 
           {formErrors.submit && (
-            <div role="alert" style={{ padding: "10px 14px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "6px", color: "#b91c1c", fontSize: "13px", marginBottom: "12px" }}>
-              ⚠️ {formErrors.submit}
+            <div
+              role="alert"
+              style={{
+                position: "absolute",
+                width: "1px",
+                height: "1px",
+                padding: 0,
+                margin: "-1px",
+                overflow: "hidden",
+                clip: "rect(0, 0, 0, 0)",
+                whiteSpace: "nowrap",
+                border: 0,
+              }}
+            >
+              {formErrors.submit}
             </div>
           )}
 
@@ -1643,10 +1806,12 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                 </tr>
               </thead>
               <tbody>
-                {paginatedOrders.length === 0 ? (
+                {loading ? (
+                  <ImportPurchaseSkeletonRows count={perPage > 10 ? 8 : perPage} />
+                ) : paginatedOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={20} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "13.5px", background: "#f8fafc" }}>
-                      No Data Available In Table
+                    <td colSpan={20} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "14px", background: "#f8fafc" }}>
+                      No Data
                     </td>
                   </tr>
                 ) : (
@@ -2198,64 +2363,17 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             </table>
           </div>
 
-          {/* Footer matching Companies pagination */}
-          <div
-            className="pagination"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "12px 16px",
-              borderTop: "1px solid #cbd5e1",
-              fontSize: "12.5px",
-              color: "#475569",
-            }}
-          >
-            <div>
-              {sortedOrders.length === 0
-                ? "Showing 0 To 0 Of 0 Entries"
-                : `Showing ${(currentPage - 1) * perPage + 1} To ${Math.min(
-                  currentPage * perPage,
-                  sortedOrders.length
-                )} Of ${sortedOrders.length} Entries`}
-            </div>
-
-            <div style={{ display: "flex", gap: "6px" }}>
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                style={{
-                  padding: "5px 12px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  background: currentPage <= 1 ? "#f8fafc" : "#ffffff",
-                  color: currentPage <= 1 ? "#94a3b8" : "#334155",
-                  cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-                }}
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                style={{
-                  padding: "5px 12px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "4px",
-                  background: currentPage >= totalPages ? "#f8fafc" : "#ffffff",
-                  color: currentPage >= totalPages ? "#94a3b8" : "#334155",
-                  cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
-                }}
-              >
-                Next
-              </button>
-            </div>
+          {/* Pagination Footer matching Companies design */}
+          <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={perPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

@@ -3,6 +3,151 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-17] — Universal "Grey and Locked" Calculation Design Pattern, Zero-Layout-Shift Floating Toast Architecture, "No Data" Empty States Standardization & Table Skeletons Unification
+
+### 1. Universal "Grey and Locked" Calculation Design Pattern
+- **Design Tokens & Global CSS Classes ([`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css)):**
+  - Implemented the official Inhyma ERP standard for auto-calculated, server-computed, and formula-derived values to distinguish them immediately from user-editable inputs:
+    - **Background Color:** `#e9ecef` (Light slate grey in light mode, `#1e293b` in dark mode).
+    - **Border:** `1px solid #cbd5e1` (Light mode, `#334155` in dark mode).
+    - **Typography:** `#475569` font color (slate-600) with `font-weight: 600` for crisp legibility.
+    - **Interaction Protection:** `cursor: not-allowed`, `user-select: none`, with read-only/disabled input behavior preventing accidental focus or edits.
+    - **Visual Indicators:** Integrated locked indicator iconography (🔒 icon or locked suffix) to provide instant clarity that values are automatically computed.
+  - Added unified utility classes `.calc-locked`, `.calculated-field`, and `.calc-locked-wrapper` to eliminate inline styling fragmentation.
+
+- **Local Purchase Module ([`LocalPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/LocalPurchasePage.tsx)):**
+  - **Expenses Section:**
+    - **`Total Of All Expenses`**: Wrapped in `.calc-locked-wrapper` with `#e9ecef` background, lock icon, and read-only currency formatting.
+    - **`% Loading Expense (Value Based)`**: Wrapped in `.calc-locked-wrapper` with `#e9ecef` background, lock icon, and non-editable percentage formatting.
+  - **Product Items Table:**
+    - Line-item calculated columns (`Item Total`, `Expense Per Unit`, `Unit Landing Rate (VB)`, and `Total Landing Rate (VB)`) styled with `.calc-locked` cells.
+    - Grand total summary cells in the table footer styled with `.calc-locked`.
+
+- **Import Purchase Module ([`ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Updated `readOnlyField` wrapper to use `.calc-locked` for all computed summary cards:
+    - `Total Expenses`
+    - `Invoice Total Value (INR)`
+    - `Gross Total Landing (INR)`
+    - `% Loading Expense (Value Based)`
+    - `Loading Amount per CBM`
+  - Customs landing matrix and line-item calculated columns (`unit_landing_rate_vb`, `unit_landing_rate_cb`, and item totals) styled with `.calc-locked`.
+
+- **Product Master ([`Products.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/masters/Products.tsx)):**
+  - Dimensions & Packaging calculation: `packaging_unit_cbm` (computed as `(L × W × H) / 1,000,000`) and multi-package total cards (`packageTotals.cbm`, `net`, `gross`) updated to `.calc-locked`.
+
+### 2. Universal Zero-Layout-Shift Floating Toast Architecture & Deprecation of Static In-Page Banners
+- **Top-Right Floating Toast Notification Engine ([`toast.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/toast.tsx), [`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css)):**
+  - Deprecated legacy in-page static alert banners (`.banner`, `.banner-success`, `.banner-danger`, `.error-banner`) that pushed down form controls, expanded page heights, and created high Cumulative Layout Shift (CLS).
+  - Deployed an asynchronous floating toast system (`useToast()`) mounted at the fixed viewport overlay (`top: 20px; right: 20px; z-index: 99999;`).
+  - Implemented 4 notification tiers:
+    - **Success:** Emerald green (`#059669` / `#10b981`) with `✓` icon and 3.5s auto-dismiss.
+    - **Error:** Crimson red (`#dc2626` / `#ef4444`) with `✕` icon and 3.5s auto-dismiss.
+    - **Warning:** Amber (`#d97706`) with alert icon.
+    - **Info:** Slate blue (`#2563eb`) with info icon.
+  - Interactive dismiss button (`×`), auto-dismiss timer pause on mouse hover, and stacked toast queue.
+- **Pages Updated Across Inhyma ERP:**
+  - `Organization.tsx`: Replaced static branding/settings update banner with top-right floating toast.
+  - `Trash.tsx`: Replaced static restore, bulk restore, delete, bulk delete, and empty trash inline banners with floating toasts.
+  - `Profile.tsx`: Replaced profile update and password change inline banners with floating toasts.
+  - `SetupPage.tsx` (HRMS): Replaced global feedback inline banners with floating toasts across all setup tabs.
+  - `LeavePage.tsx` (HRMS): Replaced leave application, approval, cancel, and holiday inline banner cards with floating toasts.
+  - `LocalPurchasePage.tsx` & `ImportPurchasePage.tsx`: Converted form submit error alerts into visually-hidden DOM nodes with floating toast dispatch.
+  - `TechnicianOperationsPage.tsx` & `PriceListPage.tsx`: Routed `<Banner>` component alerts to floating toast notifications.
+- **Accessible Graceful Degradation Pattern:**
+  - Styled `.banner`, `.error-banner`, and `.success-banner` in `visually-hidden` mode (`position: absolute; clip: rect(0, 0, 0, 0);`) so screen readers, assistive technology, and unit tests (`getByRole("alert")`) continue to pass without causing visual layout shifts.
+
+### 3. Universal "No Data" Empty State Standardization
+- Standardized empty table state indicators across all ERP modules to the clean, consistent phrase **`"No Data"`** (replacing fragmented phrases like `"No records found."`, `"No suppliers found."`, `"No user accounts found."`, `"No soft-deleted records found."`, `"No proforma invoices found."`):
+  - **Modules Updated:**
+    - `Companies.tsx` (`<TableMessageRow colSpan={...}>No Data</TableMessageRow>`)
+    - `Suppliers.tsx` (`<TableMessageRow colSpan={10}>No Data</TableMessageRow>`)
+    - `Users.tsx` (`<TableMessageRow colSpan={8}>No Data</TableMessageRow>`)
+    - `PriceListPage.tsx` (`No Data`)
+    - `ProformaInvoicesPage.tsx` (`No Data`)
+    - `StockTransferPage.tsx` (`No Data`)
+    - `StockAdjustmentPage.tsx` (`No Data`)
+    - `DiscountPaymentsPage.tsx` (`No Data`)
+    - `Rbac.tsx` (Departments table: `No Data`)
+    - `Audit.tsx` (`<TableMessageRow colSpan={8}>No Data</TableMessageRow>`)
+
+### 3. Unified Table Skeleton Loaders
+- Standardized table skeleton rows across data grids during active loading states, maintaining fixed column geometry and preventing jarring layout shifts during data fetching.
+
+### 4. Automated Verification & Quality Assurance
+- **TypeScript Typecheck:** `npx tsc --noEmit` verified with **0 errors**.
+- **Unit & Integration Tests:** 73/73 tests in `LocalPurchasePage.test.tsx` and `ImportPurchasePage.test.tsx` passed.
+- **Browser Visual Verification:** Browser session inspection on `http://localhost:5174/purchase order/addedit` and `http://localhost:5174/import-purchase/addedit` confirmed exact visual compliance with design specifications.
+
+## [Release 2026-10-17] — New Payments Module (Technical Tasks Collections & Service Charges), Zero-Synthetic-Data Enforcement, Fake Account Purge & Navigation Streamlining
+
+### 1. New Core Module: Payments (`/payments`)
+- **Figma-Faithful Design & Implementation ([`PaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/PaymentsPage.tsx), [`payments.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/payments.css)):**
+  - Designed and deployed the dedicated **Payments** module to manage service charges, technician cash collections, and payment statuses for technical tasks.
+  - **Sidebar Navigation:** Integrated directly into the **`TASK`** navigation block in [`nav.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/nav.ts), placed immediately under `Technical Tasks`. Rendered with a custom Indian Rupee (`₹`) SVG icon [`IconIndianRupee`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/icons.tsx).
+  - **Top KPI Metric Cards:** Real-time financial summary strip:
+    - **`TOTAL PAYMENT`**: Real-time sum of service charges across all chargeable technical tasks.
+    - **`PAID`**: Real-time total collected amount displayed in high-contrast emerald green (`#16a34a`).
+    - **`DUE`**: Dynamic pending balance (`Total - Paid`) in bold slate font (`#0f172a`).
+  - **Status Tabs Navigation:**
+    - `Pending (<count>)`: Active by default with blue bottom highlight (`#007bff`), displaying tasks with pending or partial balances.
+    - `Completed (<count>)`: Displays tasks where full payment has been received and reconciled.
+  - **Sub-toolbar Controls:**
+    - Dropdown for selectable items per page (`10`, `25`, `50`, `100` Items/Page).
+    - Instant live text search across company name, city, machine model, contact person, technician, and priority.
+    - Toggleable collapsible filter panel: City, Task Type (`Physical Visit`, `Telecall`, etc.), Priority (`A`, `B`, `C`), Technician name, and Date Range (`From Date` - `To Date`).
+  - **14-Column Grid:**
+    - Checkbox (row selection and select-all).
+    - `Company Name` (interactive blue link opening full payment detail modal).
+    - `Task Type` (soft-hued pill badges: `Physical Visit` in sky blue `#e0f2fe`, `Telecall` in soft green `#dcfce7`).
+    - `City`, `Priority`, `Machine & Model`, `Contact Person` (`Name / Phone`).
+    - `Task Date & Task By`, `Task Approved By`, `Task Allotted To`.
+    - `Total Amount`: Highlighting green `Chargable` badge alongside formatted INR currency (`₹...`).
+    - `Paid/Due`: Multi-line breakdown displaying collected payments in blue (`Paid: ₹...`) and outstanding balances in red (`Due: ₹...`).
+    - `Task Status`: Soft badges for `Approved`, `Completed`, `Pending`.
+    - `Action`: Context menu (`⋮`) offering quick triggers for *Record Payment* and *View Details*.
+  - **Interactive Modals:**
+    - **Record / Collect Payment Modal:** Automatic balance due calculator. Captures Amount to Collect (validated against positive values), Payment Mode (*Company Acc*, *Self collect*, *UPI / QR*, *Cheque*, *Cash*, *Bank Transfer*), Date, Reference/UTR No, Receipt Screenshot/Document upload, and collection remarks.
+    - **Add New Payment Modal:** Powered by `ClientNameAutocomplete` to link existing clients or initiate quick service payment tasks.
+    - **Payment Details Modal:** Full drilldown into task specs, contact details, approver, technician allocation, and payment receipt preview.
+    - **Bulk Delete Confirmation Modal:** Safe multi-record soft deletion.
+
+### 2. Backend Payment API & Aggregation Engine (`backend/app/technical_tasks`)
+- **New Endpoints in [`routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/technical_tasks/routes.py):**
+  - `GET /api/v1/technical-tasks/payment-summary`: Calculates aggregate `total_payment`, `paid`, `due`, `pending_count`, and `completed_count` in a single index-friendly SQL query with zero full-table scans.
+  - `POST /api/v1/technical-tasks/{task_id}/record-payment`: Atomically updates `collected_amount`, `payment_mode`, `payment_status` (`Paid` if balance cleared, `Pending` if partial), marks task `Completed` if work was done, and automatically registers an audit call log entry (`call_type="Payment Collected"`).
+- **Service & Repository Enhancements ([`service.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/technical_tasks/service.py), [`repository.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/technical_tasks/repository.py)):**
+  - Added `get_payment_summary()` and `record_payment()` business methods.
+  - Refined `payment_collected` query filter in `list_tasks` to properly segregate `pending` and `completed` payment states.
+- **Pydantic Schemas ([`schemas.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/technical_tasks/schemas.py)):**
+  - Added `TechnicalTaskPaymentRecordRequest` schema.
+  - Added `collected_amount: Decimal | None` to `TechnicalTaskUpdate`.
+- **Frontend API Client ([`technicalTasksApi.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/technicalTasksApi.ts)):**
+  - Exported `fetchPaymentSummary()` and `recordTechnicalTaskPayment()`.
+  - Added `TechnicalTaskPaymentSummary` and `TechnicalTaskPaymentRecordPayload` TypeScript interfaces.
+
+### 3. Removal of Gatepass from Navigation Sidebar
+- In alignment with user instructions, removed redundant `Gatepass` sidebar item from the **`TASK`** navigation section in [`nav.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/nav.ts).
+- Cleaned up navigation key lookup and page titles dictionary. The **`TASK`** section now cleanly hosts:
+  1. `Tasks`
+  2. `Technical Tasks`
+  3. `Payments`
+  4. `Technician Ops & Wallet`
+
+### 4. Zero-Synthetic-Data Policy Enforcement & Test File Cleanup
+- **Purge of QA / Mock Data Generation Files:**
+  - Removed 18 legacy test, seeding, and QA scripts across Inhyma and ERP_Dashboard that previously generated mock data or seeded randomized accounts.
+  - Cleaned leftover test accounts (`manager_user_q`, `out_mgr_user_q`, `rep_a_user_q`, `rep_b_user_q`).
+  - Protected all authentic accounts (`usera`, `userb`, `userc`, `userd`, and `admin`).
+- **Elimination of Fake Data Fabrication:**
+  - Excised dummy phone number generators (`+0000...`) in SSO authentication pathways.
+  - Disabled silent SSO auto-provisioning to ensure accounts are only explicitly created or mapped.
+  - Enforced honest zero-states across all tables: no fake placeholder records are generated; empty states display clear guidance and `+ ADD NEW` triggers.
+
+### 5. Automated Verification & Quality Assurance
+- **TypeScript Typecheck:** `npx tsc --noEmit` verified with **0 errors**.
+- **Backend Test Suite:** `pytest tests/test_technical_tasks.py` passed **16/16 tests** (including dedicated payment lifecycle test `test_payment_summary_and_recording`).
+- **Live Browser Verification:** Authenticated browser verification on `http://localhost:5174/payments` confirmed pixel-faithful UI, KPI cards, tabs, modal opening, and clean sidebar layout.
+
 ## [Release 2026-10-16] — Product Master Multi-View Navigation, Inventory DB Integrity, Server-Authoritative Stock Adjustments & E2E Testing Protocol
 
 ### 1. Product Master Multi-View Navigation & Warning Elimination

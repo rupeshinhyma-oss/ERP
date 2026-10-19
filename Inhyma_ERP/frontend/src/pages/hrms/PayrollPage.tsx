@@ -158,6 +158,111 @@ export function formatMonthDisplay(monthStr?: string): string {
 }
 
 // ===========================================================================
+// Payroll Skeleton Loaders
+// ===========================================================================
+
+function MyPayslipsSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`payslip-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 35, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 35, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 35, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 65, height: 22 }} /></td>
+          <td style={{ textAlign: "right" }}><span className="skeleton-box" style={{ width: 90, height: 28, borderRadius: 4, display: "inline-block" }} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function PayrollComponentsSkeletonRows({ rowCount = 4 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`comp-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: index % 2 === 0 ? "70%" : "55%", height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 50, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 70, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 55, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 55, height: 20 }} /></td>
+          <td style={{ textAlign: "right" }}>
+            <div style={{ display: "inline-flex", gap: 6 }}>
+              <span className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+              <span className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+            </div>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function EmployeeSalarySkeletonRows({ rowCount = 6 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`salary-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: 60, height: 14 }} /></td>
+          <td>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="skeleton-line" style={{ width: index % 2 === 0 ? "80%" : "60%", height: 14 }} />
+              <span className="skeleton-line" style={{ width: "40%", height: 11 }} />
+            </div>
+          </td>
+          <td><span className="skeleton-line" style={{ width: 90, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 70, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 70, height: 20 }} /></td>
+          <td style={{ textAlign: "right" }}>
+            <span className="skeleton-box" style={{ width: 85, height: 28, borderRadius: 4, display: "inline-block" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function MonthlyPayrollSkeletonRows({ rowCount = 6 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`monthly-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="skeleton-line" style={{ width: index % 2 === 0 ? "80%" : "60%", height: 14 }} />
+              <span className="skeleton-line" style={{ width: "45%", height: 11 }} />
+            </div>
+          </td>
+          <td><span className="skeleton-line" style={{ width: 30, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 30, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 30, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 70, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 60, height: 20 }} /></td>
+          <td style={{ textAlign: "right" }}>
+            <div style={{ display: "inline-flex", gap: 6 }}>
+              <span className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+              <span className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+            </div>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// ===========================================================================
 // Payroll Page Component
 // ===========================================================================
 
@@ -897,6 +1002,9 @@ export function PayrollPage() {
           </div>
 
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0" }}>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 600 }}>My Approved Salary Slips</h3>
+            </div>
             <div className="table-responsive">
               <table className="table" style={{ width: "100%", margin: 0 }}>
                 <thead style={{ background: "#f8fafc" }}>
@@ -914,11 +1022,7 @@ export function PayrollPage() {
                 </thead>
                 <tbody>
                   {loadingMyPayslips ? (
-                    <tr>
-                      <td colSpan={9} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
-                        Loading your salary slips...
-                      </td>
-                    </tr>
+                    <MyPayslipsSkeletonRows />
                   ) : myPayslips.length === 0 ? (
                     <tr>
                       <td colSpan={9} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
@@ -1269,11 +1373,7 @@ export function PayrollPage() {
                   </thead>
                   <tbody>
                     {loadingComponents ? (
-                      <tr>
-                        <td colSpan={7} style={{ textAlign: "center", padding: "28px", color: "#64748b" }}>
-                          Loading configured earnings...
-                        </td>
-                      </tr>
+                      <PayrollComponentsSkeletonRows />
                     ) : earningComponents.length === 0 ? (
                       <tr>
                         <td colSpan={7} style={{ textAlign: "center", padding: "28px", color: "#64748b" }}>
@@ -1395,11 +1495,7 @@ export function PayrollPage() {
                   </thead>
                   <tbody>
                     {loadingComponents ? (
-                      <tr>
-                        <td colSpan={7} style={{ textAlign: "center", padding: "28px", color: "#64748b" }}>
-                          Loading configured deductions...
-                        </td>
-                      </tr>
+                      <PayrollComponentsSkeletonRows />
                     ) : deductionComponents.length === 0 ? (
                       <tr>
                         <td colSpan={7} style={{ textAlign: "center", padding: "28px", color: "#64748b" }}>
@@ -1637,11 +1733,7 @@ export function PayrollPage() {
                   </thead>
                   <tbody>
                     {loadingSalaries ? (
-                      <tr>
-                        <td colSpan={9} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
-                          Loading employees...
-                        </td>
-                      </tr>
+                      <EmployeeSalarySkeletonRows />
                     ) : filteredEmployees.length === 0 ? (
                       <tr>
                         <td colSpan={9} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
@@ -1906,11 +1998,7 @@ export function PayrollPage() {
                   </thead>
                   <tbody>
                     {loadingPayroll ? (
-                      <tr>
-                        <td colSpan={11} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
-                          Loading monthly payroll...
-                        </td>
-                      </tr>
+                      <MonthlyPayrollSkeletonRows />
                     ) : !monthlyPayroll || monthlyPayroll.items.length === 0 ? (
                       <tr>
                         <td colSpan={11} style={{ textAlign: "center", padding: "36px", color: "#64748b" }}>
@@ -2332,7 +2420,28 @@ export function PayrollPage() {
                   Salary Revision History
                 </h5>
                 {loadingRevisions ? (
-                  <div style={{ fontSize: "12px", color: "#64748b", padding: "8px 0" }}>Loading revision history...</div>
+                  <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflow: "hidden" }}>
+                    <table className="table" style={{ width: "100%", margin: 0, fontSize: "12px" }}>
+                      <thead style={{ background: "#f8fafc" }}>
+                        <tr>
+                          <th>Effective From</th>
+                          <th>Annual CTC</th>
+                          <th>Monthly CTC</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[1, 2, 3].map((n) => (
+                          <tr key={n} className="skeleton-row" aria-hidden="true">
+                            <td><span className="skeleton-line" style={{ width: 80, height: 12 }} /></td>
+                            <td><span className="skeleton-line" style={{ width: 70, height: 12 }} /></td>
+                            <td><span className="skeleton-line" style={{ width: 70, height: 12 }} /></td>
+                            <td><span className="skeleton-badge" style={{ width: 55, height: 18 }} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : revisions.length === 0 ? (
                   <div style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>No previous revisions on record.</div>
                 ) : (

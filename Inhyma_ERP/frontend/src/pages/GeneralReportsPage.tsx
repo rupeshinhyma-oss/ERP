@@ -66,6 +66,28 @@ const tdStyle: React.CSSProperties = {
   verticalAlign: "top",
 };
 
+const GeneralReportsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`gen-report-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ ...tdStyle, whiteSpace: "nowrap" }}><div className="skeleton-line" style={{ width: 80 }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "80%" }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={tdStyle}>
+          <div className="skeleton-line" style={{ width: "65%", marginBottom: 4 }} />
+          <div className="skeleton-line" style={{ width: "45%" }} />
+        </td>
+        <td style={tdStyle}><div className="skeleton-badge" style={{ width: 70 }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "85%" }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={tdStyle}><div className="skeleton-badge" style={{ width: 75 }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+      </tr>
+    ))}
+  </>
+);
+
 export function GeneralReportsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get("tab") || "call-logs";
@@ -416,21 +438,16 @@ export function GeneralReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {loadingLogs && rows.length === 0 && (
-                      <tr>
-                        <td colSpan={10} style={{ ...tdStyle, color: "#64748b", textAlign: "center", padding: 32 }}>
-                          Loading call logs...
-                        </td>
-                      </tr>
-                    )}
-                    {!loadingLogs && rows.length === 0 && !logsError && (
+                    {loadingLogs ? (
+                      <GeneralReportsSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
+                    ) : rows.length === 0 && !logsError ? (
                       <tr>
                         <td colSpan={10} style={{ ...tdStyle, color: "#64748b", textAlign: "center", padding: 32 }}>
                           No call logs found for the selected filters.
                         </td>
                       </tr>
-                    )}
-                    {rows.map((r) => (
+                    ) : (
+                      rows.map((r) => (
                       <tr key={r.id}>
                         <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{r.call_date}</td>
                         <td style={{ ...tdStyle, fontWeight: 600 }}>{r.company_name}</td>
@@ -502,7 +519,7 @@ export function GeneralReportsPage() {
                         </td>
                         <td style={tdStyle}>{r.task_allotted_to || "—"}</td>
                       </tr>
-                    ))}
+                    )))}
                   </tbody>
                 </table>
               </div>
@@ -689,8 +706,13 @@ export function GeneralReportsPage() {
                 </div>
               )}
               {loadingSummary && !summaryData && (
-                <div style={{ color: "#64748b", fontSize: 13, padding: "30px 0", textAlign: "center" }}>
-                  Loading monthly summary...
+                <div style={{ display: "flex", gap: 12, padding: "20px 0 10px", alignItems: "flex-end" }}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} style={{ width: 54, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                      <div className="skeleton-box" style={{ width: 36, height: 120, borderRadius: 4 }} />
+                      <div className="skeleton-line" style={{ width: 40 }} />
+                    </div>
+                  ))}
                 </div>
               )}
 

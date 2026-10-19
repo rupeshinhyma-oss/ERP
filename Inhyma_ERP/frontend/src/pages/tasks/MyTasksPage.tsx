@@ -17,6 +17,38 @@ import {
 
 type TabFilter = "ALL" | TaskStatus | "OVERDUE";
 
+const MyTasksSkeletonTable: React.FC<{ count?: number }> = ({ count = 6 }) => (
+  <div className="table-responsive">
+    <table className="table task-table">
+      <thead>
+        <tr>
+          <th style={{ width: "40px" }}></th>
+          <th>Task</th>
+          <th style={{ width: "120px" }}>Status</th>
+          <th style={{ width: "100px" }}>Priority</th>
+          <th style={{ width: "120px" }}>Subtasks</th>
+          <th style={{ width: "140px" }}>Due Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {Array.from({ length: count }).map((_, index) => (
+          <tr key={`mytasks-skeleton-${index}`} className="table-skeleton-row">
+            <td><div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 3 }} /></td>
+            <td>
+              <div className="skeleton-line" style={{ width: "65%", marginBottom: 4 }} />
+              <div className="skeleton-line" style={{ width: "40%" }} />
+            </td>
+            <td><div className="skeleton-badge" style={{ width: 75 }} /></td>
+            <td><div className="skeleton-badge" style={{ width: 60 }} /></td>
+            <td><div className="skeleton-line" style={{ width: 50 }} /></td>
+            <td><div className="skeleton-line" style={{ width: 80 }} /></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
 export const MyTasksPage: React.FC = () => {
   const { profile } = useAuth();
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
@@ -169,7 +201,7 @@ export const MyTasksPage: React.FC = () => {
       {/* Tasks Table / Card List */}
       <div className="task-card-container">
         {loading ? (
-          <div className="task-empty-state">Loading your tasks...</div>
+          <MyTasksSkeletonTable count={6} />
         ) : tasks.length === 0 ? (
           <div className="task-empty-state">
             <IconCheckSquare />
