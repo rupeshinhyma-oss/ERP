@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { apiGet, apiPatch, API_ORIGIN } from "@/lib/api";
 import { usePendingGuard, useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
@@ -377,6 +378,20 @@ export function ProductGalleryPage() {
   // disables the delete control for another photo/product.
   const { isPending: isPhotoDeletePending, guard: guardPhotoDelete } = usePendingGuard<string>();
 
+  useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === "product-gallery") {
+        setSelectedProduct(null);
+        setSelectedSupplier(null);
+        setSelectedQuotation(null);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, []);
+
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 250);
   const brands = useLookup<Brand>("/masters/brands", 250);
@@ -682,68 +697,65 @@ export function ProductGalleryPage() {
             }}
           />
 
-          <select
-            value={categoryFilter}
-            onChange={(e) => {
-              setCategoryFilter(e.target.value);
-              setSubCategoryFilter("");
-            }}
-            style={{
-              padding: "9px 14px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e0",
-              fontSize: "13.5px",
-              background: "#ffffff",
-              minWidth: "160px",
-            }}
-          >
-            <option value="">All Categories</option>
-            {categories.items.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <div style={{ minWidth: "170px" }}>
+            <SearchableFilterDropdown
+              value={categoryFilter || null}
+              onChange={(val) => {
+                setCategoryFilter(val || "");
+                setSubCategoryFilter("");
+              }}
+              placeholder="All Categories"
+              allLabel="All Categories"
+              fetchOptions={async (term) => {
+                const q = term.toLowerCase().trim();
+                return categories.items
+                  .filter((c) => !q || c.name.toLowerCase().includes(q))
+                  .map((c) => ({ value: c.id, label: c.name }));
+              }}
+              fetchLabelForValue={async (val) => {
+                const c = categories.items.find((item) => item.id === val);
+                return c ? c.name : "";
+              }}
+            />
+          </div>
 
-          <select
-            value={subCategoryFilter}
-            onChange={(e) => setSubCategoryFilter(e.target.value)}
-            style={{
-              padding: "9px 14px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e0",
-              fontSize: "13.5px",
-              background: "#ffffff",
-              minWidth: "160px",
-            }}
-          >
-            <option value="">All Sub Categories</option>
-            {scopedSubCategories.map((sc: ProductSubCategory) => (
-              <option key={sc.id} value={sc.id}>
-                {sc.name}
-              </option>
-            ))}
-          </select>
+          <div style={{ minWidth: "170px" }}>
+            <SearchableFilterDropdown
+              value={subCategoryFilter || null}
+              onChange={(val) => setSubCategoryFilter(val || "")}
+              placeholder="All Sub Categories"
+              allLabel="All Sub Categories"
+              fetchOptions={async (term) => {
+                const q = term.toLowerCase().trim();
+                return scopedSubCategories
+                  .filter((sc: ProductSubCategory) => !q || sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q)))
+                  .map((sc: ProductSubCategory) => ({ value: sc.id, label: sc.name }));
+              }}
+              fetchLabelForValue={async (val) => {
+                const sc = subCategories.items.find((item) => item.id === val);
+                return sc ? sc.name : "";
+              }}
+            />
+          </div>
 
-          <select
-            value={brandFilter}
-            onChange={(e) => setBrandFilter(e.target.value)}
-            style={{
-              padding: "9px 14px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e0",
-              fontSize: "13.5px",
-              background: "#ffffff",
-              minWidth: "160px",
-            }}
-          >
-            <option value="">All Brands</option>
-            {brands.items.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+          <div style={{ minWidth: "170px" }}>
+            <SearchableFilterDropdown
+              value={brandFilter || null}
+              onChange={(val) => setBrandFilter(val || "")}
+              placeholder="All Brands"
+              allLabel="All Brands"
+              fetchOptions={async (term) => {
+                const q = term.toLowerCase().trim();
+                return brands.items
+                  .filter((b) => !q || b.name.toLowerCase().includes(q))
+                  .map((b) => ({ value: b.id, label: b.name }));
+              }}
+              fetchLabelForValue={async (val) => {
+                const b = brands.items.find((item) => item.id === val);
+                return b ? b.name : "";
+              }}
+            />
+          </div>
         </div>
 
         {loading ? (

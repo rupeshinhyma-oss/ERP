@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select, or_
+from sqlalchemy import case, or_, select
 
 from app.cache.manager import CacheManager
 from app.common.list_query import ListQueryParams
@@ -76,9 +76,31 @@ class ProductService:
         await self.repository.attach_planning_supplier_info([product])
         return product
 
-    async def list_paginated(self, query: ListQueryParams) -> tuple[list[Product], int]:
-        """Return a page of products matching the given search/sort/filter parameters."""
-        products, total = await self.repository.paginated_list(query)
+    async def list_paginated(
+        self, query: ListQueryParams, *, light: bool = False
+    ) -> tuple[list[Product], int]:
+        """Return a page of products matching the given search/sort/filter parameters.
+
+        With ``light=True`` the heavy ``images`` column is deferred (never read
+        from the DB) and an ``images_omitted`` flag tells clients whether photos
+        exist, to be fetched via the single-product endpoint on demand.
+        """
+        if light:
+            from sqlalchemy import String, cast, func
+            from sqlalchemy.orm import defer
+            from sqlalchemy.orm.attributes import set_committed_value
+
+            products, total = await self.repository.paginated_list(
+                query,
+                load_options=(defer(Product.images),),
+                extra_columns=(
+                    (func.length(cast(Product.images, String)) > 4).label("images_omitted"),
+                ),
+            )
+            for p in products:
+                set_committed_value(p, "images", None)
+        else:
+            products, total = await self.repository.paginated_list(query)
         hsn_ids = {p.hsn_id for p in products if p.hsn_id}
         if hsn_ids:
             hsns = await self.hsn_repository.list_all()
@@ -130,6 +152,29 @@ class ProductService:
             {
                 "id": str(r.id),
                 "name": r.product_name_tally or r.product_name or "",
+                "code": r.product_code or "",
+            }
+            for r in rows
+        ]
+
+    async def list_products_lookup(self, limit: int = 1000) -> list[dict[str, str]]:
+        """Return lightweight active products {id, name, product_name, product_code} for fast UI lookups."""
+        from sqlalchemy import select
+        stmt = (
+            select(Product.id, Product.product_name_tally, Product.product_name, Product.product_code)
+            .where(Product.deleted_at.is_(None))
+            .where(Product.status == "active")
+            .order_by(Product.product_name_tally.asc())
+            .limit(limit)
+        )
+        res = await self.repository.session.execute(stmt)
+        rows = res.all()
+        return [
+            {
+                "id": str(r.id),
+                "name": r.product_name or r.product_name_tally or "",
+                "product_name": r.product_name or r.product_name_tally or "",
+                "product_code": r.product_code or "",
                 "code": r.product_code or "",
             }
             for r in rows
@@ -381,8 +426,11 @@ class ProductService:
         uoms_map = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
 
         from app.suppliers.models import Supplier
-        sup_rows = (await self.repository.session.execute(select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None)))).all()
-        suppliers_map = {str(r.id): r.company_name for r in sup_rows}
+        sup_rows = (await self.repository.session.execute(select(Supplier.id, Supplier.company_name, Supplier.brand_description).where(Supplier.deleted_at.is_(None)))).all()
+        suppliers_map = {
+            str(r.id): (r.brand_description.strip() if r.brand_description and r.brand_description.strip() else r.company_name)
+            for r in sup_rows
+        }
 
         def _serialize_for_compare(p: Product) -> dict[str, Any]:
             return {
@@ -391,7 +439,7 @@ class ProductService:
                 "Brand": brands_map.get(str(p.brand_id), "—") if p.brand_id else "—",
                 "Category": categories_map.get(str(p.category_id), "—") if p.category_id else "—",
                 "Sub Category": sub_categories_map.get(str(p.sub_category_id), "—") if p.sub_category_id else "—",
-                "Primary Supplier": suppliers_map.get(str(p.supplier_id), "—") if p.supplier_id else "—",
+                "Supplier Brand": suppliers_map.get(str(p.supplier_id), "—") if p.supplier_id else "—",
                 "HSN Code": hsns_map.get(str(p.hsn_id), "—") if p.hsn_id else "—",
                 "UOM": uoms_map.get(str(p.uom_id), "—") if p.uom_id else "—",
                 "Pack. Qty": p.packaging_quantity if p.packaging_quantity is not None else "—",
@@ -416,9 +464,27 @@ class ProductService:
 
             supplier_name = field_values.pop("supplier_name", None)
             if supplier_name:
-                stmt_sup = select(Supplier).where(
-                    Supplier.company_name.ilike(supplier_name.strip()),
-                    Supplier.deleted_at.is_(None),
+                clean_sup = supplier_name.strip()
+                stmt_sup = (
+                    select(Supplier)
+                    .where(
+                        or_(
+                            Supplier.brand_description.ilike(clean_sup),
+                            Supplier.company_name.ilike(clean_sup),
+                            Supplier.brand_description.ilike(f"{clean_sup}%"),
+                            Supplier.company_name.ilike(f"{clean_sup}%"),
+                        ),
+                        Supplier.deleted_at.is_(None),
+                    )
+                    .order_by(
+                        case(
+                            (Supplier.brand_description.ilike(clean_sup), 1),
+                            (Supplier.company_name.ilike(clean_sup), 2),
+                            (Supplier.brand_description.ilike(f"{clean_sup}%"), 3),
+                            (Supplier.company_name.ilike(f"{clean_sup}%"), 4),
+                            else_=5,
+                        )
+                    )
                 )
                 res_sup = await self.repository.session.execute(stmt_sup)
                 found_supplier = res_sup.scalars().first()
@@ -592,9 +658,12 @@ class ProductService:
         # Suppliers lookup for Primary Supplier
         from app.suppliers.models import Supplier
         sup_res = await self.repository.session.execute(
-            select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None))
+            select(Supplier.id, Supplier.company_name, Supplier.brand_description).where(Supplier.deleted_at.is_(None))
         )
-        suppliers_export_map = {str(row.id): row.company_name for row in sup_res}
+        suppliers_export_map = {
+            str(row.id): (row.brand_description.strip() if row.brand_description and row.brand_description.strip() else row.company_name)
+            for row in sup_res
+        }
 
         # Organizations
         org_res = await self.repository.session.execute(select(MasterCompany.id, MasterCompany.name, MasterCompany.branches))
@@ -631,7 +700,7 @@ class ProductService:
                 "Brand": brands.get(str(p.brand_id), "") if p.brand_id else "",
                 "Category": categories.get(str(p.category_id), "") if p.category_id else "",
                 "Sub Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",
-                "Primary Supplier": suppliers_export_map.get(str(p.supplier_id), "") if p.supplier_id else "",
+                "Supplier Brand": suppliers_export_map.get(str(p.supplier_id), "") if p.supplier_id else "",
                 "HSN Code": hsns.get(str(p.hsn_id), "") if p.hsn_id else "",
                 "UOM": uoms.get(str(p.uom_id), "") if p.uom_id else "",
                 "Organization": ", ".join(org_names),

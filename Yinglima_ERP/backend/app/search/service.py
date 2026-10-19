@@ -59,7 +59,7 @@ from __future__ import annotations
 import logging
 from typing import List, Type
 
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.base import SoftDeleteMixin
@@ -86,10 +86,10 @@ logger = logging.getLogger(__name__)
 LIMIT_PER_ENTITY = 5
 
 
-def _not_deleted(model: Type) -> ColumnElement[bool] | bool:
+def _not_deleted(model: Type) -> ColumnElement[bool]:
     """
     Return the ``deleted_at IS NULL`` filter for a soft-deletable model, or
-    ``True`` (a harmless always-true SQL condition) for a model that has no
+    ``true()`` (a harmless always-true SQL condition) for a model that has no
     soft-delete support at all (e.g. ``User``, ``Organization``).
 
     Centralized here so every search block below is automatically correct
@@ -98,7 +98,7 @@ def _not_deleted(model: Type) -> ColumnElement[bool] | bool:
     """
     if issubclass(model, SoftDeleteMixin):
         return model.deleted_at.is_(None)
-    return True
+    return true()
 
 
 def escape_like_wildcards(val: str) -> str:
@@ -163,7 +163,7 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
         ).limit(LIMIT_PER_ENTITY)
         users = (await db.execute(stmt)).scalars().all()
         for u in users:
-            name = u.display_name or f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username
+            name = u.display_name or f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or str(u.id)
             details = f"Code: {u.employee_code} | Email: {u.email}" if u.employee_code else u.email
             results.append(
                 SearchResultItem(
@@ -186,7 +186,6 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
                 Supplier.company_name.ilike(pattern),
                 Supplier.brand_description.ilike(pattern),
                 Supplier.contact_full_name.ilike(pattern),
-                Supplier.town.ilike(pattern),
                 Supplier.address.ilike(pattern),
                 Supplier.tax_id_number.ilike(pattern),
             ),
@@ -555,7 +554,8 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
 
             deleted_rows = (await db.execute(stmt)).scalars().all()
             for row in deleted_rows:
-                title = str(getattr(row, name_col, f"{entity_name} {row.id}"))
+                row_id = str(getattr(row, "id", ""))
+                title = str(getattr(row, name_col, f"{entity_name} {row_id}"))
                 code_val = getattr(row, code_col, None) if code_col else None
                 code_suffix = f" ({code_val})" if code_val else ""
                 del_time = (
@@ -566,7 +566,7 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
                 results.append(
                     SearchResultItem(
                         category="Trash",
-                        id=str(row.id),
+                        id=row_id,
                         title=f"{title}{code_suffix} [Deleted]",
                         subtitle=f"Type: {entity_name} | Deleted on {del_time}",
                         target_url=f"./trash.html?q={title}",

@@ -175,6 +175,7 @@ async def _to_buyer_read(service: BuyerService, buyer) -> dict:
         "company_name": buyer.company_name,
         "buyer_type": buyer.buyer_type,
         "country_id": buyer.country_id,
+        "state_id": buyer.state_id,
         "city": buyer.city,
         "address": buyer.address,
         "contact_salutation": buyer.contact_salutation,
@@ -197,7 +198,7 @@ async def _to_buyer_read(service: BuyerService, buyer) -> dict:
         "emails": [e.email for e in buyer.emails],
         "category_ids": [link.category_id for link in buyer.category_links],
         "sub_category_ids": [link.sub_category_id for link in buyer.sub_category_links],
-        "contacts": [BuyerContactRead.model_validate(c) for c in buyer.contacts],
+        "contacts": [BuyerContactRead.model_validate(c) for c in buyer.contacts if getattr(c, "deleted_at", None) is None],
     }
     return BuyerRead.model_validate(payload).model_dump(mode="json")
 
@@ -251,7 +252,7 @@ async def create_buyer(
             except Exception:
                 pass
 
-    buyer = await service.create(**payload.model_dump())
+    buyer = await service.create(**payload.model_dump(), created_by_id=current_user.id)
     data = await _to_buyer_read(service, buyer)
     await _record_action(
         audit_service=audit_service,
@@ -372,7 +373,9 @@ async def import_buyers(
 ) -> dict:
     """Import buyers from an uploaded CSV/XLSX file, validating every row with 3-way duplicate detection."""
     raw_bytes = await file.read()
-    summary = await service.import_file(file.filename or "import.csv", raw_bytes, update_existing=update_existing)
+    summary = await service.import_file(
+        file.filename or "import.csv", raw_bytes, update_existing=update_existing, created_by_id=current_user.id
+    )
     await _record_action(
         audit_service=audit_service,
         request=request,
@@ -410,9 +413,9 @@ async def update_buyer(
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing buyer profile."""
-    buyer = await service.update(buyer_id, **payload.model_dump())
+    buyer = await service.update(buyer_id, **payload.model_dump(exclude_unset=True))
     data = await _to_buyer_read(service, buyer)
-    changes = payload.model_dump(exclude_none=True, exclude={"version"}, mode="json")
+    changes = payload.model_dump(exclude_unset=True, exclude={"version"}, mode="json")
     await _record_action(
         audit_service=audit_service,
         request=request,
@@ -750,3 +753,26 @@ async def delete_buyer_contact(
         description=f"Deleted contact {contact_id} from buyer {buyer_id}.",
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)
+
+
+@router.post("/{buyer_id}/contacts/{contact_id}/make-primary", summary="Promote a contact to primary contact")
+async def make_primary_contact(
+    buyer_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    request: Request,
+    service: BuyerService = Depends(get_buyer_service),
+    current_user: CurrentUser = Depends(require_permission("buyer.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Promote an existing contact person to be the buyer's primary contact."""
+    contact = await service.set_primary_contact(buyer_id, contact_id)
+    data = BuyerContactRead.model_validate(contact).model_dump(mode="json")
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        entity_id=contact.id,
+        description=f"Promoted contact {contact.person_name!r} to primary for buyer {buyer_id}.",
+    )
+    return build_success_response(data=data, request_id=request.state.request_id, message="Contact set as primary.")

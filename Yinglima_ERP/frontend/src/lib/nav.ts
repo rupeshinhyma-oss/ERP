@@ -103,6 +103,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", permission: "organizationlist.view" },
         ],
       },
+      { key: "notification-settings", label: "Notification Rules", path: "/notification-settings", icon: "bell", permission: "user.view" },
       { key: "organization", label: "ERP Settings", path: "/organization", icon: "settings", permission: "organization.manage" },
       { key: "audit", label: "Audit Log", path: "/audit", icon: "clock", permission: "audit.view" },
       { key: "trash", label: "Trash", path: "/trash", icon: "trash", permission: "trash.view" },
@@ -154,6 +155,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "effective-permissions": "Effective Permissions Inspector",
   "employee-form": "Employee Form",
   "employee-detail": "Employee Detail",
+  "notification-settings": "Notification Rules",
   "403": "Access Restricted",
 };
 

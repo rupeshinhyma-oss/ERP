@@ -322,6 +322,27 @@ export function UsersPage() {
   }, [setSearchParams]);
 
   useModalHistorySync(Boolean(viewUser), handleCloseViewUser);
+  useModalHistorySync(createOpen, () => {
+    setCreateOpen(false);
+    setAutoManagerNotice(null);
+  });
+  useModalHistorySync(editOpen, () => setEditOpen(false));
+
+  useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === "users") {
+        setCreateOpen(false);
+        setAutoManagerNotice(null);
+        setEditOpen(false);
+        setOverridesUserId(null);
+        handleCloseViewUser();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, [handleCloseViewUser]);
 
   // Universal search deep-link: `?id=` opens that user's detail view
   // directly, so clicking a Users result in the topbar search lands on the

@@ -57,6 +57,10 @@ export interface PlanningSheet {
   organization_id?: string | null;
   /** This sheet's linked branch id (one of organization_id's MasterCompany.branches entries). null only for sheets created before this link existed. */
   branch_id?: string | null;
+  /** Linked Buyer profile ID for buyer-specific planning sheets. */
+  buyer_id?: string | null;
+  /** Manually specified branch/delivery location for buyer sheets. */
+  buyer_branch_name?: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

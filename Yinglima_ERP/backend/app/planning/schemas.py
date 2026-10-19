@@ -33,8 +33,10 @@ class PlanningSheetCreate(BaseModel):
     """
 
     name: str = Field(..., min_length=1, max_length=150, description="e.g. 'Mum Branch'.")
-    organization_id: uuid.UUID = Field(..., description="The Product Master organization (MasterCompany) this sheet's branch belongs to.")
-    branch_id: str = Field(..., min_length=1, max_length=100, description="One of organization_id's branch ids (from MasterCompany.branches).")
+    organization_id: uuid.UUID | None = Field(default=None, description="The Product Master organization (MasterCompany) this sheet's branch belongs to.")
+    branch_id: str | None = Field(default=None, max_length=100, description="One of organization_id's branch ids (from MasterCompany.branches).")
+    buyer_id: uuid.UUID | None = Field(default=None, description="Linked Buyer profile ID for buyer-specific planning sheets.")
+    buyer_branch_name: str | None = Field(default=None, max_length=150, description="Manually specified branch/delivery location for buyer sheets.")
     mum_group_label: str = Field(default="Mum", min_length=1, max_length=50, description="Group label name (e.g. 'Mum', 'CN', 'MP').")
     description: str | None = Field(default=None)
 
@@ -78,6 +80,12 @@ class PlanningSheetRead(BaseModel):
     )
     branch_id: str | None = Field(
         default=None, description="This sheet's linked branch id (from organization_id's MasterCompany.branches). NULL for sheets created before this link existed."
+    )
+    buyer_id: uuid.UUID | None = Field(
+        default=None, description="Linked Buyer profile ID for buyer-specific planning sheets."
+    )
+    buyer_branch_name: str | None = Field(
+        default=None, description="Manually specified branch/delivery location for buyer sheets."
     )
     created_by: uuid.UUID
     created_at: datetime

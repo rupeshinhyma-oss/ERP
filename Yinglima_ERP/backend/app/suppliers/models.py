@@ -123,14 +123,13 @@ class Supplier(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDele
     contact_salutation: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "Mr. / Mrs / Ms"
     contact_full_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     contact_designation: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    contact_calling_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    contact_whatsapp_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    contact_wechat_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    contact_calling_number: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    contact_whatsapp_number: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    contact_wechat_number: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     # --- Second form (main data profile form) --------------------------------------------
     tax_id_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    town: Mapped[str | None] = mapped_column(String(150), nullable=True)
     primary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
     secondary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -236,9 +235,9 @@ class SupplierContact(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin
     country_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("countries.id", ondelete="SET NULL"), nullable=True, index=True
     )  # "Country (dropdown menu) (by default China)"
-    calling_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    whatsapp_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    wechat_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    calling_number: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    whatsapp_number: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    wechat_number: Mapped[str | None] = mapped_column(String(150), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Marks the contact auto-created from the First Data Form, so the

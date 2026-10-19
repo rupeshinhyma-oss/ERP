@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
@@ -18,6 +18,7 @@ import { SaleProcessDetailModal } from "./SaleProcessDetailModal";
 
 export function SaleProcessListPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const toast = useToast();
 
   const [orders, setOrders] = useState<SaleOrder[]>([]);
@@ -53,6 +54,18 @@ export function SaleProcessListPage() {
   const [actionMenuPos, setActionMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [viewOrderId, setViewOrderId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+
+  // Sync deep link query params (from notifications or external links)
+  useEffect(() => {
+    const s = searchParams.get("search");
+    const id = searchParams.get("id");
+    if (s) {
+      setSearch(s);
+    }
+    if (id) {
+      setViewOrderId(id);
+    }
+  }, [searchParams]);
 
   // Close kebab action menu on outside click or scroll
   useEffect(() => {

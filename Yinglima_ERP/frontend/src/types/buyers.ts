@@ -26,6 +26,7 @@ export interface Buyer {
   company_name: string;
   buyer_type?: BuyerType | null;
   country_id: string;
+  state_id?: string | null;
   city?: string | null;
   address?: string | null;
   contact_salutation?: string | null;
@@ -45,6 +46,7 @@ export interface Buyer {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  created_by_name?: string | null;
   emails?: string[];
   contacts?: BuyerContact[];
   category_ids?: string[];

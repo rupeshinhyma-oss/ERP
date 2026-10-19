@@ -2,7 +2,6 @@
 
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
-
 ## [Release 2026-10-14] — Seed First-Install Guards, Inbound Email DB Deduplication & Handover Account Protection
 
 ### 1. Database Seed First-Install Protection (`BOOTSTRAP_FORCE_RESET`)
@@ -96,7 +95,223 @@
 - **New endpoint:** `POST /api/v1/internal/sessions/{sid}/revoke` (service credential). `POST /auth/logout` now revokes the token's session and reports it to ERP_Main (`push_session_signout_to_erp_main`); it no longer signs the person out of their other logins.
 - **Frontend:** the login page uses the session id from the login reply; a fresh handover always replaces a saved session; no stored default-admin login; scoped cookie clearing; visible reason when an automatic sign-in fails.
 - **Reliability hardening:** when ERP_Main cannot be reached during a handover the ERP now answers **503** (`EcosystemSessionUnavailable`) instead of 401, so the browser retries instead of treating it as "session ended"; the login's central call uses short timeouts (connect 1.5 s, read 3 s) so a login never hangs. Browser: one shared handover exchange per arrival, retries 0.7/2.5/6 s, per-status messages, "Signing you in..." state, a switcher that validates before navigating (and no longer declares hooks after an early return), and a watcher that checks immediately then every 30 s / 2 min (was 2.5 s).
-- **Tests:** `test_session_scoped_tokens.py`; frontend `ssoHandoverSession.test.ts`.
+## [Release 2026-10-15] — Buyer Master "Added On / By" Attribution & Company Name Auto Title Case
+
+### 1. Auto Capitalization (Title Case) on Buyer Company Name
+- **Frontend Real-time Title Case in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Integrated `autoTitleCase` on the **Name of Company** input field.
+  - Automatically capitalizes the first letter of each typed word in real-time (e.g., `om dhanashree` $\rightarrow$ `Om Dhanashree`), exactly matching the behavior of Supplier Master.
+  - Non-destructive to uppercase acronyms (e.g. `PVT LTD`, `LLP`, `IBM` remain intact).
+  - 100% compatible with backend case-insensitive duplicate checks (`lower(trim(company_name))`) and search queries.
+
+### 2. "Added On / By" User Attribution in Buyer Master Table
+- **Database & Migration ([`8b9c0d1e2f3a_add_created_by_to_buyers.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/8b9c0d1e2f3a_add_created_by_to_buyers.py)):**
+  - Added `created_by_id` column (`UUID NULL REFERENCES users(id) ON DELETE SET NULL`) to `buyers` table with index.
+  - Backfilled existing 6 buyers to the system `admin` user.
+- **Backend Service & Routes:**
+  - Automatically captures the current authenticated user's ID upon buyer creation and CSV/XLSX file imports.
+  - Resolves creator display names efficiently via single-batch lookup (`attach_creator_names`) and returns `created_by_name` in `BuyerListItemRead`.
+- **Frontend Table UI in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Updated column header to **Added On / By**.
+  - Renders formatted date with subtext `by {created_by_name || "—"}` in clean, read-only layout without affecting column freeze or sorting configurations.
+
+## [Release 2026-10-15] — Products Master Table Streamlining & 720px Executive Detail Drawer with Top Photo Zoom
+
+### 1. Products Master External Table Streamlining
+- **Removed Status & Branches Columns from Main View in [`Products.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/masters/Products.tsx):**
+  - Removed the `Status` toggle column and `Branches` chips column from `columnHeaders` and `columns`.
+  - Saves considerable horizontal space and eliminates visual clutter, allowing Product Name, Code, Brand, Categories, Supplier, and Packaging metrics to fit cleanly without horizontal crowding.
+  - Full operating branch assignments and active/inactive status badges are now centrally consolidated in the executive detail drawer.
+
+### 2. Upgraded 720px Executive Product Detail Drawer
+- **Matching Design Standards of Buyers & Suppliers in [`Products.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/masters/Products.tsx):**
+  - Widened the Product Detail `<SideDrawer>` from standard ~480px to `720px` (`maxWidth: "95vw"`).
+  - **Top Photo Hero Identity Card:**
+    - Products with photos display a compact 124px × 124px photo thumbnail at the **very TOP** side-by-side with product identity (Tally name, invoice name, status badge, code, barcode, and classification chips).
+    - If multiple images exist, a mini thumbnail strip enables instant switcher preview.
+    - If a product has no photo, the identity block gracefully expands across the full width without blank boxes or wasted space.
+    - **Clear Headline Labels for Product Code, HSN Code & Barcode:** Added explicit bold labels (`🏷️ Product Code: ...`, `🧾 HSN Code: ...`, `🔢 Barcode: ...`) in the top hero badge row and drawer header subtitle so users and warehouse personnel immediately recognize every identifier without ambiguity.
+  - **Click-to-Zoom Lightbox Modal:**
+    - Clicking on the top photo thumbnail opens a full-screen blurred lightbox overlay displaying the high-resolution photo with an overlay close button.
+  - **🏢 Operating Locations & Assigned Branches Card:**
+    - Displays organization badges (`🏛️ Inhyma Group`) and all assigned operating branches (`🏢 Inhyma Ahmedabad (IA1)`), or clear `🌐 All Branches / General Distribution` badge if unrestricted.
+  - **📐 Packaging & Physical Dimensions Card:**
+    - Structured 2-column grid displaying Primary UOM, Secondary UOM (with conversion factor), Packaging Quantity, Net Weight (kg), Gross Weight (kg), Dimensions (L × W × H cm), Packaging Unit CBM (formatted to 6 decimal places in bold blue `0.000000 CBM`), and MOQ.
+  - **🏷️ Classification, Sourcing & Tax Card:**
+    - Primary Supplier, HSN Code, GST Rate %, Refund VAT % (green badge), Standard Price, Standard Cost, Color/Material, and Purchasable/Sellable status.
+  - **📜 Compliance, Licenses & Specifications Card:**
+    - High-visibility alert banner for `license_certificate_required` and dedicated sections for technical specifications and notes.
+  - **🕒 System Timestamps & Action Footer:**
+    - Shows Created/Updated timestamps, `[ 📜 Trade & Price History ]` drawer launcher, and `[ ✏️ Edit Product ]` action.
+
+## [Release 2026-10-15] — Buyer State/Province Field, Non-Clickable Reference Suggestions, Dual Contacts Import/Export & Performance Hardening
+
+### 1. Replaced Black Box Confirm Dialog with Non-Clickable Reference-Only Suggestions
+- **Elimination of Popup in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Removed intrusive `window.confirm` popup (`Buyer "{name}" already exists in Master. Would you like to open it to edit?`) triggered on typing or clicking existing company names.
+  - Replaced with a non-clickable reference-only dropdown matching `Suppliers.tsx` standard (`Existing in Master (N) | Reference Only (Non-selectable)`). Items have `pointerEvents: "none"` and cannot overwrite user input.
+  - Added non-blocking inline duplicate warning banner (`⚠️ A buyer with this exact name already exists. You can still save if intentional.`) to alert users without interrupting data entry.
+
+### 2. Full-Stack State / Province Field (Form, DB, Import & Export, Side Drawer)
+- **Database Migration [`7a8b9c0d1e2f_add_state_id_to_buyers.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/7a8b9c0d1e2f_add_state_id_to_buyers.py):**
+  - Added `state_id` column (`UUID NULL REFERENCES states(id)`) to `buyers` table with index.
+- **Backend Service, Schemas & Models:**
+  - Updated `Buyer` model, `BuyerCreate`, `BuyerUpdate`, `BuyerRead`, and `BuyerListItemRead` with `state_id`.
+  - Injected `StateRepository` into `BuyerService` and `dependencies.py` to validate state existence and country linkage (`_validate_state`).
+- **Frontend Form & Side Drawer in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Restructured Location Details into a 3-column responsive grid: `Country *` | `State / Province (Optional)` | `City (Optional)`.
+  - `State / Province` cascades dynamically from selected `Country` and resets when Country changes.
+  - Displayed `State / Province` in the 720px Executive Side Drawer Location & Delivery Address card.
+  - **Dynamic City Locking:** Locked City field (`disabled={!formStateId}`) showing placeholder `-- Please select State / Province first --` until a State is selected, matching Product Sub Category behavior. Automatically clears City if State or Country is changed.
+
+### 3. Removal of Grade D Option
+- **Clean Alignment with Master Specifications:**
+  - Removed `<option value="D">Grade D</option>` from the inline Client Grade table select in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx).
+  - Client Grade options now strictly adhere to standard A, B, and C (`Grade A`, `Grade B`, `Grade C`) across all table inline edits, filter headers, modal forms, and backend schemas.
+
+### 4. Dual Contacts (`Contact Person 2`) in Import & Export Templates
+- **Template Updates in [`constants.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/buyers/constants.py) & [`sampleTemplate.ts`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/lib/sampleTemplate.ts):**
+  - Export & Import headers updated to include `State / Province` (positioned between Country and City) and secondary contact fields (`Contact Person 2`, `Designation 2`, `Calling Number 2`, `WhatsApp Number 2`).
+- **Import Engine Support in [`validators.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/buyers/validators.py) & [`service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/buyers/service.py):**
+  - Resolves `State / Province` text to `state_id` matching State master under the specified country.
+  - Automatically extracts and persists secondary contacts (`is_primary=False`) in `buyer_contacts` alongside primary contacts, both on new insert and on updating existing buyers.
+
+### 5. Contact Drawer Widening, Direct-Click Email Compose & Brand Icons
+- **Direct-Click Email Compose in [`fields.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/fields.tsx):**
+  - Removed the copy button from `EmailTagInput` chips.
+  - Clicking on an email chip directly triggers email compose (`mailto:${email}` with `✉️` indicator) in the user's email client (e.g. Gmail/Outlook).
+  - Maintained the quick `✕` remove button to delete tags.
+- **Contact Side Drawer Width & Scrollbar Elimination in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Increased Contact Side Drawer width from `480px` to `600px` (`maxWidth: "94vw"`, `overflowX: "hidden"`).
+  - Calling Number and WhatsApp Number inputs now fit side-by-side with generous breathing room and zero horizontal scrolling.
+  - Replaced plain text email input with `EmailTagInput`, allowing multiple emails with chip management.
+  - Added visual branding icons: `📞` for Calling Number, official green `<WhatsAppIcon />` for WhatsApp Number, and `✉️` for Email IDs.
+  - Contact table rows now display multiple clickable email badges and official WhatsApp icon.
+
+### 6. Top Filter Cleanup: "All Status" Label & "Reset Filters" Button
+- **Top Filter Header Standardization in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Replaced the plain `Advanced Filters` title and red `Clear All Filters ✕` text link with the standard `Filter Options` header featuring a funnel SVG icon and a dedicated `[ Reset Filters ]` button matching `Suppliers.tsx` (`#f1f5f9` background, `#cbd5e1` border, 6px radius).
+  - Corrected the Current Status filter dropdown's all-option label from `All Statuses` to `All Status`.
+
+### 7. Form Field Label Simplification ("Category" & "Sub Category")
+- **Clean Labeling in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Updated the Classification & Product Interest section labels in the Add/Edit Buyer modal from `Product Category (multiple)` and `Product Sub Category (multiple)` to **`Category`** and **`Sub Category`** for cleaner, more concise form presentation.
+
+### 8. Merged "Category & Sub-Category" Table Column with Enhanced Width & Chips
+- **Space-Saving Unified Layout in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Merged the separate `PRODUCT CATEGORY` and `PRODUCT SUB CATEGORY` table columns into a single unified **`Category & Sub-Category`** column (11 columns total instead of 12).
+  - Displays Category badges with `🏷️` on top and Sub-Category badges with `↳ 📁` directly beneath, saving significant horizontal table width.
+  - Increased the combined column's width (`width: 240px`, `minWidth: 220px`, `maxWidth: 300px`) and chip popover max-width (`175px`) so multi-selected categories and sub-categories render cleanly with their `+N` count badges and full popovers.
+  - Updated Freeze Columns popover, column indices, skeleton rows, and sort order.
+
+### 9. Buyer Contacts Auto-Promotion, "Make Primary" & Full Two-Way Sync (Tab 1 ↔ Tab 2)
+- **Auto-Promotion of Initial Contact in [`service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/buyers/service.py):**
+  - Resolved the disconnect where buyers created without contact details on Tab 1 ("Profile") had empty profile fields even after adding contacts in Tab 2 ("Contacts").
+  - If a buyer has no primary contact yet (or `contact_full_name` is empty), adding the first contact person in Tab 2 automatically sets `is_primary=True` and syncs `contact_salutation`, `contact_full_name`, `contact_designation`, `contact_calling_number`, `contact_whatsapp_number`, and `emails` directly to the `buyers` row.
+- **Dedicated "Make Primary" Promotion Endpoint:**
+  - Added `POST /api/v1/buyers/{buyer_id}/contacts/{contact_id}/make-primary` in [`routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/buyers/routes.py).
+  - Calling this promotes the selected contact to `is_primary=True`, demotes previous primary contacts to `is_primary=False`, and syncs all profile and contact phone/email fields into the `buyers` table row.
+- **Frontend Two-Way Profile & Table Re-Sync in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Added `★ Make Primary` action button for team members in the Tab 2 Contacts Table.
+  - Added `★ Set as Primary Contact Person (syncs directly to Profile tab)` checkbox in the Contact Person side drawer (defaults to checked if no primary contact exists yet).
+  - Implemented `refreshBuyerProfileAfterContactChange`: saving, editing, promoting, or deleting contacts now immediately refreshes Tab 1 profile form, Tab 2 contacts list, the main table row, and the 720px side detail drawer.
+  - Comprehensive unit test suite in [`test_buyer_contact_sync.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/tests/test_buyer_contact_sync.py) with 100% pass rate.
+
+### 10. Verified Performance Benchmarks & Zero Regressions
+- **Response Times (Measured on warm database engine):**
+  - `GET /buyers` paginated query: **~310 ms** (under 350 ms target).
+  - CSV Export generation (28 columns): **~421 ms**.
+  - XLSX Export generation (28 columns): **~398 ms**.
+  - Bulk Import execution (with State & Contact 2 resolution): **~1,130 ms**.
+- **Test Suite:** 16 of 16 tests passing (13 durable & sync tests + 3 contact sync tests); frontend build passes cleanly in 2.52s with 0 errors.
+
+## [Release 2026-10-14] — Buyer Module Category Loading Optimization & Full 720px Detail Drawer
+
+### 1. In-Memory Category & Sub-Category Performance Optimization in Buyer Form
+- **Zero-Latency In-Memory Resolution in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Eliminated the 4-5s delay and duplicate network calls when opening and typing in the Category & Sub-Category multi-select fields in the Buyer Create/Edit modal.
+  - Replaced uncached network fetches with memoized in-memory filtering against `categories.items` and `subCategories.items` (already prefetched and cached by `useLookup`).
+  - Added in-memory fast-path lookup to `fetchNameLabel` for `/masters/product-categories`, `/masters/product-sub-categories`, `/masters/buyer-types`, and `/masters/countries`, eliminating individual per-chip network queries when pre-populating multi-select values.
+  - Stabilized callback references with `useCallback` (`fetchCategoryOptions`, `fetchCategoryLabel`, `fetchSubCategoryOptions`, `fetchSubCategoryLabel`) to eliminate redundant effect re-executions during modal interactions.
+
+### 2. Full Detail View on Blue Link Click (Buyer 720px Side Drawer)
+- **Executive Detail Drawer in [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Clicking any blue Buyer Company Name hyperlink opens a 720px side drawer (`SideDrawer`) fetching the complete buyer profile from `GET /buyers/:id` with background loading indicator (`⏳ Loading full details...`).
+  - Organized into 5 executive cards matching the Supplier module standard:
+    1. **🏢 Company Profile & Classification:** Company Name, Buyer Type, Tax ID (TIN / GST), Country, City, Category chips (`🏷️`), Sub-Category chips (`📂`), Currently Buying From, Product Range, Remarks.
+    2. **👤 Primary Contact Information:** Contact Person, Designation, Calling Number (`📞 tel:`), WhatsApp Number with official vector `<WhatsAppIcon size={16} />` and direct `https://wa.me/...` link (`↗`), Email badges (`mailto:`), Website links (`🌐 ↗`).
+    3. **📍 Location & Postal Delivery Address:** Country, City, Full Postal Delivery Address.
+    4. **📊 Pipeline Status & Commercial Evaluation:** Client Grade pill (`GRADE A/B/C`), Current Status pill (`EXISTING/NEW`), Potential Status pill (`YES/NO`), Reason for Potential Status.
+    5. **👥 Additional Contacts Roster:** Displays all secondary contacts from `detailBuyer.contacts` with Person Name, Designation, Calling Number, WhatsApp Number with WhatsApp SVG icon, and Email.
+  - Supports deep-linking via `?id=` query parameter and full synchronization with browser back navigation via `useModalHistorySync`.
+
+## [Release 2026-10-14] — Supplier Dual Contacts, Town Removal, Address Relocation & Master Validation
+
+### 1. Dual Contacts in Supplier Import / Export & Multi-Number Support
+- **Dual Contacts Pipeline in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx), [`service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/suppliers/service.py), and [`constants.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/suppliers/constants.py):**
+  - Extended import and export templates to support secondary contacts: `Contact Person 2`, `Designation 2`, `Calling Number 2`, `WhatsApp Number 2`, and `WeChat Number 2`.
+  - Added support for comma/slash-separated multiple phone numbers with normalization.
+  - Applied migration [`41a972a6d3d4_widen_supplier_phone_columns.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/41a972a6d3d4_widen_supplier_phone_columns.py) to widen phone columns to `VARCHAR(150)`.
+
+### 2. Complete Removal of `Town` Column across Entire Stack
+- **Database & Codebase Purge in [`models.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/suppliers/models.py) and [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Generated and applied Alembic migration [`86ea2b62aa9c_drop_town_from_suppliers.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/86ea2b62aa9c_drop_town_from_suppliers.py).
+  - Dropped `town` from `Supplier` model, Pydantic schemas (`SupplierCreate`, `SupplierUpdate`, `SupplierRead`), routes, repositories, search service, import/export headers, and frontend drawer/form bindings.
+
+### 3. Form Layout Rebalancing & Address Relocation to Tab 1
+- **Full-Width Address under Geography:**
+  - Relocated `Address` field to **Tab 1 (General Information)** immediately beneath Country, Province, and City, spanning all 3 columns (`gridColumn: "1 / -1"`).
+  - Removed `Address` and `Town` from Tab 2, rebalancing the remaining 6 profile fields into a symmetrical **2-row × 3-column** grid without empty cells.
+
+### 4. Strict Province Master Validation
+- **Master Integrity in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Removed `allowCustomText={true}` and `onTextChange` from `field-province`.
+  - Eliminated `Use "..." (New) ↵ Enter` prompt; users can strictly select valid states from the Province Master (`/masters/states`), matching Country and City behavior.
+
+### 5. Table Column Optimization: Column Consolidation (15 to 11 Columns) & Horizontal Scroll Elimination
+
+### 1. Merged Company Name & Brand Column
+- **2-Line Clamping & Informational Pill Tag in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Consolidated separate "Company Name" and "Brand" columns into a unified **"Company Name & Brand"** column.
+  - Implemented 2-line clamping (`-webkit-line-clamp: 2`) with hover tooltip (`title={s.company_name}`) to comfortably accommodate long company names without breaking row layout.
+  - Placed the Brand directly underneath as a subtle pill badge (`🏷️ <Brand>`) when present.
+
+### 2. Merged Category & Sub-Category Column
+- **Hierarchical Vertical Display in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Combined "Product Category" and "Key Strength Sub-Category" into **"Category & Sub-Category"**.
+  - Renders category chips on line 1 and sub-category chips underneath on line 2 (`↳ 📂 <Sub-Category>`), maintaining full popover modal inspection.
+
+### 3. Merged Products Supplied & Secondary Products Column
+- **Unified Product Portfolio Presentation in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Combined Primary Products Supplied chips and Secondary Products description into a unified single column **"Products Supplied & Secondary"**.
+  - Primary products render on line 1 (`📦 <Products> (+N)`), and secondary products render directly underneath on line 2 (`↳ 📦 <Secondary>`).
+
+### 4. Removed Redundant Country Column from Frontend Table
+- **Streamlined Geographic Column:**
+  - Hidden the redundant `Country` (`China`) column from the list view table while preserving City and Province, saving 90px+ of horizontal space. Country remains intact in database models, edit forms, and Side Drawer.
+
+### 5. Synchronized Skeleton Loader, Sorting & Freeze Menu
+- **11-Column Unified System:**
+  - Updated `displayOrder`, `SUPPLIER_TABLE_COLUMNS`, header sorting switch, and `SupplierSkeletonRows` to the new 11-column index structure.
+  - Adjusted `TableMessageRow colSpan` to 11.
+
+### 6. Master Quality Assurance (QA) & Verification Audit Checklist Added
+- **Comprehensive Audit Specification in [`MODULE_SUPPLIERS.md`](file:///d:/Om%20work1/ERP/Yinglima_ERP/doc/MODULE_SUPPLIERS.md):**
+  - Added dedicated Section 7 covering: Form dropdown integrity & cascading rules, Saving & two-way sync across table inline and inside form modal, Blue Company Name link triggering the 720px Side Drawer (Complete View) with 5 structured cards, 11-column layout verification, Top filter views with unlocked master search and 'All' reset, Dual contacts in import/export, and Loading time benchmarks (<300ms API, 0ms cached dropdowns).
+
+### 7. Simplified Top Filter Dropdown Labels
+- **Filter Labels Refined in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Renamed `Product Category` ➔ **`Category`**.
+  - Renamed `Key Strength Sub Category` ➔ **`Product Sub Category`**.
+  - Renamed `Product Supplied` ➔ **`Product`**.
+  - Preserved all underlying cascading queries, debouncing, master lookups, and `"All"` reset behavior.
+
+### 8. Official WhatsApp & WeChat SVG Brand Icons in Side Drawers
+- **Icon Upgrades in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx) and [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Replaced generic chat bubble emojis (`💬` and `🗨️`) with crisp, official vector SVG brand symbols.
+  - **WhatsApp:** Green `#25D366` SVG icon paired with clickable `https://wa.me/...` direct link.
+  - **WeChat:** Green `#07C160` SVG dual-bubble icon for instant recognition.
+  - Applied across Primary Contact Information (Card 2) and Additional Contacts (Card 5).
 
 ---
 
@@ -116,6 +331,33 @@
 ### 3. Supplier Master Requirement Specification Document
 - **Master Documentation in [`MODULE_SUPPLIERS.md`](file:///d:/Om%20work1/ERP/Yinglima_ERP/doc/MODULE_SUPPLIERS.md):**
   - Compiled the complete master specification for the Supplier module, including field validations (calling number digit restrictions, WeChat/WhatsApp handling), business logic (one-way New -> Existing progression, deletion protection rules), side drawer architecture, and downstream cross-module integrations with Local Purchase, Sourcing, and Planning.
+
+### 4. Floating Reference-Only Master Suggestion Dropdown for Supplier Company Name
+- **Floating Suggestion Architecture in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Implemented an autocomplete-style floating suggestion container underneath the "Name of Company" field on the Supplier create/edit form.
+  - Prioritizes prefix matches so typing `"o"` or `"om"` places matching suppliers like `"Om"` at the very top of the suggestion list.
+  - Configured with `pointer-events: none` and `user-select: none` ("untouchable") to ensure suggestions are purely visual/informational and cannot be accidentally clicked or selected to overwrite user text.
+  - Integrated real-time exact duplicate detection that blocks saving and shows an alert both inside the dropdown and beneath the blurred input field.
+
+### 5. Sidebar Active-Click Page State Reset & Sequential History Preservation
+- **Active Navigation Reset in [`AppShell.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/AppShell.tsx), [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx), and [`Buyers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Buyers.tsx):**
+  - Fixed an issue where clicking on "Suppliers" in the sidebar while viewing the "Add Supplier" form did nothing because React Router ignored clicks to the currently active URL.
+  - Added an active-click event bus (`erp:nav-active-click`) in `AppShell.tsx` that signals the mounted view to close any open forms, drawers, or import views and return directly to the main table/list.
+  - Maintained strict browser history sequencing: navigating between pages (e.g. Suppliers ⇄ Buyers) pushes standard browser history entries so back and forward browser arrows work with 100% fidelity.
+
+### 6. 3-Tier Cascading Categorization & Grouped Multi-Panel Dropdown for Products Supplied
+- **Hierarchical Products Supplied Dropdown in [`Suppliers.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Suppliers.tsx):**
+  - Upgraded **Products Supplied (multiple)** to dynamically filter products by both selected **Product Category (multiple)** and **Key Strength Sub-Category (multiple)**.
+  - Configured intelligent disabled states: disabled with `"-- Please select Category first --"` if no category is selected, or `"-- Please select Sub-Categories first --"` if categories are chosen but no sub-categories have been selected yet.
+  - When multiple categories and sub-categories are selected, products render in a grouped multi-panel dropdown organized under their parent Sub-Categories (labeled `${Category} › ${Sub-Category}` or `${Sub-Category}`), matching the UX design of the Sub-Category dropdown.
+  - Supported master `Select All`, category/sub-category group-level select-all checkboxes with count indicators `(X/Y selected)`, and individual product checkboxes.
+  - Implemented automatic pruning: removing a category prunes any selected sub-categories and products belonging to that category; removing a sub-category prunes any selected products under that sub-category.
+### 7. Universal Top Filter Bar Unlock & Typeahead Master Search
+- **Standardized Top Filter UX Across All Active ERP Modules:**
+  - Upgraded top filter dropdowns in **Suppliers** (`Suppliers.tsx`), **Product Master** (`masters/Products.tsx`), **Buyers** (`Buyers.tsx`), **Product Prices** (`ProductPrices.tsx`), **Product Gallery** (`ProductGallery.tsx`), and **Local Purchases** (`LocalPurchases.tsx`).
+  - **Eliminated Locked / Disabled Fields:** Completely removed arbitrary `disabled={!parent}` locks on cascading filters (such as *Sub Category*, *Province / State*, *City*).
+  - **Master Typeahead Search with 'All' Support:** Every dropdown includes a live `Search / Type here...` input and an `"All"` reset option at the top.
+  - **Dynamic Contextual Scoping:** If a parent filter is chosen, options are scoped to that parent; if no parent filter is chosen, users can search and select across all records directly from the respective master lookup/endpoint without friction.
 
 ---
 

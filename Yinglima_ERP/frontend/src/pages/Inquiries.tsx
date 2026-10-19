@@ -201,13 +201,24 @@ export function InquiriesPage() {
   }, [buyerIdParam, buyerNames, resolveBuyerName]);
 
   useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === "inquiries") {
+        navigateToView({ layer: "companies" });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, [navigateToView]);
+
+  useEffect(() => {
     (async () => {
       try {
-        const [codeRes, prodRes, uomRes, buyerRes] = await Promise.all([
+        const [codeRes, uomRes, buyerRes] = await Promise.all([
           apiGet<ConsignmentCode[]>("/inquiries/consignment-codes"),
-          apiGet<any>("/masters/products?page_size=1000"),
-          apiGet<any>("/masters/uom?page_size=1000"),
-          apiGet<any>("/buyers?limit=1000"),
+          apiGet<any>("/masters/uom?page_size=100"),
+          apiGet<any>("/buyers?page_size=200"),
         ]);
         const cMap: Record<string, string> = {};
         codeRes.data.forEach((c) => { cMap[c.id] = c.code; });
@@ -217,11 +228,6 @@ export function InquiriesPage() {
         const bMap: Record<string, string> = {};
         bList.forEach((b: any) => { bMap[b.id] = b.company_name || b.name || "Buyer"; });
         setBuyerNames(bMap);
-
-        const pList: any[] = Array.isArray(prodRes.data) ? prodRes.data : prodRes.data?.data || [];
-        const pMap: Record<string, string> = {};
-        pList.forEach((p: any) => { pMap[p.id] = `${p.product_code || ""} — ${p.product_name || p.product_name_tally || ""}`; });
-        setProductNames(pMap);
 
         const uList: any[] = Array.isArray(uomRes.data) ? uomRes.data : uomRes.data?.data || [];
         const uMap: Record<string, string> = {};
@@ -233,35 +239,24 @@ export function InquiriesPage() {
     })();
   }, [refreshTrigger]);
 
-  // Calculate dynamic inquiry counts from database without unnecessary refetches on view change
+  // Lazy-load products in lightweight format only when navigating into the items view layer
   useEffect(() => {
-    (async () => {
-      try {
-        const { data: summaries } = await apiGet<CompanySummary[]>("/inquiries/companies");
-        let pending = 0;
-        let approved = 0;
-        let ongoing = 0;
-        let completed = 0;
-        let total_order = 0;
-
-        for (const s of summaries) {
-          const totalConsignments = s.consignment_count || 0;
-          const fullyApproved = s.approved_count || 0;
-          const proposed = s.proposed_count || 0;
-          const partial = Math.max(0, totalConsignments - fullyApproved - proposed);
-
-          total_order += totalConsignments;
-          completed += fullyApproved;
-          approved += fullyApproved + partial;
-          pending += proposed;
-          ongoing += proposed + partial;
+    if (view.layer === "items" && Object.keys(productNames).length === 0) {
+      (async () => {
+        try {
+          const prodRes = await apiGet<any>("/masters/products?light_list=true&page_size=200");
+          const pList: any[] = Array.isArray(prodRes.data) ? prodRes.data : prodRes.data?.data || [];
+          const pMap: Record<string, string> = {};
+          pList.forEach((p: any) => {
+            pMap[p.id] = `${p.product_code || ""} — ${p.product_name || p.product_name_tally || ""}`;
+          });
+          setProductNames(pMap);
+        } catch {
+          /* best-effort */
         }
-        setStats({ pending, approved, ongoing, completed, total_order });
-      } catch {
-        /* fallback */
-      }
-    })();
-  }, [refreshTrigger]);
+      })();
+    }
+  }, [view.layer, productNames]);
 
   return (
     <AppShell activeKey="inquiries">
@@ -514,6 +509,7 @@ export function InquiriesPage() {
             onOpenQuickAdd={(buyerId) => { setQuickAddInitialBuyerId(buyerId || ""); setQuickAddOpen(true); }}
             activeStatusTab={companyStatusTab}
             onTabChange={setCompanyStatusTab}
+            onStatsUpdate={setStats}
           />
         )}
         {view.layer === "consignments" && (
@@ -573,6 +569,7 @@ function CompaniesView({
   onOpenQuickAdd,
   activeStatusTab,
   onTabChange,
+  onStatsUpdate,
 }: {
   onOpenCompany: (buyerId: string) => void;
   resolveBuyerName: (buyerId: string) => Promise<void>;
@@ -582,6 +579,7 @@ function CompaniesView({
   onOpenQuickAdd: (buyerId?: string) => void;
   activeStatusTab?: "all" | "pending" | "ongoing" | "approved" | "completed";
   onTabChange?: (tab: "all" | "pending" | "ongoing" | "approved" | "completed") => void;
+  onStatsUpdate?: (stats: { pending: number; approved: number; ongoing: number; completed: number; total_order: number }) => void;
 }) {
   const [summaries, setSummaries] = useState<CompanySummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -597,6 +595,27 @@ function CompaniesView({
       const { data } = await apiGet<CompanySummary[]>("/inquiries/companies");
       const activeSummaries = data.filter((s) => s.consignment_count > 0);
       setSummaries(activeSummaries);
+
+      let pending = 0;
+      let approved = 0;
+      let ongoing = 0;
+      let completed = 0;
+      let total_order = 0;
+
+      for (const s of data) {
+        const totalConsignments = s.consignment_count || 0;
+        const fullyApproved = s.approved_count || 0;
+        const proposed = s.proposed_count || 0;
+        const partial = Math.max(0, totalConsignments - fullyApproved - proposed);
+
+        total_order += totalConsignments;
+        completed += fullyApproved;
+        approved += fullyApproved + partial;
+        pending += proposed;
+        ongoing += proposed + partial;
+      }
+      onStatsUpdate?.({ pending, approved, ongoing, completed, total_order });
+
       activeSummaries.forEach((s) => {
         if (!s.company_name || s.company_name === "Unknown Company") {
           void resolveBuyerName(s.buyer_id);
@@ -607,7 +626,7 @@ function CompaniesView({
     } finally {
       setLoading(false);
     }
-  }, [onError, resolveBuyerName]);
+  }, [onError, resolveBuyerName, onStatsUpdate]);
 
   useEffect(() => {
     void loadSummaries();
@@ -7212,7 +7231,7 @@ function QuickInquiryDrawer({
     (async () => {
       try {
         const [compRes, uomRes] = await Promise.all([
-          apiGet<any>("/buyers?limit=1000"),
+          apiGet<any>("/buyers?page_size=200"),
           apiGet<any[]>("/masters/uom"),
         ]);
         const buyersList = Array.isArray(compRes.data) ? compRes.data : compRes.data?.data || [];

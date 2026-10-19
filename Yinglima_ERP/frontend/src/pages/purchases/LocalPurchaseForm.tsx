@@ -19,7 +19,13 @@ import { apiGet, apiPatch, apiPost, apiPostMultipart, errorMessage } from "@/lib
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
 import { SearchableDropdown } from "@/components/SearchableDropdown";
-import type { LocalPurchaseDetail, LocalPurchaseItem } from "@/types/localPurchase";
+import type {
+  ConsignmentProductItem,
+  LocalPurchaseDetail,
+  LocalPurchaseItem,
+  LocalPurchasePayload,
+  SheetConsignmentLookup,
+} from "@/types/localPurchase";
 
 export function LocalPurchaseFormPage() {
   const navigate = useNavigate();
@@ -27,6 +33,20 @@ export function LocalPurchaseFormPage() {
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
   const toast = useToast();
+
+  // Cascading Sourcing (Organization -> Branch -> Group Label -> Consignment)
+  const [consignmentsLookup, setConsignmentsLookup] = useState<SheetConsignmentLookup[]>([]);
+  const [loadingConsignments, setLoadingConsignments] = useState(false);
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string; branches?: any[] }>>([]);
+
+  const [organizationId, setOrganizationId] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [branchName, setBranchName] = useState("");
+  const [groupLabel, setGroupLabel] = useState("");
+  const [consignmentCode, setConsignmentCode] = useState("");
+  const [planningSheetId, setPlanningSheetId] = useState("");
+  const [planningColumnId, setPlanningColumnId] = useState("");
 
   // Form Fields
   const [supplierId, setSupplierId] = useState("");
@@ -41,6 +61,14 @@ export function LocalPurchaseFormPage() {
   const [showQuickFillModal, setShowQuickFillModal] = useState(false);
   const [quickFillRate, setQuickFillRate] = useState<string>("");
   const [quickFillOnlyEmpty, setQuickFillOnlyEmpty] = useState(true);
+
+  // Custom In-App Confirmation Modal for Consignment/Branch/Org switches
+  const [switchModal, setSwitchModal] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
 
   // Expenses
   const [packingForwarding, setPackingForwarding] = useState<number | "">("");
@@ -68,10 +96,9 @@ export function LocalPurchaseFormPage() {
   } | null>(null);
   const lastFetchedPlanningKeyRef = useRef<string>("");
 
-  // Bill file extraction
+  // Bill file attachment
   const [billFile, setBillFile] = useState<File | null>(null);
   const [billFileUrl, setBillFileUrl] = useState<string | null>(null);
-  const [extracting, setExtracting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Product Search state
@@ -97,7 +124,7 @@ export function LocalPurchaseFormPage() {
   const [initialLoading, setInitialLoading] = useState(isEdit);
 
   // Lookups
-  const supplierLookup = useLookup<{ id: string; company_name: string; supplier_type?: string }>(
+  const supplierLookup = useLookup<{ id: string; company_name: string; supplier_type?: string; brand_description?: string }>(
     "/suppliers",
     500
   );
@@ -129,17 +156,38 @@ export function LocalPurchaseFormPage() {
       }
       const clean = term.trim().toLowerCase();
       const filtered = clean
-        ? list.filter((s: { id: string; company_name: string; supplier_type?: string }) => {
+        ? list.filter((s: { id: string; company_name: string; supplier_type?: string; brand_description?: string }) => {
             const name = (s.company_name || "").toLowerCase();
+            const brand = (s.brand_description || "").toLowerCase();
             const type = (s.supplier_type || "").toLowerCase();
-            return name.includes(clean) || type.includes(clean);
+            return name.includes(clean) || brand.includes(clean) || type.includes(clean);
           })
         : list;
-      return filtered.map((s: { id: string; company_name: string; supplier_type?: string }) => ({
-        value: s.id,
-        label: s.company_name,
-        sublabel: s.supplier_type || undefined,
-      }));
+      return filtered.map((s: { id: string; company_name: string; supplier_type?: string; brand_description?: string }) => {
+        const brand = s.brand_description?.trim();
+        const comp = s.company_name?.trim();
+        const hasBrand = Boolean(brand);
+        const showComp = Boolean(hasBrand && comp && comp.toLowerCase() !== brand!.toLowerCase());
+        const displayLabel = hasBrand ? (showComp ? `${brand} (${comp})` : brand!) : (comp || "");
+
+        return {
+          value: s.id,
+          label: displayLabel,
+          sublabel: s.supplier_type || undefined,
+          renderLabel: () => (
+            <span>
+              {hasBrand ? (
+                <>
+                  <strong style={{ fontWeight: 700, color: "#0f172a" }}>{brand}</strong>
+                  {showComp && <span style={{ color: "#64748b", marginLeft: "5px" }}>({comp})</span>}
+                </>
+              ) : (
+                <span>{comp}</span>
+              )}
+            </span>
+          ),
+        };
+      });
     },
     [supplierLookup.items]
   );
@@ -157,8 +205,13 @@ export function LocalPurchaseFormPage() {
           list = [];
         }
       }
-      const match = list.find((s: { id: string; company_name: string }) => s.id === supId);
-      return match ? match.company_name : supplierName || supId;
+      const match = list.find((s: { id: string; company_name: string; brand_description?: string }) => s.id === supId);
+      if (!match) return supplierName || supId;
+      const brand = match.brand_description?.trim();
+      const comp = match.company_name?.trim();
+      const hasBrand = Boolean(brand);
+      const showComp = Boolean(hasBrand && comp && comp.toLowerCase() !== brand!.toLowerCase());
+      return hasBrand ? (showComp ? `${brand} (${comp})` : brand!) : (comp || "");
     },
     [supplierLookup.items, supplierName]
   );
@@ -171,6 +224,14 @@ export function LocalPurchaseFormPage() {
       try {
         const { data } = await apiGet<LocalPurchaseDetail>(`/purchases/local/${id}`);
         if (data) {
+          setOrganizationId(data.organization_id || "");
+          setOrganizationName(data.organization_name || "");
+          setBranchId(data.branch_id || "");
+          setBranchName(data.branch_name || "");
+          setGroupLabel(data.group_label || "");
+          setConsignmentCode(data.consignment_code || "");
+          setPlanningSheetId(data.planning_sheet_id || "");
+          setPlanningColumnId(data.planning_column_id || "");
           setSupplierId(data.supplier_id);
           setSupplierName(data.supplier_name);
           setInvoiceNo(data.invoice_no);
@@ -195,11 +256,329 @@ export function LocalPurchaseFormPage() {
     loadPurchase();
   }, [id, isEdit, toast]);
 
+  // Fetch cascading sheets & consignments lookup + company master records on mount
+  useEffect(() => {
+    const fetchInitialCascades = async () => {
+      setLoadingConsignments(true);
+      try {
+        const [lookupRes, compRes] = await Promise.all([
+          apiGet<SheetConsignmentLookup[]>("/purchases/local/consignments-lookup"),
+          apiGet<any>("/masters/company-list?page_size=100").catch(() => ({ data: [] })),
+        ]);
+        const lookupList = Array.isArray(lookupRes.data) ? lookupRes.data : [];
+        setConsignmentsLookup(lookupList);
+
+        const compList = Array.isArray(compRes.data)
+          ? compRes.data
+          : Array.isArray(compRes.data?.items)
+          ? compRes.data.items
+          : [];
+        setCompanies(compList);
+      } catch (err) {
+        console.error("Failed to load consignments lookup:", err);
+      } finally {
+        setLoadingConsignments(false);
+      }
+    };
+    fetchInitialCascades();
+  }, []);
+
+  // Cascading helpers: Available Organizations
+  const availableOrganizations = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of companies) {
+      if (c.id && c.name) {
+        map.set(c.id, c.name);
+      }
+    }
+    for (const s of consignmentsLookup) {
+      if (s.organization_id && s.organization_name) {
+        map.set(s.organization_id, s.organization_name);
+      }
+    }
+    if (organizationId && organizationName && !map.has(organizationId)) {
+      map.set(organizationId, organizationName);
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [companies, consignmentsLookup, organizationId, organizationName]);
+
+  // Cascading helpers: Available Branches for selected Organization
+  const availableBranches = useMemo(() => {
+    if (!organizationId) return [];
+    const map = new Map<string, string>();
+    const comp = companies.find((c) => c.id === organizationId);
+    if (comp && Array.isArray(comp.branches)) {
+      for (const b of comp.branches) {
+        if (b.id) {
+          const pfx = b.code_prefix ? ` (${b.code_prefix})` : "";
+          map.set(b.id, `${b.name || b.id}${pfx}`);
+        }
+      }
+    }
+    for (const s of consignmentsLookup) {
+      if (s.organization_id === organizationId && s.branch_id && s.branch_name) {
+        map.set(s.branch_id, s.branch_name);
+      }
+    }
+    if (branchId && branchName && !map.has(branchId)) {
+      map.set(branchId, branchName);
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [companies, consignmentsLookup, organizationId, branchId, branchName]);
+
+  // Cascading helpers: Matching Planning Sheet for selected Org & Branch
+  const matchingSheet = useMemo(() => {
+    if (!organizationId || !branchId) return null;
+    return (
+      consignmentsLookup.find(
+        (s) => s.organization_id === organizationId && s.branch_id === branchId
+      ) || null
+    );
+  }, [consignmentsLookup, organizationId, branchId]);
+
+  // Cascading helpers: Available Consignments for selected Sheet
+  const availableConsignments = useMemo(() => {
+    const list = matchingSheet ? [...(matchingSheet.consignments || [])] : [];
+    if (planningColumnId && consignmentCode && !list.some((c) => c.column_id === planningColumnId)) {
+      list.unshift({
+        column_id: planningColumnId,
+        column_name: consignmentCode,
+        consignment_code: consignmentCode,
+        position: 0,
+        planned_items_count: items.length,
+      });
+    }
+    return list;
+  }, [matchingSheet, planningColumnId, consignmentCode, items.length]);
+
+  const [loadingConsignmentItems, setLoadingConsignmentItems] = useState(false);
+
+  // Auto-populate line items from Shipment Planning Consignment column
+  const loadConsignmentItems = async (colId: string, codeName: string) => {
+    if (!colId) return;
+    setLoadingConsignmentItems(true);
+    try {
+      const res = await apiGet<ConsignmentProductItem[]>(
+        `/purchases/local/consignments/${colId}/items`
+      );
+      const data = Array.isArray(res.data) ? res.data : [];
+      if (data.length > 0) {
+        const mapped: LocalPurchaseItem[] = data.map((it) => {
+          const qty = it.quantity || 0;
+          const rate = it.unit_rate || 0;
+          const vat = it.vat_rate || 0;
+          const itemTotal = Number((qty * rate).toFixed(2));
+          const vatAmt = Number(((itemTotal * vat) / 100).toFixed(2));
+          return {
+            product_id: it.product_id,
+            product_name: it.product_name,
+            product_code: it.product_code || undefined,
+            hsn_code: it.hsn_code || undefined,
+            quantity: it.quantity,
+            unit_rate: it.unit_rate,
+            vat_rate: it.vat_rate,
+            item_total: itemTotal,
+            vat_amount: vatAmt,
+            expense_per_unit: 0,
+            unit_landing_rate: rate,
+            total_landing_rate: itemTotal,
+          };
+        });
+        setItems(mapped);
+
+        // Auto-select supplier if not selected yet and all items share the same supplier
+        if (!supplierId) {
+          const withSup = data.filter((d) => d.supplier_id);
+          if (withSup.length > 0) {
+            const firstSupId = withSup[0].supplier_id!;
+            const allSame = withSup.every((d) => d.supplier_id === firstSupId);
+            if (allSame) {
+              await handleSelectSupplier(firstSupId);
+            }
+          }
+        }
+
+        setSubmitAttempted(false);
+        setErrors((prev) => {
+          const next = { ...prev };
+          delete next.items;
+          delete next.unit_rates;
+          delete next.quantities;
+          return next;
+        });
+        toast(
+          `🚢 Auto-populated ${mapped.length} planned products from Consignment ${codeName}!`,
+          "success"
+        );
+      } else {
+        setItems([]);
+        toast(`Consignment ${codeName} has no items with planned quantity > 0. Table cleared.`, "info");
+      }
+    } catch (err) {
+      console.error("Failed to load consignment items:", err);
+      toast(errorMessage(err), "error");
+    } finally {
+      setLoadingConsignmentItems(false);
+    }
+  };
+
+  const handleSelectOrganization = (orgId: string) => {
+    if (orgId === organizationId) return;
+
+    const executeOrgChange = () => {
+      setItems([]);
+      setOrganizationId(orgId);
+      const org = availableOrganizations.find((o) => o.id === orgId);
+      setOrganizationName(org?.name || "");
+      setBranchId("");
+      setBranchName("");
+      setGroupLabel("");
+      setConsignmentCode("");
+      setPlanningSheetId("");
+      setPlanningColumnId("");
+
+      if (errors.organization_id) {
+        setErrors((prev) => {
+          const next = { ...prev };
+          delete next.organization_id;
+          return next;
+        });
+      }
+      setSwitchModal(null);
+    };
+
+    if (items.length > 0) {
+      const org = availableOrganizations.find((o) => o.id === orgId);
+      setSwitchModal({
+        title: "Change Company Entity?",
+        message: `Changing the organization to "${org?.name || "selected organization"}" will reset the destination branch, consignment, and the ${items.length} item(s) in this purchase.`,
+        confirmLabel: "Yes, Change Organization",
+        onConfirm: executeOrgChange,
+      });
+      return;
+    }
+
+    executeOrgChange();
+  };
+
+  const handleSelectBranch = (brId: string) => {
+    if (brId === branchId) return;
+
+    const executeBranchChange = () => {
+      setItems([]);
+      setBranchId(brId);
+      const br = availableBranches.find((b) => b.id === brId);
+      setBranchName(br?.name || "");
+
+      const sheet = consignmentsLookup.find(
+        (s) => s.organization_id === organizationId && s.branch_id === brId
+      );
+      if (sheet) {
+        setGroupLabel(sheet.group_label || "");
+        setPlanningSheetId(sheet.sheet_id);
+      } else {
+        setGroupLabel("");
+        setPlanningSheetId("");
+      }
+      setConsignmentCode("");
+      setPlanningColumnId("");
+
+      if (errors.branch_id || errors.group_label) {
+        setErrors((prev) => {
+          const next = { ...prev };
+          delete next.branch_id;
+          delete next.group_label;
+          return next;
+        });
+      }
+      setSwitchModal(null);
+    };
+
+    if (items.length > 0) {
+      const br = availableBranches.find((b) => b.id === brId);
+      setSwitchModal({
+        title: "Change Destination Branch?",
+        message: `Changing the branch to "${br?.name || "selected branch"}" will reset the selected consignment and the ${items.length} item(s) in this purchase.`,
+        confirmLabel: "Yes, Change Branch",
+        onConfirm: executeBranchChange,
+      });
+      return;
+    }
+
+    executeBranchChange();
+  };
+
+  const handleSelectConsignment = async (colId: string) => {
+    if (colId === planningColumnId) return;
+
+    if (!colId) {
+      if (items.length > 0) {
+        setSwitchModal({
+          title: "Clear Consignment?",
+          message: `Clearing the consignment will remove the ${items.length} item(s) currently in the table. Do you want to proceed?`,
+          confirmLabel: "Yes, Clear Consignment",
+          onConfirm: () => {
+            setItems([]);
+            setPlanningColumnId("");
+            setConsignmentCode("");
+            setSwitchModal(null);
+          },
+        });
+        return;
+      }
+      setPlanningColumnId("");
+      setConsignmentCode("");
+      return;
+    }
+
+    const found = matchingSheet?.consignments?.find((c) => c.column_id === colId);
+    const code = found?.consignment_code || "";
+
+    if (items.length > 0) {
+      setSwitchModal({
+        title: "Replace Consignment Items?",
+        message: `Changing consignment to "${code || "selected consignment"}" will replace the ${items.length} item(s) currently in the table with items planned for ${code || "this consignment"}.`,
+        confirmLabel: "Yes, Replace Items",
+        onConfirm: async () => {
+          setPlanningColumnId(colId);
+          setConsignmentCode(code);
+          if (errors.consignment_code) {
+            setErrors((prev) => {
+              const next = { ...prev };
+              delete next.consignment_code;
+              return next;
+            });
+          }
+          await loadConsignmentItems(colId, code);
+          setSwitchModal(null);
+        },
+      });
+      return;
+    }
+
+    setPlanningColumnId(colId);
+    setConsignmentCode(code);
+
+    if (errors.consignment_code) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.consignment_code;
+        return next;
+      });
+    }
+
+    await loadConsignmentItems(colId, code);
+  };
+
   // Handle Supplier selection with error clearance and smart quote refresh
   const handleSelectSupplier = async (supId: string) => {
     setSupplierId(supId);
-    const sup = supplierLookup.items?.find((s: { id: string; company_name: string }) => s.id === supId);
-    setSupplierName(sup?.company_name || "");
+    const sup = supplierLookup.items?.find((s: { id: string; company_name: string; brand_description?: string }) => s.id === supId);
+    const brand = sup?.brand_description?.trim();
+    const comp = sup?.company_name?.trim();
+    const hasBrand = Boolean(brand);
+    const showComp = Boolean(hasBrand && comp && comp.toLowerCase() !== brand!.toLowerCase());
+    setSupplierName(hasBrand ? (showComp ? `${brand} (${comp})` : brand!) : (comp || ""));
     if (errors.supplier_id) {
       setErrors((prev) => {
         const next = { ...prev };
@@ -667,87 +1046,6 @@ export function LocalPurchaseFormPage() {
     return diff;
   }, [invoiceTotalValue, calculations.itemsTotalGross]);
 
-  // Bill Extraction (PDF & Excel)
-  const handleExtractBill = async () => {
-    if (!billFile) {
-      toast("Please choose a PDF or Excel bill file first.", "warning");
-      return;
-    }
-    setExtracting(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", billFile);
-
-      const res = await apiPostMultipart<any>("/purchases/local/extract-bill", formData);
-      if (res.data) {
-        const d = res.data;
-        if (d.supplier_id) {
-          setSupplierId(d.supplier_id);
-          const found = supplierLookup.items?.find((s: { id: string; company_name: string }) => s.id === d.supplier_id);
-          setSupplierName(found?.company_name || d.supplier_name || "");
-          setErrors((prev) => {
-            const next = { ...prev };
-            delete next.supplier_id;
-            return next;
-          });
-        } else if (d.supplier_name) {
-          const cleanExtracted = d.supplier_name.trim().toLowerCase();
-          const match = supplierLookup.items?.find((s: { id: string; company_name: string }) => {
-            const cn = s.company_name.trim().toLowerCase();
-            return cn === cleanExtracted || cn.includes(cleanExtracted) || cleanExtracted.includes(cn);
-          });
-          if (match) {
-            setSupplierId(match.id);
-            setSupplierName(match.company_name);
-            setErrors((prev) => {
-              const next = { ...prev };
-              delete next.supplier_id;
-              return next;
-            });
-          } else {
-            setSupplierName(d.supplier_name);
-          }
-        }
-
-        if (d.bill_file_url) setBillFileUrl(d.bill_file_url);
-        if (d.invoice_no) setInvoiceNo(d.invoice_no);
-        if (d.invoice_date) setInvoiceDate(d.invoice_date);
-        if (d.currency) setCurrency(d.currency);
-        if (d.invoice_total_value) setInvoiceTotalValue(d.invoice_total_value);
-
-        if (d.items && d.items.length > 0) {
-          const newRows: LocalPurchaseItem[] = d.items.map((it: any) => ({
-            product_id: it.matched_product_id || null,
-            product_name: it.product_name || "Item",
-            product_code: it.product_code || null,
-            hsn_code: it.hsn_code || null,
-            quantity: it.quantity || 1,
-            unit_rate: it.unit_rate || 0,
-            vat_rate: it.vat_rate !== undefined ? it.vat_rate : 13,
-            item_total: Number((it.quantity * it.unit_rate).toFixed(2)),
-            vat_amount: 0,
-            expense_per_unit: 0,
-            unit_landing_rate: it.unit_rate || 0,
-            total_landing_rate: Number((it.quantity * it.unit_rate).toFixed(2)),
-          }));
-          setItems(newRows);
-          toast(
-            `Extracted ${d.items.length} item(s) from bill successfully!`,
-            "success"
-          );
-        } else {
-          toast(
-            d.notes || "Could not extract items from bill: No readable line items found. Please upload a digital text PDF or Excel sheet.",
-            "error"
-          );
-        }
-      }
-    } catch (err) {
-      toast(errorMessage(err), "error");
-    } finally {
-      setExtracting(false);
-    }
-  };
 
   // Missing rates metrics & Auto-Suggested Rate for Quick Fill
   const missingRateCount = useMemo(() => {
@@ -822,6 +1120,15 @@ export function LocalPurchaseFormPage() {
   // Comprehensive Form Validation (Product Master Visual Style)
   const validateForm = (): Record<string, string> => {
     const errs: Record<string, string> = {};
+    if (!organizationId) {
+      errs.organization_id = "Organization is required.";
+    }
+    if (!branchId) {
+      errs.branch_id = "Branch is required.";
+    }
+    if (!consignmentCode.trim()) {
+      errs.consignment_code = "Consignment is required.";
+    }
     if (!supplierId) {
       errs.supplier_id = "Supplier is required.";
     }
@@ -908,14 +1215,38 @@ export function LocalPurchaseFormPage() {
 
     setSubmitting(true);
     try {
-      const payload = {
+      let finalBillUrl = billFileUrl;
+      if (billFile) {
+        try {
+          const formData = new FormData();
+          formData.append("file", billFile);
+          const uploadRes = await apiPostMultipart<{ bill_file_url?: string; url?: string }>("/purchases/local/upload-bill", formData);
+          const uploadedUrl = uploadRes.data?.bill_file_url || uploadRes.data?.url;
+          if (uploadedUrl) {
+            finalBillUrl = uploadedUrl;
+            setBillFileUrl(finalBillUrl);
+          }
+        } catch (uploadErr) {
+          console.warn("Bill file upload warning:", uploadErr);
+        }
+      }
+
+      const payload: LocalPurchasePayload = {
+        organization_id: organizationId || null,
+        organization_name: organizationName || null,
+        branch_id: branchId || null,
+        branch_name: branchName || null,
+        group_label: groupLabel || null,
+        consignment_code: consignmentCode || null,
+        planning_sheet_id: planningSheetId || null,
+        planning_column_id: planningColumnId || null,
         supplier_id: supplierId,
         supplier_name: supplierName,
         invoice_no: invoiceNo.trim(),
         invoice_date: invoiceDate,
         currency: currency,
         invoice_total_value: Number(invoiceTotalValue),
-        bill_file_url: billFileUrl || null,
+        bill_file_url: finalBillUrl || null,
         packing_forwarding: Number(packingForwarding) || 0,
         transport_expense: Number(transportExpense) || 0,
         offloading_expense: Number(offloadingExpense) || 0,
@@ -1088,7 +1419,166 @@ export function LocalPurchaseFormPage() {
               <span style={{ color: "#0061f2" }}>📄</span> Procurement & Invoice Essentials
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "16px", overflow: "visible" }}>
+            {/* ROW 1: Cascading Sourcing (Organization -> Branch -> Consignment) */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                gap: "16px",
+                marginBottom: "16px",
+                paddingBottom: "16px",
+                borderBottom: "1px dashed #e2e8f0",
+              }}
+            >
+              {/* 1. Organization */}
+              <div>
+                <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
+                  Organization <span style={{ color: "#ef4444" }}>*</span>
+                  {loadingConsignments && <span style={{ fontSize: "11px", color: "#0284c7", marginLeft: "6px" }}>⏳ Loading...</span>}
+                </label>
+                <select
+                  value={organizationId}
+                  onChange={(e) => handleSelectOrganization(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: errors.organization_id ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
+                    boxShadow: errors.organization_id ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+                    background: errors.organization_id ? "#fff5f5" : "#ffffff",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    fontWeight: 600,
+                    boxSizing: "border-box",
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value="">Select Organization...</option>
+                  {availableOrganizations.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.organization_id ? (
+                  <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <span>▲</span> {errors.organization_id}
+                  </div>
+                ) : (
+                  <span style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "block" }}>
+                    Company entity
+                  </span>
+                )}
+              </div>
+
+              {/* 2. Branch */}
+              <div>
+                <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
+                  Branch <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={branchId}
+                  onChange={(e) => handleSelectBranch(e.target.value)}
+                  disabled={!organizationId || availableBranches.length === 0}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: errors.branch_id ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
+                    boxShadow: errors.branch_id ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+                    background: !organizationId ? "#f8fafc" : errors.branch_id ? "#fff5f5" : "#ffffff",
+                    fontSize: "13px",
+                    color: !organizationId ? "#94a3b8" : "#0f172a",
+                    fontWeight: 600,
+                    boxSizing: "border-box",
+                    cursor: !organizationId ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <option value="">
+                    {!organizationId ? "Select Organization first" : "Select Branch..."}
+                  </option>
+                  {availableBranches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.branch_id ? (
+                  <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <span>▲</span> {errors.branch_id}
+                  </div>
+                ) : (
+                  <span style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "block" }}>
+                    Target destination branch
+                  </span>
+                )}
+              </div>
+
+              {/* 3. Consignment */}
+              <div>
+                <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
+                  Consignment <span style={{ color: "#ef4444" }}>*</span>
+                  {loadingConsignmentItems && <span style={{ fontSize: "11px", color: "#0284c7", marginLeft: "6px" }}>⏳ Loading items...</span>}
+                </label>
+                <select
+                  value={planningColumnId}
+                  onChange={(e) => handleSelectConsignment(e.target.value)}
+                  disabled={!branchId || !matchingSheet || availableConsignments.length === 0}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: errors.consignment_code ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
+                    boxShadow: errors.consignment_code ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+                    background: (!branchId || !matchingSheet) ? "#f8fafc" : errors.consignment_code ? "#fff5f5" : "#ffffff",
+                    fontSize: "13px",
+                    color: (!branchId || !matchingSheet) ? "#94a3b8" : "#0f172a",
+                    fontWeight: 600,
+                    boxSizing: "border-box",
+                    cursor: (!branchId || !matchingSheet) ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <option value="">
+                    {!branchId
+                      ? "Select Branch first"
+                      : !matchingSheet
+                      ? "No planning sheet found"
+                      : availableConsignments.length === 0
+                      ? "No consignments found"
+                      : "Select Consignment..."}
+                  </option>
+                  {availableConsignments.map((c) => (
+                    <option key={c.column_id} value={c.column_id}>
+                      {c.consignment_code} ({c.planned_items_count} planned items)
+                    </option>
+                  ))}
+                </select>
+                {errors.consignment_code ? (
+                  <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <span>▲</span> {errors.consignment_code}
+                  </div>
+                ) : (
+                  <span style={{ fontSize: "11px", color: "#0284c7", fontWeight: 600, marginTop: "4px", display: "block" }}>
+                    🚢 Auto-loads planned products into table
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* ROW 2: Supplier (Prominent Width & High Border), Invoice No, Invoice Date */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(280px, 1.6fr) minmax(180px, 1fr) minmax(160px, 1fr)",
+                gap: "16px",
+                marginBottom: "16px",
+                alignItems: "flex-start",
+                overflow: "visible",
+              }}
+            >
               {/* 1. Supplier */}
               <div style={{ position: "relative", zIndex: 50 }}>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
@@ -1097,10 +1587,19 @@ export function LocalPurchaseFormPage() {
                 <SearchableDropdown
                   value={supplierId || null}
                   onChange={(val) => handleSelectSupplier(val || "")}
-                  placeholder="Type to search supplier (e.g. Sanlite, LT, Youngsun)..."
+                  placeholder="Type to search supplier brand or name..."
                   fetchOptions={supplierFetcher}
                   fetchLabelForValue={supplierLabelFetcher}
                   hasError={Boolean(errors.supplier_id)}
+                  inputStyle={{
+                    border: errors.supplier_id ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
+                    boxShadow: errors.supplier_id ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+                    borderRadius: "6px",
+                    padding: "8px 12px",
+                    fontSize: "13px",
+                    background: errors.supplier_id ? "#fff5f5" : "#ffffff",
+                    fontWeight: 500,
+                  }}
                 />
                 {errors.supplier_id ? (
                   <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
@@ -1108,12 +1607,12 @@ export function LocalPurchaseFormPage() {
                   </div>
                 ) : (
                   <span style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "block" }}>
-                    Domestic factory / vendor
+                    Brand in <strong>bold</strong>, company in (parentheses)
                   </span>
                 )}
               </div>
 
-              {/* 4. Invoice No */}
+              {/* 2. Invoice No */}
               <div>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Invoice No <span style={{ color: "#ef4444" }}>*</span>
@@ -1137,7 +1636,7 @@ export function LocalPurchaseFormPage() {
                     width: "100%",
                     padding: "8px 10px",
                     borderRadius: "6px",
-                    border: errors.invoice_no ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
+                    border: errors.invoice_no ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
                     boxShadow: errors.invoice_no ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
                     background: errors.invoice_no ? "#fff5f5" : "#ffffff",
                     fontSize: "13px",
@@ -1151,7 +1650,7 @@ export function LocalPurchaseFormPage() {
                 )}
               </div>
 
-              {/* 5. Invoice Date */}
+              {/* 3. Invoice Date */}
               <div>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Invoice Date <span style={{ color: "#ef4444" }}>*</span>
@@ -1174,7 +1673,7 @@ export function LocalPurchaseFormPage() {
                     width: "100%",
                     padding: "7px 10px",
                     borderRadius: "6px",
-                    border: errors.invoice_date ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
+                    border: errors.invoice_date ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
                     boxShadow: errors.invoice_date ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
                     background: errors.invoice_date ? "#fff5f5" : "#ffffff",
                     fontSize: "13px",
@@ -1189,15 +1688,53 @@ export function LocalPurchaseFormPage() {
               </div>
             </div>
 
-            {/* Financial Details Row: Single Invoice Total Value with VAT, Bill Extraction */}
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1fr) minmax(360px, 1.4fr)", gap: "20px", paddingTop: "14px", borderTop: "1px solid #f1f5f9", alignItems: "flex-end" }}>
-              {/* Single Consolidated Field: Invoice Total Value with VAT */}
+            {/* ROW 3: Currency, Invoice Total Value with VAT, Bill Document Attachment */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(140px, 0.9fr) minmax(200px, 1.3fr) minmax(260px, 1.8fr)",
+                gap: "16px",
+                paddingTop: "14px",
+                borderTop: "1px dashed #e2e8f0",
+                alignItems: "flex-start",
+              }}
+            >
+              {/* 1. Currency */}
+              <div>
+                <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
+                  Currency
+                </label>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1.5px solid #94a3b8",
+                    background: "#ffffff",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    boxSizing: "border-box",
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value="RMB">RMB (¥)</option>
+                  <option value="INR">INR (₹)</option>
+                  <option value="USD">USD ($)</option>
+                </select>
+                <span style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "block" }}>
+                  Billing currency
+                </span>
+              </div>
+
+              {/* 2. Invoice Total Value with VAT */}
               <div>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#0f172a", marginBottom: "6px", display: "block" }}>
-                  Invoice Total Value with VAT (RMB ¥) <span style={{ color: "#ef4444" }}>*</span>
+                  Invoice Total ({currencySymbol}) <span style={{ color: "#ef4444" }}>*</span>
                 </label>
                 <div style={{ position: "relative" }}>
-                  <span style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", fontWeight: 700, color: "#64748b", fontSize: "14px" }}>
+                  <span style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", fontWeight: 700, color: "#64748b", fontSize: "13px" }}>
                     {currencySymbol}
                   </span>
                   <input
@@ -1225,29 +1762,33 @@ export function LocalPurchaseFormPage() {
                     required
                     style={{
                       width: "100%",
-                      padding: "8px 12px 8px 28px",
+                      padding: "8px 10px 8px 24px",
                       borderRadius: "6px",
-                      border: errors.invoice_total_value ? "2px solid #ef4444" : "2px solid #94a3b8",
+                      border: errors.invoice_total_value ? "2px solid #ef4444" : "1.5px solid #94a3b8",
                       boxShadow: errors.invoice_total_value ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
                       background: errors.invoice_total_value ? "#fff5f5" : "#ffffff",
-                      fontSize: "14px",
+                      fontSize: "13.5px",
                       fontWeight: 700,
                       color: "#0f172a",
                       boxSizing: "border-box",
                     }}
                   />
                 </div>
-                {errors.invoice_total_value && (
+                {errors.invoice_total_value ? (
                   <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
                     <span>▲</span> {errors.invoice_total_value}
                   </div>
+                ) : (
+                  <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                    Gross total incl. VAT
+                  </span>
                 )}
               </div>
 
-              {/* Bill File Upload & Extract Action */}
+              {/* 3. Bill Document File */}
               <div>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
-                  Bill Document File <span style={{ fontWeight: 400, color: "#64748b" }}>(PDF, Image, or Excel sheet)</span>
+                  Bill Document File <span style={{ fontWeight: 400, color: "#64748b" }}>(PDF, Image, Excel - Optional)</span>
                 </label>
                 <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                   <div style={{ position: "relative", flex: 1 }}>
@@ -1262,9 +1803,9 @@ export function LocalPurchaseFormPage() {
                       }}
                       style={{
                         width: "100%",
-                        padding: "5px 10px",
+                        padding: "6px 10px",
                         fontSize: "12px",
-                        border: "1px solid #cbd5e1",
+                        border: "1.5px solid #94a3b8",
                         borderRadius: "6px",
                         background: "#f8fafc",
                         boxSizing: "border-box",
@@ -1296,29 +1837,6 @@ export function LocalPurchaseFormPage() {
                     )}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleExtractBill}
-                    disabled={!billFile || extracting}
-                    style={{
-                      background: !billFile || extracting ? "#94a3b8" : "#f59e0b",
-                      color: "#ffffff",
-                      border: "none",
-                      padding: "8px 14px",
-                      borderRadius: "6px",
-                      fontWeight: 700,
-                      fontSize: "12.5px",
-                      cursor: !billFile || extracting ? "not-allowed" : "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      whiteSpace: "nowrap",
-                      boxShadow: !billFile || extracting ? "none" : "0 2px 4px rgba(245,158,11,0.25)",
-                    }}
-                  >
-                    {extracting ? "⏳ Extracting..." : "⚡ Extract Bill Data"}
-                  </button>
-
                   {billFileUrl && (
                     <a
                       href={billFileUrl}
@@ -1328,24 +1846,28 @@ export function LocalPurchaseFormPage() {
                       style={{
                         background: "#ecfdf5",
                         color: "#059669",
-                        border: "1px solid #a7f3d0",
-                        padding: "8px 14px",
+                        border: "1.5px solid #a7f3d0",
+                        padding: "7px 12px",
                         borderRadius: "6px",
                         fontWeight: 700,
-                        fontSize: "12.5px",
+                        fontSize: "12px",
                         cursor: "pointer",
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: "6px",
+                        gap: "5px",
                         whiteSpace: "nowrap",
                         textDecoration: "none",
+                        boxSizing: "border-box",
                       }}
                       title="Download bill document stored in Supabase"
                     >
-                      📥 Download Stored Bill
+                      📥 Bill
                     </a>
                   )}
                 </div>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                  Optional bill attachment linked upon saving
+                </span>
               </div>
             </div>
           </div>
@@ -1507,7 +2029,7 @@ export function LocalPurchaseFormPage() {
                 PRODUCT SEARCH
               </div>
               <div style={{ fontSize: "12px", color: "#64748b" }}>
-                Search and select any active product from catalog or let AI bill extraction fill items
+                Search and select any active product from catalog to add to items
               </div>
             </div>
 
@@ -1805,21 +2327,21 @@ export function LocalPurchaseFormPage() {
             )}
 
             {/* Items Table */}
-            <div className="table-scroll" style={{ maxHeight: "calc(100vh - 350px)", minHeight: "220px", border: "none", borderRadius: 0, overflowY: "visible" }}>
-              <table>
+            <div className="table-scroll" style={{ maxHeight: "calc(100vh - 350px)", minHeight: "220px", border: "none", borderRadius: 0, overflowX: "auto", overflowY: "visible" }}>
+              <table style={{ width: "100%", minWidth: "1280px", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <th style={{ width: "35px", textAlign: "center" }}>#</th>
-                    <th style={{ minWidth: "220px" }}>Product Name</th>
-                    <th style={{ width: "90px" }}>HSN Code</th>
-                    <th style={{ width: "90px", textAlign: "right" }}>Qty</th>
-                    <th style={{ width: "100px", textAlign: "right" }}>Unit Rate</th>
-                    <th style={{ width: "70px", textAlign: "right" }}>VAT %</th>
-                    <th style={{ width: "110px", textAlign: "right" }}>Item Total</th>
-                    <th style={{ width: "90px", textAlign: "right", background: "#eff6ff" }}>Expense Per Unit</th>
-                    <th style={{ width: "120px", textAlign: "right", background: "#eff6ff" }}>Unit Landing Rate (VB)</th>
-                    <th style={{ width: "130px", textAlign: "right", background: "#eff6ff" }}>Total Landing Rate (VB)</th>
-                    <th style={{ width: "40px", textAlign: "center" }}></th>
+                    <th style={{ width: "40px", minWidth: "40px", textAlign: "center" }}>#</th>
+                    <th style={{ minWidth: "250px" }}>Product Name</th>
+                    <th style={{ width: "115px", minWidth: "105px", textAlign: "center" }}>HSN Code</th>
+                    <th style={{ width: "125px", minWidth: "115px", textAlign: "center" }}>Qty</th>
+                    <th style={{ width: "125px", minWidth: "115px", textAlign: "right" }}>Unit Rate</th>
+                    <th style={{ width: "85px", minWidth: "80px", textAlign: "right" }}>VAT %</th>
+                    <th style={{ width: "120px", minWidth: "115px", textAlign: "right" }}>Item Total</th>
+                    <th style={{ width: "110px", minWidth: "100px", textAlign: "right", background: "#eff6ff" }}>Expense Per Unit</th>
+                    <th style={{ width: "135px", minWidth: "125px", textAlign: "right", background: "#eff6ff" }}>Unit Landing Rate (VB)</th>
+                    <th style={{ width: "140px", minWidth: "130px", textAlign: "right", background: "#eff6ff" }}>Total Landing Rate (VB)</th>
+                    <th style={{ width: "45px", minWidth: "45px", textAlign: "center" }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1966,21 +2488,30 @@ export function LocalPurchaseFormPage() {
                         </td>
 
                         {/* HSN */}
-                        <td>
+                        <td style={{ width: "115px", minWidth: "105px" }}>
                           <input
                             type="text"
                             value={item.hsn_code || ""}
                             onChange={(e) => handleItemChange(idx, "hsn_code", e.target.value)}
                             placeholder="HSN"
-                            style={{ width: "100%", padding: "5px 6px", borderRadius: "4px", border: "1px solid #cbd5e1", fontSize: "12px", boxSizing: "border-box" }}
+                            style={{
+                              width: "100%",
+                              padding: "6px 8px",
+                              borderRadius: "6px",
+                              border: "1.5px solid #cbd5e1",
+                              fontSize: "12.5px",
+                              textAlign: "center",
+                              boxSizing: "border-box",
+                              color: "#334155",
+                            }}
                           />
                         </td>
 
                         {/* Qty */}
-                        <td>
+                        <td style={{ width: "125px", minWidth: "115px", textAlign: "center" }}>
                           <input
                             type="number"
-                            step="0.01"
+                            step="any"
                             min="0.01"
                             value={item.quantity === "" ? "" : item.quantity}
                             onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
@@ -1990,31 +2521,37 @@ export function LocalPurchaseFormPage() {
                             required
                             style={{
                               width: "100%",
-                              padding: "5px 6px",
-                              borderRadius: "4px",
+                              minWidth: "90px",
+                              padding: "6px 8px",
+                              borderRadius: "6px",
                               border:
                                 submitAttempted && (item.quantity === "" || Number(item.quantity) <= 0)
                                   ? "1.5px solid #ef4444"
-                                  : "1px solid #cbd5e1",
+                                  : "1.5px solid #94a3b8",
                               boxShadow:
                                 submitAttempted && (item.quantity === "" || Number(item.quantity) <= 0)
                                   ? "0 0 0 2px rgba(239, 68, 68, 0.15)"
                                   : undefined,
-                              fontSize: "12.5px",
+                              background:
+                                submitAttempted && (item.quantity === "" || Number(item.quantity) <= 0)
+                                  ? "#fff5f5"
+                                  : "#ffffff",
+                              fontSize: "13.5px",
                               fontWeight: 700,
-                              textAlign: "right",
+                              textAlign: "center",
+                              color: "#0f172a",
                               boxSizing: "border-box",
                             }}
                           />
                           {submitAttempted && (item.quantity === "" || Number(item.quantity) <= 0) && (
-                            <div style={{ color: "#dc2626", fontSize: "10.5px", fontWeight: 700, marginTop: "2px", textAlign: "right" }}>
+                            <div style={{ color: "#dc2626", fontSize: "10.5px", fontWeight: 700, marginTop: "2px", textAlign: "center" }}>
                               ▲ Qty &gt; 0 req.
                             </div>
                           )}
                         </td>
 
                         {/* Unit Rate */}
-                        <td>
+                        <td style={{ width: "125px", minWidth: "115px" }}>
                           <input
                             id={`unit-rate-input-${idx}`}
                             type="number"
@@ -2028,12 +2565,13 @@ export function LocalPurchaseFormPage() {
                             required
                             style={{
                               width: "100%",
-                              padding: "5px 6px",
-                              borderRadius: "4px",
+                              minWidth: "90px",
+                              padding: "6px 8px",
+                              borderRadius: "6px",
                               border:
                                 submitAttempted && (!item.unit_rate || Number(item.unit_rate) <= 0)
                                   ? "1.5px solid #ef4444"
-                                  : "1px solid #cbd5e1",
+                                  : "1.5px solid #94a3b8",
                               boxShadow:
                                 submitAttempted && (!item.unit_rate || Number(item.unit_rate) <= 0)
                                   ? "0 0 0 2px rgba(239, 68, 68, 0.15)"
@@ -2042,7 +2580,7 @@ export function LocalPurchaseFormPage() {
                                 submitAttempted && (!item.unit_rate || Number(item.unit_rate) <= 0)
                                   ? "#fff5f5"
                                   : "#ffffff",
-                              fontSize: "12.5px",
+                              fontSize: "13.5px",
                               fontWeight: 700,
                               textAlign: "right",
                               boxSizing: "border-box",
@@ -2129,7 +2667,7 @@ export function LocalPurchaseFormPage() {
                       <td colSpan={3} style={{ textAlign: "right", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                         Grand Total:
                       </td>
-                      <td style={{ textAlign: "right" }}>
+                      <td style={{ textAlign: "center", fontSize: "13.5px", fontWeight: 800, color: "#0f172a" }}>
                         {Number(calculations.totalQuantity).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       </td>
                       <td colSpan={2}></td>
@@ -2554,6 +3092,176 @@ export function LocalPurchaseFormPage() {
                   }}
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CUSTOM CONFIRM SWITCH MODAL */}
+        {switchModal && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 100050,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px",
+              boxSizing: "border-box",
+            }}
+          >
+            {/* Backdrop */}
+            <div
+              onClick={() => setSwitchModal(null)}
+              style={{
+                position: "absolute",
+                inset: 0,
+                background: "rgba(15, 23, 42, 0.55)",
+                backdropFilter: "blur(3px)",
+              }}
+            />
+
+            {/* Dialog Card */}
+            <div
+              style={{
+                position: "relative",
+                width: "480px",
+                maxWidth: "95vw",
+                background: "#ffffff",
+                borderRadius: "12px",
+                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                border: "1px solid #cbd5e1",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+                zIndex: 100051,
+              }}
+            >
+              {/* Header */}
+              <div
+                style={{
+                  padding: "16px 20px",
+                  borderBottom: "1px solid #e2e8f0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "#f8fafc",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      width: "36px",
+                      height: "36px",
+                      borderRadius: "8px",
+                      background: "#eff6ff",
+                      color: "#0284c7",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "18px",
+                      border: "1px solid #bae6fd",
+                    }}
+                  >
+                    🚢
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: "#0f172a" }}>
+                      {switchModal.title}
+                    </h3>
+                    <p style={{ margin: 0, fontSize: "11.5px", color: "#64748b" }}>
+                      Confirmation required before replacing table items
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSwitchModal(null)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#94a3b8",
+                    fontSize: "18px",
+                    cursor: "pointer",
+                    padding: "4px",
+                    lineHeight: 1,
+                  }}
+                  title="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: "20px", fontSize: "13.5px", color: "#334155", lineHeight: 1.55 }}>
+                <p style={{ margin: 0, color: "#1e293b", fontWeight: 500 }}>{switchModal.message}</p>
+                <div
+                  style={{
+                    marginTop: "14px",
+                    padding: "10px 12px",
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    color: "#92400e",
+                    fontWeight: 500,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <span style={{ fontSize: "14px" }}>⚠️</span>
+                  <span>Any custom unit rates, discounts, or edits currently in the table will be discarded.</span>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div
+                style={{
+                  padding: "14px 20px",
+                  background: "#f8fafc",
+                  borderTop: "1px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "10px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSwitchModal(null)}
+                  style={{
+                    padding: "8px 16px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: "#475569",
+                    background: "#ffffff",
+                    border: "1.5px solid #cbd5e1",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void switchModal.onConfirm();
+                  }}
+                  style={{
+                    padding: "8px 18px",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    color: "#ffffff",
+                    background: "#0284c7",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    boxShadow: "0 1px 2px rgba(2, 132, 199, 0.25)",
+                  }}
+                >
+                  {switchModal.confirmLabel}
                 </button>
               </div>
             </div>

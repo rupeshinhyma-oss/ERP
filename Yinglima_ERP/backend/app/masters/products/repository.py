@@ -101,13 +101,17 @@ class ProductRepository(BaseRepository[Product]):
         supplier_info_by_supplier_id: dict[uuid.UUID, tuple[str, str | None]] = {}
         if direct_supplier_ids:
             stmt_direct = (
-                select(Supplier.id, Supplier.company_name, City.name.label("city_name"))
+                select(Supplier.id, Supplier.company_name, Supplier.brand_description, City.name.label("city_name"))
                 .outerjoin(City, City.id == Supplier.city_id)
                 .where(Supplier.id.in_(direct_supplier_ids))
             )
             res_direct = await self.session.execute(stmt_direct)
             supplier_info_by_supplier_id = {
-                row.id: (row.company_name, row.city_name) for row in res_direct.all()
+                row.id: (
+                    (row.brand_description.strip() if row.brand_description and row.brand_description.strip() else row.company_name),
+                    row.city_name,
+                )
+                for row in res_direct.all()
             }
 
         # 2. For products without explicit product.supplier_id, fallback to earliest SupplierProductLink
@@ -134,6 +138,7 @@ class ProductRepository(BaseRepository[Product]):
                     ranked.c.product_id,
                     Supplier.id.label("supplier_id"),
                     Supplier.company_name,
+                    Supplier.brand_description,
                     City.name.label("city_name"),
                 )
                 .join(Supplier, Supplier.id == ranked.c.supplier_id)
@@ -142,7 +147,12 @@ class ProductRepository(BaseRepository[Product]):
             )
             res_link = await self.session.execute(stmt_link)
             supplier_info_by_product_id = {
-                row.product_id: (row.supplier_id, row.company_name, row.city_name) for row in res_link.all()
+                row.product_id: (
+                    row.supplier_id,
+                    (row.brand_description.strip() if row.brand_description and row.brand_description.strip() else row.company_name),
+                    row.city_name,
+                )
+                for row in res_link.all()
             }
 
         # 3. Attach info to products

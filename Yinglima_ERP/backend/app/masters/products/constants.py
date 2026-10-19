@@ -40,7 +40,7 @@ EXPORT_HEADERS = [
     "Brand",
     "Category",
     "Sub Category",
-    "Primary Supplier",
+    "Supplier Brand",
     "HSN Code",
     "UOM",
     "Organization",

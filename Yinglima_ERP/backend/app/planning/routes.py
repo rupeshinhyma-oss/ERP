@@ -294,6 +294,8 @@ async def create_sheet(
         name=payload.name,
         organization_id=payload.organization_id,
         branch_id=payload.branch_id,
+        buyer_id=payload.buyer_id,
+        buyer_branch_name=payload.buyer_branch_name,
         mum_group_label=payload.mum_group_label or "Mum",
         description=payload.description,
         user_id=current_user.id,

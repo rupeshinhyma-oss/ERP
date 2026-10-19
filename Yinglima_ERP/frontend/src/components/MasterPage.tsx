@@ -48,6 +48,7 @@ import {
 import { useAuth, useSrNoJump, useModalHistorySync } from "@/lib/hooks";
 import { useLiveList } from "@/lib/live/useLiveList";
 import { handleFormEnterKeyNavigation } from "@/lib/formUtils";
+import { invalidateLookupCache } from "@/lib/lookups";
 import type { ImportHeader, ImportSummary, MasterRecord, PaginationMeta } from "@/types";
 
 /** Form state is a flat id -> string map, mirroring the original inputs. */
@@ -629,6 +630,24 @@ export function MasterPage<T extends MasterRecord>({
   // navigating back to Dashboard.
   useModalHistorySync(modalOpen, () => setModalOpen(false));
   useModalHistorySync(Boolean(drawerItem), handleCloseDrawer);
+
+  // When user clicks the active sidebar item, close the modal/drawer/import and return to table list
+  useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === activeKey) {
+        setModalOpen(false);
+        setEditingId("");
+        setEditingItem(null);
+        setForm(emptyForm);
+        handleCloseDrawer();
+        setIsImportOpen(false);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, [activeKey, emptyForm, handleCloseDrawer]);
 
   // Universal search deep-link: `?id=` opens that record's detail drawer
   // directly, so clicking a result in the topbar search (for any master data
@@ -1267,6 +1286,7 @@ export function MasterPage<T extends MasterRecord>({
         }
         setRows((prev) => prev.map((row) => (row.id === editingId ? recordToUse : row)));
         setAllRecords((prev) => prev.map((row) => (row.id === editingId ? recordToUse : row)));
+        invalidateLookupCache(apiBase);
       } else {
         const { data: newRecord } = await apiPost<T>(apiBase, payload);
         if (newRecord) {
@@ -1279,6 +1299,7 @@ export function MasterPage<T extends MasterRecord>({
         } else {
           reload();
         }
+        invalidateLookupCache(apiBase);
       }
       setError(null);
       setAlertPopup(null);
@@ -1333,6 +1354,7 @@ export function MasterPage<T extends MasterRecord>({
       setRows((prev) => prev.filter((row) => row.id !== id));
       setAllRecords((prev) => prev.filter((row) => row.id !== id));
       setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
+      invalidateLookupCache(apiBase);
     } catch (err) {
       setError(err);
     }
@@ -1353,6 +1375,7 @@ export function MasterPage<T extends MasterRecord>({
       setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "active" } : row)));
       setAllRecords((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "active" } : row)));
       setSelectedIds([]);
+      invalidateLookupCache(apiBase);
     } catch (err) {
       setError(err);
     }
@@ -1365,6 +1388,7 @@ export function MasterPage<T extends MasterRecord>({
       setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "inactive" } : row)));
       setAllRecords((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "inactive" } : row)));
       setSelectedIds([]);
+      invalidateLookupCache(apiBase);
     } catch (err) {
       setError(err);
     }
@@ -1404,6 +1428,7 @@ export function MasterPage<T extends MasterRecord>({
       setRows((prev) => prev.filter((row) => !idsToDelete.includes(row.id)));
       setAllRecords((prev) => prev.filter((row) => !idsToDelete.includes(row.id)));
       setSelectedIds([]);
+      invalidateLookupCache(apiBase);
     } catch (err) {
       setError(err);
     }
@@ -1860,6 +1885,7 @@ export function MasterPage<T extends MasterRecord>({
                   setImportSummary(summary);
                 }
                 reload();
+                invalidateLookupCache(apiBase);
               }}
               onError={(msg) => {
                 setImportError(msg);

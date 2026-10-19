@@ -166,6 +166,8 @@ class ProductRead(BaseModel):
     specification: str | None
     description: str | None
     images: list[str] | None = None
+    # True when photos exist but were left out of a lightweight list response.
+    images_omitted: bool | None = None
 
     @computed_field
     @property

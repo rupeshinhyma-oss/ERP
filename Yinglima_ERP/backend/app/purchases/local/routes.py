@@ -81,6 +81,14 @@ async def list_local_purchases(
     for r in records:
         s = LocalPurchaseSummaryResponse(
             id=r.id,
+            organization_id=r.organization_id,
+            organization_name=r.organization_name,
+            branch_id=r.branch_id,
+            branch_name=r.branch_name,
+            group_label=r.group_label,
+            consignment_code=r.consignment_code,
+            planning_sheet_id=r.planning_sheet_id,
+            planning_column_id=r.planning_column_id,
             supplier_id=r.supplier_id,
             supplier_name=r.supplier_name,
             invoice_no=r.invoice_no,
@@ -156,8 +164,8 @@ async def calculate_preview(
     )
 
 
-@router.post("/extract-bill", summary="Upload and extract data from PDF or Excel bill")
-async def extract_bill(
+@router.post("/upload-bill", summary="Upload invoice document file to storage")
+async def upload_bill(
     request: Request,
     file: UploadFile = File(...),
     service: LocalPurchaseService = Depends(get_service),
@@ -165,10 +173,17 @@ async def extract_bill(
 ) -> dict:
     file_bytes = await file.read()
     filename = file.filename or "uploaded_bill.pdf"
-    extracted = await service.extract_bill(file_bytes=file_bytes, filename=filename)
+    from app.common.storage import guess_content_type, upload_to_supabase
+    safe_name = f"{uuid.uuid4().hex[:12]}_{filename}"
+    url = await upload_to_supabase(
+        bucket="purchase-bills",
+        filename=safe_name,
+        content=file_bytes,
+        content_type=guess_content_type(filename),
+    )
     return build_success_response(
-        data=extracted.model_dump(),
-        message="Bill extracted successfully.",
+        data={"bill_file_url": url},
+        message="Bill uploaded successfully.",
         request_id=getattr(request.state, "request_id", "-"),
     )
 
@@ -225,6 +240,34 @@ async def get_planning_items(
     return build_success_response(
         data=result,
         message=f"Found {result.get('count', 0)} planned items from {result.get('sheet_name', 'Shipment Planning')}.",
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.get("/consignments-lookup", summary="Get cascading planning sheets, branches, group labels, and consignments")
+async def get_consignments_lookup(
+    request: Request,
+    service: LocalPurchaseService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.view')),
+) -> dict:
+    data = await service.get_consignments_lookup()
+    return build_success_response(
+        data=[d.model_dump() for d in data],
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.get("/consignments/{column_id}/items", summary="Extract planned items for a specific consignment column")
+async def get_consignment_items(
+    column_id: uuid.UUID,
+    request: Request,
+    service: LocalPurchaseService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_permission('local_purchase.view')),
+) -> dict:
+    items = await service.get_consignment_items(column_id)
+    return build_success_response(
+        data=[itm.model_dump() for itm in items],
+        message=f"Loaded {len(items)} planned items from consignment.",
         request_id=getattr(request.state, "request_id", "-"),
     )
 

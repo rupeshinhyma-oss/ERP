@@ -126,7 +126,8 @@ export interface DetailField {
  * the drawer -- one direct translation of openDetailDrawer()'s fieldsHtml
  * template.
  */
-export function DetailFieldGrid({ fields }: { fields: DetailField[] }) {
+export function DetailFieldGrid({ fields, columns = 2 }: { fields: DetailField[]; columns?: number }) {
+  const colCount = Math.max(1, columns);
   return (
     <div
       style={{
@@ -136,9 +137,15 @@ export function DetailFieldGrid({ fields }: { fields: DetailField[] }) {
         padding: "20px",
       }}
     >
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 20px" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
+          gap: "16px 20px",
+        }}
+      >
         {fields.map((f, i) => (
-          <div key={i} style={f.fullWidth ? { gridColumn: "span 2" } : undefined}>
+          <div key={i} style={f.fullWidth ? { gridColumn: `span ${colCount}` } : undefined}>
             <span
               style={{
                 fontSize: "12px",

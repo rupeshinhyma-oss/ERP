@@ -52,9 +52,9 @@ def _get_field(row: dict[str, Any], *aliases: str, default: str = "") -> str:
             v = str(row[a]).strip()
             if v:
                 return v
-        norm_a = a.lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "")
+        norm_a = a.lstrip("\ufeff").lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "")
         for k, v in row.items():
-            if v is not None and str(k).strip().lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "") == norm_a:
+            if v is not None and k.strip().lstrip("\ufeff").lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "") == norm_a:
                 if str(v).strip():
                     return str(v).strip()
     return default
@@ -62,7 +62,6 @@ def _get_field(row: dict[str, Any], *aliases: str, default: str = "") -> str:
 
 def validate_buyer_row(raw_row: dict[str, Any], row_number: int) -> dict[str, Any]:
     """Validate one raw import row and return clean field kwargs, or raise on bad data."""
-    from typing import Any
     from app.buyers.models import BuyerCurrentStatus, BuyerGrade, BuyerPotential
 
     company_name = _get_field(raw_row, "Company Name", "company_name", "Buyer Name", "buyer_name", "Client Name")
@@ -75,6 +74,7 @@ def validate_buyer_row(raw_row: dict[str, Any], row_number: int) -> dict[str, An
 
     buyer_type_raw = _get_field(raw_row, "Buyer Type", "buyer_type")
 
+    state_raw = _get_field(raw_row, "State / Province", "Province", "State", "state_province", "state_name", "province_name")
     city = _get_field(raw_row, "City", "city_name")
     address = _get_field(raw_row, "Address", "address")
     salutation = _get_field(raw_row, "Contact Salutation", "Salutation", "contact_salutation")
@@ -128,6 +128,20 @@ def validate_buyer_row(raw_row: dict[str, Any], row_number: int) -> dict[str, An
         whatsapp_number_raw, field_label=f"Row {row_number}: WhatsApp Number"
     ) if whatsapp_number_raw else None
 
+    # Contact Person 2 fields
+    contact_person_2 = _get_field(raw_row, "Contact Person 2", "Contact Person Name 2", "contact_person_2", "contact_full_name_2")
+    designation_2 = _get_field(raw_row, "Designation 2", "contact_designation_2")
+    calling_number_2_raw = _get_field(raw_row, "Calling Number 2", "contact_calling_number_2")
+    whatsapp_number_2_raw = _get_field(raw_row, "WhatsApp Number 2", "contact_whatsapp_number_2")
+
+    calling_number_2 = validate_phone_number(
+        calling_number_2_raw, field_label=f"Row {row_number}: Calling Number 2"
+    ) if calling_number_2_raw else None
+
+    whatsapp_number_2 = validate_phone_number(
+        whatsapp_number_2_raw, field_label=f"Row {row_number}: WhatsApp Number 2"
+    ) if whatsapp_number_2_raw else None
+
     emails_raw = _get_field(raw_row, "Emails", "Email", "email", "emails")
     emails = []
     if emails_raw:
@@ -143,6 +157,7 @@ def validate_buyer_row(raw_row: dict[str, Any], row_number: int) -> dict[str, An
         "company_name": company_name,
         "buyer_type": buyer_type_raw or None,
         "country_raw": country_raw,
+        "state_raw": state_raw or None,
         "city": city or None,
         "address": address or None,
         "contact_salutation": salutation or None,
@@ -150,6 +165,10 @@ def validate_buyer_row(raw_row: dict[str, Any], row_number: int) -> dict[str, An
         "contact_designation": designation or None,
         "contact_calling_number": calling_number,
         "contact_whatsapp_number": whatsapp_number,
+        "contact_person_2": contact_person_2 or None,
+        "designation_2": designation_2 or None,
+        "calling_number_2": calling_number_2,
+        "whatsapp_number_2": whatsapp_number_2,
         "emails": emails,
         "tax_id_number": tax_id or None,
         "website": website or None,

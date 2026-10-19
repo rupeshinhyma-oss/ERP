@@ -1429,6 +1429,388 @@ function HistoryDrawer({
   );
 }
 
+interface SearchableEntityDropdownProps {
+  value: string | null;
+  onChange: (val: string | null) => void;
+  organizations: { id: string; name: string }[];
+  buyers: { id: string; company_name: string }[];
+}
+
+function SearchableEntityDropdown({
+  value,
+  onChange,
+  organizations,
+  buyers,
+}: SearchableEntityDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      setSearchTerm("");
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }
+  }, [open]);
+
+  // Determine current display label
+  const currentLabel = useMemo(() => {
+    if (!value) return "All Entities (Organizations & Buyers)";
+    if (value.startsWith("buyer:")) {
+      const bId = value.replace("buyer:", "");
+      const b = buyers.find((x) => x.id === bId);
+      return b ? `👤 ${b.company_name}` : "Selected Buyer";
+    }
+    const o = organizations.find((x) => x.id === value);
+    return o ? `🏢 ${o.name}` : "Selected Organization";
+  }, [value, organizations, buyers]);
+
+  // Filtered lists based on search term
+  const term = searchTerm.toLowerCase().trim();
+
+  const filteredOrgs = useMemo(() => {
+    if (!term) return organizations;
+    return organizations.filter((o) => o.name.toLowerCase().includes(term));
+  }, [organizations, term]);
+
+  const filteredBuyers = useMemo(() => {
+    if (!term) return buyers;
+    return buyers.filter((b) => b.company_name.toLowerCase().includes(term));
+  }, [buyers, term]);
+
+  const showAllOption = !term || "all entities (organizations & buyers)".includes(term);
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", display: "inline-block" }}>
+      {/* Trigger Button */}
+      <div
+        tabIndex={0}
+        onClick={() => setOpen((prev) => !prev)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((prev) => !prev);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        title="Filter sheets by Internal Organization or Buyer"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          minWidth: "250px",
+          maxWidth: "360px",
+          padding: "6px 10px",
+          fontSize: "13px",
+          fontWeight: 600,
+          color: value ? (value.startsWith("buyer:") ? "#15803D" : "#1D4ED8") : "#334155",
+          background: value ? (value.startsWith("buyer:") ? "#F0FDF4" : "#EFF6FF") : "#FFFFFF",
+          border: value
+            ? value.startsWith("buyer:")
+              ? "1.5px solid #86EFAC"
+              : "1.5px solid #93C5FD"
+            : "1.5px solid #CBD5E1",
+          borderRadius: "6px",
+          cursor: "pointer",
+          userSelect: "none",
+          transition: "all 0.15s ease",
+          boxShadow: open ? "0 0 0 3px rgba(37, 99, 235, 0.15)" : "none",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {currentLabel}
+        </span>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+          {value && (
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(null);
+                setOpen(false);
+              }}
+              title="Clear filter (show all)"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "16px",
+                height: "16px",
+                borderRadius: "50%",
+                background: value.startsWith("buyer:") ? "#DCFCE7" : "#DBEAFE",
+                color: value.startsWith("buyer:") ? "#15803D" : "#1D4ED8",
+                fontSize: "11px",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = value.startsWith("buyer:") ? "#BBF7D0" : "#BFDBFE";
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = value.startsWith("buyer:") ? "#DCFCE7" : "#DBEAFE";
+              }}
+            >
+              ×
+            </span>
+          )}
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#64748b"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              transition: "transform 0.15s ease",
+              transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            }}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+      </div>
+
+      {/* Popover Menu with Top Search Bar */}
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 99999,
+            width: "320px",
+            maxHeight: "360px",
+            background: "#ffffff",
+            border: "1px solid #cbd5e0",
+            borderRadius: "6px",
+            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          {/* Top Search Input Box */}
+          <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" }}>
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search / Type here..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setOpen(false);
+                }
+              }}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                fontSize: "13px",
+                border: "1px solid #cbd5e0",
+                borderRadius: "4px",
+                outline: "none",
+                background: "#ffffff",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          {/* Options List */}
+          <div style={{ overflowY: "auto", flex: 1, padding: "4px 0" }}>
+            {/* "All Entities" Option */}
+            {showAllOption && (
+              <div
+                onClick={() => {
+                  onChange(null);
+                  setOpen(false);
+                }}
+                style={{
+                  padding: "8px 12px",
+                  fontSize: "13px",
+                  fontWeight: !value ? 600 : 500,
+                  cursor: "pointer",
+                  background: !value ? "#0061f2" : "transparent",
+                  color: !value ? "#ffffff" : "#1e293b",
+                  transition: "background 0.1s",
+                }}
+                onMouseOver={(e) => {
+                  if (value) e.currentTarget.style.background = "#f1f5f9";
+                }}
+                onMouseOut={(e) => {
+                  if (value) e.currentTarget.style.background = "transparent";
+                }}
+              >
+                All Entities (Organizations & Buyers)
+              </div>
+            )}
+
+            {/* Internal Organizations Group */}
+            {filteredOrgs.length > 0 && (
+              <div>
+                <div
+                  style={{
+                    padding: "7px 12px 6px 12px",
+                    fontSize: "11.5px",
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.6px",
+                    color: "#1D4ED8",
+                    background: "#EFF6FF",
+                    borderTop: showAllOption ? "1px solid #DBEAFE" : "none",
+                    borderBottom: "1px solid #DBEAFE",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    userSelect: "none",
+                  }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                    <span>🏢</span>
+                    <span>INTERNAL ORGANIZATIONS</span>
+                  </span>
+                  <span
+                    style={{
+                      background: "#DBEAFE",
+                      color: "#1E40AF",
+                      borderRadius: "10px",
+                      padding: "1px 7px",
+                      fontSize: "10.5px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {filteredOrgs.length}
+                  </span>
+                </div>
+                {filteredOrgs.map((org) => {
+                  const isSelected = value === org.id;
+                  return (
+                    <div
+                      key={org.id}
+                      onClick={() => {
+                        onChange(org.id);
+                        setOpen(false);
+                      }}
+                      style={{
+                        padding: "7px 12px 7px 18px",
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        background: isSelected ? "#0061f2" : "transparent",
+                        color: isSelected ? "#ffffff" : "#1e293b",
+                        fontWeight: isSelected ? 600 : 400,
+                        transition: "background 0.1s",
+                      }}
+                      onMouseOver={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = "#f1f5f9";
+                      }}
+                      onMouseOut={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      {org.name}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Buyers Group */}
+            {filteredBuyers.length > 0 && (
+              <div>
+                <div
+                  style={{
+                    padding: "7px 12px 6px 12px",
+                    fontSize: "11.5px",
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.6px",
+                    color: "#0369A1",
+                    background: "#F0F9FF",
+                    borderTop: "1px solid #BAE6FD",
+                    borderBottom: "1px solid #BAE6FD",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    userSelect: "none",
+                  }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                    <span>👤</span>
+                    <span>BUYERS</span>
+                  </span>
+                  <span
+                    style={{
+                      background: "#BAE6FD",
+                      color: "#0369A1",
+                      borderRadius: "10px",
+                      padding: "1px 7px",
+                      fontSize: "10.5px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {filteredBuyers.length}
+                  </span>
+                </div>
+                {filteredBuyers.map((b) => {
+                  const itemVal = `buyer:${b.id}`;
+                  const isSelected = value === itemVal;
+                  return (
+                    <div
+                      key={b.id}
+                      onClick={() => {
+                        onChange(itemVal);
+                        setOpen(false);
+                      }}
+                      style={{
+                        padding: "7px 12px 7px 18px",
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        background: isSelected ? "#0061f2" : "transparent",
+                        color: isSelected ? "#ffffff" : "#1e293b",
+                        fontWeight: isSelected ? 600 : 400,
+                        transition: "background 0.1s",
+                      }}
+                      onMouseOver={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = "#f1f5f9";
+                      }}
+                      onMouseOut={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      {b.company_name}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {!showAllOption && filteredOrgs.length === 0 && filteredBuyers.length === 0 && (
+              <div style={{ padding: "16px 12px", fontSize: "13px", color: "#64748b", textAlign: "center" }}>
+                No matching entities found
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PlanningPage() {
   const { hasPermission } = useAuth();
   const showToast = useToast();
@@ -1459,19 +1841,11 @@ export function PlanningPage() {
    * filtered view can be shared/bookmarked.
    */
   const organizations = useLookup<{ id: string; name: string; branches?: { id: string; name: string; code_prefix?: string }[] | null }>("/masters/company-list/lookup", 250);
+  const buyersLookup = useLookup<{ id: string; company_name: string; city?: string }>("/buyers", 500);
   const [activeOrganizationId, setActiveOrganizationId] = useState<string | null>(null);
   /**
-   * Which organization's sheet TABS are currently shown at all (Mumbai/
-   * Chennai/Inhyma Mumbai etc.) -- completely separate from
-   * `activeOrganizationId` above, which is the legacy per-request ROW
-   * filter for sheets that predate the branch-link feature. This one
-   * controls which tabs even appear in the tab bar: picking an
-   * organization here hides every sheet not linked to it (see
-   * `visibleSheets` below); null means "no organization filter chosen
-   * yet" and defaults to showing whichever organization the
-   * first-loaded sheet belongs to (see the effect below), so the page
-   * never shows a confusing mix of every organization's branches at
-   * once by default.
+   * Which organization's or buyer's sheet TABS are currently shown at all (Mumbai/
+   * Chennai/Inhyma Mumbai / Buyer tabs etc.)
    */
   const [tabOrganizationFilterId, setTabOrganizationFilterId] = useState<string | null>(null);
   const [itemHeaderTitle, setItemHeaderTitle] = useState("ITEM");
@@ -1480,9 +1854,12 @@ export function PlanningPage() {
   const [error, setError] = useState<unknown>(null);
 
   const [addSheetOpen, setAddSheetOpen] = useState(false);
+  const [newSheetType, setNewSheetType] = useState<"organization" | "buyer">("organization");
   const [newSheetGroupLabel, setNewSheetGroupLabel] = useState("Mum");
   const [newSheetOrganizationId, setNewSheetOrganizationId] = useState("");
   const [newSheetBranchId, setNewSheetBranchId] = useState("");
+  const [newSheetBuyerId, setNewSheetBuyerId] = useState("");
+  const [newSheetBuyerBranch, setNewSheetBuyerBranch] = useState("");
 
   const [statusPicker, setStatusPicker] = useState<{ anchor: HTMLElement; rowId: string; columnId: string } | null>(null);
   const [mumHistoryPopover, setMumHistoryPopover] = useState<{ anchor: HTMLElement; rowId: string } | null>(null);
@@ -1498,6 +1875,23 @@ export function PlanningPage() {
   const [frozenColumnIds, setFrozenColumnIds] = useState<Set<string>>(new Set());
   const [columnsPanelOpen, setColumnsPanelOpen] = useState(false);
   const [activeColumnFilters, setActiveColumnFilters] = useState<Record<string, { selectedValues?: Set<string>; textQuery?: string }>>({});
+
+  useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === "planning") {
+        setHistoryOpen(false);
+        setColumnsPanelOpen(false);
+        setConfigureColumn(null);
+        setLinkPicker(null);
+        setStatusPicker(null);
+        setMumHistoryPopover(null);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, []);
 
   /**
    * Server-side search payload derived from `activeColumnFilters`,
@@ -1558,8 +1952,12 @@ export function PlanningPage() {
 
   const currentOrgName = useMemo(() => {
     if (!tabOrganizationFilterId) return "All";
+    if (tabOrganizationFilterId.startsWith("buyer:")) {
+      const bId = tabOrganizationFilterId.replace("buyer:", "");
+      return buyersLookup.items.find((b) => b.id === bId)?.company_name || "Selected Buyer";
+    }
     return organizations.items.find((o) => o.id === tabOrganizationFilterId)?.name || "Current Organization";
-  }, [tabOrganizationFilterId, organizations.items]);
+  }, [tabOrganizationFilterId, organizations.items, buyersLookup.items]);
 
   // Close org search dropdown on click outside
   useEffect(() => {
@@ -1587,7 +1985,7 @@ export function PlanningPage() {
       try {
         const qs = toQueryString({
           query: term,
-          ...(tabOrganizationFilterId ? { organization_id: tabOrganizationFilterId } : {}),
+          ...(tabOrganizationFilterId && !tabOrganizationFilterId.startsWith("buyer:") ? { organization_id: tabOrganizationFilterId } : {}),
           limit_per_branch: 5,
         });
         const { data } = await apiGet<{
@@ -1811,7 +2209,7 @@ export function PlanningPage() {
       const { data } = await apiGet<PlanningSheet[]>("/planning/sheets");
       setSheets(data);
       if (data.length > 0) {
-        const urlSheetParam = searchParams.get("sheet");
+        const urlSheetParam = searchParams.get("sheet") || searchParams.get("sheet_id");
         const matched = urlSheetParam
           ? data.find(
             (s) => s.name.toLowerCase() === urlSheetParam.toLowerCase() || s.id === urlSheetParam
@@ -1828,15 +2226,54 @@ export function PlanningPage() {
         setActiveSheetId(target.id);
         setSheetUrlParam(target.name);
         
-        // Default the tab-visibility filter to Inhyma if available, otherwise target's organization
-        const defaultOrgId = inhymaOrg ? inhymaOrg.id : (target.organization_id ?? null);
-        setTabOrganizationFilterId((prev) => (prev !== null ? prev : defaultOrgId));
+        // If an explicit sheet was matched from URL params, switch to its org/buyer so its tab is visible!
+        if (matched) {
+          const matchedOrgId = matched.organization_id ?? (matched.buyer_id ? `buyer:${matched.buyer_id}` : null);
+          setTabOrganizationFilterId(matchedOrgId);
+        } else {
+          const defaultOrgId = inhymaOrg ? inhymaOrg.id : (target.organization_id ?? null);
+          setTabOrganizationFilterId((prev) => (prev !== null ? prev : defaultOrgId));
+        }
       }
     } catch (err) {
       setError(err);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams, organizations.items, activeSheetId]);
+
+  // Dynamically respond to searchParams changes (e.g. user clicks a notification while already on /planning)
+  useEffect(() => {
+    const urlSheet = searchParams.get("sheet") || searchParams.get("sheet_id");
+    if (!urlSheet || sheets.length === 0) return;
+    const matched = sheets.find(
+      (s) => s.name.toLowerCase() === urlSheet.toLowerCase() || s.id === urlSheet
+    );
+    if (matched && matched.id !== activeSheetId) {
+      setActiveSheetId(matched.id);
+      setSheetUrlParam(matched.name);
+      const targetOrgId = matched.organization_id ?? (matched.buyer_id ? `buyer:${matched.buyer_id}` : null);
+      setTabOrganizationFilterId(targetOrgId);
+    }
+  }, [searchParams, sheets, activeSheetId]);
+
+  // Highlight and scroll to specific row when row_id is present
+  useEffect(() => {
+    const rowId = searchParams.get("row_id");
+    if (!rowId || !grid || grid.rows.length === 0) return;
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`planning-row-${rowId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        const origBg = el.style.backgroundColor;
+        el.style.transition = "background-color 0.4s ease";
+        el.style.backgroundColor = "#fef08a";
+        setTimeout(() => {
+          el.style.backgroundColor = origBg;
+        }, 2200);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchParams, grid]);
 
   /**
    * Sheets currently shown as tabs, restricted to whichever organization
@@ -1849,6 +2286,10 @@ export function PlanningPage() {
    */
   const visibleSheets = useMemo(() => {
     if (tabOrganizationFilterId === null) return sheets;
+    if (tabOrganizationFilterId.startsWith("buyer:")) {
+      const bId = tabOrganizationFilterId.replace("buyer:", "");
+      return sheets.filter((s) => s.buyer_id === bId);
+    }
     return sheets.filter((s) => s.organization_id === tabOrganizationFilterId);
   }, [sheets, tabOrganizationFilterId]);
 
@@ -2711,13 +3152,36 @@ export function PlanningPage() {
 
   async function handleCreateSheet(e: React.FormEvent) {
     e.preventDefault();
+
+    if (newSheetType === "buyer") {
+      if (!newSheetBuyerId || !newSheetBuyerBranch.trim() || !newSheetGroupLabel.trim()) return;
+      const buyer = buyersLookup.items.find((b) => b.id === newSheetBuyerId);
+      const buyerName = buyer?.company_name || "Buyer";
+      const branchName = newSheetBuyerBranch.trim();
+      const sheetName = `${buyerName} - ${branchName}`;
+      try {
+        const { data } = await apiPost<PlanningSheet>("/planning/sheets", {
+          name: sheetName,
+          buyer_id: newSheetBuyerId,
+          buyer_branch_name: branchName,
+          mum_group_label: newSheetGroupLabel.trim(),
+        });
+        setNewSheetGroupLabel("Mum");
+        setNewSheetBuyerId("");
+        setNewSheetBuyerBranch("");
+        setAddSheetOpen(false);
+        await loadSheets();
+        setTabOrganizationFilterId(`buyer:${newSheetBuyerId}`);
+        setActiveSheetId(data.id);
+        setSheetUrlParam(data.name);
+      } catch (err) {
+        setError(err);
+      }
+      return;
+    }
+
+    // Existing internal organization creation: 100% UNTOUCHED
     if (!newSheetGroupLabel.trim() || !newSheetOrganizationId || !newSheetBranchId) return;
-    // The sheet's name is always exactly the selected branch's name from
-    // Product Master's organization list -- there is no separate
-    // free-typed "sheet name" anymore. This can never be empty when the
-    // guard above passed, since newSheetBranchId can only be set to a
-    // real branch id that came from this same organization's branches
-    // list (see the Branch <SelectField> below).
     const branchName =
       organizations.items.find((o) => o.id === newSheetOrganizationId)?.branches?.find((b) => b.id === newSheetBranchId)
         ?.name ?? "";
@@ -3675,9 +4139,16 @@ export function PlanningPage() {
                 className="btn btn-secondary"
                 onClick={() => {
                   setNewSheetGroupLabel("Mum");
-                  const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
-                  setNewSheetOrganizationId(tabOrganizationFilterId || inhymaOrg?.id || "");
-                  setNewSheetBranchId("");
+                  if (tabOrganizationFilterId?.startsWith("buyer:")) {
+                    setNewSheetType("buyer");
+                    setNewSheetBuyerId(tabOrganizationFilterId.replace("buyer:", ""));
+                    setNewSheetBuyerBranch("");
+                  } else {
+                    setNewSheetType("organization");
+                    const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
+                    setNewSheetOrganizationId(tabOrganizationFilterId || inhymaOrg?.id || "");
+                    setNewSheetBranchId("");
+                  }
                   setAddSheetOpen(true);
                 }}
               >
@@ -3690,42 +4161,18 @@ export function PlanningPage() {
         <Banner error={error} />
 
         {/*
-          Which organization's branches show as tabs at all -- separate
-          from the "Organization" control in the toolbar above (which
-          either filters ROWS on the currently-open legacy sheet, or
-          shows a locked badge for a branch-linked sheet). This one
-          controls the TAB BAR itself: pick an organization here and
-          only ITS sheets remain visible below; if it has none yet, the
-          tab bar goes blank rather than falling back to some other
-          organization's sheet (see the visibleSheets/effect above for
-          the exact fallback rules).
+          Which organization's or buyer's branches show as tabs at all
         */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <label htmlFor="tab_organization_filter" style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
-            Organization:
+          <label style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
+            Entity:
           </label>
-          <select
-            id="tab_organization_filter"
-            value={tabOrganizationFilterId ?? ""}
-            onChange={(e) => setTabOrganizationFilterId(e.target.value || null)}
-            title="Show only this organization's branch tabs"
-            style={{
-              border: "1px solid #CBD5E1",
-              borderRadius: 6,
-              padding: "6px 10px",
-              fontSize: 13,
-              color: tabOrganizationFilterId ? "#2563EB" : "#334155",
-              background: tabOrganizationFilterId ? "#EFF6FF" : "#FFFFFF",
-              cursor: "pointer",
-            }}
-          >
-            <option value="">All Organizations</option>
-            {organizations.items.map((org) => (
-              <option key={org.id} value={org.id}>
-                {org.name}
-              </option>
-            ))}
-          </select>
+          <SearchableEntityDropdown
+            value={tabOrganizationFilterId}
+            onChange={(val) => setTabOrganizationFilterId(val)}
+            organizations={organizations.items}
+            buyers={buyersLookup.items}
+          />
         </div>
 
         {/* Sheet tabs -- one per branch (Mum Branch, MP Branch, GJ Branch, ...), unlimited. */}
@@ -3903,7 +4350,7 @@ export function PlanningPage() {
                     </TableMessageRow>
                   ) : (
                     displayedRows.map((row) => (
-                      <tr key={row.id}>
+                      <tr key={row.id} id={`planning-row-${row.id}`}>
                         <EditableRowLabel
                           label={row.label}
                           canEdit={canEditCells}
@@ -4180,71 +4627,131 @@ export function PlanningPage() {
         {addSheetOpen && (
           <SimpleModal title="Add Sheet (Branch Tab)" onClose={() => setAddSheetOpen(false)}>
             <form onSubmit={handleCreateSheet}>
-              {/*
-                Every sheet must now be linked to one real branch from
-                Product Master's organization list (see
-                PlanningSheet.organization_id/branch_id) -- this replaces
-                "branch" being nothing more than whatever text was typed
-                into a name field. There is no separate sheet-name input
-                anymore: the sheet's name is always exactly the selected
-                branch's own name (see handleCreateSheet), so the tab
-                shown next to "Mumbai Branch"/"Chennai Branch" always
-                matches Product Master's branch list verbatim, instead of
-                risking two different names for the same branch. Branch
-                options are scoped to whichever organization is currently
-                selected; picking a different organization clears the
-                branch selection since a branch id from one organization
-                is meaningless for another.
-              */}
-              <div style={{ marginTop: 12 }}>
-                <SelectField
-                  id="new_sheet_organization"
-                  label="Organization *"
-                  required
-                  value={newSheetOrganizationId}
-                  onChange={(v) => {
-                    setNewSheetOrganizationId(v);
-                    setNewSheetBranchId("");
+              {/* Type Switcher */}
+              <div style={{ display: "flex", gap: 8, background: "#F1F5F9", padding: "4px", borderRadius: "8px", marginTop: 8, marginBottom: 14 }}>
+                <button
+                  type="button"
+                  onClick={() => setNewSheetType("organization")}
+                  style={{
+                    flex: 1,
+                    padding: "7px 12px",
+                    fontSize: "12.5px",
+                    fontWeight: 700,
+                    borderRadius: "6px",
+                    border: "none",
+                    background: newSheetType === "organization" ? "#FFFFFF" : "transparent",
+                    color: newSheetType === "organization" ? "#0284C7" : "#64748B",
+                    boxShadow: newSheetType === "organization" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                    cursor: "pointer",
                   }}
-                  hint="Which Product Master organization this sheet's branch belongs to."
                 >
-                  <option value="">Select an organization…</option>
-                  {organizations.items.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
-                  ))}
-                </SelectField>
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <SelectField
-                  id="new_sheet_branch"
-                  label="Branch *"
-                  required
-                  value={newSheetBranchId}
-                  onChange={setNewSheetBranchId}
-                  hint={
-                    !newSheetOrganizationId
-                      ? "Pick an organization first."
-                      : "This sheet will only show Product Master rows in this exact branch."
-                  }
+                  🏢 Internal Organization
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewSheetType("buyer")}
+                  style={{
+                    flex: 1,
+                    padding: "7px 12px",
+                    fontSize: "12.5px",
+                    fontWeight: 700,
+                    borderRadius: "6px",
+                    border: "none",
+                    background: newSheetType === "buyer" ? "#FFFFFF" : "transparent",
+                    color: newSheetType === "buyer" ? "#0284C7" : "#64748B",
+                    boxShadow: newSheetType === "buyer" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                    cursor: "pointer",
+                  }}
                 >
-                  <option value="">
-                    {newSheetOrganizationId ? "Select a branch…" : "Select an organization first"}
-                  </option>
-                  {(organizations.items.find((o) => o.id === newSheetOrganizationId)?.branches || []).map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </SelectField>
+                  👤 Buyer Profile
+                </button>
               </div>
+
+              {newSheetType === "organization" ? (
+                <>
+                  <div style={{ marginTop: 12 }}>
+                    <SelectField
+                      id="new_sheet_organization"
+                      label="Organization *"
+                      required
+                      value={newSheetOrganizationId}
+                      onChange={(v) => {
+                        setNewSheetOrganizationId(v);
+                        setNewSheetBranchId("");
+                      }}
+                      hint="Which Product Master organization this sheet's branch belongs to."
+                    >
+                      <option value="">Select an organization…</option>
+                      {organizations.items.map((org) => (
+                        <option key={org.id} value={org.id}>
+                          {org.name}
+                        </option>
+                      ))}
+                    </SelectField>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <SelectField
+                      id="new_sheet_branch"
+                      label="Branch *"
+                      required
+                      value={newSheetBranchId}
+                      onChange={setNewSheetBranchId}
+                      hint={
+                        !newSheetOrganizationId
+                          ? "Pick an organization first."
+                          : "This sheet will only show Product Master rows in this exact branch."
+                      }
+                    >
+                      <option value="">
+                        {newSheetOrganizationId ? "Select a branch…" : "Select an organization first"}
+                      </option>
+                      {(organizations.items.find((o) => o.id === newSheetOrganizationId)?.branches || []).map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </SelectField>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ marginTop: 12 }}>
+                    <SelectField
+                      id="new_sheet_buyer"
+                      label="Buyer *"
+                      required
+                      value={newSheetBuyerId}
+                      onChange={setNewSheetBuyerId}
+                      hint="Select which Buyer from Buyer Profiles this planning sheet is for."
+                    >
+                      <option value="">Select a buyer…</option>
+                      {buyersLookup.items.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.company_name}
+                        </option>
+                      ))}
+                    </SelectField>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <TextField
+                      id="new_sheet_buyer_branch"
+                      label="Branch / Delivery Location *"
+                      required
+                      placeholder="e.g. Unit 1, Bhiwandi Plant, Main Site"
+                      value={newSheetBuyerBranch}
+                      onChange={setNewSheetBuyerBranch}
+                      hint="Enter the buyer's branch or delivery plant name manually."
+                    />
+                  </div>
+                </>
+              )}
+
               <div style={{ marginTop: 12 }}>
                 <TextField
                   id="new_sheet_group_label"
                   label="Group Label Name *"
                   required
-                  placeholder="e.g. CN, MP, Mum, Chen"
+                  placeholder="e.g. CN, MP, Mum, Chen, PP"
                   value={newSheetGroupLabel}
                   onChange={setNewSheetGroupLabel}
                 />
@@ -4256,7 +4763,11 @@ export function PlanningPage() {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={!newSheetGroupLabel.trim() || !newSheetOrganizationId || !newSheetBranchId}
+                  disabled={
+                    newSheetType === "organization"
+                      ? !newSheetGroupLabel.trim() || !newSheetOrganizationId || !newSheetBranchId
+                      : !newSheetGroupLabel.trim() || !newSheetBuyerId || !newSheetBuyerBranch.trim()
+                  }
                 >
                   Create Sheet
                 </button>

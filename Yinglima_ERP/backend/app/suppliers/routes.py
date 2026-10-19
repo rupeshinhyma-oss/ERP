@@ -136,7 +136,6 @@ async def _to_supplier_read(service: SupplierService, supplier) -> dict:
         "contact_wechat_number": supplier.contact_wechat_number,
         "tax_id_number": supplier.tax_id_number,
         "address": supplier.address,
-        "town": supplier.town,
         "primary_website": supplier.primary_website,
         "secondary_website": supplier.secondary_website,
         "supplier_grade": supplier.supplier_grade,
@@ -155,7 +154,7 @@ async def _to_supplier_read(service: SupplierService, supplier) -> dict:
         "category_ids": [link.category_id for link in supplier.category_links],
         "sub_category_ids": [link.sub_category_id for link in supplier.sub_category_links],
         "product_ids": [link.product_id for link in supplier.product_links],
-        "contacts": [SupplierContactRead.model_validate(c) for c in supplier.contacts],
+        "contacts": [SupplierContactRead.model_validate(c) for c in supplier.contacts if getattr(c, "deleted_at", None) is None],
     }
     return SupplierRead.model_validate(payload).model_dump(mode="json")
 

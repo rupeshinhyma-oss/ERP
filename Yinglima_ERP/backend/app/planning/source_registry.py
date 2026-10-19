@@ -77,7 +77,7 @@ def _build_product_module() -> SourceModule:
         # (see ProductRepository.attach_planning_supplier_info) -- a product
         # can have multiple linked suppliers, but Shipment Planning only
         # ever needs the one exact supplier for that exact item.
-        SourceField("supplier_name", "Supplier Name", is_numeric=False),
+        SourceField("supplier_name", "Brand of Supplier", is_numeric=False),
         SourceField("supplier_city", "City", is_numeric=False),
         # --- Packaging attributes, used by the fixed NO. OF PKG / TOTAL WEIGHT / TOTAL CBM formulas ---
         SourceField("packaging_quantity", "PKG QTY", is_numeric=True),

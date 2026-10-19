@@ -136,9 +136,13 @@ async def list_products(
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductService = Depends(get_product_service),
     _current_user: CurrentUser = Depends(require_permission("product.view")),
+    light_list: bool = False,
 ) -> dict:
-    """List products, with search/sort/filter/pagination."""
-    products, total = await service.list_paginated(query)
+    """List products, with search/sort/filter/pagination.
+
+    ``light_list=true`` omits the heavy base64 images (see ``images_omitted``).
+    """
+    products, total = await service.list_paginated(query, light=light_list)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
 
     data = [ProductRead.model_validate(p) for p in products]
@@ -229,6 +233,17 @@ async def get_product_names_lookup(
     """Return lightweight product name suggestions matching search term anywhere in the name."""
     names = await service.search_product_names(search=search, limit=min(limit, 50))
     return build_success_response(data=names, request_id=request.state.request_id)
+
+
+@router.get("/lookup", summary="Lightweight active products lookup")
+async def get_products_lookup(
+    request: Request,
+    service: ProductService = Depends(get_product_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Return lightweight list of active products {id, name, product_name, product_code} for fast UI lookups."""
+    products = await service.list_products_lookup()
+    return build_success_response(data=products, request_id=request.state.request_id)
 
 
 @router.get("/{product_id}", summary="Get a product")

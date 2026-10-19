@@ -11,6 +11,7 @@ Contains core business logic for:
 from __future__ import annotations
 
 import io
+import logging
 import math
 import os
 import uuid
@@ -43,6 +44,8 @@ from app.sales.schemas import (
     SaleOrderCreate,
     SaleOrderUpdate,
 )
+
+logger = logging.getLogger("sales")
 
 
 class SaleService:
@@ -699,7 +702,23 @@ class SaleService:
             items=item_entities,
         )
 
-        return await self.repo.create(order)
+        created_order = await self.repo.create(order)
+        try:
+            from app.notifications.service import NotificationService
+            sender_id = getattr(current_user, "id", None)
+            buyer_label = created_order.buyer_name or "Buyer"
+            amt_str = f"₹{created_order.total_amount:,.2f}"
+            await NotificationService.dispatch_event(
+                self.session,
+                event_key="sale_process_created",
+                title=f"New Sale Order: {created_order.order_no} ({buyer_label})",
+                message=f"Order {created_order.order_no} created for {buyer_label} with total amount {amt_str}.",
+                link=f"/sale/process?search={created_order.order_no}&id={created_order.id}",
+                sender_id=sender_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to dispatch sale_process_created notification: {e}")
+        return created_order
 
     async def update_order(
         self,

@@ -95,7 +95,7 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     spec = _get_val(raw_row, "Specification", "specification", "Compliance & License Requirements", "Product Specification")
     desc = _get_val(raw_row, "Description", "description")
     license_req = _get_val(raw_row, "Compliance & License Requirements", "license_certificate_required")
-    supplier_name = _get_val(raw_row, "Primary Supplier", "primary_supplier", "Supplier", "supplier_name", "Supplier Name", "Supplier (Primary)")
+    supplier_name = _get_val(raw_row, "Supplier Brand", "Brand of Supplier", "Primary Supplier", "primary_supplier", "Supplier", "supplier_name", "Supplier Name", "Supplier (Primary)")
 
     return {
         "product_code": product_code,

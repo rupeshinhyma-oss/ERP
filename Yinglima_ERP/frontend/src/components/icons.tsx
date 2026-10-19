@@ -539,6 +539,7 @@ export const ICONS = {
   clock: IconClock,
   trash: IconTrash,
   database: IconDatabase,
+  bell: IconBell,
   chevronDown: IconChevronDown,
   chevronRight: IconChevronRight,
   userPlus: IconUserPlus,

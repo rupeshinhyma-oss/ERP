@@ -1065,17 +1065,8 @@ export function EmailTagInput({
   const [inputValue, setInputValue] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  const handleCopy = (email: string, key: string) => {
-    void navigator.clipboard.writeText(email);
-    setCopiedKey(key);
-    setTimeout(() => {
-      setCopiedKey((current) => (current === key ? null : current));
-    }, 1500);
-  };
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -1176,7 +1167,6 @@ export function EmailTagInput({
         }}
       >
         {visibleEmails.map((email, idx) => {
-          const isCopied = copiedKey === `vis-${idx}`;
           return (
             <span
               key={`${email}-${idx}`}
@@ -1184,22 +1174,22 @@ export function EmailTagInput({
                 background: "#2563eb",
                 color: "#ffffff",
                 borderRadius: "4px",
-                padding: "2px 5px 2px 7px",
+                padding: "2px 6px 2px 7px",
                 fontSize: "12px",
                 fontWeight: 600,
                 display: "inline-flex",
                 alignItems: "center",
-                gap: "4px",
+                gap: "5px",
                 whiteSpace: "nowrap",
                 flexShrink: 0,
-                maxWidth: "160px",
+                maxWidth: "200px",
                 boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
               }}
             >
               <a
                 href={`mailto:${email}`}
                 onClick={(e) => e.stopPropagation()}
-                title={`Send email to ${email} (Click to open in mail app)`}
+                title={`Send email to ${email} (Click to open in mail compose)`}
                 style={{
                   color: "#ffffff",
                   textDecoration: "none",
@@ -1207,45 +1197,16 @@ export function EmailTagInput({
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
                   cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
                 }}
                 onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
                 onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
               >
-                {email}
+                <span>✉️</span>
+                <span>{email}</span>
               </a>
-
-              {/* 1-Click Copy button */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCopy(email, `vis-${idx}`);
-                }}
-                title={isCopied ? "Copied to clipboard!" : `Copy ${email}`}
-                style={{
-                  background: isCopied ? "#16a34a" : "rgba(255, 255, 255, 0.22)",
-                  border: "none",
-                  borderRadius: "3px",
-                  color: "#ffffff",
-                  cursor: "pointer",
-                  padding: "1px 3px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  lineHeight: 1,
-                  fontSize: "10px",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                {isCopied ? (
-                  <span style={{ fontSize: "10px", fontWeight: 700 }}>✓</span>
-                ) : (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                )}
-              </button>
 
               {/* Remove button */}
               <button
@@ -1255,15 +1216,18 @@ export function EmailTagInput({
                   removeTag(idx);
                 }}
                 style={{
-                  background: "none",
+                  background: "transparent",
                   border: "none",
                   color: "#ffffff",
                   fontWeight: 700,
                   fontSize: "11px",
                   cursor: "pointer",
-                  padding: "0 1px",
+                  padding: "0 2px",
                   lineHeight: 1,
                   opacity: 0.85,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
                 title="Remove email"
               >
@@ -1362,7 +1326,6 @@ export function EmailTagInput({
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
             {emails.map((email, idx) => {
-              const isCopied = copiedKey === `pop-${idx}`;
               return (
                 <span
                   key={`all-${email}-${idx}`}
@@ -1382,50 +1345,21 @@ export function EmailTagInput({
                   <a
                     href={`mailto:${email}`}
                     onClick={(e) => e.stopPropagation()}
-                    title={`Send email to ${email}`}
+                    title={`Send email to ${email} (Click to open in mail compose)`}
                     style={{
                       color: "#ffffff",
                       textDecoration: "none",
                       cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
                     }}
                     onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
                     onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
                   >
-                    {email}
+                    <span>✉️</span>
+                    <span>{email}</span>
                   </a>
-
-                  {/* 1-Click Copy button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCopy(email, `pop-${idx}`);
-                    }}
-                    title={isCopied ? "Copied to clipboard!" : `Copy ${email}`}
-                    style={{
-                      background: isCopied ? "#16a34a" : "rgba(255, 255, 255, 0.22)",
-                      border: "none",
-                      borderRadius: "3px",
-                      color: "#ffffff",
-                      cursor: "pointer",
-                      padding: "2px 4px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      lineHeight: 1,
-                      fontSize: "11px",
-                      transition: "all 0.15s ease",
-                    }}
-                  >
-                    {isCopied ? (
-                      <span style={{ fontSize: "10px", fontWeight: 700 }}>✓</span>
-                    ) : (
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                      </svg>
-                    )}
-                  </button>
 
                   <button
                     type="button"
@@ -1517,13 +1451,29 @@ export function SelectField({
   }, [children]);
 
   const options = useMemo(() => {
+    function extractNodeText(node: ReactNode): string {
+      if (node == null) return "";
+      if (typeof node === "string" || typeof node === "number") return String(node);
+      if (Array.isArray(node)) return node.map(extractNodeText).join(" ");
+      if (React.isValidElement(node) && node.props) {
+        const p = node.props as any;
+        if (typeof p.label === "string") return p.label;
+        if (p.children) return extractNodeText(p.children);
+      }
+      return "";
+    }
+
     const list: { value: string; label: string; element: ReactNode; disabled?: boolean }[] = [];
     flattenedChildren.forEach((child) => {
+      const childProps = child.props as any;
+      const textLabel = typeof childProps.label === "string" && childProps.label.trim()
+        ? childProps.label
+        : extractNodeText(childProps.children) || String(childProps.value ?? "");
       list.push({
-        value: String(child.props.value ?? ""),
-        label: typeof child.props.children === "string" ? child.props.children : String(child.props.children ?? child.props.value ?? ""),
-        element: child.props.children ?? child.props.value ?? "",
-        disabled: child.props.disabled,
+        value: String(childProps.value ?? ""),
+        label: textLabel,
+        element: childProps.children ?? childProps.value ?? "",
+        disabled: childProps.disabled,
       });
     });
     return list;

@@ -62,6 +62,15 @@ class LocalPurchaseItemResponse(LocalPurchaseItemBase):
 class LocalPurchaseBase(BaseModel):
     """Base fields for a local purchase invoice."""
 
+    organization_id: uuid.UUID | None = None
+    organization_name: str | None = None
+    branch_id: str | None = None
+    branch_name: str | None = None
+    group_label: str | None = None
+    consignment_code: str | None = None
+    planning_sheet_id: uuid.UUID | None = None
+    planning_column_id: uuid.UUID | None = None
+
     supplier_id: uuid.UUID
     supplier_name: str = Field(..., min_length=1, max_length=200)
     invoice_no: str = Field(..., min_length=1, max_length=100)
@@ -87,6 +96,15 @@ class LocalPurchaseCreate(LocalPurchaseBase):
 class LocalPurchaseUpdate(BaseModel):
     """Payload to update a local purchase with items."""
 
+    organization_id: uuid.UUID | None = None
+    organization_name: str | None = None
+    branch_id: str | None = None
+    branch_name: str | None = None
+    group_label: str | None = None
+    consignment_code: str | None = None
+    planning_sheet_id: uuid.UUID | None = None
+    planning_column_id: uuid.UUID | None = None
+
     supplier_id: uuid.UUID | None = None
     supplier_name: str | None = None
     invoice_no: str | None = None
@@ -110,6 +128,15 @@ class LocalPurchaseSummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    organization_id: uuid.UUID | None = None
+    organization_name: str | None = None
+    branch_id: str | None = None
+    branch_name: str | None = None
+    group_label: str | None = None
+    consignment_code: str | None = None
+    planning_sheet_id: uuid.UUID | None = None
+    planning_column_id: uuid.UUID | None = None
+
     supplier_id: uuid.UUID
     supplier_name: str
     invoice_no: str
@@ -139,6 +166,45 @@ class LocalPurchaseDetailResponse(LocalPurchaseSummaryResponse):
     offloading_expense: float = 0.0
     other_expense: float = 0.0
     items: list[LocalPurchaseItemResponse] = Field(default_factory=list)
+
+
+class ConsignmentColumnInfo(BaseModel):
+    """One consignment column on a planning sheet."""
+
+    column_id: uuid.UUID
+    column_name: str
+    consignment_code: str
+    position: int
+    planned_items_count: int = 0
+
+
+class SheetConsignmentLookup(BaseModel):
+    """Planning sheet with its consignments for cascading selection."""
+
+    sheet_id: uuid.UUID
+    sheet_name: str
+    organization_id: uuid.UUID | None = None
+    organization_name: str | None = None
+    branch_id: str | None = None
+    branch_name: str | None = None
+    group_label: str
+    consignments: list[ConsignmentColumnInfo] = Field(default_factory=list)
+
+
+class ConsignmentProductItem(BaseModel):
+    """Planned product extracted from a consignment column for purchase line items."""
+
+    product_id: uuid.UUID | None = None
+    product_name: str
+    product_code: str | None = None
+    hsn_code: str | None = None
+    quantity: float
+    unit_rate: float
+    vat_rate: float
+    item_total: float
+    supplier_id: uuid.UUID | None = None
+    supplier_name: str | None = None
+    supplier_brand: str | None = None
 
 
 class BillExtractionItem(BaseModel):
