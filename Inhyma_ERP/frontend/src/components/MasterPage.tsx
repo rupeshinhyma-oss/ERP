@@ -2010,7 +2010,7 @@ export function MasterPage<T extends MasterRecord>({
 
       <main className="page">
         {breadcrumbTrail && <Breadcrumb trail={breadcrumbTrail} />}
-        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: subtitle ? "flex-start" : "center", gap: "12px", marginBottom: "8px" }}>
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: subtitle ? "flex-start" : "center", gap: "12px", marginBottom: "16px" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>{heading}</h1>
             {subtitle && <div className="page-subtitle">{subtitle}</div>}
@@ -2108,16 +2108,7 @@ export function MasterPage<T extends MasterRecord>({
             <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
               <button
                 type="button"
-                style={{
-                  padding: "6px 16px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#64748b",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
+                className="btn-filter-reset"
                 onClick={() => {
                   setSearchInput("");
                   setCurrentPage(1);
@@ -2128,16 +2119,7 @@ export function MasterPage<T extends MasterRecord>({
               </button>
               <button
                 type="button"
-                style={{
-                  padding: "6px 16px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#f59e0b",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
+                className="btn-filter-search"
                 onClick={() => {
                   setCurrentPage(1);
                   reload();

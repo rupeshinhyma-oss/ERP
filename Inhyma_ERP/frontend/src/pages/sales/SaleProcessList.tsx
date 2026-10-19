@@ -307,7 +307,11 @@ export function SaleProcessListPage() {
   // Controls state
   const [includingGst, setIncludingGst] = useState(true);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>("all");
+  const [activeTab, setActiveTabState] = useState<string>(() => sessionStorage.getItem("sales_process_active_tab") || "all");
+  const setActiveTab = (tab: string) => {
+    sessionStorage.setItem("sales_process_active_tab", tab);
+    setActiveTabState(tab);
+  };
   const [perPage, setPerPage] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [search, setSearch] = useState("");
@@ -349,6 +353,8 @@ export function SaleProcessListPage() {
   const [modalLrNo, setModalLrNo] = useState("");
   const [modalLrTransporter, setModalLrTransporter] = useState("");
   const [modalLrDate, setModalLrDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
+  const [modalLrFile, setModalLrFile] = useState("");
+  const [modalLrPhotos, setModalLrPhotos] = useState<string[]>([]);
 
   // LR Dispatch Modal state (WhatsApp / Email direct notice)
   const [lrDispatchOrder, setLrDispatchOrder] = useState<SaleOrder | null>(null);
@@ -470,6 +476,22 @@ export function SaleProcessListPage() {
   ], [metrics, isTestMode]);
 
 
+  const [appliedFilters, setAppliedFilters] = useState({
+    orderDateFrom: "",
+    orderDateTo: "",
+    invoiceDateFrom: "",
+    invoiceDateTo: "",
+    expDateFrom: "",
+    expDateTo: "",
+    state: "",
+    dispatch: "",
+    warehouse: "",
+    salesPerson: "",
+    company: "",
+    thirdParty: "",
+    po: "",
+  });
+
   const handleResetFilters = () => {
     setOrderDateFrom("");
     setOrderDateTo("");
@@ -485,6 +507,39 @@ export function SaleProcessListPage() {
     setThirdPartyFilter("");
     setPoFilter("");
     setSearch("");
+    setAppliedFilters({
+      orderDateFrom: "",
+      orderDateTo: "",
+      invoiceDateFrom: "",
+      invoiceDateTo: "",
+      expDateFrom: "",
+      expDateTo: "",
+      state: "",
+      dispatch: "",
+      warehouse: "",
+      salesPerson: "",
+      company: "",
+      thirdParty: "",
+      po: "",
+    });
+  };
+
+  const handleSearchFilters = () => {
+    setAppliedFilters({
+      orderDateFrom,
+      orderDateTo,
+      invoiceDateFrom,
+      invoiceDateTo,
+      expDateFrom,
+      expDateTo,
+      state: stateFilter,
+      dispatch: dispatchFilter,
+      warehouse: warehouseFilter,
+      salesPerson: salesPersonFilter,
+      company: companyFilter,
+      thirdParty: thirdPartyFilter,
+      po: poFilter,
+    });
   };
 
   // Filtered orders list
@@ -498,73 +553,73 @@ export function SaleProcessListPage() {
       }
 
       // Order Date filter
-      if (orderDateFrom) {
-        const fromT = parseDateForCompare(orderDateFrom);
+      if (appliedFilters.orderDateFrom) {
+        const fromT = parseDateForCompare(appliedFilters.orderDateFrom);
         const ordT = parseDateForCompare(o.order_date);
         if (fromT && (!ordT || ordT < fromT)) return false;
       }
-      if (orderDateTo) {
-        const toT = parseDateForCompare(orderDateTo);
+      if (appliedFilters.orderDateTo) {
+        const toT = parseDateForCompare(appliedFilters.orderDateTo);
         const ordT = parseDateForCompare(o.order_date);
         if (toT && (!ordT || ordT > toT)) return false;
       }
 
       // Invoice Date filter
-      if (invoiceDateFrom) {
-        const fromT = parseDateForCompare(invoiceDateFrom);
+      if (appliedFilters.invoiceDateFrom) {
+        const fromT = parseDateForCompare(appliedFilters.invoiceDateFrom);
         const invT = parseDateForCompare(o.invoice_date);
         if (fromT && (!invT || invT < fromT)) return false;
       }
-      if (invoiceDateTo) {
-        const toT = parseDateForCompare(invoiceDateTo);
+      if (appliedFilters.invoiceDateTo) {
+        const toT = parseDateForCompare(appliedFilters.invoiceDateTo);
         const invT = parseDateForCompare(o.invoice_date);
         if (toT && (!invT || invT > toT)) return false;
       }
 
       // Expected Delivery Date filter
-      if (expDateFrom) {
-        const fromT = parseDateForCompare(expDateFrom);
+      if (appliedFilters.expDateFrom) {
+        const fromT = parseDateForCompare(appliedFilters.expDateFrom);
         const expT = parseDateForCompare(o.expected_delivery_date || o.delivery_date);
         if (fromT && (!expT || expT < fromT)) return false;
       }
-      if (expDateTo) {
-        const toT = parseDateForCompare(expDateTo);
+      if (appliedFilters.expDateTo) {
+        const toT = parseDateForCompare(appliedFilters.expDateTo);
         const expT = parseDateForCompare(o.expected_delivery_date || o.delivery_date);
         if (toT && (!expT || expT > toT)) return false;
       }
 
       // State filter
-      if (stateFilter && !o.state?.toLowerCase().includes(stateFilter.toLowerCase())) {
+      if (appliedFilters.state && !o.state?.toLowerCase().includes(appliedFilters.state.toLowerCase())) {
         return false;
       }
 
       // Dispatch filter
-      if (dispatchFilter) {
+      if (appliedFilters.dispatch) {
         const isDisp = ["dispatched", "lr", "delivered", "completed"].includes((o.status || "").toLowerCase()) || Boolean(o.lr_no);
-        if (dispatchFilter === "yes" && !isDisp) return false;
-        if (dispatchFilter === "no" && isDisp) return false;
+        if (appliedFilters.dispatch === "yes" && !isDisp) return false;
+        if (appliedFilters.dispatch === "no" && isDisp) return false;
       }
 
       // Warehouse filter
-      if (warehouseFilter && o.warehouse !== warehouseFilter) return false;
+      if (appliedFilters.warehouse && o.warehouse !== appliedFilters.warehouse) return false;
 
       // Sales person filter
-      if (salesPersonFilter && !o.sales_person?.toLowerCase().includes(salesPersonFilter.toLowerCase())) {
+      if (appliedFilters.salesPerson && !o.sales_person?.toLowerCase().includes(appliedFilters.salesPerson.toLowerCase())) {
         return false;
       }
 
       // Company filter
-      if (companyFilter && !o.company_name?.toLowerCase().includes(companyFilter.toLowerCase())) {
+      if (appliedFilters.company && !o.company_name?.toLowerCase().includes(appliedFilters.company.toLowerCase())) {
         return false;
       }
 
       // Third party
-      if (thirdPartyFilter && String(o.third_party || o.third_party_delivery || "no").toLowerCase() !== thirdPartyFilter.toLowerCase()) {
+      if (appliedFilters.thirdParty && String(o.third_party || o.third_party_delivery || "no").toLowerCase() !== appliedFilters.thirdParty.toLowerCase()) {
         return false;
       }
 
       // PO
-      if (poFilter && String(o.po).toLowerCase() !== poFilter.toLowerCase()) {
+      if (appliedFilters.po && String(o.po).toLowerCase() !== appliedFilters.po.toLowerCase()) {
         return false;
       }
 
@@ -589,19 +644,7 @@ export function SaleProcessListPage() {
   }, [
     orders,
     activeTab,
-    orderDateFrom,
-    orderDateTo,
-    invoiceDateFrom,
-    invoiceDateTo,
-    expDateFrom,
-    expDateTo,
-    stateFilter,
-    dispatchFilter,
-    warehouseFilter,
-    salesPersonFilter,
-    companyFilter,
-    thirdPartyFilter,
-    poFilter,
+    appliedFilters,
     search,
   ]);
 
@@ -859,6 +902,8 @@ export function SaleProcessListPage() {
                 setModalLrNo(order.lr_no || "");
                 setModalLrTransporter(order.transport_name || order.transporter_name || "");
                 setModalLrDate(order.lr_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
+                setModalLrFile("");
+                setModalLrPhotos([]);
 
                 if (!order.gatepass_no) {
                   apiGet<{ gatepass_no: string }>("/sales/next-gatepass-no")
@@ -912,21 +957,12 @@ export function SaleProcessListPage() {
         <Breadcrumb trail={["Sale", "Sale Process"]} />
 
         {/* Page Header & Top Actions */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "16px",
-            flexWrap: "wrap",
-            gap: "12px",
-          }}
-        >
+        <div className="page-header">
           <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>
             Sale Process
           </h1>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             {/* Including GST Switch */}
             <label
               style={{
@@ -999,6 +1035,7 @@ export function SaleProcessListPage() {
             {/* + ADD NEW Button */}
             <Link
               to="/sales/process/add"
+              className="btn btn-add-new"
               style={{
                 backgroundColor: "#0061f2",
                 color: "#ffffff",
@@ -1021,6 +1058,7 @@ export function SaleProcessListPage() {
             {/* Export Button */}
             <button
               type="button"
+              className="btn btn-imp-exp"
               onClick={handleExport}
               style={{
                 backgroundColor: "#f59e0b",
@@ -1042,111 +1080,7 @@ export function SaleProcessListPage() {
           </div>
         </div>
 
-        {/* 6 Top KPI Summary Cards */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-            gap: "12px",
-            marginBottom: "16px",
-          }}
-        >
-          {kpiCards.map((card) => {
-            const isSelected = activeTab === card.key;
-            return (
-              <div
-                key={card.key}
-                onClick={() => {
-                  setActiveTab(card.key);
-                  setCurrentPage(1);
-                }}
-                style={{
-                  margin: 0,
-                  cursor: "pointer",
-                  border: isSelected ? "2px solid #0061f2" : "1px solid #e2e8f0",
-                  backgroundColor: isSelected ? "#f8fafc" : "#ffffff",
-                  padding: "12px 14px",
-                  borderRadius: "8px",
-                  boxShadow: isSelected
-                    ? "0 4px 6px -1px rgba(0,97,242,0.1)"
-                    : "0 1px 3px rgba(0,0,0,0.04)",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    color: isSelected ? "#0061f2" : "#64748b",
-                    letterSpacing: "0.03em",
-                    marginBottom: "6px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {card.label}
-                </div>
-                <div
-                  style={{
-                    fontSize: "15px",
-                    fontWeight: 700,
-                    color: "#0f172a",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {formatIndianCurrency(card.amount)}{" "}
-                  <span style={{ fontWeight: 500, fontSize: "12px", color: "#64748b" }}>
-                    ({card.count})
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* 10 Status Navigation Tabs */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-            borderBottom: "1px solid #e2e8f0",
-            marginBottom: "16px",
-            overflowX: "auto",
-            scrollbarWidth: "thin",
-          }}
-        >
-          {tabs.map((t) => {
-            const isActive = activeTab === t.key;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => {
-                  setActiveTab(t.key);
-                  setCurrentPage(1);
-                }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  borderBottom: isActive ? "2px solid #0061f2" : "2px solid transparent",
-                  color: isActive ? "#0061f2" : "#64748b",
-                  fontWeight: isActive ? 700 : 500,
-                  fontSize: "12.5px",
-                  padding: "8px 12px",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                {t.label} ({t.count})
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Collapsible Filter Panel */}
+        {/* Collapsible Filter Panel (Placed ABOVE KPI cards) */}
         {filterOpen && (
           <div
             data-testid="sale-process-filter-panel"
@@ -1215,7 +1149,7 @@ export function SaleProcessListPage() {
                 />
               </div>
 
-              {/* Expected Delivery Date Range */}
+              {/* Exp Deli Date From / To */}
               <div>
                 <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                   Exp. Delivery From
@@ -1353,41 +1287,130 @@ export function SaleProcessListPage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 type="button"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#f1f5f9",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "6px",
-                  padding: "6px 14px",
-                  fontSize: "12px",
-                  color: "#475569",
-                  cursor: "pointer",
-                }}
               >
                 Reset
               </button>
               <button
                 type="button"
-                onClick={() => setFilterOpen(false)}
-                style={{
-                  background: "#0061f2",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "6px",
-                  padding: "6px 16px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
+                className="btn-filter-search"
+                onClick={handleSearchFilters}
               >
-                Apply Filters
+                Search
               </button>
             </div>
           </div>
         )}
+
+        {/* 6 Top KPI Summary Cards */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+            gap: "12px",
+            marginBottom: "16px",
+          }}
+        >
+          {kpiCards.map((card) => {
+            const isSelected = activeTab === card.key;
+            return (
+              <div
+                key={card.key}
+                onClick={() => {
+                  setActiveTab(card.key);
+                  setCurrentPage(1);
+                }}
+                style={{
+                  margin: 0,
+                  cursor: "pointer",
+                  border: isSelected ? "2px solid #0061f2" : "1px solid #e2e8f0",
+                  backgroundColor: isSelected ? "#f8fafc" : "#ffffff",
+                  padding: "12px 14px",
+                  borderRadius: "8px",
+                  boxShadow: isSelected
+                    ? "0 4px 6px -1px rgba(0,97,242,0.1)"
+                    : "0 1px 3px rgba(0,0,0,0.04)",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    color: isSelected ? "#0061f2" : "#64748b",
+                    letterSpacing: "0.03em",
+                    marginBottom: "6px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {card.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    color: "#0f172a",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {formatIndianCurrency(card.amount)}{" "}
+                  <span style={{ fontWeight: 500, fontSize: "12px", color: "#64748b" }}>
+                    ({card.count})
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 10 Status Navigation Tabs */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
+            borderBottom: "1px solid #e2e8f0",
+            marginBottom: "16px",
+            overflowX: "auto",
+            scrollbarWidth: "thin",
+          }}
+        >
+          {tabs.map((t) => {
+            const isActive = activeTab === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => {
+                  setActiveTab(t.key);
+                  setCurrentPage(1);
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: isActive ? "2px solid #0061f2" : "2px solid transparent",
+                  color: isActive ? "#0061f2" : "#64748b",
+                  fontWeight: isActive ? 700 : 500,
+                  fontSize: "12.5px",
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                {t.label} ({t.count})
+              </button>
+            );
+          })}
+        </div>
+
+
 
         {/* Controls Bar: Items/Page + Search */}
         <div
@@ -1588,12 +1611,57 @@ export function SaleProcessListPage() {
 
                       {/* Third Party */}
                       <td style={{ padding: "8px 12px", color: "#475569" }}>
-                        {String(o.third_party || "No")}
+                        {(() => {
+                          const isTp = _yes(o.third_party) || _yes(o.third_party_delivery);
+                          const tpAtt = o.third_party_invoice || (o as any).third_party_file;
+                          if (!isTp) return "No";
+                          if (tpAtt) {
+                            return (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                <span style={{ color: "#0284c7", fontWeight: 600 }}>Yes</span>
+                                <span
+                                  title={`Third Party Invoice: ${tpAtt}`}
+                                  style={{ cursor: "pointer", fontSize: "13px" }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    alert(`Third Party Invoice Document: ${tpAtt}`);
+                                  }}
+                                >
+                                  📎
+                                </span>
+                              </span>
+                            );
+                          }
+                          return "Yes";
+                        })()}
                       </td>
 
                       {/* PO */}
                       <td style={{ padding: "8px 12px", color: "#475569" }}>
-                        {String(o.po || "No")}
+                        {(() => {
+                          const isPo = _yes(o.po);
+                          const poAtt = (o as any).po_file || (o as any).po_attachment || (o.files || []).find((f) => f.name?.toLowerCase().includes("po"));
+                          const poName = typeof poAtt === "string" ? poAtt : poAtt?.name;
+                          if (!isPo && !poName) return "No";
+                          if (poName) {
+                            return (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                <span style={{ color: "#0284c7", fontWeight: 600 }}>Yes</span>
+                                <span
+                                  title={`Purchase Order: ${poName}`}
+                                  style={{ cursor: "pointer", fontSize: "13px" }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    alert(`Client PO Document: ${poName}`);
+                                  }}
+                                >
+                                  📎
+                                </span>
+                              </span>
+                            );
+                          }
+                          return "Yes";
+                        })()}
                       </td>
 
                       {/* Sales Person */}
@@ -1724,7 +1792,17 @@ export function SaleProcessListPage() {
                           ⋮
                         </button>
 
-                        {openActionId === o.id && (
+                        {openActionId === o.id && (() => {
+                          const isAdmin = Boolean(profile?.role === "admin" || profile?.username === "admin" || (profile as any)?.is_superuser);
+                          const st = (o.status || "pending").toLowerCase();
+                          const hasInvoice = Boolean(o.invoice_no);
+                          const isPendingOrSalesConfirmed = st === "pending" || st === "sales_confirmed";
+                          // Spec: Edit upto Sales Confirmed stage, once Admin Approved / Invoiced cannot edit unless Admin
+                          const canEditOrder = (isPendingOrSalesConfirmed && !hasInvoice) || isAdmin;
+                          // Spec: Delete allowed only for Pending and Cancelled stage, or Admin rights
+                          const canDeleteOrder = st === "pending" || st === "cancelled" || st === "gatepass_cancelled" || isAdmin;
+
+                          return (
                           <div
                             onClick={(e) => e.stopPropagation()}
                             style={{
@@ -1742,43 +1820,46 @@ export function SaleProcessListPage() {
                               padding: "4px 0",
                             }}
                           >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigate(`/sales/process/edit/${o.id}`);
-                                setOpenActionId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                color: "#334155",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                            >
-                              <svg
-                                width="13"
-                                height="13"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
+                            {canEditOrder ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  sessionStorage.setItem("sales_process_active_tab", activeTab);
+                                  navigate(`/sales/process/edit/${o.id}`);
+                                  setOpenActionId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  padding: "7px 12px",
+                                  background: "none",
+                                  border: "none",
+                                  textAlign: "left",
+                                  fontSize: "12px",
+                                  cursor: "pointer",
+                                  color: "#334155",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                               >
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                              </svg>
-                              Edit
-                            </button>
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                </svg>
+                                Edit
+                              </button>
+                            ) : null}
 
                             <button
                               type="button"
@@ -1960,59 +2041,62 @@ export function SaleProcessListPage() {
                               Send LR to Client
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                if (window.confirm(`Delete order ${o.order_no}?`)) {
-                                  try {
-                                    await apiDelete(`/sales/orders/${o.id}`);
-                                  } catch {
-                                    // Local delete fallback
+                            {canDeleteOrder && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (window.confirm(`Delete order ${o.order_no}?`)) {
+                                    try {
+                                      await apiDelete(`/sales/orders/${o.id}`);
+                                    } catch {
+                                      // Local delete fallback
+                                    }
+                                    setOrders((prev) => prev.filter((it) => it.id !== o.id));
+                                    toast(`Order ${o.order_no} deleted`, "success");
                                   }
-                                  setOrders((prev) => prev.filter((it) => it.id !== o.id));
-                                  toast(`Order ${o.order_no} deleted`, "success");
-                                }
-                                setOpenActionId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                color: "#334155",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.backgroundColor = "#fef2f2";
-                                e.currentTarget.style.color = "#dc2626";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.backgroundColor = "transparent";
-                                e.currentTarget.style.color = "#334155";
-                              }}
-                            >
-                              <svg
-                                width="13"
-                                height="13"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
+                                  setOpenActionId(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  padding: "7px 12px",
+                                  background: "none",
+                                  border: "none",
+                                  textAlign: "left",
+                                  fontSize: "12px",
+                                  cursor: "pointer",
+                                  color: "#334155",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = "#fef2f2";
+                                  e.currentTarget.style.color = "#dc2626";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = "transparent";
+                                  e.currentTarget.style.color = "#334155";
+                                }}
                               >
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                              </svg>
-                              Delete
-                            </button>
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                </svg>
+                                Delete
+                              </button>
+                            )}
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))
@@ -2473,7 +2557,7 @@ export function SaleProcessListPage() {
               {(selectedNewStatus || editingStatusOrder.status) === "lr" && (
                 <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "6px", padding: "12px", marginBottom: "14px" }}>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b21a8", marginBottom: "8px" }}>
-                    📦 Transporter LR Details:
+                    📦 Transporter LR & Dispatch Proofs:
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                     <div>
@@ -2498,6 +2582,45 @@ export function SaleProcessListPage() {
                         onChange={(e) => setModalLrTransporter(e.target.value)}
                         style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe" }}
                       />
+                    </div>
+                    <div style={{ gridColumn: "span 2", marginTop: "4px" }}>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#6b21a8", marginBottom: "3px" }}>
+                        Attach LR Document (PDF / Scan)
+                      </label>
+                      <input
+                        type="file"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) setModalLrFile(f.name);
+                        }}
+                        style={{ width: "100%", fontSize: "11.5px" }}
+                      />
+                      {modalLrFile && (
+                        <div style={{ fontSize: "11px", color: "#7c3aed", marginTop: "2px" }}>
+                          📎 Attached: {modalLrFile}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ gridColumn: "span 2", marginTop: "4px" }}>
+                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#6b21a8", marginBottom: "3px" }}>
+                        Upload Loading / Dispatch Photos & Videos (Multiple)
+                      </label>
+                      <input
+                        type="file"
+                        multiple
+                        onChange={(e) => {
+                          if (e.target.files) {
+                            const names = Array.from(e.target.files).map((f) => f.name);
+                            setModalLrPhotos(names);
+                          }
+                        }}
+                        style={{ width: "100%", fontSize: "11.5px" }}
+                      />
+                      {modalLrPhotos.length > 0 && (
+                        <div style={{ fontSize: "11px", color: "#7c3aed", marginTop: "2px" }}>
+                          📸 {modalLrPhotos.length} file(s) selected: {modalLrPhotos.join(", ")}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2564,6 +2687,8 @@ export function SaleProcessListPage() {
                       extra.transporter_name = modalLrTransporter.trim();
                       extra.transport_name = modalLrTransporter.trim();
                       extra.lr_date = modalLrDate.trim();
+                      if (modalLrFile) extra.lr_file = modalLrFile;
+                      if (modalLrPhotos.length > 0) extra.lr_photos = modalLrPhotos;
                     }
 
                     try {

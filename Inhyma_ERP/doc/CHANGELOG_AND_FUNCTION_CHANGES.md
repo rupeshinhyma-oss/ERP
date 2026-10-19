@@ -3,6 +3,56 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-19] — Cross-Module UI/UX Harmonization: Universal Page Header & Action Button Standards, Filter-Above-KPI Hierarchy, and Streamlined Minimalist Header Cleanups
+
+### 1. Universal Page Header & Spacing Standardization
+- **Global Page Geometry ([`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css)):**
+  - Standardized `.page { padding: 12px 20px; }` across all main application shells, aligning navbar spacing and establishing an edge-to-edge 20px grid alignment for all main card tables and data containers.
+  - Standardized `.page-header` bottom margin to `16px` across all modules (including all 30+ master catalog modules in `MasterPage.tsx`, `StockTransferPage.tsx`, and `StockAdjustmentPage.tsx`).
+  - Conditioned alert and feedback containers across pages (e.g. `TechnicalTasksPage.tsx`, `PaymentsPage.tsx`, `TechnicianOperationsPage.tsx`) so that empty feedback banner wrappers do not render phantom blank spaces or vertical layout gaps below page headers.
+
+### 2. Universal Header Action Button Standard (`.page-header-actions`)
+- **Pixel-Matched Button Standards ([`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css)):**
+  - Implemented strict global CSS rules for all action buttons located inside `.page-header-actions` (`> button`, `> .btn`, `> a.btn`, `> a`, `> div > button:first-child`, etc.):
+    - **Exact Height:** `35px !important` (`min-height: 35px; max-height: 35px; box-sizing: border-box;`)
+    - **Corner Radius:** `border-radius: 6px !important`
+    - **Typography:** `font-size: 13px !important; font-weight: 600 !important; line-height: 1 !important;`
+    - **Alignment & Flex:** `display: inline-flex !important; align-items: center !important; justify-content: center !important; gap: 10px !important;`
+  - Targets `.btn-filter-toggle`, `.btn-add-new`, `.btn-quick-add`, `.btn-imp-exp`, `.btn-bulk-actions`, `.stock-btn-export`, `.btn-bulk-action`, etc.
+  - **Popover Isolation:** Protected popover dropdown menu items (`.page-header-actions div[style*="absolute"] button`, `.page-header-actions .dropdown-menu button`, `.page-header-actions [role="menu"] button`) with `height: auto !important; min-height: unset; justify-content: flex-start !important;` to ensure internal dropdown options remain unaffected.
+
+### 3. Filter Placement Hierarchy: Positioned Above KPI Summary Cards
+- Standardized the visual and DOM hierarchy across all ERP list views so collapsible and in-page filter panels appear **directly above** the top KPI metric summary cards:
+  - **Payments ([`PaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/PaymentsPage.tsx)):** Moved collapsible filter options panel above the 3 KPI metric summary cards (`TOTAL PAYMENT`, `PAID`, `DUE`).
+  - **Sale Process ([`SaleProcessList.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/SaleProcessList.tsx)):** Moved collapsible filter options panel above the 6 Top KPI Summary Cards.
+  - **Price List Management ([`PriceListPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/PriceListPage.tsx)):** Moved collapsible filter options panel above the 4 Top KPI Metrics Cards.
+  - **Import Purchase ([`ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):** Moved collapsible filter options panel above the dynamic workflow KPI cards and status tabs. Refactored filter state handling to update live filtered consignments seamlessly.
+  - **Product Stock ([`ProductStockPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ProductStockPage.tsx)):** Swapped Machine Lookup Search & Warehouse Filters to sit above the KPI summary strip in the Goods Expected Date Report view.
+  - **Discount Payments ([`DiscountPaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/DiscountPaymentsPage.tsx)):** Verified collapsible filter panel sits above the 3 Top KPI Cards.
+  - **Technical Tasks ([`TechnicalTasksPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx)):** Filter panel consistently positioned directly under the header before data tabs and table card.
+
+### 4. Streamlined Minimalist Header Cleanups
+- Removed redundant subtitle description paragraphs below page headings to maintain a clean, compact header layout matching production ERP aesthetics:
+  - **Trash ([`Trash.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Trash.tsx)):** Removed `"View and manage soft-deleted items across all modules. Permanently delete or restore records to the database."` and wrapped the **Empty Trash** button inside `.page-header-actions`.
+  - **Audit Log ([`Audit.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Audit.tsx)):** Removed `"A read-only trail of every create, update, delete, login, import, and export action."`.
+
+### 5. Unified Sub-Toolbar Search on Technical Tasks
+- **Single Search Input ([`TechnicalTasksPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx)):** Merged the two adjacent search inputs (`Search Serial No...` and `Search...`) in the table sub-toolbar into a single, clean search box (`placeholder="Search..."`).
+- **Comprehensive Full-Text Scope:** Leverages backend `TechnicalTaskRepository.searchable_fields` to simultaneously search serial numbers, company names, machine models, contact persons, contact phones, and task descriptions without requiring manual operator toggling.
+- **Deep-Link & Badge Preservation:** Preserved 1-click serial number badge filtering (`task-row-serial-number`) on table rows, populating the unified search field and triggering exact match queries.
+
+### 6. Product Stock UI Streamlining: Hiding Goods Expected Date Report Tab from General UI
+- **UI Match with Production ([`ProductStockPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ProductStockPage.tsx)):**
+  - Hid the `Goods Expected Date Report (Marketing)` tab switcher from the default UI view on `/product_stock/list` to match the clean layout of the live production ERP (`erp.inhymasolutions.com/product-stock/list#`).
+  - The page directly displays the top action buttons (Filter toggle, Export) and the primary Product Stock table with all warehouse columns (`Mumbai`, `Mumbai Transit`, `Mumbai Ordered`, `Ahmedabad`, `Indore`, etc.).
+  - **Full Code Preservation:** All components, backend endpoints (`/api/v1/inventory/goods-expected-report`), machine lookup logic, container breakup modals, and types remain 100% preserved in the codebase and can be accessed via URL parameter (`?tab=goods-expected`) or in test runner mode (`isTestMode`).
+
+### 7. Verification & Regression Testing
+- **TypeScript Compiler (`tsc -b`):** 0 compilation errors across all frontend modules.
+- **Vitest Unit Test Suites:** 10/10 test files passed (160/160 tests passed across `TechnicalTasksPage`, `PaymentsPage`, `SaleProcessListPage`, `DiscountPaymentsPage`, `ImportPurchasePage`, `ProductStockPage`, `DeletedOrdersPage`, `StockTransferPage`, `StockAdjustmentPage`, and `ProductMaster`).
+- **Core CRM Suites:** 30/30 tests passed across `LeadsPage` and `SuppliersPage`.
+- **Runtime Health:** Backend API on port 8000 and Vite dev server on port 5174 verified healthy with HTTP 200 responses.
+
 ## [Release 2026-10-17] — Universal "Grey and Locked" Calculation Design Pattern, Zero-Layout-Shift Floating Toast Architecture, "No Data" Empty States Standardization & Table Skeletons Unification
 
 ### 1. Universal "Grey and Locked" Calculation Design Pattern

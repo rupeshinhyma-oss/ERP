@@ -956,38 +956,18 @@ export function StockAdjustmentPage({
               </div>
             </div>
 
-            <div className="adjustment-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+            <div className="adjustment-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 type="button"
-                className="adjustment-btn-reset"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#5c6f84",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "8px 24px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                }}
               >
                 Reset
               </button>
               <button
                 type="button"
-                className="adjustment-btn-search"
+                className="btn-filter-search"
                 onClick={handleApplyFilters}
-                style={{
-                  background: "#f59e0b",
-                  color: "#1e293b",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "8px 24px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                }}
               >
                 Search
               </button>

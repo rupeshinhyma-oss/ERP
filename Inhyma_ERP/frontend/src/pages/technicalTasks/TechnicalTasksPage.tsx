@@ -615,6 +615,21 @@ function TechnicalTasksPageContent() {
   const [filterTechnician, setFilterTechnician] = useState<string>("");
   const [filterPriority, setFilterPriority] = useState<string>("");
 
+  const [appliedFilters, setAppliedFilters] = useState({
+    dateFrom: "",
+    dateTo: "",
+    thirdPartyCity: "",
+    paymentCollected: "",
+    taskType: "",
+    status: "",
+    city: "",
+    callType: "",
+    serviceType: "",
+    technician: "",
+    priority: "",
+    serialNumber: "",
+  });
+
   // Master lookups
   const [cityOptions, setCityOptions] = useState<string[]>([]);
   const [technicianOptions, setTechnicianOptions] = useState<string[]>([]);
@@ -847,6 +862,18 @@ function TechnicalTasksPageContent() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // Debounce toolbar serial number search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAppliedFilters((prev) => {
+        if (prev.serialNumber === filterSerialNumber) return prev;
+        return { ...prev, serialNumber: filterSerialNumber };
+      });
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [filterSerialNumber]);
+
   // Fetch counts
   const loadCounts = useCallback(async () => {
     try {
@@ -869,46 +896,46 @@ function TechnicalTasksPageContent() {
         sort_desc: sortDesc,
       };
 
-      if (filterStatus) {
-        params.status = filterStatus.toLowerCase();
+      if (appliedFilters.status) {
+        params.status = appliedFilters.status.toLowerCase();
       } else if (activeTab && activeTab.toLowerCase() !== "all") {
         params.status = activeTab.toLowerCase();
       }
       if (debouncedSearch) {
         params.search = debouncedSearch;
       }
-      if (filterCity) {
-        params.city = filterCity;
+      if (appliedFilters.city) {
+        params.city = appliedFilters.city;
       }
-      if (filterTaskType) {
-        params.task_type = filterTaskType;
+      if (appliedFilters.taskType) {
+        params.task_type = appliedFilters.taskType;
       }
-      if (filterCallType) {
-        params.call_type = filterCallType;
+      if (appliedFilters.callType) {
+        params.call_type = appliedFilters.callType;
       }
-      if (filterTechnician) {
-        params.task_allotted_to = filterTechnician;
+      if (appliedFilters.technician) {
+        params.task_allotted_to = appliedFilters.technician;
       }
-      if (filterPriority) {
-        params.priority = filterPriority;
+      if (appliedFilters.priority) {
+        params.priority = appliedFilters.priority;
       }
-      if (filterSerialNumber.trim()) {
-        params.serial_number = filterSerialNumber.trim();
+      if (appliedFilters.serialNumber.trim()) {
+        params.serial_number = appliedFilters.serialNumber.trim();
       }
-      if (filterServiceType) {
-        params.service_type = filterServiceType;
+      if (appliedFilters.serviceType) {
+        params.service_type = appliedFilters.serviceType;
       }
-      if (filterThirdPartyCity) {
-        params.third_party_city = filterThirdPartyCity;
+      if (appliedFilters.thirdPartyCity) {
+        params.third_party_city = appliedFilters.thirdPartyCity;
       }
-      if (filterPaymentCollected) {
-        params.payment_collected = filterPaymentCollected;
+      if (appliedFilters.paymentCollected) {
+        params.payment_collected = appliedFilters.paymentCollected;
       }
-      if (filterDateFrom) {
-        params.date_from = filterDateFrom;
+      if (appliedFilters.dateFrom) {
+        params.date_from = appliedFilters.dateFrom;
       }
-      if (filterDateTo) {
-        params.date_to = filterDateTo;
+      if (appliedFilters.dateTo) {
+        params.date_to = appliedFilters.dateTo;
       }
 
       const res = await fetchTechnicalTasks(params);
@@ -939,18 +966,7 @@ function TechnicalTasksPageContent() {
     sortDesc,
     activeTab,
     debouncedSearch,
-    filterSerialNumber,
-    filterCity,
-    filterTaskType,
-    filterCallType,
-    filterTechnician,
-    filterPriority,
-    filterStatus,
-    filterServiceType,
-    filterThirdPartyCity,
-    filterPaymentCollected,
-    filterDateFrom,
-    filterDateTo,
+    appliedFilters,
   ]);
 
   useEffect(() => {
@@ -1560,13 +1576,42 @@ function TechnicalTasksPageContent() {
     setFilterTechnician("");
     setFilterPriority("");
     setFilterSerialNumber("");
+    setSearchQuery("");
+    setDebouncedSearch("");
     setCurrentPage(1);
+    setAppliedFilters({
+      dateFrom: "",
+      dateTo: "",
+      thirdPartyCity: "",
+      paymentCollected: "",
+      taskType: "",
+      status: "",
+      city: "",
+      callType: "",
+      serviceType: "",
+      technician: "",
+      priority: "",
+      serialNumber: "",
+    });
   };
 
   // Search / Apply Filters
   const handleSearchFilters = () => {
     setCurrentPage(1);
-    loadTasks();
+    setAppliedFilters({
+      dateFrom: filterDateFrom,
+      dateTo: filterDateTo,
+      thirdPartyCity: filterThirdPartyCity,
+      paymentCollected: filterPaymentCollected,
+      taskType: filterTaskType,
+      status: filterStatus,
+      city: filterCity,
+      callType: filterCallType,
+      serviceType: filterServiceType,
+      technician: filterTechnician,
+      priority: filterPriority,
+      serialNumber: filterSerialNumber,
+    });
   };
 
   // Badges
@@ -1892,9 +1937,11 @@ function TechnicalTasksPageContent() {
         </div>
 
         {/* Alerts & Feedback Banner */}
-        <div style={{ marginBottom: "16px" }}>
-          <Banner error={apiError || actionError} success={actionSuccess} />
-        </div>
+        {(apiError || actionError || actionSuccess) && (
+          <div style={{ marginBottom: "16px" }}>
+            <Banner error={apiError || actionError} success={actionSuccess} />
+          </div>
+        )}
 
         {/* TOP FILTER PANEL - EXACT MATCH TO COMPANIES SCREENSHOT */}
         {filterOpen && (
@@ -2089,58 +2136,23 @@ function TechnicalTasksPageContent() {
                   <option value="pending">Pending</option>
                 </select>
               </div>
+            </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  alignItems: "flex-end",
-                  gap: "10px",
-                  height: "100%",
-                  paddingBottom: "2px",
-                }}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+              <button
+                type="button"
+                className="btn-filter-reset"
+                onClick={handleResetFilters}
               >
-                <button
-                  type="button"
-                  onClick={handleResetFilters}
-                  style={{
-                    background: "#5c6f84",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "5px",
-                    padding: "8px 24px",
-                    fontWeight: 600,
-                    fontSize: "13.5px",
-                    cursor: "pointer",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                    transition: "opacity 0.2s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
-                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSearchFilters}
-                  style={{
-                    background: "#f59e0b",
-                    color: "#1e293b",
-                    border: "none",
-                    borderRadius: "5px",
-                    padding: "8px 24px",
-                    fontWeight: 600,
-                    fontSize: "13.5px",
-                    cursor: "pointer",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                    transition: "opacity 0.2s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
-                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-                >
-                  Search
-                </button>
-              </div>
+                Reset
+              </button>
+              <button
+                type="button"
+                className="btn-filter-search"
+                onClick={handleSearchFilters}
+              >
+                Search
+              </button>
             </div>
           </div>
         )}
@@ -2207,54 +2219,31 @@ function TechnicalTasksPageContent() {
               </div>
             </div>
 
-            {/* Serial Number Search Filter */}
-            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-              <input
-                type="text"
-                placeholder="Search Serial No..."
-                aria-label="Search by serial number"
-                data-testid="filter-serial-number"
-                value={filterSerialNumber}
-                onChange={(e) => setFilterSerialNumber(e.target.value)}
-                style={{ width: "190px", padding: "8px 30px 8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-              />
-              {filterSerialNumber && (
-                <button
-                  type="button"
-                  onClick={() => setFilterSerialNumber("")}
-                  title="Clear serial search"
-                  style={{
-                    position: "absolute",
-                    right: "8px",
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "#94a3b8",
-                    fontSize: "16px",
-                    lineHeight: 1,
-                    padding: "0 2px",
-                    display: "flex",
-                    alignItems: "center",
-                  }}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-
-            {/* Search Input */}
+            {/* Unified Search Input */}
             <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
               <input
                 type="text"
                 placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ width: "260px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                aria-label="Search"
+                data-testid="filter-serial-number"
+                value={searchQuery || filterSerialNumber}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchQuery(val);
+                  setFilterSerialNumber("");
+                  setAppliedFilters((prev) => ({ ...prev, serialNumber: "" }));
+                }}
+                style={{ width: "260px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
               />
-              {searchQuery && (
+              {(searchQuery || filterSerialNumber) && (
                 <button
                   type="button"
-                  onClick={() => setSearchQuery("")}
+                  onClick={() => {
+                    setSearchQuery("");
+                    setFilterSerialNumber("");
+                    setAppliedFilters((prev) => ({ ...prev, serialNumber: "" }));
+                    setCurrentPage(1);
+                  }}
                   title="Clear search"
                   style={{
                     position: "absolute",
@@ -2468,9 +2457,54 @@ function TechnicalTasksPageContent() {
                   <tr>
                     <td
                       colSpan={TOTAL_COLS_COUNT}
-                      style={{ textAlign: "center", padding: "48px 16px", color: "#64748b", fontSize: "14px" }}
+                      style={{ textAlign: "center", padding: "50px 20px" }}
                     >
-                      No Data
+                      <div
+                        style={{
+                          width: "48px",
+                          height: "48px",
+                          margin: "0 auto 12px",
+                          borderRadius: "50%",
+                          background: "#f1f5f9",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#94a3b8",
+                        }}
+                      >
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="2" y="5" width="20" height="14" rx="2" />
+                          <line x1="2" y1="10" x2="22" y2="10" />
+                        </svg>
+                      </div>
+                      <div style={{ fontSize: "16px", fontWeight: 700, color: "#1e293b", marginBottom: "6px" }}>
+                        {searchQuery || Object.values(appliedFilters).some(Boolean)
+                          ? "No technical tasks found matching your filters"
+                          : "No technical tasks in the system yet"}
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#64748b", marginBottom: searchQuery || Object.values(appliedFilters).some(Boolean) ? "16px" : 0 }}>
+                        {searchQuery || Object.values(appliedFilters).some(Boolean)
+                          ? "Try clearing or adjusting your search / filter criteria."
+                          : "Get started by creating your first technical task."}
+                      </div>
+                      {(searchQuery || Object.values(appliedFilters).some(Boolean)) && (
+                        <button
+                          type="button"
+                          onClick={handleResetFilters}
+                          className="btn"
+                          style={{
+                            backgroundColor: "#0061f2",
+                            color: "#ffffff",
+                            fontWeight: 600,
+                            padding: "8px 18px",
+                            borderRadius: "6px",
+                            border: "none",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Clear All Filters
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -2583,7 +2617,11 @@ function TechnicalTasksPageContent() {
                                         data-testid="task-row-serial-number"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setFilterSerialNumber(task.serial_number || "");
+                                          const sn = task.serial_number || "";
+                                          setFilterSerialNumber(sn);
+                                          setSearchQuery(sn);
+                                          setAppliedFilters((prev) => ({ ...prev, serialNumber: sn }));
+                                          setCurrentPage(1);
                                         }}
                                         title="Click to search past tasks with this serial number"
                                         style={{

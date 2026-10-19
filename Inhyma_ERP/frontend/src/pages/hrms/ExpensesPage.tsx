@@ -520,7 +520,7 @@ export function ExpensesPage() {
             </h1>
           </div>
 
-          <div>
+          <div className="page-header-actions">
             <button
               type="button"
               id="btn-add-expense"

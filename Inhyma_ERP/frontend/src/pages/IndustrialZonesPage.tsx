@@ -704,36 +704,19 @@ export function IndustrialZonesPage() {
               </div>
             </div>
 
-            {/* Action buttons: Reset (gray) and Search (amber/yellow) matching screenshot 3 */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            {/* Action buttons: Reset and Search */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
+                type="button"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#64748b",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 20px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
               >
                 Reset
               </button>
               <button
+                type="button"
+                className="btn-filter-search"
                 onClick={handleSearchClick}
-                style={{
-                  background: "#eab308",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 24px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  boxShadow: "0 1px 3px rgba(234,179,8,0.3)",
-                }}
               >
                 Search
               </button>

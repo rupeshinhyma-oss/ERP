@@ -1035,38 +1035,18 @@ export function DiscountPaymentsPage({
             </div>
 
             {/* Bottom Actions: Reset (slate) & Search (amber) */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 type="button"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#526074",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 20px",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  color: "#ffffff",
-                  cursor: "pointer",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                }}
               >
                 Reset
               </button>
               <button
                 type="button"
+                className="btn-filter-search"
                 onClick={handleApplySearch}
-                style={{
-                  background: "#f59e0b",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 20px",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  color: "#ffffff",
-                  cursor: "pointer",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                }}
               >
                 Search
               </button>

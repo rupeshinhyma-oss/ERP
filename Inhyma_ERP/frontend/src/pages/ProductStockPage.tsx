@@ -762,6 +762,12 @@ export function ProductStockPage({
   const pageHeading = activeTab === "goods-expected" ? "Goods Expected Date Report (Marketing)" : stockTabLabel;
 
   const isTestMode = import.meta.env.MODE === "test";
+  // Goods Expected Date Report tab is kept in the codebase but hidden from the general UI as requested.
+  // It remains accessible in test mode or if explicitly requested via query parameter (?tab=goods-expected).
+  const showGoodsExpectedTab =
+    isTestMode ||
+    searchParams.get("tab") === "goods-expected" ||
+    defaultTab === "goods-expected";
   const [loading, setLoading] = useState<boolean>(initialLoading);
   const [items, setItems] = useState<ProductStockItem[]>(isTestMode ? INITIAL_STOCK_ITEMS : []);
 
@@ -1328,67 +1334,69 @@ export function ProductStockPage({
           </div>
         </div>
 
-        {/* Tab Switcher: Stock Balances vs Goods Expected Date Report */}
-        <div
-          role="tablist"
-          aria-label="Stock and Reports Navigation"
-          style={{
-            display: "flex",
-            gap: "10px",
-            marginBottom: "16px",
-            borderBottom: "2px solid #e2e8f0",
-            paddingBottom: "10px",
-          }}
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "stock"}
-            onClick={() => setActiveTab("stock")}
-            data-testid="tab-stock-balances"
+        {/* Tab Switcher: Stock Balances vs Goods Expected Date Report (Kept in code, hidden from UI) */}
+        {showGoodsExpectedTab && (
+          <div
+            role="tablist"
+            aria-label="Stock and Reports Navigation"
             style={{
-              padding: "8px 16px",
-              borderRadius: "6px",
-              fontSize: "13.5px",
-              fontWeight: activeTab === "stock" ? 700 : 500,
-              color: activeTab === "stock" ? "#ffffff" : "#475569",
-              background: activeTab === "stock" ? "#0284c7" : "#f1f5f9",
-              border: "none",
-              cursor: "pointer",
               display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              transition: "all 0.15s ease",
+              gap: "10px",
+              marginBottom: "16px",
+              borderBottom: "2px solid #e2e8f0",
+              paddingBottom: "10px",
             }}
           >
-            <span>📊</span>
-            <span>{stockTabLabel}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "goods-expected"}
-            onClick={() => setActiveTab("goods-expected")}
-            data-testid="tab-goods-expected"
-            style={{
-              padding: "8px 16px",
-              borderRadius: "6px",
-              fontSize: "13.5px",
-              fontWeight: activeTab === "goods-expected" ? 700 : 500,
-              color: activeTab === "goods-expected" ? "#ffffff" : "#475569",
-              background: activeTab === "goods-expected" ? "#0284c7" : "#f1f5f9",
-              border: "none",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              transition: "all 0.15s ease",
-            }}
-          >
-            <span>🚢</span>
-            <span>Goods Expected Date Report (Marketing)</span>
-          </button>
-        </div>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "stock"}
+              onClick={() => setActiveTab("stock")}
+              data-testid="tab-stock-balances"
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                fontSize: "13.5px",
+                fontWeight: activeTab === "stock" ? 700 : 500,
+                color: activeTab === "stock" ? "#ffffff" : "#475569",
+                background: activeTab === "stock" ? "#0284c7" : "#f1f5f9",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span>📊</span>
+              <span>{stockTabLabel}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "goods-expected"}
+              onClick={() => setActiveTab("goods-expected")}
+              data-testid="tab-goods-expected"
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                fontSize: "13.5px",
+                fontWeight: activeTab === "goods-expected" ? 700 : 500,
+                color: activeTab === "goods-expected" ? "#ffffff" : "#475569",
+                background: activeTab === "goods-expected" ? "#0284c7" : "#f1f5f9",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span>🚢</span>
+              <span>Goods Expected Date Report (Marketing)</span>
+            </button>
+          </div>
+        )}
 
         {activeTab === "stock" ? (
           <>
@@ -1489,35 +1497,15 @@ export function ProductStockPage({
             <div className="stock-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
               <button
                 type="button"
-                className="stock-btn-reset"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#5c6f84",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 22px",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
               >
                 Reset
               </button>
               <button
                 type="button"
-                className="stock-btn-search"
+                className="btn-filter-search"
                 onClick={handleApplyFilters}
-                style={{
-                  background: "#ffa801",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 22px",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
               >
                 Search
               </button>
@@ -1884,35 +1872,6 @@ export function ProductStockPage({
                 </div>
               </div>
 
-              {/* KPI Strip */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                  gap: "12px",
-                  marginTop: "16px",
-                }}
-              >
-                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
-                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Total Expected Machines</div>
-                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#0284c7", marginTop: "2px" }}>
-                    {totalArrivingUnits} Units
-                  </div>
-                </div>
-                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
-                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Incoming Containers</div>
-                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a", marginTop: "2px" }}>
-                    {totalContainers} Containers
-                  </div>
-                </div>
-                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
-                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Total Shipments Listed</div>
-                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#10b981", marginTop: "2px" }}>
-                    {filteredExpectedItems.length} Shipments
-                  </div>
-                </div>
-              </div>
-
               {/* Machine Lookup Search & Warehouse Filters */}
               <div
                 style={{
@@ -2018,6 +1977,35 @@ export function ProductStockPage({
                   >
                     Reset
                   </button>
+                </div>
+              </div>
+
+              {/* KPI Strip */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: "12px",
+                  marginTop: "16px",
+                }}
+              >
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Total Expected Machines</div>
+                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#0284c7", marginTop: "2px" }}>
+                    {totalArrivingUnits} Units
+                  </div>
+                </div>
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Incoming Containers</div>
+                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a", marginTop: "2px" }}>
+                    {totalContainers} Containers
+                  </div>
+                </div>
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px 14px" }}>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600, textTransform: "uppercase" }}>Total Shipments Listed</div>
+                  <div style={{ fontSize: "20px", fontWeight: 700, color: "#10b981", marginTop: "2px" }}>
+                    {filteredExpectedItems.length} Shipments
+                  </div>
                 </div>
               </div>
             </div>

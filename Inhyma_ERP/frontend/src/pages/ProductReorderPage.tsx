@@ -933,11 +933,11 @@ export function ProductReorderPage() {
               </div>
             </div>
 
-            <div className="reorder-filter-actions">
-              <button type="button" className="reorder-btn-reset" onClick={handleResetFilters}>
+            <div className="reorder-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+              <button type="button" className="btn-filter-reset" onClick={handleResetFilters}>
                 Reset
               </button>
-              <button type="button" className="reorder-btn-search" onClick={handleApplyFilters}>
+              <button type="button" className="btn-filter-search" onClick={handleApplyFilters}>
                 Search
               </button>
             </div>

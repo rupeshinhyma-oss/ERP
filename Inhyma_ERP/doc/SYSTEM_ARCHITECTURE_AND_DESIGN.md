@@ -346,6 +346,37 @@ To ensure screen readers, assistive technology, and automated unit test suites (
 - Additionally, `<Banner>` mounts a `useEffect` trigger that automatically dispatches the message to `useToast()` if provided.
 - This guarantees 100% test compatibility (zero broken tests across 160+ unit tests) and full WCAG accessibility while giving end users an ultra-smooth, modern floating toast experience.
 
+---
 
+## 13. Universal Page Header, Action Buttons Standard & Filter Hierarchy
 
+### 13.1 Page Header Geometry & Spacing
+To ensure pixel-perfect vertical alignment and zero visual discrepancies across all ERP modules:
+1. **Container Padding (`.page`):** Standardized to `padding: 12px 20px;`, establishing a consistent 20px horizontal margin matching the edges of tables, filter panels, and KPI cards.
+2. **Page Header Spacing (`.page-header`):** Standardized with `margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;`.
+3. **Phantom Gap Elimination:** Feedback banner wrapper elements are conditionally rendered only when an error or success message exists (`{(error || success) && ...}`), preventing empty vertical voids below headers.
 
+### 13.2 Universal Header Action Buttons (`.page-header-actions`)
+All primary and secondary actions in top-level page headers adhere to a strict universal geometry:
+1. **Geometry & Font Tokens:**
+   - Exact `height: 35px !important;` (`min-height: 35px; max-height: 35px; box-sizing: border-box;`).
+   - Exact `border-radius: 6px !important;`.
+   - Typography: `font-size: 13px !important; font-weight: 600 !important; line-height: 1 !important;`.
+   - Layout: `display: inline-flex !important; align-items: center !important; justify-content: center !important; gap: 10px !important;`.
+2. **Targeted Controls:** Applied uniformly across `.btn-filter-toggle`, `.btn-add-new`, `.btn-quick-add`, `.btn-imp-exp`, `.btn-bulk-actions`, `.stock-btn-export`, etc.
+3. **Dropdown Popover Isolation:** Dropdown menu buttons inside absolute popovers (`.page-header-actions div[style*="absolute"] button`) are explicitly isolated with `height: auto !important; min-height: unset; justify-content: flex-start !important;` so menu item layout remains unconstrained.
+
+### 13.3 Filter-Above-KPI Architectural Hierarchy
+Across all listing and operational views containing KPI summary statistics, the DOM and visual hierarchy places filter panels **directly above** KPI metric summary cards:
+1. **User Workflow Rationale:** Users refine their search and scoping criteria before analyzing aggregated numerical totals. Placing filters above KPI cards ensures users intuitively understand that the metrics below reflect the active filter parameters.
+2. **Implemented Modules:**
+   - **Payments:** Filter Panel ➔ 3 Top KPI Cards (`TOTAL PAYMENT`, `PAID`, `DUE`) ➔ Data Table.
+   - **Sale Process:** Filter Panel ➔ 6 Top KPI Summary Cards ➔ Status Tabs & Table.
+   - **Price List:** Filter Panel ➔ 4 Top KPI Cards ➔ Table.
+   - **Import Purchase:** Filter Panel ➔ Dynamic Workflow KPI Cards ➔ Status Tabs & Table.
+   - **Product Stock:** Machine Lookup & Warehouse Filters ➔ KPI Strip ➔ Data Table.
+   - **Discount Payments:** Filter Panel ➔ 3 Top KPI Cards ➔ Table.
+   - **Technical Tasks:** Filter Panel ➔ Status Tabs & Main Card.
+
+### 13.4 Minimalist Header Standard
+To eliminate visual clutter on high-frequency operational pages, verbose descriptive subtitles under main page headings (e.g. on `Trash.tsx` and `Audit.tsx`) are removed, keeping page titles bold, focused, and immediately scannable.

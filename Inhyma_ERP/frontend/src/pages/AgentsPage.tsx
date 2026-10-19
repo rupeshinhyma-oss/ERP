@@ -858,34 +858,18 @@ export function AgentsPage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
+                type="button"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#64748b",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 20px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
               >
                 Reset
               </button>
               <button
+                type="button"
+                className="btn-filter-search"
                 onClick={handleSearchClick}
-                style={{
-                  background: "#eab308",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 24px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
               >
                 Search
               </button>

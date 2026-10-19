@@ -399,6 +399,8 @@ export function StockTransferPage({
   // Filter drafts
   const [fromWhFilter, setFromWhFilter] = useState("All");
   const [toWhFilter, setToWhFilter] = useState("All");
+  const [appliedFromWh, setAppliedFromWh] = useState("All");
+  const [appliedToWh, setAppliedToWh] = useState("All");
 
   // Active drawer item
   const [activeItem, setActiveItem] = useState<StockTransferItem | null>(null);
@@ -507,8 +509,8 @@ export function StockTransferPage({
     }
     InventoryApi.listStockTransfers({
       status: activeTab,
-      from_warehouse: fromWhFilter !== "All" ? fromWhFilter : undefined,
-      to_warehouse: toWhFilter !== "All" ? toWhFilter : undefined,
+      from_warehouse: appliedFromWh !== "All" ? appliedFromWh : undefined,
+      to_warehouse: appliedToWh !== "All" ? appliedToWh : undefined,
       limit: perPage,
     })
       .then((res) => {
@@ -551,7 +553,7 @@ export function StockTransferPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, fromWhFilter, toWhFilter, perPage, initialLoading]);
+  }, [activeTab, appliedFromWh, appliedToWh, perPage, initialLoading]);
 
   useEffect(() => {
     const cleanup = loadTransfers();
@@ -614,12 +616,16 @@ export function StockTransferPage({
     setAppliedDateRange("");
     setFromWhFilter("All");
     setToWhFilter("All");
+    setAppliedFromWh("All");
+    setAppliedToWh("All");
   }, []);
 
   // Apply search filters
   const handleSearchFilters = useCallback(() => {
     setAppliedDateRange(dateRangeFilter);
-  }, [dateRangeFilter]);
+    setAppliedFromWh(fromWhFilter);
+    setAppliedToWh(toWhFilter);
+  }, [dateRangeFilter, fromWhFilter, toWhFilter]);
 
   // Handle Add New Submission
   const handleCreateTransfer = async (e: React.FormEvent) => {
@@ -690,10 +696,10 @@ export function StockTransferPage({
       if (activeTab !== "All" && item.status.toLowerCase() !== activeTab.toLowerCase()) {
         return false;
       }
-      if (fromWhFilter !== "All" && item.from_warehouse !== fromWhFilter) {
+      if (appliedFromWh !== "All" && item.from_warehouse !== appliedFromWh) {
         return false;
       }
-      if (toWhFilter !== "All" && item.to_warehouse !== toWhFilter) {
+      if (appliedToWh !== "All" && item.to_warehouse !== appliedToWh) {
         return false;
       }
       // Applied Date Range filtering
@@ -817,7 +823,7 @@ export function StockTransferPage({
     <AppShell activeKey="stock-transfer" pageClassName="page-stock-transfer">
       <main className="page">
         {/* Top Header */}
-        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Stock Transfer</h1>
           </div>
@@ -1058,38 +1064,18 @@ export function StockTransferPage({
               </div>
             </div>
 
-            <div className="transfer-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+            <div className="transfer-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 type="button"
-                className="transfer-btn-reset"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#5c6f84",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "8px 24px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                }}
               >
                 Reset
               </button>
               <button
                 type="button"
-                className="transfer-btn-search"
+                className="btn-filter-search"
                 onClick={handleSearchFilters}
-                style={{
-                  background: "#f59e0b",
-                  color: "#1e293b",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "8px 24px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                }}
               >
                 Search
               </button>

@@ -2263,44 +2263,18 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   </div>
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
                   <button
                     type="button"
+                    className="btn-filter-reset"
                     onClick={handleResetFilters}
-                    style={{
-                      background: "#5c6f84",
-                      color: "#ffffff",
-                      border: "none",
-                      borderRadius: "5px",
-                      padding: "8px 24px",
-                      fontWeight: 600,
-                      fontSize: "13.5px",
-                      cursor: "pointer",
-                      boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                      transition: "opacity 0.2s",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
-                    onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
                   >
                     Reset
                   </button>
                   <button
                     type="button"
+                    className="btn-filter-search"
                     onClick={handleApplyFilters}
-                    style={{
-                      background: "#f59e0b",
-                      color: "#1e293b",
-                      border: "none",
-                      borderRadius: "5px",
-                      padding: "8px 24px",
-                      fontWeight: 600,
-                      fontSize: "13.5px",
-                      cursor: "pointer",
-                      boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                      transition: "opacity 0.2s",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
-                    onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
                   >
                     Search
                   </button>

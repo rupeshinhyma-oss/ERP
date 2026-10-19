@@ -1156,7 +1156,6 @@ export default function FollowUpsPage() {
   }, [sortedItems, currentPage, itemsPerPage]);
 
   const startIndex = totalEntries === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
-  const endIndex = Math.min(currentPage * itemsPerPage, totalEntries);
 
   // Column Sort Handler (3-state)
   const handleSort = (colKey: string) => {
@@ -1354,7 +1353,7 @@ export default function FollowUpsPage() {
           </div>
 
           {/* Action buttons matching screenshot */}
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             {/* Filter Toggle Button */}
             <button
               id="btn-toggle-filter"
@@ -1733,24 +1732,14 @@ export default function FollowUpsPage() {
             </div>
 
             {/* Bottom Action Buttons: Reset & Search */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 id="btn-reset-filters"
                 type="button"
+                className="btn-filter-reset"
                 onClick={() => {
                   setFilters(INITIAL_FILTERS);
                   setAppliedFilters(INITIAL_FILTERS);
-                }}
-                style={{
-                  height: "36px",
-                  padding: "0 20px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: "#f1f5f9",
-                  color: "#475569",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
                 }}
               >
                 Reset
@@ -1758,19 +1747,8 @@ export default function FollowUpsPage() {
               <button
                 id="btn-search-filters"
                 type="button"
+                className="btn-filter-search"
                 onClick={() => setAppliedFilters(filters)}
-                style={{
-                  height: "36px",
-                  padding: "0 22px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#eab308",
-                  color: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
-                }}
               >
                 Search
               </button>

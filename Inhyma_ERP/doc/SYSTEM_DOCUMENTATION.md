@@ -48,7 +48,16 @@
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
 11. [Universal Bulk Import & Export Wizard](#11-universal-bulk-import--export-wizard)
-12. [Frontend Architecture & Single-Flight Token Refresh](#12-frontend-architecture--single-flight-token-refresh)
+12. [Frontend Architecture, UI Standards & Single-Flight Token Refresh](#12-frontend-architecture--single-flight-token-refresh)
+   - 12.1. [Universal "Grey and Locked" Calculation Design Pattern](#121-universal-grey-and-locked-calculation-design-pattern-calc-locked)
+   - 12.2. [Zero-Layout-Shift Floating Toast Architecture](#122-zero-layout-shift-floating-toast-architecture--banner-deprecation)
+   - 12.3. [Universal "No Data" Empty State Standardization](#123-universal-no-data-empty-state-standardization)
+   - 12.4. [Unified Table Skeleton Loaders](#124-unified-table-skeleton-loaders)
+   - 12.5. [Universal Page Header & Spacing Standardization](#125-universal-page-header--spacing-standardization)
+   - 12.6. [Universal Header Action Buttons Standard](#126-universal-header-action-buttons-standard-page-header-actions)
+   - 12.7. [Filter Placement Hierarchy: Positioned Above KPI Summary Cards](#127-filter-placement-hierarchy-positioned-above-kpi-summary-cards)
+   - 12.8. [Streamlined Minimalist Header Cleanups](#128-streamlined-minimalist-header-cleanups)
+   - 12.9. [Sub-Toolbar Search Consolidation & Table Empty State Cleanup](#129-sub-toolbar-search-consolidation--table-empty-state-cleanup)
 13. [Complete API Route & Endpoint Directory](#13-complete-api-route--endpoint-directory)
 14. [Developer & AI Integration Guide (Rules of Engagement)](#14-developer--ai-integration-guide-rules-of-engagement)
 15. [Deployment, Environment Variables & Operations](#15-deployment-environment-variables--operations)
@@ -1382,6 +1391,41 @@ To eliminate ambiguity between user-editable inputs and system-calculated or for
 
 #### 12.4. Unified Table Skeleton Loaders
 - Standardized skeleton row placeholders maintaining fixed column geometry during active loading states to prevent jarring layout jumps.
+
+#### 12.5. Universal Page Header & Spacing Standardization
+- **Global Page Geometry (`.page` & `.page-header`):**
+  - Standardized `.page { padding: 12px 20px; }` across all pages, aligning topbar spacing and providing an edge-to-edge 20px grid alignment for all main card tables and data containers.
+  - Standardized `.page-header { margin-bottom: 16px; }` across all views, including all 30+ master modules via `MasterPage.tsx`, `StockTransferPage.tsx`, and `StockAdjustmentPage.tsx`.
+  - Conditioned alert and feedback containers across pages (`TechnicalTasksPage.tsx`, `PaymentsPage.tsx`, `TechnicianOperationsPage.tsx`) to ensure empty feedback banner wrappers do not render phantom blank spaces or vertical layout gaps below page headers.
+
+#### 12.6. Universal Header Action Buttons Standard (`.page-header-actions`)
+- **Pixel-Matched Button Architecture:**
+  - Standardized CSS rules for all action buttons located inside `.page-header-actions` (`height: 35px !important; min-height: 35px !important; max-height: 35px !important; box-sizing: border-box !important; border-radius: 6px !important; font-size: 13px !important; font-weight: 600 !important; gap: 10px !important; line-height: 1 !important; display: inline-flex !important; align-items: center !important; justify-content: center !important;`).
+  - Unifies `.btn-filter-toggle`, `.btn-add-new`, `.btn-quick-add`, `.btn-imp-exp`, `.btn-bulk-actions`, `.stock-btn-export`, etc.
+  - **Popover Isolation:** Protected popover dropdown menu items (`.page-header-actions div[style*="absolute"] button`, `.dropdown-menu button`, `[role="menu"] button`) with `height: auto !important; min-height: unset; justify-content: flex-start !important;` to ensure internal dropdown menu options remain normal.
+
+#### 12.7. Filter Placement Hierarchy: Positioned Above KPI Summary Cards
+- Standardized the visual and DOM hierarchy across all ERP list views so collapsible and in-page filter panels appear **directly above** the top KPI metric summary cards:
+  - **Payments (`PaymentsPage.tsx`):** Filter toggle panel sits above the 3 KPI metric summary cards (`TOTAL PAYMENT`, `PAID`, `DUE`).
+  - **Sale Process (`SaleProcessList.tsx`):** Collapsible filter panel sits above the 6 Top KPI Summary Cards.
+  - **Price List Management (`PriceListPage.tsx`):** Collapsible filter panel sits above the 4 Top KPI Metrics Cards.
+  - **Import Purchase (`ImportPurchasePage.tsx`):** Collapsible filter panel sits above the dynamic workflow KPI cards and status tabs.
+  - **Product Stock (`ProductStockPage.tsx`):** Machine Lookup Search & Warehouse Filters sit above the KPI summary strip in the Goods Expected Date Report view.
+  - **Discount Payments (`DiscountPaymentsPage.tsx`):** Collapsible filter panel sits above the 3 Top KPI Cards.
+  - **Technical Tasks (`TechnicalTasksPage.tsx`):** Filter panel sits directly under the header before data tabs and table card.
+
+#### 12.8. Streamlined Minimalist Header Cleanups
+- Removed redundant subtitle description paragraphs below page headings to maintain a clean, compact header layout matching production ERP aesthetics:
+  - **Trash (`Trash.tsx`):** Removed redundant description text and placed **Empty Trash** button inside `.page-header-actions`.
+  - **Audit Log (`Audit.tsx`):** Removed redundant description text, keeping clean **Audit Log** header.
+
+#### 12.9. Sub-Toolbar Search Consolidation & Table Empty State Cleanup
+- **Unified Sub-Toolbar Search (`TechnicalTasksPage.tsx`):**
+  - Merged the separate serial number search input and generic search input into a single, clean search box (`placeholder="Search..."`).
+  - Automatically queries across all backend searchable fields (serial number, customer/company, machine model, contact person, phone, task description) without requiring manual mode switches.
+  - Retained 1-click serial number table badge deep-filtering (`task-row-serial-number`), instantly populating the unified search input and filtering records.
+- **Empty State Button Deduplication:**
+  - Removed redundant `+ Add New Task` action buttons from within the empty state table body, avoiding duplication with the primary `+ ADD NEW` button located in `.page-header-actions` at the top right.
 
 ### HRMS Enhancements: All-Employee Attendance Calendar & Payroll Excel Export Architecture
 

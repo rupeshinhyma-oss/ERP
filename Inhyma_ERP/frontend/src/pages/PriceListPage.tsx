@@ -121,6 +121,41 @@ export function PriceListPage() {
   const [brandFilter, setBrandFilter] = useState<string>("");
   const [pricingStatusFilter, setPricingStatusFilter] = useState<"all" | "priced" | "unpriced">("all");
   const [gstFilter, setGstFilter] = useState<string>("");
+  const [appliedFilters, setAppliedFilters] = useState({
+    category: "",
+    subCategory: "",
+    brand: "",
+    pricingStatus: "all" as "all" | "priced" | "unpriced",
+    gst: "",
+  });
+
+  const handleResetFilters = () => {
+    setCategoryFilter("");
+    setSubCategoryFilter("");
+    setBrandFilter("");
+    setPricingStatusFilter("all");
+    setGstFilter("");
+    setSearchTerm("");
+    setPage(1);
+    setAppliedFilters({
+      category: "",
+      subCategory: "",
+      brand: "",
+      pricingStatus: "all",
+      gst: "",
+    });
+  };
+
+  const handleSearchFilters = () => {
+    setPage(1);
+    setAppliedFilters({
+      category: categoryFilter,
+      subCategory: subCategoryFilter,
+      brand: brandFilter,
+      pricingStatus: pricingStatusFilter,
+      gst: gstFilter,
+    });
+  };
 
   // --- Lookups ---
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
@@ -210,12 +245,12 @@ export function PriceListPage() {
       params.set("page", String(page));
       params.set("page_size", String(pageSize));
       if (debouncedSearch) params.set("search", debouncedSearch);
-      if (categoryFilter) params.set("category_id", categoryFilter);
-      if (subCategoryFilter) params.set("sub_category_id", subCategoryFilter);
-      if (brandFilter) params.set("brand_id", brandFilter);
-      if (pricingStatusFilter === "priced") params.set("has_price", "true");
-      if (pricingStatusFilter === "unpriced") params.set("has_price", "false");
-      if (gstFilter) params.set("gst_percent", gstFilter);
+      if (appliedFilters.category) params.set("category_id", appliedFilters.category);
+      if (appliedFilters.subCategory) params.set("sub_category_id", appliedFilters.subCategory);
+      if (appliedFilters.brand) params.set("brand_id", appliedFilters.brand);
+      if (appliedFilters.pricingStatus === "priced") params.set("has_price", "true");
+      if (appliedFilters.pricingStatus === "unpriced") params.set("has_price", "false");
+      if (appliedFilters.gst) params.set("gst_percent", appliedFilters.gst);
 
       const res = await apiGet<PriceListItem[]>(`/masters/price-list?${params.toString()}`);
       setItems(Array.isArray(res.data) ? res.data : []);
@@ -232,11 +267,7 @@ export function PriceListPage() {
     page,
     pageSize,
     debouncedSearch,
-    categoryFilter,
-    subCategoryFilter,
-    brandFilter,
-    pricingStatusFilter,
-    gstFilter,
+    appliedFilters,
   ]);
 
   useEffect(() => {
@@ -485,7 +516,7 @@ export function PriceListPage() {
             </h1>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
             {/* PROMINENT INCLUSIVE / EXCLUSIVE GST TOGGLE (F&B ERP MODEL) */}
             <div
               style={{
@@ -680,113 +711,7 @@ export function PriceListPage() {
 
         <Banner error={error} success={success} />
 
-        {/* Top 4 KPI Metrics Cards */}
-        {metrics && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-              gap: "16px",
-              marginBottom: "18px",
-            }}
-          >
-            <div
-              style={{
-                background: "#ffffff",
-                borderRadius: "10px",
-                padding: "16px 20px",
-                border: "1px solid #e2e8f0",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-              }}
-            >
-              <div style={{ fontSize: "12px", fontWeight: 600, color: "#64748b", textTransform: "uppercase" }}>
-                Total Catalog Products
-              </div>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", marginTop: "4px" }}>
-                {metrics.total_products.toLocaleString()}
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                Items registered in Inhyma ERP
-              </div>
-            </div>
-
-            <div
-              style={{
-                background: "#ffffff",
-                borderRadius: "10px",
-                padding: "16px 20px",
-                border: "1px solid #e2e8f0",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-              }}
-            >
-              <div style={{ fontSize: "12px", fontWeight: 600, color: "#10b981", textTransform: "uppercase" }}>
-                Priced Products
-              </div>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", marginTop: "4px" }}>
-                {metrics.priced_products.toLocaleString()}
-                <span style={{ fontSize: "13px", fontWeight: 600, color: "#10b981", marginLeft: "8px" }}>
-                  (
-                  {metrics.total_products > 0
-                    ? Math.round((metrics.priced_products / metrics.total_products) * 100)
-                    : 0}
-                  %)
-                </span>
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                Active selling rates assigned
-              </div>
-            </div>
-
-            <div
-              style={{
-                background: "#ffffff",
-                borderRadius: "10px",
-                padding: "16px 20px",
-                border: "1px solid #e2e8f0",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-              }}
-            >
-              <div style={{ fontSize: "12px", fontWeight: 600, color: "#f59e0b", textTransform: "uppercase" }}>
-                Unpriced Products
-              </div>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", marginTop: "4px" }}>
-                {metrics.unpriced_products.toLocaleString()}
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                Pending commercial pricing setup
-              </div>
-            </div>
-
-            <div
-              style={{
-                background: "#ffffff",
-                borderRadius: "10px",
-                padding: "16px 20px",
-                border: "1px solid #e2e8f0",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-              }}
-            >
-              <div style={{ fontSize: "12px", fontWeight: 600, color: "#0061f2", textTransform: "uppercase" }}>
-                Average Selling Price ({isInclusiveMode ? "Incl. GST" : "Excl. GST"})
-              </div>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", marginTop: "4px" }}>
-                {formatCurrency(
-                  isInclusiveMode
-                    ? metrics.avg_standard_price_inc_gst
-                    : metrics.avg_standard_price_ex_gst
-                )}
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                Avg Min Floor:{" "}
-                {formatCurrency(
-                  isInclusiveMode ? metrics.avg_min_price_inc_gst : metrics.avg_min_price_ex_gst
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Collapsible Filter Panel */}
+        {/* Collapsible Filter Panel (Placed ABOVE KPI cards) */}
         {filterOpen && (
           <div
             style={{
@@ -940,31 +865,127 @@ export function PriceListPage() {
               </select>
             </div>
 
-            <div style={{ display: "flex", gap: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 type="button"
-                onClick={() => {
-                  setCategoryFilter("");
-                  setSubCategoryFilter("");
-                  setBrandFilter("");
-                  setPricingStatusFilter("all");
-                  setGstFilter("");
-                  setSearchTerm("");
-                  setPage(1);
-                }}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: "#f8fafc",
-                  color: "#475569",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
+                className="btn-filter-reset"
+                onClick={handleResetFilters}
               >
                 Reset
               </button>
+              <button
+                type="button"
+                className="btn-filter-search"
+                onClick={handleSearchFilters}
+              >
+                Search
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Top 4 KPI Metrics Cards */}
+        {metrics && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              gap: "16px",
+              marginBottom: "18px",
+            }}
+          >
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "10px",
+                padding: "16px 20px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+              }}
+            >
+              <div style={{ fontSize: "12px", fontWeight: 600, color: "#64748b", textTransform: "uppercase" }}>
+                Total Catalog Products
+              </div>
+              <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", marginTop: "4px" }}>
+                {metrics.total_products.toLocaleString()}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                Items registered in Inhyma ERP
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "10px",
+                padding: "16px 20px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+              }}
+            >
+              <div style={{ fontSize: "12px", fontWeight: 600, color: "#10b981", textTransform: "uppercase" }}>
+                Priced Products
+              </div>
+              <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", marginTop: "4px" }}>
+                {metrics.priced_products.toLocaleString()}
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "#10b981", marginLeft: "8px" }}>
+                  (
+                  {metrics.total_products > 0
+                    ? Math.round((metrics.priced_products / metrics.total_products) * 100)
+                    : 0}
+                  %)
+                </span>
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                Active selling rates assigned
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "10px",
+                padding: "16px 20px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+              }}
+            >
+              <div style={{ fontSize: "12px", fontWeight: 600, color: "#f59e0b", textTransform: "uppercase" }}>
+                Unpriced Products
+              </div>
+              <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", marginTop: "4px" }}>
+                {metrics.unpriced_products.toLocaleString()}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                Pending commercial pricing setup
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "10px",
+                padding: "16px 20px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+              }}
+            >
+              <div style={{ fontSize: "12px", fontWeight: 600, color: "#0061f2", textTransform: "uppercase" }}>
+                Average Selling Price ({isInclusiveMode ? "Incl. GST" : "Excl. GST"})
+              </div>
+              <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a", marginTop: "4px" }}>
+                {formatCurrency(
+                  isInclusiveMode
+                    ? metrics.avg_standard_price_inc_gst
+                    : metrics.avg_standard_price_ex_gst
+                )}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                Avg Min Floor:{" "}
+                {formatCurrency(
+                  isInclusiveMode ? metrics.avg_min_price_inc_gst : metrics.avg_min_price_ex_gst
+                )}
+              </div>
             </div>
           </div>
         )}

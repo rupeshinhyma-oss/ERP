@@ -300,6 +300,19 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const [filterEtd, setFilterEtd] = useState<DateFilter>(EMPTY_DATE_FILTER);
   const [filterEta, setFilterEta] = useState<DateFilter>(EMPTY_DATE_FILTER);
 
+  const handleResetFilters = () => {
+    setFilterWarehouse("ALL");
+    setFilterSupplier("ALL");
+    setFilterArrival(EMPTY_DATE_FILTER);
+    setFilterEtd(EMPTY_DATE_FILTER);
+    setFilterEta(EMPTY_DATE_FILTER);
+    setCurrentPage(1);
+  };
+
+  const handleSearchFilters = () => {
+    setCurrentPage(1);
+  };
+
   // Selection & Bulk Actions matching Companies design
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
@@ -1386,60 +1399,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
           </div>
         </div>
 
-        {/* KPI cards and status tabs: one per status in the DB-configured workflow */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${statusKeys.length + 1}, 1fr)`,
-            gap: "14px",
-            marginBottom: "16px",
-          }}
-        >
-          {["all", ...statusKeys].map((key) => (
-            <div
-              key={key}
-              data-testid={`kpi-card-${key}`}
-              style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.02)" }}
-            >
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                {key === "all" ? "ALL" : statusRules[key]?.card_label || statusRules[key]?.label || key}
-              </div>
-              <div style={{ fontSize: "15.5px", fontWeight: 700, color: "#1e293b", marginTop: "4px" }}>
-                {formatIndianCurrency(kpi(key).amount)} ({kpi(key).count})
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Status Tabs underneath KPI cards */}
-        <div style={{ display: "flex", alignItems: "center", gap: "24px", borderBottom: "1px solid #e2e8f0", marginBottom: "16px" }}>
-          {["ALL", ...statusKeys].map((key) => {
-            const tabKey = key === "ALL" ? "all" : key;
-            const active = selectedTab === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                data-testid={`tab-${tabKey}`}
-                onClick={() => setSelectedTab(key)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  borderBottom: active ? "2px solid #0061f2" : "2px solid transparent",
-                  padding: "8px 4px",
-                  fontSize: "13.5px",
-                  fontWeight: active ? 700 : 500,
-                  color: active ? "#0061f2" : "#64748b",
-                  cursor: "pointer",
-                }}
-              >
-                {key === "ALL" ? "All" : statusRules[key]?.label || key} ({kpi(tabKey).count})
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Collapsible Filter Panel */}
+        {/* Collapsible Filter Panel (Placed ABOVE KPI cards) */}
         {isFilterOpen && (
           <div
             data-testid="filter-panel"
@@ -1518,34 +1478,81 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                   )}
                 </div>
               ))}
+            </div>
 
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFilterWarehouse("ALL");
-                    setFilterSupplier("ALL");
-                    setFilterArrival(EMPTY_DATE_FILTER);
-                    setFilterEtd(EMPTY_DATE_FILTER);
-                    setFilterEta(EMPTY_DATE_FILTER);
-                  }}
-                  style={{
-                    padding: "6px 14px",
-                    background: "#f1f5f9",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "4px",
-                    fontSize: "12.5px",
-                    fontWeight: 600,
-                    color: "#475569",
-                    cursor: "pointer",
-                  }}
-                >
-                  Reset
-                </button>
-              </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+              <button
+                type="button"
+                className="btn-filter-reset"
+                onClick={handleResetFilters}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                className="btn-filter-search"
+                onClick={handleSearchFilters}
+              >
+                Search
+              </button>
             </div>
           </div>
         )}
+
+        {/* KPI cards and status tabs: one per status in the DB-configured workflow */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${statusKeys.length + 1}, 1fr)`,
+            gap: "14px",
+            marginBottom: "16px",
+          }}
+        >
+          {["all", ...statusKeys].map((key) => (
+            <div
+              key={key}
+              data-testid={`kpi-card-${key}`}
+              style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.02)" }}
+            >
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {key === "all" ? "ALL" : statusRules[key]?.card_label || statusRules[key]?.label || key}
+              </div>
+              <div style={{ fontSize: "15.5px", fontWeight: 700, color: "#1e293b", marginTop: "4px" }}>
+                {formatIndianCurrency(kpi(key).amount)} ({kpi(key).count})
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Status Tabs underneath KPI cards */}
+        <div style={{ display: "flex", alignItems: "center", gap: "24px", borderBottom: "1px solid #e2e8f0", marginBottom: "16px" }}>
+          {["ALL", ...statusKeys].map((key) => {
+            const tabKey = key === "ALL" ? "all" : key;
+            const active = selectedTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                data-testid={`tab-${tabKey}`}
+                onClick={() => setSelectedTab(key)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: active ? "2px solid #0061f2" : "2px solid transparent",
+                  padding: "8px 4px",
+                  fontSize: "13.5px",
+                  fontWeight: active ? 700 : 500,
+                  color: active ? "#0061f2" : "#64748b",
+                  cursor: "pointer",
+                }}
+              >
+                {key === "ALL" ? "All" : statusRules[key]?.label || key} ({kpi(tabKey).count})
+              </button>
+            );
+          })}
+        </div>
+
+
 
         {/* Table Container Card */}
         <div
