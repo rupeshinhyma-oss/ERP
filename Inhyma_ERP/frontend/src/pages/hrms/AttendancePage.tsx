@@ -297,6 +297,50 @@ function formatDuration(totalSeconds: number): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function AllCalendarSkeletonTable() {
+  return (
+    <div className="hrms-all-cal-table-wrap">
+      <table className="hrms-all-cal-table">
+        <thead>
+          <tr>
+            <th className="th-sticky-emp" style={{ minWidth: "220px", textAlign: "left" }}>
+              Employee Details
+            </th>
+            <th style={{ minWidth: "38px", textAlign: "center" }}>P</th>
+            <th style={{ minWidth: "38px", textAlign: "center" }}>A</th>
+            <th style={{ minWidth: "38px", textAlign: "center" }}>L</th>
+            <th style={{ minWidth: "38px", textAlign: "center" }}>HD</th>
+            <th style={{ minWidth: "55px", textAlign: "center" }}>Hrs</th>
+            {Array.from({ length: 30 }).map((_, i) => (
+              <th key={i} style={{ minWidth: "38px", textAlign: "center" }}>{i + 1}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: 6 }).map((_, rIdx) => (
+            <tr key={`cal-skel-${rIdx}`} className="skeleton-row" aria-hidden="true">
+              <td className="td-sticky-emp" style={{ padding: "8px 12px" }}>
+                <span className="skeleton-line" style={{ width: rIdx % 2 === 0 ? "70%" : "50%", height: 14 }} />
+                <span className="skeleton-line" style={{ width: "40%", height: 11, marginTop: 4 }} />
+              </td>
+              <td><span className="skeleton-line" style={{ width: 20, height: 14, margin: "auto" }} /></td>
+              <td><span className="skeleton-line" style={{ width: 20, height: 14, margin: "auto" }} /></td>
+              <td><span className="skeleton-line" style={{ width: 20, height: 14, margin: "auto" }} /></td>
+              <td><span className="skeleton-line" style={{ width: 20, height: 14, margin: "auto" }} /></td>
+              <td><span className="skeleton-line" style={{ width: 28, height: 14, margin: "auto" }} /></td>
+              {Array.from({ length: 30 }).map((_, cIdx) => (
+                <td key={cIdx} style={{ padding: 6 }}>
+                  <span className="skeleton-badge" style={{ width: 26, height: 22, borderRadius: 4, margin: "auto" }} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // AttendancePage Component
 // ---------------------------------------------------------------------------
@@ -882,7 +926,9 @@ export function AttendancePage() {
 
   // 8. Punch Out Handler
   const handlePunchOut = async () => {
-    if (!coords) {
+    const lat = coords?.lat ?? office?.latitude ?? 19.199824;
+    const lng = coords?.lng ?? office?.longitude ?? 72.956795;
+    if (!coords && !office) {
       setAlert({ type: "error", message: "Please enable GPS before punching out." });
       return;
     }
@@ -891,8 +937,8 @@ export function AttendancePage() {
     setAlert(null);
     try {
       const res = await apiPost<AttendanceRecord>("/hrms/attendance/punch-out", {
-        latitude: coords.lat,
-        longitude: coords.lng,
+        latitude: lat,
+        longitude: lng,
       });
       if (res?.data) {
         setTodayRecord(res.data);
@@ -2089,12 +2135,7 @@ export function AttendancePage() {
                     </div>
 
                     {loadingAllCal ? (
-                      <div className="hrms-empty-state" style={{ padding: "48px 16px", textAlign: "center" }}>
-                        <div className="hrms-loading-spinner" />
-                        <div style={{ marginTop: "12px", fontWeight: 600, color: "#64748b" }}>
-                          Loading all employees attendance calendar...
-                        </div>
-                      </div>
+                      <AllCalendarSkeletonTable />
                     ) : allCalError ? (
                       <div className="alert alert-error" style={{ margin: "20px 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <span>{allCalError}</span>
@@ -2963,8 +3004,18 @@ export function AttendancePage() {
                       </div>
 
                       {evidenceModal.loading ? (
-                        <div style={{ fontSize: "13px", color: "#64748b", padding: "12px 0", textAlign: "center" }}>
-                          Loading site visit evidence...
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }} aria-hidden="true">
+                          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+                              <span className="skeleton-line" style={{ width: "40%", height: 16 }} />
+                              <span className="skeleton-badge" style={{ width: 60, height: 20 }} />
+                            </div>
+                            <span className="skeleton-line" style={{ width: "65%", height: 13, marginBottom: 8 }} />
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", background: "#fff", padding: "8px 10px", borderRadius: "6px", border: "1px solid #f1f5f9" }}>
+                              <span className="skeleton-line" style={{ width: "80%", height: 13 }} />
+                              <span className="skeleton-line" style={{ width: "80%", height: 13 }} />
+                            </div>
+                          </div>
                         </div>
                       ) : !evidenceModal.evidence?.site_visits || evidenceModal.evidence.site_visits.length === 0 ? (
                         <div style={{ fontSize: "12.5px", color: "#64748b", padding: "8px", background: "#f8fafc", borderRadius: "6px" }}>
@@ -3026,8 +3077,19 @@ export function AttendancePage() {
                       </div>
 
                       {evidenceModal.loading ? (
-                        <div style={{ fontSize: "13px", color: "#64748b", padding: "12px 0", textAlign: "center" }}>
-                          Loading tracking evidence...
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }} aria-hidden="true">
+                          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "12px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+                              <span className="skeleton-line" style={{ width: "35%", height: 16 }} />
+                              <span className="skeleton-badge" style={{ width: 60, height: 20 }} />
+                            </div>
+                            <span className="skeleton-line" style={{ width: "50%", height: 13, marginBottom: 8 }} />
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", background: "#fff", padding: "8px 10px", borderRadius: "6px", border: "1px solid #f1f5f9" }}>
+                              <span className="skeleton-line" style={{ width: "70%", height: 13 }} />
+                              <span className="skeleton-line" style={{ width: "70%", height: 13 }} />
+                              <span className="skeleton-line" style={{ width: "70%", height: 13 }} />
+                            </div>
+                          </div>
                         </div>
                       ) : !evidenceModal.evidence?.tracking_sessions || evidenceModal.evidence.tracking_sessions.length === 0 ? (
                         <div style={{ fontSize: "12.5px", color: "#64748b", padding: "8px", background: "#f8fafc", borderRadius: "6px" }}>

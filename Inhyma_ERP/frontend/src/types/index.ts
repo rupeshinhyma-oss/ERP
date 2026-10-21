@@ -549,6 +549,8 @@ export interface User {
   position_id?: string | null;
   position_name?: string | null;
   department?: string | null;
+  department_id?: string | null;
+  department_name?: string | null;
   date_of_birth?: string | null;
   gender?: string | null;
   date_of_joining?: string | null;

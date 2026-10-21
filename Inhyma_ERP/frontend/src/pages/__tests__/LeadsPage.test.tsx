@@ -209,7 +209,7 @@ describe("LeadsPage", () => {
       expect(screen.getByText("No Data Available In Table")).toBeTruthy();
     });
 
-    expect(screen.getByText("Showing 0 To 0 Of 0 Entries")).toBeTruthy();
+    expect(document.querySelector(".pagination")?.textContent).toContain("Showing 0–0 of 0 total");
     expect(screen.getByRole("button", { name: "Previous" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
   });
@@ -392,7 +392,11 @@ describe("LeadsPage", () => {
     // Filter by State = Gujarat
     fireEvent.change(stateSelect, { target: { value: "Gujarat" } });
 
-    // Table now filters reactively based on data
+    // Click Search to apply filters
+    const searchBtn = document.getElementById("btn-filter-search")!;
+    fireEvent.click(searchBtn);
+
+    // Table now filters based on applied filter
     await waitFor(() => {
       expect(screen.getByText("Apex Valves & Automation")).toBeTruthy();
     });

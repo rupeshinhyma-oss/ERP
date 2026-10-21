@@ -362,9 +362,12 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
       return { data: null } as any;
     });
 
-    vi.mocked(apiModule.apiPost).mockResolvedValueOnce({
-      data: mockCompletedRecord,
-    } as any);
+    vi.mocked(apiModule.apiPost).mockImplementation(async (url: string) => {
+      if (url.includes("punch-out")) {
+        return { data: mockCompletedRecord } as any;
+      }
+      return { data: {} } as any;
+    });
 
     render(
       <MemoryRouter>

@@ -12,6 +12,7 @@ import {
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete, API_BASE } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import {
   loadGoogleMapsSdk,
   searchGooglePlaces,
@@ -139,31 +140,130 @@ const RADIUS_OPTIONS = [50, 100, 150, 200, 250, 500, 1000];
 const DEFAULT_THANE_LAT = 19.199824;
 const DEFAULT_THANE_LNG = 72.956795;
 
+function SetupLeaveTypesSkeletonRows({ rowCount = 4 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`setup-leave-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: index % 2 === 0 ? "70%" : "50%", height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 50, height: 20 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 70, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 35, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 35, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 45, height: 20 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 55, height: 20 }} /></td>
+          <td style={{ textAlign: "right" }}>
+            <span className="skeleton-box" style={{ width: 45, height: 26, borderRadius: 4, display: "inline-block" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function SetupExpensesSkeletonRows({ rowCount = 4 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`setup-exp-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: index % 2 === 0 ? "70%" : "55%", height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 50, height: 20 }} /></td>
+          <td><span className="skeleton-line" style={{ width: "80%", height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 55, height: 20 }} /></td>
+          <td style={{ textAlign: "right" }}>
+            <span className="skeleton-box" style={{ width: 45, height: 26, borderRadius: 4, display: "inline-block" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function SetupLocationsSkeletonRows({ rowCount = 4 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`setup-loc-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: index % 2 === 0 ? "70%" : "50%", height: 14 }} /></td>
+          <td>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="skeleton-line" style={{ width: "80%", height: 14 }} />
+              <span className="skeleton-line" style={{ width: "50%", height: 11 }} />
+            </div>
+          </td>
+          <td className="hrms-th-center"><span className="skeleton-badge" style={{ width: 50, height: 20, margin: "auto" }} /></td>
+          <td><span className="skeleton-line" style={{ width: 40, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 55, height: 20 }} /></td>
+          <td style={{ textAlign: "right" }}>
+            <span className="skeleton-box" style={{ width: 50, height: 26, borderRadius: 4, display: "inline-block" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function SetupDetailedEmployeesSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`setup-det-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="skeleton-line" style={{ width: index % 2 === 0 ? "75%" : "55%", height: 14 }} />
+              <span className="skeleton-line" style={{ width: "45%", height: 11 }} />
+            </div>
+          </td>
+          <td><span className="skeleton-line" style={{ width: 80, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 60, height: 22 }} /></td>
+          <td><span className="skeleton-box" style={{ width: 85, height: 28, borderRadius: 4 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 65, height: 20 }} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function SetupReturnTimerSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`setup-ret-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="skeleton-line" style={{ width: index % 2 === 0 ? "75%" : "55%", height: 14 }} />
+              <span className="skeleton-line" style={{ width: "45%", height: 11 }} />
+            </div>
+          </td>
+          <td><span className="skeleton-line" style={{ width: 80, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 70, height: 20 }} /></td>
+          <td><span className="skeleton-box" style={{ width: 85, height: 28, borderRadius: 4 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 70, height: 14 }} /></td>
+          <td><span className="skeleton-box" style={{ width: 65, height: 26, borderRadius: 4 }} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function SetupPage() {
   const [activeTab, setActiveTab] = useState<
     "leaveTypes" | "expenseSettings" | "geoFencing" | "detailedTracking" | "returnTimer" | "attendanceDownload"
   >("leaveTypes");
 
-  // Notifications
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Notifications -> Floating Toasts
+  const toast = useToast();
 
   const showSuccess = (msg: string) => {
-    setSuccessMessage(msg);
-    setErrorMessage(null);
-    setTimeout(() => setSuccessMessage(null), 4000);
+    toast(msg, "success");
   };
 
   const showError = (msg: string) => {
-    setErrorMessage(msg);
-    setSuccessMessage(null);
-    setTimeout(() => setErrorMessage(null), 6000);
+    toast(msg, "error");
   };
 
   const showWarning = (msg: string) => {
-    setErrorMessage(msg);
-    setSuccessMessage(null);
-    setTimeout(() => setErrorMessage(null), 7000);
+    toast(msg, "warning");
   };
 
   // Auth context for permissions & scoping
@@ -1201,48 +1301,7 @@ export function SetupPage() {
           </div>
         </div>
 
-        {/* Global Feedback Banners */}
-        {successMessage && (
-          <div
-            style={{
-              padding: "12px 18px",
-              background: "#ecfdf5",
-              border: "1px solid #a7f3d0",
-              borderRadius: "8px",
-              color: "#065f46",
-              marginBottom: "16px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <span>✓</span>
-            <span>{successMessage}</span>
-          </div>
-        )}
 
-        {errorMessage && (
-          <div
-            style={{
-              padding: "12px 18px",
-              background: "#fef2f2",
-              border: "1px solid #fecaca",
-              borderRadius: "8px",
-              color: "#991b1b",
-              marginBottom: "16px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <span>⚠</span>
-            <span>{errorMessage}</span>
-          </div>
-        )}
 
         {/* Setup Internal Screen Tabs */}
         <div className="hrms-tabs-nav">
@@ -1313,8 +1372,24 @@ export function SetupPage() {
               </div>
 
               {loadingLeaves ? (
-                <div style={{ padding: "40px", textAlign: "center", color: "var(--color-muted)" }}>
-                  Loading leave types...
+                <div className="hrms-table-container">
+                  <table className="hrms-table">
+                    <thead>
+                      <tr>
+                        <th>Leave Name</th>
+                        <th>Code</th>
+                        <th>Category</th>
+                        <th>Annual Balance</th>
+                        <th>Max Consecutive</th>
+                        <th>Carry Forward</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: "right" }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <SetupLeaveTypesSkeletonRows />
+                    </tbody>
+                  </table>
                 </div>
               ) : leaveTypes.length === 0 ? (
                 <div className="hrms-placeholder-box">
@@ -1437,8 +1512,21 @@ export function SetupPage() {
               </div>
 
               {loadingExpenses ? (
-                <div style={{ padding: "30px", textAlign: "center", color: "var(--color-muted)" }}>
-                  Loading expense categories...
+                <div className="hrms-table-container">
+                  <table className="hrms-table">
+                    <thead>
+                      <tr>
+                        <th>Category Name</th>
+                        <th>Code</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: "right" }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <SetupExpensesSkeletonRows />
+                    </tbody>
+                  </table>
                 </div>
               ) : expenseCategories.length === 0 ? (
                 <div className="hrms-placeholder-box">
@@ -1760,8 +1848,22 @@ export function SetupPage() {
               )}
 
               {loadingLocations ? (
-                <div style={{ padding: "40px", textAlign: "center", color: "var(--color-muted)" }}>
-                  Loading office locations...
+                <div className="hrms-table-container">
+                  <table className="hrms-table">
+                    <thead>
+                      <tr>
+                        <th>Office Name</th>
+                        <th style={{ minWidth: "280px" }}>Address & Coordinates</th>
+                        <th className="hrms-th-center">Radius</th>
+                        <th>Employees Assigned</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: "right" }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <SetupLocationsSkeletonRows />
+                    </tbody>
+                  </table>
                 </div>
               ) : locations.length === 0 ? (
                 <div className="hrms-placeholder-box">
@@ -1933,9 +2035,21 @@ export function SetupPage() {
 
                 {/* Employees Table */}
                 {loadingDetailedEmployees ? (
-                  <div style={{ padding: "50px", textAlign: "center", color: "var(--color-muted, #64748b)" }}>
-                    <div style={{ width: "24px", height: "24px", border: "3px solid #cbd5e1", borderTopColor: "#0284c7", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px auto" }} />
-                    Loading PostgreSQL employee dataset...
+                  <div className="hrms-table-container">
+                    <table className="hrms-table">
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Department</th>
+                          <th>Detailed Tracking</th>
+                          <th>GPS Sampling Interval</th>
+                          <th>Status / Feedback</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <SetupDetailedEmployeesSkeletonRows />
+                      </tbody>
+                    </table>
                   </div>
                 ) : detailedEmployees.length === 0 ? (
                   <div className="hrms-placeholder-box" style={{ padding: "40px 20px" }}>
@@ -2205,9 +2319,22 @@ export function SetupPage() {
 
                 {/* Table */}
                 {loadingReturnTimerEmployees ? (
-                  <div style={{ padding: "50px", textAlign: "center", color: "var(--color-muted, #64748b)" }}>
-                    <div style={{ width: "24px", height: "24px", border: "3px solid #cbd5e1", borderTopColor: "#0284c7", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px auto" }} />
-                    Loading return timer employee records...
+                  <div className="hrms-table-container">
+                    <table className="hrms-table">
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Department</th>
+                          <th>Inheritance</th>
+                          <th>Individual Duration</th>
+                          <th>Effective Timeout</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <SetupReturnTimerSkeletonRows />
+                      </tbody>
+                    </table>
                   </div>
                 ) : returnTimerEmployees.length === 0 ? (
                   <div className="hrms-placeholder-box" style={{ padding: "40px 20px" }}>

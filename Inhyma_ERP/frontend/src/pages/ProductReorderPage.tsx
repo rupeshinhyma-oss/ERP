@@ -267,6 +267,31 @@ export const INITIAL_REORDER_ITEMS: ProductReorderItem[] = [
   },
 ];
 
+const ProductReorderSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`reorder-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 20, margin: "0 auto" }} /></td>
+        <td style={{ padding: "10px" }}><div className="skeleton-line" style={{ width: "80%" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 28, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 32, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 32, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 32, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-line" style={{ width: 32, margin: "0 auto" }} /></td>
+        <td style={{ textAlign: "center", padding: "10px" }}><div className="skeleton-badge" style={{ width: 50, margin: "0 auto" }} /></td>
+      </tr>
+    ))}
+  </>
+);
+
 export function ProductReorderPage() {
   // Primary records state
   const [items, setItems] = useState<ProductReorderItem[]>(INITIAL_REORDER_ITEMS);
@@ -908,11 +933,11 @@ export function ProductReorderPage() {
               </div>
             </div>
 
-            <div className="reorder-filter-actions">
-              <button type="button" className="reorder-btn-reset" onClick={handleResetFilters}>
+            <div className="reorder-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+              <button type="button" className="btn-filter-reset" onClick={handleResetFilters}>
                 Reset
               </button>
-              <button type="button" className="reorder-btn-search" onClick={handleApplyFilters}>
+              <button type="button" className="btn-filter-search" onClick={handleApplyFilters}>
                 Search
               </button>
             </div>
@@ -1051,11 +1076,7 @@ export function ProductReorderPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={16} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                      Loading Product Re-Order records...
-                    </td>
-                  </tr>
+                  <ProductReorderSkeletonRows count={perPage > 10 ? 8 : perPage} />
                 ) : paginatedItems.length === 0 ? (
                   <tr>
                     <td colSpan={16} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>

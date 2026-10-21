@@ -9,8 +9,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiGet, apiPatch, apiPost, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 
 interface UserProfileData {
   id: string;
@@ -44,10 +45,10 @@ function ProfileFormSkeleton() {
 export function ProfilePage() {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const showToast = useToast();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   /* Profile Form state */
   const [firstName, setFirstName] = useState("");
@@ -63,8 +64,6 @@ export function ProfilePage() {
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
 
   useEffect(() => {
@@ -81,6 +80,7 @@ export function ProfilePage() {
         }
       } catch (err) {
         setError(err);
+        showToast(errorMessage(err), "error");
       } finally {
         setLoading(false);
       }
@@ -91,7 +91,6 @@ export function ProfilePage() {
     e.preventDefault();
     if (!profile?.id) return;
     setError(null);
-    setSuccessMsg(null);
     setSavingProfile(true);
 
     try {
@@ -101,9 +100,10 @@ export function ProfilePage() {
         email: email.trim(),
         phone: phone.trim() || null,
       });
-      setSuccessMsg("Profile information updated successfully!");
+      showToast("Profile information updated successfully!", "success");
     } catch (err) {
       setError(err);
+      showToast(errorMessage(err), "error");
     } finally {
       setSavingProfile(false);
     }
@@ -111,19 +111,17 @@ export function ProfilePage() {
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setPasswordError(null);
-    setPasswordSuccess(null);
 
     if (!currentPassword) {
-      setPasswordError("Please enter your current password.");
+      showToast("Please enter your current password.", "warning");
       return;
     }
     if (!newPassword) {
-      setPasswordError("Please enter a new password.");
+      showToast("Please enter a new password.", "warning");
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordError("New password and confirm password do not match.");
+      showToast("New password and confirm password do not match.", "error");
       return;
     }
 
@@ -133,12 +131,12 @@ export function ProfilePage() {
         current_password: currentPassword,
         new_password: newPassword,
       });
-      setPasswordSuccess("Password changed successfully!");
+      showToast("Password changed successfully!", "success");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err) {
-      setPasswordError(err instanceof Error ? err.message : "Failed to change password.");
+      showToast(err instanceof Error ? err.message : "Failed to change password.", "error");
     } finally {
       setSavingPassword(false);
     }
@@ -174,11 +172,6 @@ export function ProfilePage() {
       </div>
 
         <Banner error={error} />
-        {successMsg && (
-          <div className="banner banner-success" style={{ marginBottom: "20px" }}>
-            {successMsg}
-          </div>
-        )}
 
         {/* Profile Card */}
         <div
@@ -322,16 +315,7 @@ export function ProfilePage() {
           Change Password
         </h2>
 
-        {passwordError && (
-          <div className="banner banner-danger" style={{ marginBottom: "16px" }}>
-            {passwordError}
-          </div>
-        )}
-        {passwordSuccess && (
-          <div className="banner banner-success" style={{ marginBottom: "16px" }}>
-            {passwordSuccess}
-          </div>
-        )}
+
 
         <div
           className="card"

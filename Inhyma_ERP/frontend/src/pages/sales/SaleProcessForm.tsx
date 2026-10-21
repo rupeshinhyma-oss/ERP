@@ -109,6 +109,8 @@ export interface FormLineItem {
   gst_amount: number;
   total: number;
   serial_numbers?: string[];
+  min_price?: number;
+  available_stock?: number;
 }
 
 export function formatIndianCurrency(amount: number | null | undefined): string {
@@ -209,6 +211,9 @@ export function SaleProcessFormPage() {
 
   const [transportName, setTransportName] = useState("");
   const [thirdPartyDelivery, setThirdPartyDelivery] = useState("No");
+  const [thirdPartyInvoiceFile, setThirdPartyInvoiceFile] = useState("");
+  const [po, setPo] = useState("No");
+  const [poFile, setPoFile] = useState("");
 
   const [transportDestination, setTransportDestination] = useState("");
   const [deliveryType, setDeliveryType] = useState("");
@@ -221,10 +226,10 @@ export function SaleProcessFormPage() {
 
   // Product Search State
   const [productSearch, setProductSearch] = useState("");
-  const [productMatches, setProductMatches] = useState<typeof SAMPLE_PRODUCTS>([]);
+  const [productMatches, setProductMatches] = useState<any[]>([]);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  // Line Items & Additional Charges
+  // Line Items & Additional Charges (Spec: Transport HSN 996511 & Packing HSN 996713 always visible)
   const [additionalChargesEnabled, setAdditionalChargesEnabled] = useState(true);
   const [serialModalItemIndex, setSerialModalItemIndex] = useState<number | null>(null);
   const [serialInputText, setSerialInputText] = useState("");
@@ -232,9 +237,9 @@ export function SaleProcessFormPage() {
     {
       id: "charge-1",
       is_additional_charge: true,
-      charge_type: "",
-      product_name: "",
-      hsn: "",
+      charge_type: "Transport Charges",
+      product_name: "Transport Charges",
+      hsn: "996511",
       quantity: 1,
       unit_price: 0,
       unit_discount: 0,
@@ -246,9 +251,9 @@ export function SaleProcessFormPage() {
     {
       id: "charge-2",
       is_additional_charge: true,
-      charge_type: "",
-      product_name: "",
-      hsn: "",
+      charge_type: "Packing & Forwarding",
+      product_name: "Packing & Forwarding",
+      hsn: "996713",
       quantity: 1,
       unit_price: 0,
       unit_discount: 0,
@@ -300,6 +305,9 @@ export function SaleProcessFormPage() {
           setSalesPerson(o.sales_person || "Rupesh Malia");
           setTransportName(o.transport_name || "");
           setThirdPartyDelivery(String(o.third_party_delivery || o.third_party || "No"));
+          if (o.third_party_invoice) setThirdPartyInvoiceFile(o.third_party_invoice);
+          if (o.po) setPo(String(o.po));
+          if ((o as any).po_file) setPoFile(String((o as any).po_file));
           setTransportDestination(o.transport_destination || o.city || "");
           setDeliveryType(o.delivery_type || "");
           setDeliveryCharge(o.delivery_charge || "");
@@ -381,7 +389,9 @@ export function SaleProcessFormPage() {
         product_name: p.product_name || p.name || "",
         hsn: p.hsn_code || p.hsn || "",
         rate: Number(p.sales_price || p.unit_price || p.price || 0),
+        min_price: Number(p.minimum_price || p.min_price || p.standard_price || 0),
         gst_percent: Number(p.gst_rate || p.tax_percent || 18),
+        available_stock: p.current_stock !== undefined ? Number(p.current_stock) : (p.stock !== undefined ? Number(p.stock) : undefined),
       }));
       setProductMatches(mapped);
     } catch {
@@ -389,7 +399,7 @@ export function SaleProcessFormPage() {
     }
   };
 
-  const handleSelectProductMatch = (prod: (typeof SAMPLE_PRODUCTS)[0]) => {
+  const handleSelectProductMatch = (prod: any) => {
     const qty = 1;
     const rate = prod.rate;
     const disc = 0;
@@ -410,6 +420,8 @@ export function SaleProcessFormPage() {
       gst_percent: gst,
       gst_amount: gstAmt,
       total: tot,
+      min_price: prod.min_price,
+      available_stock: prod.available_stock,
     };
 
     // Add before charge rows if any
@@ -584,6 +596,9 @@ export function SaleProcessFormPage() {
       transport_name: transportName,
       third_party_delivery: thirdPartyDelivery,
       third_party: thirdPartyDelivery,
+      third_party_invoice: thirdPartyInvoiceFile || undefined,
+      po,
+      po_file: poFile || undefined,
       transport_destination: transportDestination,
       delivery_type: deliveryType,
       delivery_charge: deliveryCharge,
@@ -902,8 +917,85 @@ export function SaleProcessFormPage() {
                 />
               </div>
 
-              <div />
-              <div />
+              {thirdPartyDelivery === "Yes" ? (
+                <div>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: "#1e293b",
+                      marginBottom: "6px",
+                      display: "block",
+                    }}
+                  >
+                    Third Party Invoice (Optional)
+                  </label>
+                  <input
+                    type="file"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) setThirdPartyInvoiceFile(f.name);
+                    }}
+                    style={{ fontSize: "12px", width: "100%" }}
+                  />
+                  {thirdPartyInvoiceFile && (
+                    <span style={{ fontSize: "11px", color: "#0284c7", marginTop: "2px", display: "block" }}>
+                      📎 Attached: {thirdPartyInvoiceFile}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div />
+              )}
+
+              <div>
+                <label
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "#1e293b",
+                    marginBottom: "6px",
+                    display: "block",
+                  }}
+                >
+                  PO (Client Purchase Order)
+                </label>
+                <select
+                  aria-label="PO"
+                  value={po}
+                  onChange={(e) => setPo(e.target.value)}
+                  style={{
+                    width: "100%",
+                    height: "36px",
+                    borderRadius: "4px",
+                    border: "1px solid #cbd5e1",
+                    padding: "0 8px",
+                    fontSize: "12.5px",
+                    background: "#ffffff",
+                    color: "#1e293b",
+                  }}
+                >
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+                {po === "Yes" && (
+                  <div style={{ marginTop: "6px" }}>
+                    <input
+                      type="file"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) setPoFile(f.name);
+                      }}
+                      style={{ fontSize: "11.5px", width: "100%" }}
+                    />
+                    {poFile && (
+                      <span style={{ fontSize: "11px", color: "#0284c7", marginTop: "2px", display: "block" }}>
+                        📎 Attached: {poFile}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Row 3 */}
@@ -1681,6 +1773,11 @@ export function SaleProcessFormPage() {
                             fontSize: "12.5px",
                           }}
                         />
+                        {!row.is_additional_charge && row.available_stock !== undefined && (
+                          <div style={{ fontSize: "11px", color: Number(row.available_stock) > 0 ? "#0284c7" : "#ef4444", marginTop: "2px", fontWeight: 500 }}>
+                            Stock: {row.available_stock}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <input
@@ -1691,12 +1788,17 @@ export function SaleProcessFormPage() {
                           style={{
                             width: "100%",
                             height: "32px",
-                            border: "1px solid #cbd5e1",
+                            border: row.min_price && row.unit_price < row.min_price ? "1px solid #f87171" : "1px solid #cbd5e1",
                             borderRadius: "3px",
                             padding: "0 6px",
                             fontSize: "12.5px",
                           }}
                         />
+                        {!row.is_additional_charge && Boolean(row.min_price && row.unit_price < row.min_price) && (
+                          <div style={{ fontSize: "10.5px", color: "#dc2626", marginTop: "2px", fontWeight: 600 }}>
+                            ⚠️ Below min ₹{row.min_price}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <div
@@ -1739,20 +1841,28 @@ export function SaleProcessFormPage() {
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <div
+                          className="calc-locked-cell"
+                          title="Calculated automatically (Qty × Unit Rate)"
                           style={{
                             height: "32px",
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            background: "#e9ecef",
                             borderRadius: "3px",
                             display: "flex",
                             alignItems: "center",
+                            justifyContent: "space-between",
                             padding: "0 8px",
                             fontSize: "12.5px",
-                            color: "#1e293b",
+                            color: "#334155",
                             fontWeight: 600,
+                            cursor: "not-allowed",
                           }}
                         >
-                          {row.taxable_amount ? row.taxable_amount.toFixed(2) : "0.00"}
+                          <span>{row.taxable_amount ? row.taxable_amount.toFixed(2) : "0.00"}</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
                         </div>
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
@@ -1796,38 +1906,54 @@ export function SaleProcessFormPage() {
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <div
+                          className="calc-locked-cell"
+                          title="Calculated automatically (Taxable × GST %)"
                           style={{
                             height: "32px",
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            background: "#e9ecef",
                             borderRadius: "3px",
                             display: "flex",
                             alignItems: "center",
+                            justifyContent: "space-between",
                             padding: "0 8px",
                             fontSize: "12.5px",
-                            color: "#1e293b",
+                            color: "#334155",
                             fontWeight: 600,
+                            cursor: "not-allowed",
                           }}
                         >
-                          {row.gst_amount ? row.gst_amount.toFixed(2) : "0.00"}
+                          <span>{row.gst_amount ? row.gst_amount.toFixed(2) : "0.00"}</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
                         </div>
                       </td>
                       <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                         <div
+                          className="calc-locked-cell"
+                          title="Calculated automatically (Taxable + GST)"
                           style={{
                             height: "32px",
-                            border: "1px solid #e2e8f0",
-                            background: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            background: "#e9ecef",
                             borderRadius: "3px",
                             display: "flex",
                             alignItems: "center",
+                            justifyContent: "space-between",
                             padding: "0 8px",
                             fontSize: "12.5px",
-                            color: "#1e293b",
+                            color: "#334155",
                             fontWeight: 600,
+                            cursor: "not-allowed",
                           }}
                         >
-                          {row.total ? row.total.toFixed(2) : "0.00"}
+                          <span>{row.total ? row.total.toFixed(2) : "0.00"}</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
                         </div>
                       </td>
                       <td style={{ padding: "6px 4px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>

@@ -1138,7 +1138,7 @@ export function UsersPage() {
                 {loading ? (
                   <UserTableSkeletonRows count={8} />
                 ) : sortedRows.length === 0 ? (
-                  <TableMessageRow colSpan={8}>No user accounts found.</TableMessageRow>
+                  <TableMessageRow colSpan={8}>No Data</TableMessageRow>
                 ) : (
                   sortedRows.map((u) => {
                     const statusUpper = (u.status || "").toUpperCase();

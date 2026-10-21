@@ -9,8 +9,9 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, errorMessage } from "@/lib/api";
 import { usePendingGuard } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 
 interface TrashItem {
   id: string;
@@ -64,10 +65,10 @@ export function TrashPage() {
   const [searchParams] = useSearchParams();
   const deepLinkQ = searchParams.get("q");
 
+  const showToast = useToast();
   const [items, setItems] = useState<TrashItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filterModule, setFilterModule] = useState<string>("ALL");
@@ -146,14 +147,14 @@ export function TrashPage() {
   async function handleRestoreSingle(entityType: string, id: string, name: string) {
     await guardRowAction(`restore:${entityType}:${id}`, async () => {
       setError(null);
-      setSuccessMsg(null);
       try {
         await apiPost("/trash/restore", { items: [{ entity_type: entityType, id }] });
-        setSuccessMsg(`Successfully restored '${name}' back to active state.`);
+        showToast(`Successfully restored '${name}' back to active state.`, "success");
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
         setError(err);
+        showToast(errorMessage(err), "error");
       }
     });
   }
@@ -164,14 +165,14 @@ export function TrashPage() {
     }
     await guardRowAction(`delete:${entityType}:${id}`, async () => {
       setError(null);
-      setSuccessMsg(null);
       try {
         await apiPost("/trash/permanent-delete", { items: [{ entity_type: entityType, id }] });
-        setSuccessMsg(`Permanently deleted '${name}' from database.`);
+        showToast(`Permanently deleted '${name}' from database.`, "success");
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
         setError(err);
+        showToast(errorMessage(err), "error");
       }
     });
   }
@@ -180,7 +181,6 @@ export function TrashPage() {
     if (selectedIds.size === 0) return;
     await guardRowAction("bulk-restore", async () => {
       setError(null);
-      setSuccessMsg(null);
 
       const payloadItems = Array.from(selectedIds).map((key) => {
         const [entity_type, id] = key.split(":");
@@ -189,11 +189,12 @@ export function TrashPage() {
 
       try {
         await apiPost("/trash/restore", { items: payloadItems });
-        setSuccessMsg(`Successfully restored ${payloadItems.length} selected item(s).`);
+        showToast(`Successfully restored ${payloadItems.length} selected item(s).`, "success");
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
         setError(err);
+        showToast(errorMessage(err), "error");
       }
     });
   }
@@ -209,7 +210,6 @@ export function TrashPage() {
     }
     await guardRowAction("bulk-delete", async () => {
       setError(null);
-      setSuccessMsg(null);
 
       const payloadItems = Array.from(selectedIds).map((key) => {
         const [entity_type, id] = key.split(":");
@@ -218,11 +218,12 @@ export function TrashPage() {
 
       try {
         await apiPost("/trash/permanent-delete", { items: payloadItems });
-        setSuccessMsg(`Permanently deleted ${payloadItems.length} item(s) from database.`);
+        showToast(`Permanently deleted ${payloadItems.length} item(s) from database.`, "success");
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
         setError(err);
+        showToast(errorMessage(err), "error");
       }
     });
   }
@@ -238,16 +239,16 @@ export function TrashPage() {
     }
     await guardRowAction("empty-trash", async () => {
       setError(null);
-      setSuccessMsg(null);
 
       try {
         const res = await apiPost<{ deleted_count: number }>("/trash/empty", {});
         const count = res?.data?.deleted_count || 0;
-        setSuccessMsg(`Trash emptied. Permanently deleted ${count} item(s).`);
+        showToast(`Trash emptied. Permanently deleted ${count} item(s).`, "success");
         setSelectedIds(new Set());
         await loadTrash();
       } catch (err) {
         setError(err);
+        showToast(errorMessage(err), "error");
       }
     });
   }
@@ -259,42 +260,36 @@ export function TrashPage() {
         <div className="page-header">
           <div>
             <h1 style={{ color: "#1e293b", fontWeight: 700, fontSize: "20px", margin: 0 }}>Trash</h1>
-            <p style={{ color: "#64748b", fontSize: "13.5px", margin: "4px 0 0 0" }}>
-              View and manage soft-deleted items across all modules. Permanently delete or restore records to the database.
-            </p>
           </div>
-          {items.length > 0 && (
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={handleEmptyTrash}
-              disabled={isRowActionPending("empty-trash")}
-              style={{
-                background: "#dc2626",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "6px",
-                padding: "8px 16px",
-                fontWeight: 600,
-                fontSize: "13.5px",
-                cursor: isRowActionPending("empty-trash") ? "default" : "pointer",
-                opacity: isRowActionPending("empty-trash") ? 0.7 : 1,
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              {isRowActionPending("empty-trash") ? "Emptying…" : "🗑️ Empty Trash"}
-            </button>
-          )}
+          <div className="page-header-actions">
+            {items.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={handleEmptyTrash}
+                disabled={isRowActionPending("empty-trash")}
+                style={{
+                  background: "#dc2626",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "8px 16px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: isRowActionPending("empty-trash") ? "default" : "pointer",
+                  opacity: isRowActionPending("empty-trash") ? 0.7 : 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                {isRowActionPending("empty-trash") ? "Emptying…" : "🗑️ Empty Trash"}
+              </button>
+            )}
+          </div>
         </div>
 
         <Banner error={error} />
-        {successMsg && (
-          <div className="banner banner-success" style={{ marginBottom: "16px" }}>
-            {successMsg}
-          </div>
-        )}
 
         {/* Toolbar & Filters */}
         <div

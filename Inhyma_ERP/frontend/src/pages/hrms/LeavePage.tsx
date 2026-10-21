@@ -11,6 +11,7 @@ import {
 } from "@/components/icons";
 import { DatePicker, parseDDMMYYYY, formatDDMMYYYY } from "@/components/DatePicker";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import { apiGet, apiPost, apiPatch, apiPut, apiDelete, apiPostMultipart } from "@/lib/api";
 import "./hrms.css";
 
@@ -164,12 +165,67 @@ interface LeaveRequest {
   updated_at: string;
 }
 
+function LeaveRequestsSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`leave-req-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: 24, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: index % 2 === 0 ? "70%" : "50%", height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 30, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: index % 2 === 0 ? "80%" : "60%", height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 40, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 65, height: 20 }} /></td>
+          <td><span className="skeleton-box" style={{ width: 45, height: 24, borderRadius: 4 }} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function LeaveApprovalsSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`leave-appr-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: 24, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 85, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 70, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 75, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 30, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 80, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 40, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 65, height: 14 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 60, height: 20 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 60, height: 20 }} /></td>
+          <td>
+            <div style={{ display: "inline-flex", gap: 4 }}>
+              <span className="skeleton-box" style={{ width: 26, height: 24, borderRadius: 4 }} />
+              <span className="skeleton-box" style={{ width: 26, height: 24, borderRadius: 4 }} />
+            </div>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function LeavePage() {
   const [activeTab, setActiveTab] = useState<LeaveTab>("my-leaves");
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [loading, setLoading] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const toast = useToast();
+  const setSuccessMsg = (msg: string | null) => {
+    if (msg) toast(msg, "success");
+  };
+  const setErrorMsg = (msg: string | null) => {
+    if (msg) toast(msg, "error");
+  };
 
   // Core Data Stores
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
@@ -181,6 +237,7 @@ export function LeavePage() {
   const [approvals, setApprovals] = useState<LeaveRequest[]>([]);
 
   // Loading & Calculation State
+  const [loading, setLoading] = useState<boolean>(false);
   const [loadingBalances, setLoadingBalances] = useState<boolean>(false);
   const [loadingRequests, setLoadingRequests] = useState<boolean>(false);
   const [calculatingDays, setCalculatingDays] = useState<boolean>(false);
@@ -1039,7 +1096,7 @@ export function LeavePage() {
               <h1 style={{ margin: 0 }}>Leave</h1>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <select
                 className="form-control"
                 style={{ width: 115, fontWeight: 600 }}
@@ -1099,27 +1156,7 @@ export function LeavePage() {
           </div>
         </div>
 
-        {/* Global Feedback Banner */}
-        {errorMsg && (
-          <div className="card" style={{ background: "#fef2f2", borderColor: "#fecaca", padding: "12px 16px", color: "#991b1b", marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>{errorMsg}</span>
-              <button type="button" className="btn-icon" onClick={() => setErrorMsg(null)}>
-                <IconClose />
-              </button>
-            </div>
-          </div>
-        )}
-        {successMsg && (
-          <div className="card" style={{ background: "#f0fdf4", borderColor: "#bbf7d0", padding: "12px 16px", color: "#166534", marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>{successMsg}</span>
-              <button type="button" className="btn-icon" onClick={() => setSuccessMsg(null)}>
-                <IconClose />
-              </button>
-            </div>
-          </div>
-        )}
+
 
         {/* Navigation Tabs Bar */}
         <div className="hrms-tabs-nav" style={{ marginBottom: 20 }}>
@@ -1190,8 +1227,19 @@ export function LeavePage() {
 
               <div style={{ padding: "0 20px 20px 20px" }}>
                 {loadingBalances ? (
-                  <div className="hrms-placeholder-box" style={{ padding: "30px 20px" }}>
-                    <p className="hrms-placeholder-text">Loading leave balances...</p>
+                  <div className="hrms-leave-cards-grid">
+                    {Array.from({ length: 4 }).map((_, idx) => (
+                      <div key={`bal-skel-${idx}`} className="hrms-leave-stat-card skeleton-row" style={{ padding: "16px 20px" }}>
+                        <span className="skeleton-line" style={{ width: "60%", height: 16 }} />
+                        <div style={{ marginTop: 12, display: "flex", alignItems: "baseline", gap: 6 }}>
+                          <span className="skeleton-box" style={{ width: 48, height: 28, borderRadius: 4 }} />
+                        </div>
+                        <div style={{ marginTop: 12, display: "flex", gap: 12, borderTop: "1px solid #f1f5f9", paddingTop: 8 }}>
+                          <span className="skeleton-line" style={{ width: "40%", height: 11 }} />
+                          <span className="skeleton-line" style={{ width: "40%", height: 11 }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : myBalances.length === 0 ? (
                   <div className="hrms-placeholder-box">
@@ -1288,8 +1336,27 @@ export function LeavePage() {
               </div>
 
               {loadingRequests ? (
-                <div className="hrms-placeholder-box" style={{ padding: "40px 20px" }}>
-                  <p className="hrms-placeholder-text">Loading leave requests...</p>
+                <div className="hrms-approval-table-wrapper">
+                  <table className="hrms-approval-table">
+                    <thead>
+                      <tr>
+                        <th>SR No.</th>
+                        <th>Leave Type</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>No. of Days</th>
+                        <th>Reason</th>
+                        <th>Attachment</th>
+                        <th>Created By</th>
+                        <th>Updated By</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <LeaveRequestsSkeletonRows />
+                    </tbody>
+                  </table>
                 </div>
               ) : filteredMyRequests.length === 0 ? (
                 <div className="hrms-placeholder-box" style={{ padding: "40px 20px" }}>
@@ -1442,7 +1509,32 @@ export function LeavePage() {
               </select>
             </div>
 
-            {filteredApprovals.length === 0 ? (
+            {loadingRequests ? (
+              <div className="hrms-approval-table-wrapper">
+                <table className="hrms-approval-table">
+                  <thead>
+                    <tr>
+                      <th>SR No.</th>
+                      <th>Employee</th>
+                      <th>Leave Type</th>
+                      <th>From</th>
+                      <th>To</th>
+                      <th>No. of Days</th>
+                      <th>Reason</th>
+                      <th>Attachment</th>
+                      <th>Created By</th>
+                      <th>Updated By</th>
+                      <th>Approval Status</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <LeaveApprovalsSkeletonRows />
+                  </tbody>
+                </table>
+              </div>
+            ) : filteredApprovals.length === 0 ? (
               <div className="hrms-placeholder-box">
                 <div className="hrms-placeholder-icon">
                   <IconCheckSquare />

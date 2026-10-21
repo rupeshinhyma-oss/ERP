@@ -863,7 +863,11 @@ function MumStatusHistoryPopover({
           Cell Change History
         </div>
         {loading ? (
-          <div className="muted" style={{ fontSize: 12 }}>Loading history…</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }} aria-hidden="true">
+            <span className="skeleton-line" style={{ width: "60%", height: 12 }} />
+            <span className="skeleton-line" style={{ width: "80%", height: 11 }} />
+            <span className="skeleton-line" style={{ width: "50%", height: 11 }} />
+          </div>
         ) : !groupedEntries || groupedEntries.length === 0 ? (
           <div className="muted" style={{ fontSize: 12 }}>No changes recorded on these columns yet.</div>
         ) : (
@@ -1410,7 +1414,14 @@ function HistoryDrawer({
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
           {loading ? (
-            <div className="muted" style={{ padding: 20 }}>Loading history…</div>
+            <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 10 }} aria-hidden="true">
+              {[1, 2, 3, 4].map((n) => (
+                <div key={n} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span className="skeleton-line" style={{ width: "70%", height: 13 }} />
+                  <span className="skeleton-line" style={{ width: "40%", height: 11 }} />
+                </div>
+              ))}
+            </div>
           ) : entries.length === 0 ? (
             <div className="muted" style={{ padding: 20 }}>No changes recorded yet.</div>
           ) : (

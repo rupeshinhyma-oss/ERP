@@ -890,6 +890,60 @@ export const TasksPage: React.FC = () => {
     );
   };
 
+  const TasksTableSkeletonRows: React.FC<{ count?: number }> = ({ count = 6 }) => (
+    <div className="table-scroll" style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13.5px" }}>
+        <thead>
+          <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
+            <th style={{ padding: "12px 14px", width: "36px", textAlign: "center" }}>
+              <div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 3, margin: "0 auto" }} />
+            </th>
+            <th style={{ padding: "12px 14px", width: "95px", color: "#475569" }}><div className="skeleton-line" style={{ width: 45 }} /></th>
+            <th style={{ padding: "12px 14px", color: "#475569" }}><div className="skeleton-line" style={{ width: 120 }} /></th>
+            <th style={{ padding: "12px 14px", width: "90px", color: "#475569" }}><div className="skeleton-line" style={{ width: 50 }} /></th>
+            <th style={{ padding: "12px 14px", width: "115px", color: "#475569" }}><div className="skeleton-line" style={{ width: 60 }} /></th>
+            <th style={{ padding: "12px 14px", width: "130px", color: "#475569" }}><div className="skeleton-line" style={{ width: 70 }} /></th>
+            <th style={{ padding: "12px 14px", width: "130px", color: "#475569" }}><div className="skeleton-line" style={{ width: 75 }} /></th>
+            <th style={{ padding: "12px 14px", width: "115px", color: "#475569" }}><div className="skeleton-line" style={{ width: 65 }} /></th>
+            <th style={{ padding: "12px 14px", width: "110px", color: "#475569" }}><div className="skeleton-line" style={{ width: 55 }} /></th>
+            <th style={{ padding: "12px 14px", textAlign: "right", width: "140px", color: "#475569" }}><div className="skeleton-line" style={{ width: 60, marginLeft: "auto" }} /></th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: count }).map((_, index) => (
+            <tr key={`tasks-skeleton-${index}`} className="table-skeleton-row" style={{ borderBottom: "1px solid #f1f5f9" }}>
+              <td style={{ padding: "12px 14px", textAlign: "center" }}>
+                <div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 3, margin: "0 auto" }} />
+              </td>
+              <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 60 }} /></td>
+              <td style={{ padding: "12px 14px" }}>
+                <div className="skeleton-line" style={{ width: "70%", marginBottom: 4 }} />
+                <div className="skeleton-line" style={{ width: "40%" }} />
+              </td>
+              <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 55 }} /></td>
+              <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 65 }} /></td>
+              <td style={{ padding: "12px 14px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div className="skeleton-circle" style={{ width: 22, height: 22 }} />
+                  <div className="skeleton-line" style={{ width: 60 }} />
+                </div>
+              </td>
+              <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 75 }} /></td>
+              <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: 70 }} /></td>
+              <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: 60 }} /></td>
+              <td style={{ padding: "12px 14px", textAlign: "right" }}>
+                <div style={{ display: "inline-flex", gap: 4 }}>
+                  <div className="skeleton-box" style={{ width: 24, height: 22, borderRadius: 4 }} />
+                  <div className="skeleton-box" style={{ width: 24, height: 22, borderRadius: 4 }} />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   const renderTableMarkup = (taskList: TaskSummary[]) => {
     return (
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13.5px" }}>
@@ -2000,10 +2054,7 @@ export const TasksPage: React.FC = () => {
           {isTableActive ? (
             <div>
               {loading ? (
-                <div style={{ padding: "56px 24px", textAlign: "center", color: "#64748b" }}>
-                  <div style={{ fontSize: "28px", marginBottom: "8px" }}>⏳</div>
-                  <div style={{ fontWeight: 600, fontSize: "14px", color: "#334155" }}>Loading tasks...</div>
-                </div>
+                <TasksTableSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
               ) : scopeView === "organization" ? (
                 /* Organization View: Grouped by Department with Collapsible Accordions */
                 <div>

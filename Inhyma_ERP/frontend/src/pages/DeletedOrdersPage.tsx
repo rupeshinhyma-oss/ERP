@@ -171,6 +171,31 @@ const SALES_PERSONS = [
   "Rupesh Inhyma",
 ];
 
+const DeletedOrdersSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`deleted-order-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ padding: "12px 10px" }}>
+          <div className="skeleton-line" style={{ width: "75%", marginBottom: 4 }} />
+          <div className="skeleton-line" style={{ width: "50%" }} />
+        </td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "65%" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "80%" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "50%" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "40%" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "65%" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-line" style={{ width: "50%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-badge" style={{ width: 85 }} /></td>
+        <td style={{ padding: "12px 10px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 70, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px 10px" }}><div className="skeleton-badge" style={{ width: 65 }} /></td>
+      </tr>
+    ))}
+  </>
+);
+
 export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilterOpen?: boolean } = {}) {
   const [items, setItems] = useState<DeletedOrderItem[]>(INITIAL_DELETED_ORDERS);
   const [loading, setLoading] = useState<boolean>(false);
@@ -387,10 +412,10 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
         <Breadcrumb trail={["Reports", "Deleted Orders"]} />
 
         {/* Top Header */}
-        <div className="deleted-orders-header">
+        <div className="page-header deleted-orders-header">
           <h1 className="deleted-orders-title">Deleted Orders</h1>
 
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <button
               type="button"
               className="btn btn-filter-toggle"
@@ -532,17 +557,17 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
             </div>
 
             {/* Filter Actions */}
-            <div className="deleted-orders-filter-actions">
+            <div className="deleted-orders-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
               <button
                 type="button"
-                className="deleted-orders-btn-reset"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
               >
                 Reset
               </button>
               <button
                 type="button"
-                className="deleted-orders-btn-search"
+                className="btn-filter-search"
                 onClick={handleApplyFilters}
               >
                 Search
@@ -633,11 +658,7 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={13} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                      Loading deleted orders records...
-                    </td>
-                  </tr>
+                  <DeletedOrdersSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
                 ) : filteredItems.length === 0 ? (
                   <tr>
                     <td colSpan={13} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>

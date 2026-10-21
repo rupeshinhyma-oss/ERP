@@ -22,6 +22,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { IconTrash, IconPlus } from "@/components/icons";
@@ -111,6 +113,36 @@ const EMPTY_FORM: FormState = {
   sales_person: "",
   remarks: "",
 };
+
+const AgentsTableSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`agents-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ padding: "12px 14px", textAlign: "center" }}>
+          <div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 4, margin: "0 auto" }} />
+        </td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: 24 }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "65%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "55%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "65%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 50 }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 65 }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 65 }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: 32 }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}>
+          <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+            <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+            <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4 }} />
+          </div>
+        </td>
+      </tr>
+    ))}
+  </>
+);
 
 export function AgentsPage() {
   const showToast = useToast();
@@ -349,6 +381,15 @@ export function AgentsPage() {
   // Pagination
   const totalRecords = filteredAgents.length;
   const totalPages = Math.ceil(totalRecords / pageSize) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: totalRecords,
+    page_size: pageSize,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, totalRecords, pageSize]);
+
   const paginatedAgents = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
     return filteredAgents.slice(start, start + pageSize);
@@ -817,34 +858,18 @@ export function AgentsPage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
+                type="button"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#64748b",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 20px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
               >
                 Reset
               </button>
               <button
+                type="button"
+                className="btn-filter-search"
                 onClick={handleSearchClick}
-                style={{
-                  background: "#eab308",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "7px 24px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
               >
                 Search
               </button>
@@ -1063,11 +1088,7 @@ export function AgentsPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={14} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
-                      Loading Agents...
-                    </td>
-                  </tr>
+                  <AgentsTableSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
                 ) : paginatedAgents.length === 0 ? (
                   <tr>
                     <td colSpan={14} style={{ padding: "32px", textAlign: "center", color: "#94a3b8" }}>
@@ -1244,53 +1265,17 @@ export function AgentsPage() {
             </table>
           </div>
 
-          {/* Pagination */}
-          <div
-            style={{
-              padding: "14px 20px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              borderTop: "1px solid #f1f5f9",
-              fontSize: "13px",
-              color: "#64748b",
-            }}
-          >
-            <div>
-              Showing {totalRecords === 0 ? 0 : (currentPage - 1) * pageSize + 1} To{" "}
-              {Math.min(currentPage * pageSize, totalRecords)} Of {totalRecords} Entries
-            </div>
-
-            <div style={{ display: "flex", gap: "6px" }}>
-              <button
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => p - 1)}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: "4px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage <= 1 ? "#f8fafc" : "#fff",
-                  color: currentPage <= 1 ? "#94a3b8" : "#334155",
-                  cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-                }}
-              >
-                Previous
-              </button>
-              <button
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => p + 1)}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: "4px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage >= totalPages ? "#f8fafc" : "#fff",
-                  color: currentPage >= totalPages ? "#94a3b8" : "#334155",
-                  cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
-                }}
-              >
-                Next
-              </button>
-            </div>
+          {/* Pagination Footer matching Companies design */}
+          <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

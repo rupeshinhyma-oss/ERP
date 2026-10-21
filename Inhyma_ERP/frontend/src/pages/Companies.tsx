@@ -1278,6 +1278,28 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [directImportFilter, setDirectImportFilter] = useState("");
   const [monthlyImportVolumeFilter, setMonthlyImportVolumeFilter] = useState("");
   const [salesPersonFilter, setSalesPersonFilter] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState({
+    dateRange: "",
+    companyType: "",
+    status: "",
+    state: "",
+    city: "",
+    district: "",
+    category: "",
+    grade: "",
+    potential: "",
+    potentialBusiness: "",
+    monthlyTurnover: "",
+    sector: "",
+    businessCategory: "",
+    directImport: "",
+    monthlyImportVolume: "",
+    salesPerson: "",
+    visited: "",
+    country: null as string | null,
+    subCategory: null as string | null,
+    product: null as string | null,
+  });
 
   // Master option lists for filter dropdowns
   const [filterStates, setFilterStates] = useState<Array<{ id: string; name: string }>>([]);
@@ -1437,11 +1459,55 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     setSubCategoryFilter(null);
     setProductFilter(null);
     setVisitedFilter("");
+    setAppliedFilters({
+      dateRange: "",
+      companyType: "",
+      status: "",
+      state: "",
+      city: "",
+      district: "",
+      category: "",
+      grade: "",
+      potential: "",
+      potentialBusiness: "",
+      monthlyTurnover: "",
+      sector: "",
+      businessCategory: "",
+      directImport: "",
+      monthlyImportVolume: "",
+      salesPerson: "",
+      visited: "",
+      country: null,
+      subCategory: null,
+      product: null,
+    });
     setCurrentPage(1);
     setReloadCounter((n) => n + 1);
   };
 
   const handleSearchFilters = () => {
+    setAppliedFilters({
+      dateRange: filterDateRange,
+      companyType: companyTypeFilter,
+      status: statusFilter,
+      state: stateFilter,
+      city: cityFilter,
+      district: districtFilter,
+      category: categoryFilter,
+      grade: gradeFilter,
+      potential: potentialFilter,
+      potentialBusiness: potentialBusinessFilter,
+      monthlyTurnover: monthlyTurnoverFilter,
+      sector: sectorFilter,
+      businessCategory: businessCategoryFilter,
+      directImport: directImportFilter,
+      monthlyImportVolume: monthlyImportVolumeFilter,
+      salesPerson: salesPersonFilter,
+      visited: visitedFilter,
+      country: countryFilter,
+      subCategory: subCategoryFilter,
+      product: productFilter,
+    });
     setCurrentPage(1);
     setReloadCounter((n) => n + 1);
   };
@@ -2688,33 +2754,33 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const { created_after, created_before } = parseDateRange(filterDateRange);
+      const { created_after, created_before } = parseDateRange(appliedFilters.dateRange);
       const params = {
         page: currentPage,
         page_size: pageSize,
         sort_order: "asc",
         search: effectiveSearch,
         is_active: statusTab === "active" ? "true" : "false",
-        country_id: countryFilter || "",
-        state_id: stateFilter || "",
-        city_id: cityFilter || "",
-        district_id: districtFilter || "",
-        company_type: companyTypeFilter || "",
-        company_grade: gradeFilter || "",
-        current_status: statusFilter || "",
-        potential: potentialFilter || "",
-        company_category: categoryFilter || "",
-        business_category: businessCategoryFilter || "",
-        monthly_turnover: monthlyTurnoverFilter || "",
-        potential_business_per_month: potentialBusinessFilter || "",
-        direct_import_from_china: directImportFilter || "",
-        monthly_import_volume: monthlyImportVolumeFilter || "",
-        sector: sectorFilter || "",
-        sales_person_id: salesPersonFilter || "",
-        visited_factory_office: visitedFilter || "",
+        country_id: appliedFilters.country || "",
+        state_id: appliedFilters.state || "",
+        city_id: appliedFilters.city || "",
+        district_id: appliedFilters.district || "",
+        company_type: appliedFilters.companyType || "",
+        company_grade: appliedFilters.grade || "",
+        current_status: appliedFilters.status || "",
+        potential: appliedFilters.potential || "",
+        company_category: appliedFilters.category || "",
+        business_category: appliedFilters.businessCategory || "",
+        monthly_turnover: appliedFilters.monthlyTurnover || "",
+        potential_business_per_month: appliedFilters.potentialBusiness || "",
+        direct_import_from_china: appliedFilters.directImport || "",
+        monthly_import_volume: appliedFilters.monthlyImportVolume || "",
+        sector: appliedFilters.sector || "",
+        sales_person_id: appliedFilters.salesPerson || "",
+        visited_factory_office: appliedFilters.visited || "",
         category_id: "",
-        sub_category_id: subCategoryFilter || "",
-        product_id: productFilter || "",
+        sub_category_id: appliedFilters.subCategory || "",
+        product_id: appliedFilters.product || "",
         created_after: created_after || "",
         created_before: created_before || "",
       };
@@ -2761,26 +2827,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     currentPage,
     pageSize,
     effectiveSearch,
-    countryFilter,
-    stateFilter,
-    cityFilter,
-    districtFilter,
-    companyTypeFilter,
-    gradeFilter,
-    statusFilter,
-    potentialFilter,
-    businessCategoryFilter,
-    monthlyTurnoverFilter,
-    potentialBusinessFilter,
-    directImportFilter,
-    monthlyImportVolumeFilter,
-    sectorFilter,
-    salesPersonFilter,
-    visitedFilter,
-    categoryFilter,
-    subCategoryFilter,
-    productFilter,
-    filterDateRange,
+    appliedFilters,
     reloadCounter,
     resolver,
   ]);
@@ -6396,33 +6443,15 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
                 <button
                   type="button"
+                  className="btn-filter-reset"
                   onClick={handleResetFilters}
-                  style={{
-                    background: "#556987",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "6px",
-                    padding: "8px 24px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
                 >
                   Reset
                 </button>
                 <button
                   type="button"
+                  className="btn-filter-search"
                   onClick={handleSearchFilters}
-                  style={{
-                    background: "#f59e0b",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "6px",
-                    padding: "8px 24px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
                 >
                   Search
                 </button>
@@ -6633,7 +6662,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   {loading ? (
                     <CompanySkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : sortedRows.length === 0 ? (
-                    <TableMessageRow colSpan={COMPANY_TABLE_COLUMNS.length}>No companies found.</TableMessageRow>
+                    <TableMessageRow colSpan={COMPANY_TABLE_COLUMNS.length}>No Data</TableMessageRow>
                   ) : (
                     sortedRows.map((s, index) => (
                       <tr key={s.id}>

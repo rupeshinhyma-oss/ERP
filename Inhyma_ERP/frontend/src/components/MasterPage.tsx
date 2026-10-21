@@ -46,6 +46,7 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { toggleMasterStatus } from "@/lib/masters";
+import { invalidateLookupCache } from "@/lib/lookups";
 import { useAuth, useSrNoJump, useModalHistorySync } from "@/lib/hooks";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { ImportHeader, ImportSummary, MasterRecord, PaginationMeta } from "@/types";
@@ -1090,6 +1091,7 @@ export function MasterPage<T extends MasterRecord>({
           reload();
         }
       }
+      invalidateLookupCache(apiBase);
       setError(null);
       setAlertPopup(null);
       setValidationErrors({});
@@ -1136,6 +1138,7 @@ export function MasterPage<T extends MasterRecord>({
     if (!confirm(`Delete this ${entityName}? This cannot be undone.`)) return;
     try {
       await apiDelete(`${apiBase}/${id}`);
+      invalidateLookupCache(apiBase);
       setRows((prev) => prev.filter((row) => row.id !== id));
       setAllRecords((prev) => prev.filter((row) => row.id !== id));
       setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
@@ -2007,7 +2010,7 @@ export function MasterPage<T extends MasterRecord>({
 
       <main className="page">
         {breadcrumbTrail && <Breadcrumb trail={breadcrumbTrail} />}
-        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: subtitle ? "flex-start" : "center", gap: "12px", marginBottom: "8px" }}>
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: subtitle ? "flex-start" : "center", gap: "12px", marginBottom: "16px" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>{heading}</h1>
             {subtitle && <div className="page-subtitle">{subtitle}</div>}
@@ -2105,16 +2108,7 @@ export function MasterPage<T extends MasterRecord>({
             <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
               <button
                 type="button"
-                style={{
-                  padding: "6px 16px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#64748b",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
+                className="btn-filter-reset"
                 onClick={() => {
                   setSearchInput("");
                   setCurrentPage(1);
@@ -2125,16 +2119,7 @@ export function MasterPage<T extends MasterRecord>({
               </button>
               <button
                 type="button"
-                style={{
-                  padding: "6px 16px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#f59e0b",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
+                className="btn-filter-search"
                 onClick={() => {
                   setCurrentPage(1);
                   reload();
@@ -2264,7 +2249,7 @@ export function MasterPage<T extends MasterRecord>({
                     columns={columns}
                   />
                 ) : displayedRows.length === 0 ? (
-                  <TableMessageRow colSpan={colCount}>No records found.</TableMessageRow>
+                  <TableMessageRow colSpan={colCount}>No Data</TableMessageRow>
                 ) : (
                   displayedRows.map((item, index) => (
                     <tr

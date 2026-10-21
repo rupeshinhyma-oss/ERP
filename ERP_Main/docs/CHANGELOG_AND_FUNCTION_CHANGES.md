@@ -3,6 +3,30 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-19] — Universal Network Status Notifier (Offline/Online Toast & Status Indicator)
+
+### 1. Global Network Status Listener (`NetworkStatusNotifier.tsx`)
+- **Universal Offline/Online Detection:**
+  - Added [`NetworkStatusNotifier.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/components/NetworkStatusNotifier.tsx) to ERP_Main (ERP Dashboard) matching the visual and functional design implemented in Inhyma ERP.
+  - Listens to `window.online` and `window.offline` lifecycle events with initial state from `navigator.onLine`.
+- **Floating Offline Toast:**
+  - Displays a high-z-index floating notification at the bottom-right corner when internet connectivity is lost:
+    - Background: Solid red (`#dc2626`) with box shadow (`0 10px 30px rgba(220, 38, 38, 0.45)`).
+    - Pulsating offline WiFi icon animation (`pulseGlow 2s infinite`).
+    - Message: **"No network connection"** / *"Please check your internet connection."*
+- **Auto-Dismissing Reconnection Banner:**
+  - When connection is restored, transitions smoothly to an emerald green banner (`#059669`):
+    - Message: **"Internet connection restored"** / *"Your system is back online."*
+    - Automatically unmounts and dismisses after 3500ms.
+- **Document Title Synchronization:**
+  - Dynamically appends `— Offline` to the browser tab title during disconnection, restoring the original brand title when back online.
+- **Root Application Mount ([`App.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/App.tsx)):**
+  - Mounted inside `<GlobalSessionProvider>` across all views.
+- **Unit Test Coverage:**
+  - Verified with new unit test suite [`NetworkStatusNotifier.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/ERP_Main/frontend/src/tests/NetworkStatusNotifier.test.tsx) passing 3/3 tests.
+
+---
+
 ## [Release 2026-10-14] — Seed First-Install Protection, Registry Host Safeguard & Federation DNS Resilience
 
 ### 1. Database Seed First-Install Protection (`BOOTSTRAP_FORCE_RESET`)

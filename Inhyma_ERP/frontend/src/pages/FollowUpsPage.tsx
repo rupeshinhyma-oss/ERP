@@ -21,6 +21,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import {
   ClientNameAutocomplete,
@@ -1139,13 +1141,21 @@ export default function FollowUpsPage() {
   // Pagination calculations
   const totalEntries = sortedItems.length;
   const totalPages = Math.ceil(totalEntries / itemsPerPage) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: totalEntries,
+    page_size: itemsPerPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, totalEntries, itemsPerPage]);
+
   const paginatedItems = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return sortedItems.slice(start, start + itemsPerPage);
   }, [sortedItems, currentPage, itemsPerPage]);
 
   const startIndex = totalEntries === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
-  const endIndex = Math.min(currentPage * itemsPerPage, totalEntries);
 
   // Column Sort Handler (3-state)
   const handleSort = (colKey: string) => {
@@ -1343,7 +1353,7 @@ export default function FollowUpsPage() {
           </div>
 
           {/* Action buttons matching screenshot */}
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             {/* Filter Toggle Button */}
             <button
               id="btn-toggle-filter"
@@ -1722,24 +1732,14 @@ export default function FollowUpsPage() {
             </div>
 
             {/* Bottom Action Buttons: Reset & Search */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 id="btn-reset-filters"
                 type="button"
+                className="btn-filter-reset"
                 onClick={() => {
                   setFilters(INITIAL_FILTERS);
                   setAppliedFilters(INITIAL_FILTERS);
-                }}
-                style={{
-                  height: "36px",
-                  padding: "0 20px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: "#f1f5f9",
-                  color: "#475569",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
                 }}
               >
                 Reset
@@ -1747,19 +1747,8 @@ export default function FollowUpsPage() {
               <button
                 id="btn-search-filters"
                 type="button"
+                className="btn-filter-search"
                 onClick={() => setAppliedFilters(filters)}
-                style={{
-                  height: "36px",
-                  padding: "0 22px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#eab308",
-                  color: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
-                }}
               >
                 Search
               </button>
@@ -2196,76 +2185,17 @@ export default function FollowUpsPage() {
             </table>
           </div>
 
-          {/* Table Pagination Footer */}
-          <div
-            style={{
-              padding: "14px 20px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              borderTop: "1px solid #f1f5f9",
-              flexWrap: "wrap",
-              gap: "12px",
-            }}
-          >
-            <div style={{ fontSize: "13px", color: "#64748b" }}>
-              Showing {startIndex} To {endIndex} Of {totalEntries} Entries
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                style={{
-                  height: "32px",
-                  padding: "0 12px",
-                  borderRadius: "4px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage <= 1 ? "#f8fafc" : "#ffffff",
-                  color: currentPage <= 1 ? "#94a3b8" : "#334155",
-                  fontSize: "12.5px",
-                  cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-                }}
-              >
-                Previous
-              </button>
-
-              <span
-                style={{
-                  height: "32px",
-                  padding: "0 12px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "#0061f2",
-                  color: "#ffffff",
-                  borderRadius: "4px",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                }}
-              >
-                {currentPage}
-              </span>
-
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                style={{
-                  height: "32px",
-                  padding: "0 12px",
-                  borderRadius: "4px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage >= totalPages ? "#f8fafc" : "#ffffff",
-                  color: currentPage >= totalPages ? "#94a3b8" : "#334155",
-                  fontSize: "12.5px",
-                  cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
-                }}
-              >
-                Next
-              </button>
-            </div>
+          {/* Pagination Footer matching Companies design */}
+          <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setItemsPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
 

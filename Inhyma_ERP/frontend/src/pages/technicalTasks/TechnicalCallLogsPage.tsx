@@ -25,6 +25,28 @@ const thStyle: React.CSSProperties = {
 };
 const tdStyle: React.CSSProperties = { padding: "10px 12px", fontSize: 13, color: "#1e293b", borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
 
+const TechnicalCallLogsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`tech-call-log-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ ...tdStyle, whiteSpace: "nowrap" }}><div className="skeleton-line" style={{ width: 80 }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "80%" }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={tdStyle}>
+          <div className="skeleton-line" style={{ width: "65%", marginBottom: 4 }} />
+          <div className="skeleton-line" style={{ width: "45%" }} />
+        </td>
+        <td style={tdStyle}><div className="skeleton-badge" style={{ width: 70 }} /></td>
+        <td style={{ ...tdStyle, minWidth: 260 }}><div className="skeleton-line" style={{ width: "85%" }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={tdStyle}><div className="skeleton-badge" style={{ width: 75 }} /></td>
+        <td style={tdStyle}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+      </tr>
+    ))}
+  </>
+);
+
 export function TechnicalCallLogsPage() {
   const [rows, setRows] = useState<TechnicalCallLogReportRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -142,29 +164,29 @@ export function TechnicalCallLogsPage() {
                 </tr>
               </thead>
               <tbody>
-                {loading && rows.length === 0 && (
-                  <tr><td colSpan={10} style={{ ...tdStyle, color: "#64748b" }}>Loading call logs...</td></tr>
-                )}
-                {!loading && rows.length === 0 && !error && (
+                {loading ? (
+                  <TechnicalCallLogsSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
+                ) : rows.length === 0 && !error ? (
                   <tr><td colSpan={10} style={{ ...tdStyle, color: "#64748b", padding: 32 }}>No call logs found for the selected filters.</td></tr>
+                ) : (
+                  rows.map((r) => (
+                    <tr key={r.id}>
+                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{r.call_date}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{r.company_name}</td>
+                      <td style={tdStyle}>{r.city}</td>
+                      <td style={tdStyle}>{r.machine_model}</td>
+                      <td style={tdStyle}>
+                        {r.contact_person_name || "—"}
+                        {r.contact_phone ? <div style={{ color: "#64748b" }}>{r.contact_phone}</div> : null}
+                      </td>
+                      <td style={tdStyle}>{r.call_type}</td>
+                      <td style={{ ...tdStyle, minWidth: 260, whiteSpace: "pre-wrap" }}>{r.remarks}</td>
+                      <td style={tdStyle}>{r.created_by}</td>
+                      <td style={tdStyle}>{r.task_status}</td>
+                      <td style={tdStyle}>{r.task_allotted_to || "—"}</td>
+                    </tr>
+                  ))
                 )}
-                {rows.map((r) => (
-                  <tr key={r.id}>
-                    <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{r.call_date}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{r.company_name}</td>
-                    <td style={tdStyle}>{r.city}</td>
-                    <td style={tdStyle}>{r.machine_model}</td>
-                    <td style={tdStyle}>
-                      {r.contact_person_name || "—"}
-                      {r.contact_phone ? <div style={{ color: "#64748b" }}>{r.contact_phone}</div> : null}
-                    </td>
-                    <td style={tdStyle}>{r.call_type}</td>
-                    <td style={{ ...tdStyle, minWidth: 260, whiteSpace: "pre-wrap" }}>{r.remarks}</td>
-                    <td style={tdStyle}>{r.created_by}</td>
-                    <td style={tdStyle}>{r.task_status}</td>
-                    <td style={tdStyle}>{r.task_allotted_to || "—"}</td>
-                  </tr>
-                ))}
               </tbody>
             </table>
           </div>

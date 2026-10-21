@@ -170,6 +170,60 @@ function formatCurrency(amount: number | null | undefined): string {
   });
 }
 
+const GatepassTableSkeletonRows: React.FC<{ count?: number }> = ({ count = 6 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`gp-skeleton-${index}`} className="table-skeleton-row" style={{ verticalAlign: "middle" }}>
+        <td style={{ padding: "12px 14px" }}>
+          <div className="skeleton-line" style={{ width: "80%", marginBottom: 4 }} />
+          <div className="skeleton-line" style={{ width: "50%" }} />
+        </td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 45, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-line" style={{ width: 50, margin: "0 auto" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 80 }} /></td>
+        <td style={{ padding: "12px 14px", textAlign: "right" }}>
+          <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4, marginLeft: "auto" }} />
+        </td>
+      </tr>
+    ))}
+  </>
+);
+
+const WalletTableSkeletonRows: React.FC<{ count?: number }> = ({ count = 6 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`wallet-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "65%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-badge" style={{ width: 50 }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "45%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "80%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "50%", marginLeft: "auto" }} /></td>
+        <td style={{ padding: "10px 14px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 60, margin: "0 auto" }} /></td>
+      </tr>
+    ))}
+  </>
+);
+
+const WarrantyTableSkeletonRows: React.FC<{ count?: number }> = ({ count = 6 }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <tr key={`warr-skeleton-${index}`} className="table-skeleton-row">
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "75%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "80%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "45%" }} /></td>
+        <td style={{ padding: "10px 14px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "10px 14px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 65, margin: "0 auto" }} /></td>
+      </tr>
+    ))}
+  </>
+);
+
 export function TechnicianOperationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get("tab") || "gatepasses";
@@ -1145,12 +1199,8 @@ export function TechnicianOperationsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && gatepasses.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                        Loading technician gatepasses...
-                      </td>
-                    </tr>
+                  {loading ? (
+                    <GatepassTableSkeletonRows count={8} />
                   ) : gatepasses.length === 0 ? (
                     <tr>
                       <td colSpan={8} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
@@ -1647,7 +1697,9 @@ export function TechnicianOperationsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {walletTransactions.length === 0 ? (
+                    {loading ? (
+                      <WalletTableSkeletonRows count={8} />
+                    ) : walletTransactions.length === 0 ? (
                       <tr>
                         <td colSpan={8} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
                           No wallet transactions found.
@@ -1873,7 +1925,9 @@ export function TechnicianOperationsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {warranties.length === 0 ? (
+                    {loading ? (
+                      <WarrantyTableSkeletonRows count={8} />
+                    ) : warranties.length === 0 ? (
                       <tr>
                         <td colSpan={7} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
                           No machine warranties registered. Click <b>"Register Machine Warranty"</b> to add one.

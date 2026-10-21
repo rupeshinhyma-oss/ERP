@@ -134,3 +134,20 @@ export interface TechnicalMonthlySummary {
   open_now: number;
   closed_now: number;
 }
+
+export interface TechnicalTaskPaymentSummary {
+  total_payment: number;
+  paid: number;
+  due: number;
+  pending_count: number;
+  completed_count: number;
+}
+
+export interface TechnicalTaskPaymentRecordPayload {
+  amount: number;
+  payment_mode: string;
+  payment_date?: string;
+  reference_no?: string;
+  payment_screenshot?: string;
+  remarks?: string;
+}

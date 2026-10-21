@@ -143,6 +143,42 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         _counts_cache[cache_key] = (now, result)
         return dict(result)
 
+    async def get_payment_summary(self, **scope: Any) -> dict[str, Any]:
+        """Aggregate payment summary for Chargeable technical tasks: total_payment, paid, due, counts."""
+        stmt = (
+            select(
+                func.coalesce(func.sum(TechnicalTask.service_charge), 0).label("total_payment"),
+                func.coalesce(func.sum(TechnicalTask.collected_amount), 0).label("paid"),
+                func.count(TechnicalTask.id).filter(
+                    or_(
+                        TechnicalTask.payment_status.is_(None),
+                        TechnicalTask.payment_status.in_(("Pending", "pending", "Partial", "partial")),
+                        func.coalesce(TechnicalTask.collected_amount, 0) < func.coalesce(TechnicalTask.service_charge, 0),
+                    )
+                ).label("pending_count"),
+                func.count(TechnicalTask.id).filter(
+                    or_(
+                        TechnicalTask.payment_status.in_(("Paid", "paid")),
+                        func.coalesce(TechnicalTask.collected_amount, 0) >= func.coalesce(TechnicalTask.service_charge, 0),
+                    )
+                ).label("completed_count"),
+            )
+            .where(TechnicalTask.deleted_at.is_(None))
+            .where(TechnicalTask.service_type == "Chargeable")
+        )
+        stmt = self._apply_scope(stmt, **scope)
+        row = (await self.session.execute(stmt)).one()
+        total_payment = float(row.total_payment or 0)
+        paid = float(row.paid or 0)
+        due = max(0.0, total_payment - paid)
+        return {
+            "total_payment": total_payment,
+            "paid": paid,
+            "due": due,
+            "pending_count": int(row.pending_count or 0),
+            "completed_count": int(row.completed_count or 0),
+        }
+
     # ------------------------------------------------------------------ list
     async def list_tasks(
         self,
@@ -195,11 +231,20 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
             stmt = stmt.where(TechnicalTask.task_created_date <= date_to)
         if payment_collected and payment_collected.strip():
             pc = payment_collected.strip().lower()
-            if pc in ("yes", "paid", "collected", "true"):
-                stmt = stmt.where(TechnicalTask.payment_status.in_(("Paid", "paid")))
+            if pc in ("yes", "paid", "collected", "true", "completed"):
+                stmt = stmt.where(TechnicalTask.service_type == "Chargeable").where(
+                    or_(
+                        TechnicalTask.payment_status.in_(("Paid", "paid")),
+                        func.coalesce(TechnicalTask.collected_amount, 0) >= func.coalesce(TechnicalTask.service_charge, 0),
+                    )
+                )
             elif pc in ("no", "pending", "false"):
                 stmt = stmt.where(TechnicalTask.service_type == "Chargeable").where(
-                    or_(TechnicalTask.payment_status.is_(None), TechnicalTask.payment_status.in_(("Pending", "pending")))
+                    or_(
+                        TechnicalTask.payment_status.is_(None),
+                        TechnicalTask.payment_status.in_(("Pending", "pending", "Partial", "partial")),
+                        func.coalesce(TechnicalTask.collected_amount, 0) < func.coalesce(TechnicalTask.service_charge, 0),
+                    )
                 )
 
         if search and search.strip():

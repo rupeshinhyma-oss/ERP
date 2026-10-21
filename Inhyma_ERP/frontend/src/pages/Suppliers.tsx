@@ -402,6 +402,20 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const [potentialFilter, setPotentialFilter] = useState("");
   const [visitedFilter, setVisitedFilter] = useState("");
 
+  const [appliedFilters, setAppliedFilters] = useState({
+    category: null as string | null,
+    subCategory: null as string | null,
+    product: null as string | null,
+    country: null as string | null,
+    state: null as string | null,
+    city: null as string | null,
+    supplierType: "",
+    grade: "",
+    status: "",
+    potential: "",
+    visited: "",
+  });
+
   const handleResetFilters = () => {
     setCategoryFilter(null);
     setSubCategoryFilter(null);
@@ -415,6 +429,36 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     setPotentialFilter("");
     setVisitedFilter("");
     setCurrentPage(1);
+    setAppliedFilters({
+      category: null,
+      subCategory: null,
+      product: null,
+      country: null,
+      state: null,
+      city: null,
+      supplierType: "",
+      grade: "",
+      status: "",
+      potential: "",
+      visited: "",
+    });
+  };
+
+  const handleSearchFilters = () => {
+    setCurrentPage(1);
+    setAppliedFilters({
+      category: categoryFilter,
+      subCategory: subCategoryFilter,
+      product: productFilter,
+      country: countryFilter,
+      state: stateFilter,
+      city: cityFilter,
+      supplierType: supplierTypeFilter,
+      grade: gradeFilter,
+      status: statusFilter,
+      potential: potentialFilter,
+      visited: visitedFilter,
+    });
   };
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
@@ -1010,17 +1054,17 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         sort_order: "asc",
         search: effectiveSearch,
         is_active: statusTab === "active" ? "true" : "false",
-        country_id: countryFilter || "",
-        state_id: stateFilter || "",
-        city_id: cityFilter || "",
-        supplier_type: supplierTypeFilter,
-        supplier_grade: gradeFilter,
-        current_status: statusFilter,
-        potential: potentialFilter,
-        visited_factory_office: visitedFilter,
-        category_id: categoryFilter || "",
-        sub_category_id: subCategoryFilter || "",
-        product_id: productFilter || "",
+        country_id: appliedFilters.country || "",
+        state_id: appliedFilters.state || "",
+        city_id: appliedFilters.city || "",
+        supplier_type: appliedFilters.supplierType,
+        supplier_grade: appliedFilters.grade,
+        current_status: appliedFilters.status,
+        potential: appliedFilters.potential,
+        visited_factory_office: appliedFilters.visited,
+        category_id: appliedFilters.category || "",
+        sub_category_id: appliedFilters.subCategory || "",
+        product_id: appliedFilters.product || "",
       };
       try {
         const { data, meta } = await apiGet<Supplier[]>("/suppliers" + toQueryString(params));
@@ -1070,17 +1114,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     currentPage,
     pageSize,
     effectiveSearch,
-    countryFilter,
-    stateFilter,
-    cityFilter,
-    supplierTypeFilter,
-    gradeFilter,
-    statusFilter,
-    potentialFilter,
-    visitedFilter,
-    categoryFilter,
-    subCategoryFilter,
-    productFilter,
+    appliedFilters,
     reloadCounter,
     resolver,
   ]);
@@ -3469,14 +3503,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   </svg>
                   Filter Options
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: 600 }}
-                  onClick={handleResetFilters}
-                >
-                  Reset Filters
-                </button>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "14px" }}>
                 <div>
@@ -3646,6 +3672,23 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                     <option value="false">No</option>
                   </select>
                 </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+                <button
+                  type="button"
+                  className="btn-filter-reset"
+                  onClick={handleResetFilters}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  className="btn-filter-search"
+                  onClick={handleSearchFilters}
+                >
+                  Search
+                </button>
               </div>
             </div>
           )}
@@ -3868,7 +3911,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   {loading ? (
                     <SupplierSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : sortedRows.length === 0 ? (
-                    <TableMessageRow colSpan={10}>No suppliers found.</TableMessageRow>
+                    <TableMessageRow colSpan={10}>No Data</TableMessageRow>
                   ) : (
                     sortedRows.map((s) => (
                       <tr key={s.id}>

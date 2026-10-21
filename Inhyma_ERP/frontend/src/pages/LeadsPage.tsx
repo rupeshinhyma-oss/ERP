@@ -19,6 +19,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Pagination } from "@/components/Pagination";
+import type { PaginationMeta } from "@/types";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { TableMessageRow } from "@/components/ui";
@@ -261,6 +263,19 @@ export function LeadsPage() {
   const [filterPriority, setFilterPriority] = useState<string>("");
   const [filterAllottedTo, setFilterAllottedTo] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("");
+  const [appliedFilters, setAppliedFilters] = useState({
+    dateRange: "",
+    createdBy: "",
+    businessType: "",
+    state: "",
+    district: "",
+    city: "",
+    source: "",
+    callType: "",
+    priority: "",
+    allottedTo: "",
+    status: "",
+  });
   const [activeStatusTab, setActiveStatusTab] = useState<"all" | "ongoing" | "won" | "loss">("all");
 
   // Selection for bulk delete
@@ -426,7 +441,7 @@ export function LeadsPage() {
   }, [formData.district, formData.state, districtList, stateMasterList]);
 
   // Fetch Leads List from Backend
-  const loadLeads = useCallback(async () => {
+  const loadLeads = useCallback(async (filtersToUse = appliedFilters) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -434,16 +449,16 @@ export function LeadsPage() {
       params.append("offset", "0");
 
       if (searchQuery.trim()) params.append("search", searchQuery.trim());
-      if (filterCreatedBy.trim()) params.append("created_by", filterCreatedBy.trim());
-      if (filterBusinessType.trim()) params.append("business_type", filterBusinessType.trim());
-      if (filterState.trim()) params.append("state", filterState.trim());
-      if (filterDistrict.trim()) params.append("district", filterDistrict.trim());
-      if (filterCity.trim()) params.append("city", filterCity.trim());
-      if (filterSource.trim()) params.append("source", filterSource.trim());
-      if (filterCallType.trim()) params.append("call_type", filterCallType.trim());
-      if (filterPriority.trim()) params.append("priority", filterPriority.trim());
-      if (filterAllottedTo.trim()) params.append("allotted_to", filterAllottedTo.trim());
-      if (filterStatus.trim()) params.append("lead_status", filterStatus.trim());
+      if (filtersToUse.createdBy.trim()) params.append("created_by", filtersToUse.createdBy.trim());
+      if (filtersToUse.businessType.trim()) params.append("business_type", filtersToUse.businessType.trim());
+      if (filtersToUse.state.trim()) params.append("state", filtersToUse.state.trim());
+      if (filtersToUse.district.trim()) params.append("district", filtersToUse.district.trim());
+      if (filtersToUse.city.trim()) params.append("city", filtersToUse.city.trim());
+      if (filtersToUse.source.trim()) params.append("source", filtersToUse.source.trim());
+      if (filtersToUse.callType.trim()) params.append("call_type", filtersToUse.callType.trim());
+      if (filtersToUse.priority.trim()) params.append("priority", filtersToUse.priority.trim());
+      if (filtersToUse.allottedTo.trim()) params.append("allotted_to", filtersToUse.allottedTo.trim());
+      if (filtersToUse.status.trim()) params.append("lead_status", filtersToUse.status.trim());
 
       const res = await apiGet<{ items: Lead[]; total: number }>(
         `/leads/?${params.toString()}`
@@ -462,16 +477,7 @@ export function LeadsPage() {
     }
   }, [
     searchQuery,
-    filterCreatedBy,
-    filterBusinessType,
-    filterState,
-    filterDistrict,
-    filterCity,
-    filterSource,
-    filterCallType,
-    filterPriority,
-    filterAllottedTo,
-    filterStatus,
+    appliedFilters,
   ]);
 
   useEffect(() => {
@@ -630,79 +636,79 @@ export function LeadsPage() {
       }
 
       // Date Range Filter
-      if (filterDateRange.trim()) {
+      if (appliedFilters.dateRange.trim()) {
         const leadDate = lead.added_on || lead.created_at;
-        if (!isDateInRange(leadDate, filterDateRange)) {
+        if (!isDateInRange(leadDate, appliedFilters.dateRange)) {
           return false;
         }
       }
 
       // Created By Filter
-      if (filterCreatedBy.trim()) {
-        if (!lead.created_by || lead.created_by.toLowerCase() !== filterCreatedBy.toLowerCase()) {
+      if (appliedFilters.createdBy.trim()) {
+        if (!lead.created_by || lead.created_by.toLowerCase() !== appliedFilters.createdBy.toLowerCase()) {
           return false;
         }
       }
 
       // Business Type Filter
-      if (filterBusinessType.trim()) {
-        if (!lead.business_type || lead.business_type.toLowerCase() !== filterBusinessType.toLowerCase()) {
+      if (appliedFilters.businessType.trim()) {
+        if (!lead.business_type || lead.business_type.toLowerCase() !== appliedFilters.businessType.toLowerCase()) {
           return false;
         }
       }
 
       // State Filter
-      if (filterState.trim()) {
-        if (!lead.state || lead.state.toLowerCase() !== filterState.toLowerCase()) {
+      if (appliedFilters.state.trim()) {
+        if (!lead.state || lead.state.toLowerCase() !== appliedFilters.state.toLowerCase()) {
           return false;
         }
       }
 
       // District Filter
-      if (filterDistrict.trim()) {
-        if (!lead.district || lead.district.toLowerCase() !== filterDistrict.toLowerCase()) {
+      if (appliedFilters.district.trim()) {
+        if (!lead.district || lead.district.toLowerCase() !== appliedFilters.district.toLowerCase()) {
           return false;
         }
       }
 
       // City Filter
-      if (filterCity.trim()) {
-        if (!lead.city || lead.city.toLowerCase() !== filterCity.toLowerCase()) {
+      if (appliedFilters.city.trim()) {
+        if (!lead.city || lead.city.toLowerCase() !== appliedFilters.city.toLowerCase()) {
           return false;
         }
       }
 
       // Lead Source Filter
-      if (filterSource.trim()) {
-        if (!lead.source || lead.source.toLowerCase() !== filterSource.toLowerCase()) {
+      if (appliedFilters.source.trim()) {
+        if (!lead.source || lead.source.toLowerCase() !== appliedFilters.source.toLowerCase()) {
           return false;
         }
       }
 
       // Call Type Filter
-      if (filterCallType.trim()) {
-        if (!lead.call_type || lead.call_type.toLowerCase() !== filterCallType.toLowerCase()) {
+      if (appliedFilters.callType.trim()) {
+        if (!lead.call_type || lead.call_type.toLowerCase() !== appliedFilters.callType.toLowerCase()) {
           return false;
         }
       }
 
       // Priority Filter
-      if (filterPriority.trim()) {
-        if (!lead.priority || lead.priority.toLowerCase() !== filterPriority.toLowerCase()) {
+      if (appliedFilters.priority.trim()) {
+        if (!lead.priority || lead.priority.toLowerCase() !== appliedFilters.priority.toLowerCase()) {
           return false;
         }
       }
 
       // Lead Allotted To Filter
-      if (filterAllottedTo.trim()) {
-        if (!lead.allotted_to || lead.allotted_to.toLowerCase() !== filterAllottedTo.toLowerCase()) {
+      if (appliedFilters.allottedTo.trim()) {
+        if (!lead.allotted_to || lead.allotted_to.toLowerCase() !== appliedFilters.allottedTo.toLowerCase()) {
           return false;
         }
       }
 
       // Lead Status Filter
-      if (filterStatus.trim()) {
-        if (!lead.lead_status || lead.lead_status.toLowerCase() !== filterStatus.toLowerCase()) {
+      if (appliedFilters.status.trim()) {
+        if (!lead.lead_status || lead.lead_status.toLowerCase() !== appliedFilters.status.toLowerCase()) {
           return false;
         }
       }
@@ -739,17 +745,7 @@ export function LeadsPage() {
   }, [
     leads,
     activeStatusTab,
-    filterDateRange,
-    filterCreatedBy,
-    filterBusinessType,
-    filterState,
-    filterDistrict,
-    filterCity,
-    filterSource,
-    filterCallType,
-    filterPriority,
-    filterAllottedTo,
-    filterStatus,
+    appliedFilters,
     searchQuery,
   ]);
 
@@ -766,18 +762,46 @@ export function LeadsPage() {
     setFilterPriority("");
     setFilterAllottedTo("");
     setFilterStatus("");
+    const emptyFilters = {
+      dateRange: "",
+      createdBy: "",
+      businessType: "",
+      state: "",
+      district: "",
+      city: "",
+      source: "",
+      callType: "",
+      priority: "",
+      allottedTo: "",
+      status: "",
+    };
+    setAppliedFilters(emptyFilters);
     setActiveStatusTab("all");
     setSearchQuery("");
     setSortField(null);
     setSortDirection("asc");
     setCurrentPage(1);
-    loadLeads();
+    loadLeads(emptyFilters);
   };
 
   // Search Button Handler
   const handleSearchFilters = () => {
+    const nextFilters = {
+      dateRange: filterDateRange,
+      createdBy: filterCreatedBy,
+      businessType: filterBusinessType,
+      state: filterState,
+      district: filterDistrict,
+      city: filterCity,
+      source: filterSource,
+      callType: filterCallType,
+      priority: filterPriority,
+      allottedTo: filterAllottedTo,
+      status: filterStatus,
+    };
+    setAppliedFilters(nextFilters);
     setCurrentPage(1);
-    loadLeads();
+    loadLeads(nextFilters);
   };
 
   // Priority order weight for sorting
@@ -857,13 +881,19 @@ export function LeadsPage() {
   // Paginated Sliced Leads
   const totalRecords = sortedLeads.length;
   const totalPages = Math.ceil(totalRecords / itemsPerPage) || 1;
+  const paginationMeta: PaginationMeta = useMemo(() => ({
+    current_page: currentPage,
+    total_pages: totalPages,
+    total_records: totalRecords,
+    page_size: itemsPerPage,
+    has_previous: currentPage > 1,
+    has_next: currentPage < totalPages,
+  }), [currentPage, totalPages, totalRecords, itemsPerPage]);
+
   const paginatedLeads = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return sortedLeads.slice(start, start + itemsPerPage);
   }, [sortedLeads, currentPage, itemsPerPage]);
-
-  const startIndex = totalRecords === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
-  const endIndex = Math.min(currentPage * itemsPerPage, totalRecords);
 
   // Selection for bulk delete
   const allVisibleSelected = useMemo(() => {
@@ -1361,45 +1391,6 @@ export function LeadsPage() {
                 </svg>
                 Filter Options
               </div>
-              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                <button
-                  type="button"
-                  id="btn-filter-reset"
-                  className="btn btn-small"
-                  style={{
-                    background: "#f1f5f9",
-                    color: "#475569",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    fontWeight: 600,
-                    padding: "6px 14px",
-                    fontSize: "13px",
-                  }}
-                  onClick={handleResetFilters}
-                >
-                  Reset Filters
-                </button>
-                <button
-                  type="button"
-                  id="btn-filter-search"
-                  className="btn btn-small"
-                  style={{
-                    background: "#eab308",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    fontWeight: 600,
-                    padding: "6px 18px",
-                    fontSize: "13px",
-                    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
-                  }}
-                  onClick={handleSearchFilters}
-                >
-                  Search
-                </button>
-              </div>
             </div>
 
             {/* 4 Rows x 3 Columns Filter Grid */}
@@ -1754,6 +1745,25 @@ export function LeadsPage() {
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+              <button
+                type="button"
+                id="btn-filter-reset"
+                className="btn-filter-reset"
+                onClick={handleResetFilters}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                id="btn-filter-search"
+                className="btn-filter-search"
+                onClick={handleSearchFilters}
+              >
+                Search
+              </button>
             </div>
           </div>
         )}
@@ -2219,81 +2229,16 @@ export function LeadsPage() {
           </div>
 
           {/* Table Pagination Footer matching Companies design */}
-          <div
-            style={{
-              padding: "12px 20px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              background: "#ffffff",
-              borderTop: "1px solid #f1f5f9",
-              flexWrap: "wrap",
-              gap: "12px",
-            }}
-          >
-            <div style={{ fontSize: "13px", color: "#64748b" }}>
-              Showing {startIndex} To {endIndex} Of {totalRecords} Entries
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <button
-                type="button"
-                id="btn-prev-page"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                style={{
-                  height: "32px",
-                  padding: "0 14px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage <= 1 ? "#f8fafc" : "#ffffff",
-                  color: currentPage <= 1 ? "#94a3b8" : "#334155",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-                }}
-              >
-                Previous
-              </button>
-
-              <span
-                style={{
-                  height: "32px",
-                  minWidth: "32px",
-                  padding: "0 10px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: "6px",
-                  background: "#0061f2",
-                  color: "#ffffff",
-                  fontSize: "12.5px",
-                  fontWeight: 700,
-                }}
-              >
-                {currentPage}
-              </span>
-
-              <button
-                type="button"
-                id="btn-next-page"
-                disabled={currentPage >= totalPages || totalRecords === 0}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                style={{
-                  height: "32px",
-                  padding: "0 14px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: currentPage >= totalPages || totalRecords === 0 ? "#f8fafc" : "#ffffff",
-                  color: currentPage >= totalPages || totalRecords === 0 ? "#94a3b8" : "#334155",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  cursor: currentPage >= totalPages || totalRecords === 0 ? "not-allowed" : "pointer",
-                }}
-              >
-                Next
-              </button>
-            </div>
+          <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            <Pagination
+              pagination={paginationMeta}
+              pageSize={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setItemsPerPage(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
       </main>

@@ -112,10 +112,20 @@ class TechnicalTaskUpdate(BaseModel):
 
     payment_status: str | None = None
     payment_mode: str | None = None
+    collected_amount: Decimal | None = None
     payment_screenshot: str | None = None
     status: str | None = None
     cancel_remarks: str | None = None
     completed_date: date | None = None
+
+
+class TechnicalTaskPaymentRecordRequest(BaseModel):
+    amount: Decimal = Field(..., gt=0)
+    payment_mode: str = Field(..., max_length=50)
+    payment_date: date | None = None
+    reference_no: str | None = Field(default=None, max_length=100)
+    payment_screenshot: str | None = Field(default=None, max_length=500)
+    remarks: str | None = None
 
 
 class TechnicalTaskStatusUpdate(BaseModel):
