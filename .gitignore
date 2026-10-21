@@ -68,3 +68,8 @@ backups/
 /Attendance_Matrix_*.xlsx
 
 
+
+# Local QA test artifacts
+Inhyma_ERP/artifacts/
+artifacts/
+

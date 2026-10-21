@@ -32,8 +32,10 @@ from app.core.exceptions import (
     NotFoundException,
 )
 from app.database.base import _utcnow
+from app.core.logging import get_logger
 from app.masters.products.models import Product
-from app.companies.models import Company
+from app.companies.models import Company, CompanyContact
+from app.organizations.models import Organization
 from app.users.models import User
 from app.crm.lead_service import CrmLeadService, _is_system_activity
 from app.crm.models import (
@@ -58,7 +60,10 @@ from app.crm.schemas import (
     CrmSalesQuotationListResponse,
     CrmSalesQuotationRead,
     CrmSalesQuotationUpdate,
+    CrmQuotationShareActivityCreate,
 )
+
+logger = get_logger(__name__)
 
 TWOPLACES = Decimal("0.01")
 THREEPLACES = Decimal("0.001")
@@ -70,6 +75,218 @@ def _round2(val: Decimal) -> Decimal:
 
 def _round3(val: Decimal) -> Decimal:
     return val.quantize(THREEPLACES, rounding=ROUND_HALF_UP)
+
+
+def is_internal_lead_label(val: str | None, lead_code: str | None = None) -> bool:
+    """Detect if a string is an internal lead placeholder or administrative label."""
+    if not val:
+        return True
+    s = val.strip().lower()
+    if s in {"", "-", "—", "n/a", "na", "none", "null", "undefined", "unassigned", "system", "customer"}:
+        return True
+    internal_keywords = [
+        "open lead only",
+        "open lead",
+        "unmatched legacy",
+        "unmatched",
+        "legacy lead",
+        "new lead",
+        "test lead",
+        "dummy",
+        "sample lead",
+        "nonexistent entity",
+        "nonexistent",
+        "unknown entity",
+        "unknown",
+        "no company",
+    ]
+    if any(k in s for k in internal_keywords):
+        return True
+    if s.startswith("crm-") or s.startswith("ld-") or s.startswith("lead-"):
+        return True
+    if lead_code and (lead_code.lower() == s or lead_code.lower() in s):
+        return True
+    return False
+
+
+def format_phone_display(phone: str | None) -> str | None:
+    """Format phone numbers cleanly without raw artifacts or invalid placeholders."""
+    if not phone:
+        return None
+    cleaned = phone.strip()
+    digits = "".join(c for c in cleaned if c.isdigit())
+    if len(digits) < 7:
+        return None
+    if set(digits) == {"0"}:
+        return None
+    # 10-digit standard Indian mobile/landline
+    if len(digits) == 10:
+        return f"+91 {digits[:5]} {digits[5:]}"
+    # 12-digit standard with country code 91
+    if len(digits) == 12 and digits.startswith("91"):
+        return f"+91 {digits[2:7]} {digits[7:]}"
+    # Clean leading plus
+    if cleaned.startswith("+"):
+        return cleaned
+    return cleaned
+
+
+def format_address(company: Company | None) -> str | None:
+    """Format company billing address components into a coherent string."""
+    if not company:
+        return None
+    parts: list[str] = []
+    if company.address and company.address.strip():
+        parts.append(company.address.strip())
+    if company.town and company.town.strip():
+        parts.append(company.town.strip())
+    if company.district and company.district.strip():
+        parts.append(company.district.strip())
+    if company.pincode and company.pincode.strip():
+        parts.append(company.pincode.strip())
+    if not parts:
+        return None
+    return ", ".join(parts)
+
+
+def find_associated_company_contact(
+    contacts: list[CompanyContact],
+    lead: CrmLead,
+) -> CompanyContact | None:
+    """Find the contact associated with the lead among linked company contacts."""
+    if not contacts:
+        return None
+
+    lead_email = (lead.email or "").strip().lower()
+    lead_phone_digits = "".join(c for c in (lead.normalized_phone or lead.original_phone or "") if c.isdigit())
+    lead_name = (lead.name or "").strip().lower()
+    lead_is_placeholder = is_internal_lead_label(lead.name, getattr(lead, "lead_code", None))
+
+    # 1. Match by email
+    if lead_email and "@" in lead_email:
+        for c in contacts:
+            if c.email and c.email.strip().lower() == lead_email:
+                return c
+
+    # 2. Match by phone (last 10 digits)
+    if len(lead_phone_digits) >= 10:
+        target_tail = lead_phone_digits[-10:]
+        for c in contacts:
+            for num_field in (c.calling_number, c.whatsapp_number):
+                if num_field:
+                    num_digits = "".join(ch for ch in num_field if ch.isdigit())
+                    if len(num_digits) >= 10 and num_digits.endswith(target_tail):
+                        return c
+
+    # 3. Match by person name if lead name is not an internal placeholder
+    if not lead_is_placeholder and lead_name:
+        for c in contacts:
+            if c.person_name and c.person_name.strip().lower() == lead_name:
+                return c
+
+    # 4. If exactly one contact exists on the company
+    if len(contacts) == 1:
+        return contacts[0]
+
+    # Rule 3: If multiple contacts exist and none matched, do not select an arbitrary contact
+    return None
+
+
+def resolve_customer_details(
+    lead: CrmLead | None,
+    company: Company | None = None,
+    snapshot_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Authoritatively resolve customer and company details for CRM Quotation.
+    Never fabricates customer details; omits unavailable fields.
+    """
+    snap = snapshot_data or {}
+    lead_code = getattr(lead, "lead_code", None) if lead else None
+
+    # 1. Authoritative Company Name
+    comp_name: str | None = None
+    if snap.get("company_name_snapshot") and not is_internal_lead_label(snap.get("company_name_snapshot")):
+        comp_name = str(snap["company_name_snapshot"]).strip()
+    elif company and company.company_name and not is_internal_lead_label(company.company_name):
+        comp_name = company.company_name.strip()
+    elif lead and lead.company_name and not is_internal_lead_label(lead.company_name, lead_code):
+        comp_name = lead.company_name.strip()
+
+    # 2. Authoritative GSTIN
+    cust_gstin: str | None = None
+    if snap.get("customer_gstin_snapshot"):
+        cust_gstin = str(snap["customer_gstin_snapshot"]).strip()
+    elif company and company.tax_id_number:
+        cust_gstin = company.tax_id_number.strip()
+
+    # 3. Billing Address
+    billing_addr: str | None = None
+    if snap.get("billing_address_snapshot"):
+        billing_addr = str(snap["billing_address_snapshot"]).strip()
+    elif company:
+        billing_addr = format_address(company)
+
+    # 4. Associated contact resolution
+    assoc_contact: CompanyContact | None = None
+    if company and hasattr(company, "contacts") and company.contacts and lead:
+        assoc_contact = find_associated_company_contact(company.contacts, lead)
+
+    # 5. Customer Contact Name
+    cust_name: str | None = None
+    if snap.get("customer_name_snapshot") and not is_internal_lead_label(snap.get("customer_name_snapshot"), lead_code):
+        cust_name = str(snap["customer_name_snapshot"]).strip()
+    elif assoc_contact and assoc_contact.person_name and not is_internal_lead_label(assoc_contact.person_name):
+        cust_name = assoc_contact.person_name.strip()
+    elif lead and lead.name and not is_internal_lead_label(lead.name, lead_code):
+        if not (comp_name and lead.name.strip().lower() == comp_name.lower()):
+            cust_name = lead.name.strip()
+    elif company and getattr(company, "contact_full_name", None) and not is_internal_lead_label(company.contact_full_name):
+        cust_name = company.contact_full_name.strip()
+
+    if not cust_name and snap.get("customer_name_snapshot") and not is_internal_lead_label(snap.get("customer_name_snapshot"), lead_code):
+        cust_name = str(snap["customer_name_snapshot"]).strip()
+    if not cust_name and lead and lead.name and not is_internal_lead_label(lead.name, lead_code):
+        cust_name = lead.name.strip()
+
+    # 6. Contact Designation
+    designation: str | None = None
+    if snap.get("customer_designation_snapshot"):
+        designation = str(snap["customer_designation_snapshot"]).strip()
+    elif assoc_contact and assoc_contact.designation:
+        designation = assoc_contact.designation.strip()
+    elif company and getattr(company, "contact_designation", None) and company.contact_designation:
+        designation = company.contact_designation.strip()
+
+    # 7. Contact Phone
+    phone: str | None = None
+    if snap.get("customer_phone_snapshot"):
+        phone = format_phone_display(str(snap["customer_phone_snapshot"]))
+    elif lead and (lead.original_phone or lead.normalized_phone):
+        phone = format_phone_display(lead.original_phone or lead.normalized_phone)
+    elif assoc_contact:
+        phone = format_phone_display(assoc_contact.calling_number or assoc_contact.whatsapp_number)
+    elif company and getattr(company, "contact_calling_number", None):
+        phone = format_phone_display(company.contact_calling_number or company.contact_whatsapp_number)
+
+    # 8. Contact Email
+    email: str | None = None
+    if snap.get("customer_email_snapshot") and "@" in str(snap.get("customer_email_snapshot", "")):
+        email = str(snap["customer_email_snapshot"]).strip()
+    elif lead and lead.email and "@" in lead.email:
+        email = lead.email.strip()
+    elif assoc_contact and assoc_contact.email:
+        email = assoc_contact.email.strip()
+
+    return {
+        "customer_name": cust_name,
+        "customer_designation": designation,
+        "customer_phone": phone,
+        "customer_email": email,
+        "company_name": comp_name,
+        "billing_address": billing_addr,
+        "customer_gstin": cust_gstin,
+    }
 
 
 class CrmQuotationService:
@@ -399,8 +616,8 @@ class CrmQuotationService:
                     "position": pos,
                     "product_name": product.product_name,
                     "product_code": product.product_code,
-                    "description": product.description,
-                    "specification": product.specification if item.include_specifications else None,
+                    "description": item.description if item.description is not None else product.description,
+                    "specification": (item.specification if item.specification is not None else product.specification) if item.include_specifications else None,
                     "uom": item.uom or "Nos",
                     "include_images": item.include_images,
                     "selected_image_url": img_to_include,
@@ -445,6 +662,20 @@ class CrmQuotationService:
                 }
             )
 
+        # Authoritatively resolve customer snapshot details from linked lead/company
+        lead_obj = getattr(q, "lead", None)
+        company_obj = getattr(q, "company", None) or (getattr(lead_obj, "company", None) if lead_obj else None)
+        cust_info = resolve_customer_details(
+            lead=lead_obj,
+            company=company_obj,
+            snapshot_data={
+                "customer_name_snapshot": q.customer_name_snapshot,
+                "customer_phone_snapshot": q.customer_phone_snapshot,
+                "customer_email_snapshot": q.customer_email_snapshot,
+                "company_name_snapshot": q.company_name_snapshot,
+            },
+        )
+
         header_dict = {
             "quotation_number": q.quotation_number,
             "version": q.version,
@@ -452,10 +683,13 @@ class CrmQuotationService:
             "quotation_date": q.quotation_date.isoformat() if q.quotation_date else None,
             "valid_until": q.valid_until.isoformat() if q.valid_until else None,
             "currency": q.currency,
-            "customer_name_snapshot": q.customer_name_snapshot,
-            "customer_phone_snapshot": q.customer_phone_snapshot,
-            "customer_email_snapshot": q.customer_email_snapshot,
-            "company_name_snapshot": q.company_name_snapshot,
+            "customer_name_snapshot": cust_info["customer_name"] or q.customer_name_snapshot or "—",
+            "customer_designation_snapshot": cust_info["customer_designation"],
+            "customer_phone_snapshot": cust_info["customer_phone"] or q.customer_phone_snapshot,
+            "customer_email_snapshot": cust_info["customer_email"] or q.customer_email_snapshot,
+            "company_name_snapshot": cust_info["company_name"] or q.company_name_snapshot,
+            "billing_address_snapshot": cust_info["billing_address"],
+            "customer_gstin_snapshot": cust_info["customer_gstin"],
             "subtotal": float(q.subtotal),
             "discount_total": float(q.discount_total),
             "tax_total": float(q.tax_total),
@@ -464,6 +698,7 @@ class CrmQuotationService:
             "delivery_terms": q.delivery_terms,
             "notes": q.notes,
             "terms_and_conditions": q.terms_and_conditions,
+            "created_by_name": q.created_by_name,
         }
         res = dict(header_dict)
         res["header"] = header_dict
@@ -512,25 +747,43 @@ class CrmQuotationService:
         quotation_number = await self._generate_quotation_number()
         actor_name = getattr(actor, "display_name", None) or getattr(actor, "username", "CRM User")
 
-        company_name_snap = lead.company_name
-        if not company_name_snap and lead.company_id:
-            comp = await self.session.get(Company, lead.company_id)
-            if comp:
-                company_name_snap = comp.company_name
+        company_obj = None
+        if lead.company_id:
+            c_stmt = (
+                select(Company)
+                .options(selectinload(Company.contacts))
+                .where(Company.id == lead.company_id)
+            )
+            company_obj = (await self.session.execute(c_stmt)).scalar_one_or_none()
+        elif lead.company_name and not is_internal_lead_label(lead.company_name):
+            c_stmt = (
+                select(Company)
+                .options(selectinload(Company.contacts))
+                .where(
+                    func.lower(Company.company_name) == lead.company_name.strip().lower(),
+                    Company.deleted_at.is_(None),
+                )
+            )
+            company_obj = (await self.session.execute(c_stmt)).scalars().first()
+            if company_obj and not lead.company_id:
+                lead.company_id = company_obj.id
+
+        cust_info = resolve_customer_details(lead, company_obj)
+        assigned_company_id = company_obj.id if company_obj else lead.company_id
 
         quotation = CrmSalesQuotation(
             quotation_number=quotation_number,
             lead_id=lead_id,
-            company_id=lead.company_id,
+            company_id=assigned_company_id,
             version=1,
             status="draft",
             quotation_date=_utcnow(),
             valid_until=payload.valid_until,
             currency=payload.currency or "INR",
-            customer_name_snapshot=lead.name,
-            customer_phone_snapshot=lead.original_phone,
-            customer_email_snapshot=lead.email,
-            company_name_snapshot=company_name_snap,
+            customer_name_snapshot=cust_info["customer_name"] or "—",
+            customer_phone_snapshot=cust_info["customer_phone"],
+            customer_email_snapshot=cust_info["customer_email"],
+            company_name_snapshot=cust_info["company_name"],
             subtotal=subtotal,
             discount_total=discount_total,
             tax_total=tax_total,
@@ -610,7 +863,8 @@ class CrmQuotationService:
         stmt = (
             select(CrmSalesQuotation)
             .options(
-                selectinload(CrmSalesQuotation.lead),
+                selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
+                selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.items),
                 selectinload(CrmSalesQuotation.revisions),
             )
@@ -645,7 +899,8 @@ class CrmQuotationService:
         stmt = (
             select(CrmSalesQuotation)
             .options(
-                selectinload(CrmSalesQuotation.lead),
+                selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
+                selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.items),
                 selectinload(CrmSalesQuotation.revisions),
             )
@@ -839,6 +1094,29 @@ class CrmQuotationService:
             for rv in (q.revisions or [])
         ]
 
+        # Resolve customer snapshot details
+        latest_rev_snapshot = {}
+        if q.revisions:
+            latest_rev = max(q.revisions, key=lambda r: r.version or 0)
+            if latest_rev and isinstance(latest_rev.snapshot_data, dict):
+                latest_rev_snapshot = latest_rev.snapshot_data
+
+        lead_obj = getattr(q, "lead", None)
+        company_obj = getattr(q, "company", None) or (getattr(lead_obj, "company", None) if lead_obj else None)
+        cust_info = resolve_customer_details(
+            lead=lead_obj,
+            company=company_obj,
+            snapshot_data={
+                "customer_name_snapshot": q.customer_name_snapshot,
+                "customer_designation_snapshot": latest_rev_snapshot.get("customer_designation_snapshot"),
+                "customer_phone_snapshot": q.customer_phone_snapshot,
+                "customer_email_snapshot": q.customer_email_snapshot,
+                "company_name_snapshot": q.company_name_snapshot,
+                "billing_address_snapshot": latest_rev_snapshot.get("billing_address_snapshot"),
+                "customer_gstin_snapshot": latest_rev_snapshot.get("customer_gstin_snapshot"),
+            },
+        )
+
         return CrmSalesQuotationRead(
             id=q.id,
             quotation_number=q.quotation_number,
@@ -849,10 +1127,13 @@ class CrmQuotationService:
             quotation_date=q.quotation_date,
             valid_until=q.valid_until,
             currency=q.currency,
-            customer_name_snapshot=q.customer_name_snapshot,
-            customer_phone_snapshot=q.customer_phone_snapshot,
-            customer_email_snapshot=q.customer_email_snapshot,
-            company_name_snapshot=q.company_name_snapshot,
+            customer_name_snapshot=cust_info["customer_name"] or q.customer_name_snapshot or "—",
+            customer_designation_snapshot=cust_info.get("customer_designation"),
+            customer_phone_snapshot=cust_info["customer_phone"] or q.customer_phone_snapshot,
+            customer_email_snapshot=cust_info["customer_email"] or q.customer_email_snapshot,
+            company_name_snapshot=cust_info["company_name"] or q.company_name_snapshot,
+            billing_address_snapshot=cust_info.get("billing_address"),
+            customer_gstin_snapshot=cust_info.get("customer_gstin"),
             subtotal=float(q.subtotal),
             discount_total=float(q.discount_total),
             tax_total=float(q.tax_total),
@@ -924,7 +1205,8 @@ class CrmQuotationService:
         stmt = (
             select(CrmSalesQuotation)
             .options(
-                selectinload(CrmSalesQuotation.lead),
+                selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
+                selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.items),
                 selectinload(CrmSalesQuotation.revisions),
             )
@@ -953,46 +1235,160 @@ class CrmQuotationService:
         else:
             raise NotFoundException(f"Revision version {target_version} does not exist (current version is v{q.version}).")
 
-        # Deduplicated CRM activity history logging:
-        # Check if an activity for this quotation version PDF generation was already logged recently
+        # Fetch organization profile from ERP Settings as the single source of truth for company branding
+        org_stmt = select(Organization).limit(1)
+        org = (await self.session.execute(org_stmt)).scalar_one_or_none()
+        company_branding = {
+            "company_name": (org.company_name if org and org.company_name else "Inhyma Solutions LLP").strip(),
+            "legal_name": org.legal_name.strip() if org and org.legal_name else None,
+            "logo_data": org.logo_data if org and org.logo_data else None,
+            "logo_url": org.logo_url if org and org.logo_url else None,
+            "gst_number": org.gst_number.strip() if org and org.gst_number else None,
+            "pan_number": org.pan_number.strip() if org and org.pan_number else None,
+            "email": org.email.strip() if org and org.email else None,
+            "phone": org.phone.strip() if org and org.phone else None,
+            "website": org.website.strip() if org and org.website else None,
+            "address": org.address.strip() if org and org.address else None,
+            "city": org.city.strip() if org and org.city else None,
+            "state": org.state.strip() if org and org.state else None,
+            "country": org.country.strip() if org and org.country else None,
+            "postal_code": org.postal_code.strip() if org and org.postal_code else None,
+        }
+
+        # Deduplicated CRM activity history logging (safeguarded so logging errors never abort PDF generation)
         now = _utcnow()
-        recent_activity_stmt = (
+        try:
+            recent_activity_stmt = (
+                select(CrmActivity)
+                .where(
+                    CrmActivity.lead_id == q.lead_id,
+                    CrmActivity.activity_type == "quotation_pdf_generated",
+                    CrmActivity.subject == f"Quotation PDF generated: {q.quotation_number} (v{target_version})",
+                )
+                .order_by(desc(CrmActivity.created_at))
+            )
+            recent_activity = (await self.session.execute(recent_activity_stmt)).scalars().first()
+
+            should_log = False
+            if not recent_activity:
+                should_log = True
+            else:
+                rec_created = recent_activity.created_at
+                if rec_created.tzinfo is None and now.tzinfo is not None:
+                    rec_created = rec_created.replace(tzinfo=timezone.utc)
+                elif rec_created.tzinfo is not None and now.tzinfo is None:
+                    now = now.replace(tzinfo=timezone.utc)
+                elapsed = (now - rec_created).total_seconds()
+                if elapsed > 900:  # 15 minute deduplication window
+                    should_log = True
+
+            if should_log:
+                activity = CrmActivity(
+                    lead_id=q.lead_id,
+                    activity_type="quotation_pdf_generated",
+                    subject=f"Quotation PDF generated: {q.quotation_number} (v{target_version})",
+                    description=f"Sales quotation {q.quotation_number} v{target_version} PDF generated by {getattr(actor, 'display_name', None) or getattr(actor, 'username', 'CRM User')}",
+                    performed_by=actor.id if actor and getattr(actor, "id", None) else None,
+                    activity_at=now,
+                    created_at=now,
+                )
+                self.session.add(activity)
+                await self.session.commit()
+        except Exception as log_err:
+            logger.warning("Could not log quotation PDF generation activity: %s", log_err)
+            await self.session.rollback()
+
+        pdf_bytes = generate_crm_quotation_pdf_bytes(snapshot_data, company_branding=company_branding)
+        filename = f"{q.quotation_number}_v{target_version}.pdf"
+        return pdf_bytes, filename
+
+    async def record_share_activity(
+        self,
+        quotation_id: uuid.UUID,
+        payload: CrmQuotationShareActivityCreate,
+        *,
+        actor: CurrentUser,
+    ) -> dict[str, Any]:
+        """
+        Record an Email or WhatsApp share attempt/opened event against the lead & quotation.
+        Enforces lead scope, deduplicates rapid repeated clicks, and prevents claiming sent/delivered.
+        """
+        stmt = (
+            select(CrmSalesQuotation)
+            .options(
+                selectinload(CrmSalesQuotation.lead),
+            )
+            .where(
+                CrmSalesQuotation.id == quotation_id,
+                CrmSalesQuotation.deleted_at.is_(None),
+            )
+        )
+        q = (await self.session.execute(stmt)).scalar_one_or_none()
+        if not q:
+            raise NotFoundException(f"Quotation with id {quotation_id} not found.")
+
+        # RBAC check: Salesperson (assigned only), Manager (department scope), Admin (full access)
+        await self.lead_service._check_lead_scope(q.lead, actor, action="view")
+
+        target_version = payload.version or q.version
+        channel_title = "Email" if payload.channel == "email" else "WhatsApp"
+
+        now = _utcnow()
+        # Deduplicate identical share activity recorded within 60 seconds
+        recent_stmt = (
             select(CrmActivity)
             .where(
                 CrmActivity.lead_id == q.lead_id,
-                CrmActivity.activity_type == "quotation_pdf_generated",
-                CrmActivity.subject == f"Quotation PDF generated: {q.quotation_number} (v{target_version})",
+                CrmActivity.activity_type == payload.channel,
+                CrmActivity.outcome == payload.outcome,
+                CrmActivity.subject == f"{channel_title} share {payload.outcome}: {q.quotation_number} (v{target_version})",
             )
             .order_by(desc(CrmActivity.created_at))
         )
-        recent_activity = (await self.session.execute(recent_activity_stmt)).scalars().first()
-
-        should_log = False
-        if not recent_activity:
-            should_log = True
-        else:
-            rec_created = recent_activity.created_at
+        recent = (await self.session.execute(recent_stmt)).scalars().first()
+        if recent:
+            rec_created = recent.created_at
             if rec_created.tzinfo is None and now.tzinfo is not None:
                 rec_created = rec_created.replace(tzinfo=timezone.utc)
             elif rec_created.tzinfo is not None and now.tzinfo is None:
                 now = now.replace(tzinfo=timezone.utc)
             elapsed = (now - rec_created).total_seconds()
-            if elapsed > 900:  # 15 minute deduplication window
-                should_log = True
+            if elapsed < 60:
+                return {
+                    "success": True,
+                    "deduplicated": True,
+                    "activity_id": str(recent.id),
+                    "channel": payload.channel,
+                    "outcome": payload.outcome,
+                }
 
-        if should_log:
-            activity = CrmActivity(
-                lead_id=q.lead_id,
-                activity_type="quotation_pdf_generated",
-                subject=f"Quotation PDF generated: {q.quotation_number} (v{target_version})",
-                description=f"Sales quotation {q.quotation_number} v{target_version} PDF generated by {getattr(actor, 'display_name', None) or getattr(actor, 'username', 'CRM User')}",
-                performed_by=actor.id,
-                activity_at=now,
-                created_at=now,
-            )
-            self.session.add(activity)
-            await self.session.commit()
+        actor_name = getattr(actor, "display_name", None) or getattr(actor, "username", "CRM User")
+        desc_parts = [
+            f"Quotation {q.quotation_number} v{target_version} {payload.channel} share {payload.outcome} by {actor_name}."
+        ]
+        if payload.recipient:
+            desc_parts.append(f"Recipient: {payload.recipient.strip()}")
+        if payload.details:
+            desc_parts.append(f"Details: {payload.details.strip()}")
 
-        pdf_bytes = generate_crm_quotation_pdf_bytes(snapshot_data)
-        filename = f"{q.quotation_number}_v{target_version}.pdf"
-        return pdf_bytes, filename
+        activity = CrmActivity(
+            lead_id=q.lead_id,
+            activity_type=payload.channel,
+            subject=f"{channel_title} share {payload.outcome}: {q.quotation_number} (v{target_version})",
+            description=" | ".join(desc_parts),
+            outcome=payload.outcome,
+            performed_by=actor.id,
+            activity_at=now,
+            created_at=now,
+        )
+        self.session.add(activity)
+        q.lead.updated_at = now
+        await self.session.commit()
+
+        return {
+            "success": True,
+            "deduplicated": False,
+            "activity_id": str(activity.id),
+            "channel": payload.channel,
+            "outcome": payload.outcome,
+        }

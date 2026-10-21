@@ -1023,6 +1023,8 @@ class CrmQuotationItemIn(BaseModel):
     unit_price: Decimal = Field(default=Decimal("0.00"), ge=0)
     unit_discount: Decimal = Field(default=Decimal("0.00"), ge=0)
     tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
+    description: str | None = None
+    specification: str | None = None
     include_images: bool = False
     selected_image_url: str | None = None
     include_specifications: bool = True
@@ -1144,9 +1146,12 @@ class CrmSalesQuotationRead(BaseModel):
     valid_until: datetime | None = None
     currency: str
     customer_name_snapshot: str
+    customer_designation_snapshot: str | None = None
     customer_phone_snapshot: str | None = None
     customer_email_snapshot: str | None = None
     company_name_snapshot: str | None = None
+    billing_address_snapshot: str | None = None
+    customer_gstin_snapshot: str | None = None
     subtotal: float
     discount_total: float
     tax_total: float
@@ -1170,6 +1175,31 @@ class CrmSalesQuotationListResponse(BaseModel):
 
     items: list[CrmSalesQuotationRead]
     total: int
+
+
+class CrmQuotationShareActivityCreate(BaseModel):
+    """Payload to record email or WhatsApp quotation share activity."""
+
+    channel: str = Field(..., description="Sharing channel: 'email' or 'whatsapp'")
+    outcome: str = Field(..., description="Outcome: 'opened', 'attempted', or 'failed'")
+    recipient: str | None = Field(None, max_length=255, description="Recipient email address or phone number")
+    version: int | None = Field(None, description="Quotation version number being shared")
+    details: str | None = Field(None, max_length=500, description="Optional detail note")
+
+    @field_validator("channel")
+    def _validate_channel(cls, v: str) -> str:
+        s = v.strip().lower()
+        if s not in {"email", "whatsapp"}:
+            raise ValueError("channel must be 'email' or 'whatsapp'")
+        return s
+
+    @field_validator("outcome")
+    def _validate_outcome(cls, v: str) -> str:
+        s = v.strip().lower()
+        if s not in {"opened", "attempted", "failed"}:
+            raise ValueError("outcome must be 'opened', 'attempted', or 'failed'")
+        return s
+
 
 
 

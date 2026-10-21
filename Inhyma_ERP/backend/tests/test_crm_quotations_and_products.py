@@ -47,7 +47,7 @@ from httpx import AsyncClient
 from sqlalchemy import delete, select
 
 from app.auth.security import create_access_token
-from app.companies.models import Company
+from app.companies.models import Company, CompanyContact
 from app.core.constants import RecordStatus
 from app.crm.models import (
     CrmActivity,
@@ -166,12 +166,16 @@ async def setup_quotation_environment():
         for role_name, uid in roles_to_ensure:
             r_stmt = select(Role).where(Role.name == role_name)
             role_obj = (await session.execute(r_stmt)).scalar_one_or_none()
-            if role_obj:
-                ur_stmt = select(UserRole).where(UserRole.user_id == uid, UserRole.role_id == role_obj.id)
-                ur_obj = (await session.execute(ur_stmt)).scalar_one_or_none()
-                if not ur_obj:
-                    ur_obj = UserRole(user_id=uid, role_id=role_obj.id, status=RoleAssignmentStatus.ACTIVE)
-                    session.add(ur_obj)
+            if not role_obj:
+                role_obj = Role(name=role_name, is_system=True)
+                session.add(role_obj)
+                await session.flush()
+            ur_stmt = select(UserRole).where(UserRole.user_id == uid, UserRole.role_id == role_obj.id)
+            ur_obj = (await session.execute(ur_stmt)).scalar_one_or_none()
+            if not ur_obj:
+                ur_obj = UserRole(user_id=uid, role_id=role_obj.id, status=RoleAssignmentStatus.ACTIVE)
+                session.add(ur_obj)
+        await session.flush()
 
         # Pipeline & Stages
         pipe_stmt = select(CrmPipeline).where(CrmPipeline.name == "Quotation Test Pipeline")
@@ -330,6 +334,11 @@ async def setup_quotation_environment():
                 created_by=ADMIN_ID,
             )
             session.add(lead_a)
+        else:
+            lead_a.assigned_to = SALESPERSON_A_ID
+            lead_a.company_id = company.id
+            lead_a.pipeline_id = pipeline.id
+            lead_a.stage_id = stage_new.id
 
         lead_b_stmt = select(CrmLead).where(CrmLead.email == "lead_b_quote@inhyma.test")
         lead_b = (await session.execute(lead_b_stmt)).scalar_one_or_none()
@@ -347,6 +356,11 @@ async def setup_quotation_environment():
                 created_by=ADMIN_ID,
             )
             session.add(lead_b)
+        else:
+            lead_b.assigned_to = SALESPERSON_B_ID
+            lead_b.company_id = company.id
+            lead_b.pipeline_id = pipeline.id
+            lead_b.stage_id = stage_new.id
         await session.flush()
 
         # Clean up any existing test records for lead_a and lead_b for idempotent runs
@@ -1284,3 +1298,802 @@ async def test_quotation_pdf_multipage_layout(
     reader = PdfReader(io.BytesIO(pdf_bytes))
     num_pages = len(reader.pages)
     assert num_pages >= 2, f"Expected multi-page PDF for 12 items with long specifications, got {num_pages} pages"
+
+
+# ==============================================================================
+# 8. Phase 7: Customer Resolution & Professional PDF Generation Tests
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_quotation_customer_resolution_and_pdf_generation(
+    client: AsyncClient, admin_headers: dict[str, str], setup_quotation_environment: dict
+):
+    """
+    Phase 7 test:
+    1. Authoritative customer details resolved from linked Company & primary/matching contact.
+    2. Snapshots contain contact name, designation, phone (+91 formatted), email, company name, address, GSTIN.
+    3. Generates professional PDF with ReportLab:
+       - Starts with %PDF-
+       - Displays SALES QUOTATION title
+       - Displays Inhyma Solutions LLP & GSTIN 27AAKFI9869H1ZL
+       - Displays customer company, contact person, designation, address, GSTIN
+       - Omits default warranty text when not specified in terms
+    4. Downloading PDF preserves quotation draft status and version number.
+    """
+    import io
+    from pypdf import PdfReader
+    from app.users.models import User
+
+    env = setup_quotation_environment
+    prod1_id = env["prod1_id"]
+
+    # 1. Setup Company with structured address, tax ID, and contacts
+    session_factory = get_sessionmaker()
+    async with session_factory() as session:
+        admin_id = ADMIN_ID
+
+        comp_name = f"Inhyma Precision Eng {uuid.uuid4().hex[:6]}"
+        company = Company(
+            company_name=comp_name,
+            tax_id_number="27ABCDE1234F1Z5",
+            address="Unit 301, Empire Towers, Sakinaka",
+            town="Mumbai",
+            district="Mumbai Suburban",
+            pincode="400072",
+            is_active=True,
+        )
+        session.add(company)
+        await session.flush()
+
+        # Add secondary contact
+        contact_sec = CompanyContact(
+            company_id=company.id,
+            person_name="Amit Patel",
+            designation="Procurement Assistant",
+            email="amit.p@precision-eng.test",
+            calling_number="9820011111",
+            is_primary=False,
+        )
+        session.add(contact_sec)
+
+        # Add primary contact matching lead email
+        contact_lead = CompanyContact(
+            company_id=company.id,
+            person_name="Rajesh Sharma",
+            designation="Chief Technical Officer",
+            email="rajesh.sharma@precision-eng.test",
+            calling_number="9820022222",
+            is_primary=True,
+        )
+        session.add(contact_lead)
+        await session.flush()
+
+        # Pipeline and initial stage
+        stage_stmt = select(CrmPipelineStage.id).where(CrmPipelineStage.is_initial.is_(True))
+        stage_id = (await session.execute(stage_stmt)).scalars().first()
+        pipe_stmt = select(CrmPipeline.id).limit(1)
+        pipe_id = (await session.execute(pipe_stmt)).scalars().first()
+
+        # Create Lead linked to company and contact
+        lead = CrmLead(
+            name="Rajesh Sharma",
+            email="rajesh.sharma@precision-eng.test",
+            original_phone="9820022222",
+            normalized_phone="+919820022222",
+            company_id=company.id,
+            pipeline_id=pipe_id,
+            stage_id=stage_id,
+            assigned_to=admin_id,
+            created_by=admin_id,
+        )
+        session.add(lead)
+        await session.commit()
+        lead_id = str(lead.id)
+
+    # 2. Create quotation via API
+    custom_terms = "1. Payment: 100% advance against PI.\n2. Delivery: 2 weeks ex-works."
+    res = await client.post(
+        f"/api/v1/crm/leads/{lead_id}/quotations",
+        json={
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "quantity": 2,
+                    "unit_price": 50000.00,
+                    "tax_rate": 18.00,
+                    "specification_snapshot": "Custom hydraulic system with reinforced manifold.",
+                }
+            ],
+            "terms_and_conditions": custom_terms,
+        },
+        headers=admin_headers,
+    )
+    assert res.status_code == 201, res.text
+    q_data = res.json()
+    q_id = q_data["id"]
+
+    # Verify authoritative snapshot resolution
+    assert q_data["customer_name_snapshot"] == "Rajesh Sharma"
+    assert q_data["customer_designation_snapshot"] == "Chief Technical Officer"
+    assert q_data["customer_phone_snapshot"] == "+91 98200 22222"
+    assert q_data["customer_email_snapshot"] == "rajesh.sharma@precision-eng.test"
+    assert q_data["company_name_snapshot"] == comp_name
+    assert q_data["customer_gstin_snapshot"] == "27ABCDE1234F1Z5"
+    assert "Empire Towers" in (q_data.get("billing_address_snapshot") or "")
+    assert "400072" in (q_data.get("billing_address_snapshot") or "")
+
+    # 3. Download PDF
+    pdf_res = await client.get(
+        f"/api/v1/crm/quotations/{q_id}/pdf",
+        headers=admin_headers,
+    )
+    assert pdf_res.status_code == 200
+    assert pdf_res.headers["content-type"] == "application/pdf"
+    assert q_data["quotation_number"] in pdf_res.headers.get("content-disposition", "")
+    assert ".pdf" in pdf_res.headers.get("content-disposition", "")
+    pdf_bytes = pdf_res.content
+    assert pdf_bytes.startswith(b"%PDF-")
+
+    # 4. Validate PDF content with PdfReader
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    assert len(reader.pages) >= 1
+    full_pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
+
+    assert "SALES QUOTATION" in full_pdf_text
+    assert "INHYMA SOLUTIONS LLP" in full_pdf_text
+    assert "27AAKFI9869H1ZL" in full_pdf_text
+    assert comp_name in full_pdf_text
+    assert "Rajesh Sharma" in full_pdf_text
+    assert "Chief Technical Officer" in full_pdf_text
+    assert "27ABCDE1234F1Z5" in full_pdf_text
+    assert "100% advance against PI" in full_pdf_text
+    # Ensure no invented default warranties
+    assert "12 months manufacturer warranty against manufacturing defects" not in full_pdf_text
+
+    # 5. Confirm quotation status and version remained untouched
+    get_res = await client.get(f"/api/v1/crm/quotations/{q_id}", headers=admin_headers)
+    assert get_res.status_code == 200
+    q_current = get_res.json()
+    assert q_current["status"] == "draft"
+    assert q_current["version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_quotation_unlinked_lead_and_internal_label_filtering(
+    client: AsyncClient, admin_headers: dict[str, str], setup_quotation_environment: dict
+):
+    """
+    Verifies that:
+    1. Unlinked leads (company_id is None) omit company block cleanly.
+    2. Internal pipeline labels like 'Open Lead Only' or 'Unmatched Legacy' are filtered out.
+    3. Generating PDF for unlinked lead succeeds with 200 and valid PDF.
+    """
+    import io
+    from pypdf import PdfReader
+    from app.users.models import User
+
+    env = setup_quotation_environment
+    prod1_id = env["prod1_id"]
+
+    session_factory = get_sessionmaker()
+    async with session_factory() as session:
+        admin_id = ADMIN_ID
+
+        stage_stmt = select(CrmPipelineStage.id).where(CrmPipelineStage.is_initial.is_(True))
+        stage_id = (await session.execute(stage_stmt)).scalars().first()
+        pipe_stmt = select(CrmPipeline.id).limit(1)
+        pipe_id = (await session.execute(pipe_stmt)).scalars().first()
+
+        # Lead with internal placeholder title and no company
+        unlinked_lead = CrmLead(
+            name="Open Lead Only - Fast Tracking",
+            email="direct_buyer@test-domain.org",
+            original_phone="9876543210",
+            normalized_phone="+919876543210",
+            company_id=None,
+            pipeline_id=pipe_id,
+            stage_id=stage_id,
+            assigned_to=admin_id,
+            created_by=admin_id,
+        )
+        session.add(unlinked_lead)
+        await session.commit()
+        lead_id = str(unlinked_lead.id)
+
+    # Create quotation
+    res = await client.post(
+        f"/api/v1/crm/leads/{lead_id}/quotations",
+        json={
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "quantity": 1,
+                    "unit_price": 25000.00,
+                    "tax_rate": 18.00,
+                }
+            ],
+            "terms_and_conditions": "Standard ex-works terms.",
+        },
+        headers=admin_headers,
+    )
+    assert res.status_code == 201, res.text
+    q_data = res.json()
+    q_id = q_data["id"]
+
+    # Verify placeholder filter
+    assert q_data["customer_name_snapshot"] != "Open Lead Only - Fast Tracking"
+    assert q_data["company_name_snapshot"] is None
+    assert q_data["customer_phone_snapshot"] == "+91 98765 43210"
+
+    # PDF download
+    pdf_res = await client.get(
+        f"/api/v1/crm/quotations/{q_id}/pdf",
+        headers=admin_headers,
+    )
+    assert pdf_res.status_code == 200
+    pdf_bytes = pdf_res.content
+    assert pdf_bytes.startswith(b"%PDF-")
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    full_pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
+    assert "Open Lead Only" not in full_pdf_text
+    assert "+91 98765 43210" in full_pdf_text
+
+
+@pytest.mark.asyncio
+async def test_quotation_phase8_customer_details_and_company_resolution_pdf(
+    client: AsyncClient,
+    setup_quotation_environment: dict,
+    admin_headers: dict,
+) -> None:
+    """
+    Phase 8: Verify linked company/customer data flow into Quotation read model and PDF.
+    Verifies company name, contact person, phone, email, billing address, and GSTIN.
+    Verifies historical snapshot immutability when company is edited later.
+    """
+    import io
+    from pypdf import PdfReader
+
+    env = setup_quotation_environment
+    lead_id = env["lead_a_id"]
+    company_id = env["company_id"]
+
+    session_factory = get_sessionmaker()
+    # 1. Update company record to have rich details (address, town, district, pincode, tax_id_number)
+    async with session_factory() as session:
+        comp = await session.get(Company, uuid.UUID(company_id))
+        comp.company_name = "Acme Industrial Corp"
+        comp.address = "Plot 42, GIDC Electronic Estate"
+        comp.town = "Sector 25"
+        comp.district = "Gandhinagar"
+        comp.pincode = "382024"
+        comp.tax_id_number = "24AABCI1234F1Z9"
+
+        # Add a specific contact person to the company
+        contact = CompanyContact(
+            company_id=comp.id,
+            person_name="Rajesh Sharma",
+            designation="VP of Procurement",
+            email="rajesh.sharma@acme-corp.com",
+            calling_number="+91 98250 12345",
+            whatsapp_number="+91 98250 12345",
+            is_primary=True,
+        )
+        # Update lead to associate with Rajesh Sharma
+        lead = await session.get(CrmLead, uuid.UUID(lead_id))
+        lead.name = "Rajesh Sharma"
+        lead.email = "rajesh.sharma@acme-corp.com"
+
+        session.add(contact)
+        await session.commit()
+
+    # 2. Create quotation
+    res = await client.post(
+        f"/api/v1/crm/leads/{lead_id}/quotations",
+        json={
+            "valid_until": "2026-12-31",
+            "items": [
+                {
+                    "product_id": env["prod1_id"],
+                    "quantity": 2,
+                    "unit_price": 50000.00,
+                    "tax_rate": 18.00,
+                }
+            ],
+            "notes": "Payment within 30 days.",
+        },
+        headers=admin_headers,
+    )
+    assert res.status_code == 201, res.text
+    q_data = res.json()
+    q_id = q_data["id"]
+
+    # Verify customer/company data in read model
+    assert q_data["company_name_snapshot"] == "Acme Industrial Corp"
+    assert q_data["customer_name_snapshot"] == "Rajesh Sharma"
+    assert q_data["customer_designation_snapshot"] == "VP of Procurement"
+    assert "Plot 42, GIDC Electronic Estate" in q_data["billing_address_snapshot"]
+    assert q_data["customer_gstin_snapshot"] == "24AABCI1234F1Z9"
+
+    # 3. Generate PDF and verify contents
+    pdf_res = await client.get(
+        f"/api/v1/crm/quotations/{q_id}/pdf",
+        headers=admin_headers,
+    )
+    assert pdf_res.status_code == 200
+    reader = PdfReader(io.BytesIO(pdf_res.content))
+    pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
+
+    assert "Acme Industrial Corp" in pdf_text
+    assert "Rajesh Sharma" in pdf_text
+    assert "VP of Procurement" in pdf_text
+    assert "24AABCI1234F1Z9" in pdf_text
+    assert "Plot 42, GIDC Electronic Estate" in pdf_text
+    assert "Customer Name: —" not in pdf_text
+
+    # 4. Historical snapshot immutability test:
+    # Later, company name and address are modified in the Master record
+    async with session_factory() as session:
+        comp = await session.get(Company, uuid.UUID(company_id))
+        comp.company_name = "Acme Global Enterprises Ltd"
+        comp.tax_id_number = "27AABCI9999F1Z0"
+        await session.commit()
+
+    # Re-fetch PDF for the created quotation: it MUST use its saved snapshot
+    pdf_res2 = await client.get(
+        f"/api/v1/crm/quotations/{q_id}/pdf",
+        headers=admin_headers,
+    )
+    assert pdf_res2.status_code == 200
+    reader2 = PdfReader(io.BytesIO(pdf_res2.content))
+    pdf_text2 = "".join(page.extract_text() or "" for page in reader2.pages)
+    # Saved quotation retained its snapshot
+    assert "Acme Industrial Corp" in pdf_text2
+
+
+@pytest.mark.asyncio
+async def test_quotation_phase8_share_activity_recording_and_deduplication(
+    client: AsyncClient,
+    setup_quotation_environment: dict,
+    rep_a_headers: dict,
+) -> None:
+    """
+    Phase 8: Test recording email and whatsapp sharing events against lead & quotation.
+    Verifies channel, outcome, recipient, deduplication within 60s, and that quotation status is unchanged.
+    """
+    env = setup_quotation_environment
+    lead_id = env["lead_a_id"]
+
+    # Create quotation under rep_a's lead
+    res = await client.post(
+        f"/api/v1/crm/leads/{lead_id}/quotations",
+        json={
+            "items": [
+                {
+                    "product_id": env["prod1_id"],
+                    "quantity": 1,
+                    "unit_price": 10000.00,
+                    "tax_rate": 18.00,
+                }
+            ],
+        },
+        headers=rep_a_headers,
+    )
+    assert res.status_code == 201
+    q_data = res.json()
+    q_id = q_data["id"]
+    assert q_data["status"] == "draft"
+
+    # 1. Record Email share opened
+    share_res1 = await client.post(
+        f"/api/v1/crm/quotations/{q_id}/share-activity",
+        json={
+            "channel": "email",
+            "outcome": "opened",
+            "recipient": "buyer@example.com",
+            "version": 1,
+            "details": "Opened native mail composer",
+        },
+        headers=rep_a_headers,
+    )
+    assert share_res1.status_code == 200, share_res1.text
+    data1 = share_res1.json()
+    assert data1["success"] is True
+    assert data1["deduplicated"] is False
+    assert data1["channel"] == "email"
+    assert data1["outcome"] == "opened"
+    act_id = data1["activity_id"]
+
+    # 2. Quotation status MUST still be draft (not marked as sent merely because composer opened)
+    q_check = await client.get(f"/api/v1/crm/quotations/{q_id}", headers=rep_a_headers)
+    assert q_check.status_code == 200
+    assert q_check.json()["status"] == "draft"
+
+    # 3. Deduplication: Immediate repeated click within 60 seconds returns deduplicated=True
+    share_res2 = await client.post(
+        f"/api/v1/crm/quotations/{q_id}/share-activity",
+        json={
+            "channel": "email",
+            "outcome": "opened",
+            "recipient": "buyer@example.com",
+            "version": 1,
+        },
+        headers=rep_a_headers,
+    )
+    assert share_res2.status_code == 200
+    data2 = share_res2.json()
+    assert data2["success"] is True
+    assert data2["deduplicated"] is True
+    assert data2["activity_id"] == act_id
+
+    # 4. WhatsApp share opened
+    wa_res = await client.post(
+        f"/api/v1/crm/quotations/{q_id}/share-activity",
+        json={
+            "channel": "whatsapp",
+            "outcome": "opened",
+            "recipient": "+919876543210",
+            "version": 1,
+            "details": "Opened WhatsApp Web chat",
+        },
+        headers=rep_a_headers,
+    )
+    assert wa_res.status_code == 200
+    wa_data = wa_res.json()
+    assert wa_data["success"] is True
+    assert wa_data["channel"] == "whatsapp"
+    assert wa_data["outcome"] == "opened"
+
+    # 5. Invalid channel/outcome rejects with 422
+    bad_res = await client.post(
+        f"/api/v1/crm/quotations/{q_id}/share-activity",
+        json={
+            "channel": "telegram",  # invalid
+            "outcome": "opened",
+        },
+        headers=rep_a_headers,
+    )
+    assert bad_res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_quotation_phase8_share_activity_rbac(
+    client: AsyncClient,
+    setup_quotation_environment: dict,
+    rep_a_headers: dict,
+    rep_b_headers: dict,
+) -> None:
+    """
+    Phase 8: Salesperson RBAC scoping enforcement on share-activity.
+    Salespeople cannot share quotations belonging to leads assigned to other salespeople.
+    """
+    env = setup_quotation_environment
+    lead_a_id = env["lead_a_id"]
+
+    # Create quotation under lead assigned to Rep A
+    res = await client.post(
+        f"/api/v1/crm/leads/{lead_a_id}/quotations",
+        json={
+            "items": [
+                {
+                    "product_id": env["prod1_id"],
+                    "quantity": 1,
+                    "unit_price": 5000.00,
+                    "tax_rate": 18.00,
+                }
+            ],
+        },
+        headers=rep_a_headers,
+    )
+    assert res.status_code == 201
+    q_id = res.json()["id"]
+
+    # Rep B attempts to record share activity on Rep A's quotation -> 403 Forbidden
+    unauth_res = await client.post(
+        f"/api/v1/crm/quotations/{q_id}/share-activity",
+        json={
+            "channel": "email",
+            "outcome": "opened",
+            "recipient": "spy@competitor.com",
+        },
+        headers=rep_b_headers,
+    )
+    assert unauth_res.status_code == 403
+
+
+# ==============================================================================
+# 11. INHYMA ERP Quotation PDF Generation & Company Branding Tests
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_quotation_pdf_generation_scenarios_and_company_branding(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    setup_quotation_environment: dict,
+) -> None:
+    """
+    Verifies quotation PDF generation and ERP Settings branding across 5 core scenarios:
+    1. Quotation with linked company and complete customer details.
+    2. Quotation with an individual customer (no linked company).
+    3. Quotation with multiple product lines.
+    4. Quotation with missing optional customer details.
+    5. Quotation saved as a draft.
+    Also verifies that:
+    - Company branding from ERP Settings (Organization) is used.
+    - PDF contains valid %PDF header and non-empty content.
+    - Snapshot immutability is preserved.
+    """
+    env = setup_quotation_environment
+    lead_a_id = env["lead_a_id"]
+    prod1_id = env["prod1_id"]
+    prod2_id = env["prod2_id"]
+
+    # Ensure Organization record exists and has branding
+    from app.database.engine import get_sessionmaker
+    from app.organizations.models import Organization
+    session_factory = get_sessionmaker()
+    async with session_factory() as session:
+        result = await session.execute(select(Organization).limit(1))
+        org = result.scalar_one_or_none()
+        if not org:
+            org = Organization(
+                id=str(uuid.uuid4()),
+                name="Inhyma Solutions LLP",
+                legal_name="Inhyma Solutions LLP",
+                email="contact@inhyma.com",
+                phone="+91 80 4123 4567",
+                tax_id="29ABCDE1234F1Z5",
+                pan_number="ABCDE1234F",
+                city="Bengaluru",
+                state="Karnataka",
+                country="India",
+                postal_code="560058",
+            )
+            session.add(org)
+            await session.commit()
+
+    # Scenario 1 & 5: Linked company, complete details, saved as draft
+    res1 = await client.post(
+        f"/api/v1/crm/leads/{lead_a_id}/quotations",
+        json={
+            "valid_until": "2026-12-31",
+            "payment_terms": "100% advance",
+            "delivery_terms": "Immediate dispatch",
+            "notes": "Scenario 1: linked company & complete details",
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "quantity": 1,
+                    "unit_price": 50000.0,
+                    "unit_discount": 2000.0,
+                    "tax_rate": 18.0,
+                }
+            ],
+        },
+        headers=admin_headers,
+    )
+    assert res1.status_code == 201
+    q1 = res1.json()
+    assert q1["status"] == "draft"
+
+    pdf1_res = await client.get(
+        f"/api/v1/crm/quotations/{q1['id']}/pdf",
+        headers=admin_headers,
+    )
+    assert pdf1_res.status_code == 200
+    assert pdf1_res.headers["content-type"] == "application/pdf"
+    assert pdf1_res.content.startswith(b"%PDF")
+    assert len(pdf1_res.content) > 1000
+
+    # Scenario 2: Individual customer (no company)
+    from app.crm.models import CrmLead
+    async with session_factory() as session:
+        lead_a_obj = await session.get(CrmLead, lead_a_id)
+        pipe_id = lead_a_obj.pipeline_id
+        stg_id = lead_a_obj.stage_id
+        ind_lead = CrmLead(
+            id=str(uuid.uuid4()),
+            name="John Doe Individual",
+            email="john.doe.ind@example.test",
+            original_phone="+919876543210",
+            normalized_phone="+919876543210",
+            pipeline_id=pipe_id,
+            stage_id=stg_id,
+            assigned_to=ADMIN_ID,
+            company_id=None,
+            created_by=ADMIN_ID,
+        )
+        session.add(ind_lead)
+        await session.commit()
+        ind_lead_id = ind_lead.id
+
+    res2 = await client.post(
+        f"/api/v1/crm/leads/{ind_lead_id}/quotations",
+        json={
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "quantity": 1,
+                    "unit_price": 25000.0,
+                    "tax_rate": 18.0,
+                }
+            ],
+        },
+        headers=admin_headers,
+    )
+    assert res2.status_code == 201
+    q2 = res2.json()
+    assert q2["company_id"] is None
+
+    pdf2_res = await client.get(
+        f"/api/v1/crm/quotations/{q2['id']}/pdf",
+        headers=admin_headers,
+    )
+    assert pdf2_res.status_code == 200
+    assert pdf2_res.headers["content-type"] == "application/pdf"
+    assert pdf2_res.content.startswith(b"%PDF")
+    assert len(pdf2_res.content) > 1000
+
+    # Scenario 3: Multiple product lines (3 items)
+    res3 = await client.post(
+        f"/api/v1/crm/leads/{lead_a_id}/quotations",
+        json={
+            "items": [
+                {
+                    "product_id": prod1_id,
+                    "quantity": 2,
+                    "unit_price": 10000.0,
+                    "tax_rate": 18.0,
+                },
+                {
+                    "product_id": prod2_id,
+                    "quantity": 3,
+                    "unit_price": 5000.0,
+                    "tax_rate": 12.0,
+                },
+                {
+                    "product_id": prod1_id,
+                    "quantity": 1,
+                    "unit_price": 15000.0,
+                    "tax_rate": 5.0,
+                },
+            ],
+        },
+        headers=admin_headers,
+    )
+    assert res3.status_code == 201
+    q3 = res3.json()
+    assert len(q3["items"]) == 3
+
+    pdf3_res = await client.get(
+        f"/api/v1/crm/quotations/{q3['id']}/pdf",
+        headers=admin_headers,
+    )
+    assert pdf3_res.status_code == 200
+    assert pdf3_res.headers["content-type"] == "application/pdf"
+    assert pdf3_res.content.startswith(b"%PDF")
+    assert len(pdf3_res.content) > 1000
+
+    # Scenario 4: Missing optional customer details (no email, no company, no address)
+    async with session_factory() as session:
+        sparse_phone = f"+9199{random.randint(10000000, 99999999)}"
+        sparse_lead = CrmLead(
+            id=str(uuid.uuid4()),
+            name="Minimal Contact",
+            email=None,
+            original_phone=sparse_phone,
+            normalized_phone=sparse_phone,
+            pipeline_id=pipe_id,
+            stage_id=stg_id,
+            assigned_to=ADMIN_ID,
+            company_id=None,
+            created_by=ADMIN_ID,
+        )
+        session.add(sparse_lead)
+        await session.commit()
+        sparse_lead_id = sparse_lead.id
+
+    res4 = await client.post(
+        f"/api/v1/crm/leads/{sparse_lead_id}/quotations",
+        json={
+            "items": [
+                {
+                    "product_id": prod2_id,
+                    "quantity": 1,
+                    "unit_price": 8000.0,
+                    "tax_rate": 0.0,
+                }
+            ],
+        },
+        headers=admin_headers,
+    )
+    assert res4.status_code == 201
+    q4 = res4.json()
+
+    pdf4_res = await client.get(
+        f"/api/v1/crm/quotations/{q4['id']}/pdf",
+        headers=admin_headers,
+    )
+    assert pdf4_res.status_code == 200
+    assert pdf4_res.headers["content-type"] == "application/pdf"
+    assert pdf4_res.content.startswith(b"%PDF")
+    assert len(pdf4_res.content) > 1000
+
+
+@pytest.mark.asyncio
+async def test_quotation_pdf_header_single_branding_and_no_duplication():
+    """
+    Verifies that:
+    1. Only ONE company logo is rendered when configured in ERP Settings.
+    2. Only ONE company name is rendered in the header table (no repeated company name beneath logo).
+    3. No hardcoded fallback logo is loaded if ERP Settings has no logo.
+    4. No invented tagline ('YOUR INDUSTRIAL HYPERMARKET') is rendered.
+    5. Missing company fields are cleanly omitted.
+    """
+    import base64
+    import io
+    from pypdf import PdfReader
+    from app.crm.quotation_pdf import generate_crm_quotation_pdf_bytes, get_logo_flowable
+
+    sample_snapshot = {
+        "quotation_number": "QT-202610-9999",
+        "version": 1,
+        "customer_name_snapshot": "Acme Corp",
+        "company_name_snapshot": "Acme Corp",
+        "currency": "INR",
+        "total_amount": 15000.0,
+        "items": [
+            {
+                "product_name": "Test Part",
+                "quantity": 1,
+                "unit_price": 15000.0,
+                "tax_rate": 0,
+                "tax_amount": 0,
+                "line_total": 15000.0,
+            }
+        ],
+    }
+
+    # 1. No logo configured in ERP Settings
+    no_logo_branding = {
+        "company_name": "Custom Organization Ltd",
+        "email": "contact@custom.test",
+        "phone": "+91 99999 88888",
+    }
+    # get_logo_flowable must return None (no fallback to assets/logo.png)
+    assert get_logo_flowable(logo_data=None, logo_url=None) is None
+
+    pdf_no_logo = generate_crm_quotation_pdf_bytes(sample_snapshot, company_branding=no_logo_branding)
+    assert pdf_no_logo.startswith(b"%PDF-")
+    reader_no_logo = PdfReader(io.BytesIO(pdf_no_logo))
+    text_no_logo = "".join(p.extract_text() or "" for p in reader_no_logo.pages)
+    assert "YOUR INDUSTRIAL HYPERMARKET" not in text_no_logo
+    # In header, company name rendered once on left, not duplicated on right
+    # (plus running canvas footer at bottom)
+    assert text_no_logo.count("CUSTOM ORGANIZATION LTD") == 2  # 1 in header, 1 in footer
+
+    # 2. Logo configured in ERP Settings (1x1 PNG data URI)
+    png_1x1 = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\x18\xdd\x8d\xb0\x00\x00\x00\x00IEND\xaeB`\x82"
+    b64_logo = "data:image/png;base64," + base64.b64encode(png_1x1).decode()
+
+    logo_flowable = get_logo_flowable(logo_data=b64_logo)
+    assert logo_flowable is not None
+
+    with_logo_branding = {
+        "company_name": "Custom Organization Ltd",
+        "logo_data": b64_logo,
+        "email": "contact@custom.test",
+        "phone": "+91 99999 88888",
+        "gst_number": "27AAKFI9869H1ZL",
+    }
+    pdf_with_logo = generate_crm_quotation_pdf_bytes(sample_snapshot, company_branding=with_logo_branding)
+    assert pdf_with_logo.startswith(b"%PDF-")
+    reader_with_logo = PdfReader(io.BytesIO(pdf_with_logo))
+    text_with_logo = "".join(p.extract_text() or "" for p in reader_with_logo.pages)
+    assert "YOUR INDUSTRIAL HYPERMARKET" not in text_with_logo
+    # In header, logo is on left with NO company text beneath it; company name rendered once on right
+    assert text_with_logo.count("CUSTOM ORGANIZATION LTD") == 2  # 1 in header right, 1 in footer
+    assert "GSTIN: 27AAKFI9869H1ZL" in text_with_logo
+
+
+

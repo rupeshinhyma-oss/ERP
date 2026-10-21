@@ -411,7 +411,11 @@ async function performRequestOnce<T>(path: string, options: RequestInit): Promis
     throw new ApiError(message, response.status, body.errors || [], response.headers.get("Retry-After"));
   }
 
-  return { data: body.data as T, meta: body.meta };
+  const unwrappedData =
+    body && typeof body === "object" && "data" in body
+      ? body.data
+      : body;
+  return { data: unwrappedData as T, meta: body.meta };
 }
 
 /**

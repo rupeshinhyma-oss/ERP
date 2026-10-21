@@ -24,6 +24,7 @@ from app.crm.schemas import (
     CrmLeadProductListResponse,
     CrmLeadProductRead,
     CrmProductLookupResponse,
+    CrmQuotationShareActivityCreate,
     CrmQuotationStatusUpdate,
     CrmQuotationVersionRead,
     CrmSalesQuotationCreate,
@@ -239,3 +240,25 @@ async def get_quotation_pdf(
             "Content-Type": "application/pdf",
         },
     )
+
+
+@router.post(
+    "/quotations/{quotation_id}/share-activity",
+    summary="Record email or whatsapp quotation sharing attempt or opened event",
+)
+async def record_quotation_share_activity(
+    quotation_id: uuid.UUID,
+    payload: CrmQuotationShareActivityCreate,
+    service: CrmQuotationService = Depends(get_quotation_service),
+    current_user: CurrentUser = Depends(require_permission("crm.leads.view")),
+) -> dict:
+    """
+    Log sharing attempt or opened composer action for email/whatsapp.
+    Enforces RBAC lead scope and deduplicates repeated submissions.
+    """
+    return await service.record_share_activity(
+        quotation_id=quotation_id,
+        payload=payload,
+        actor=current_user,
+    )
+

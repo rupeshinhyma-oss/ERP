@@ -13,7 +13,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiDownloadBlob, errorMessage } from "@/lib/api";
+import { apiGet, apiPost, apiPut, apiPatch, apiDownloadBlob, errorMessage } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { LeadImportPage } from "./LeadImportPage";
@@ -69,16 +69,19 @@ export interface CrmQuotationItemDraft {
   selected_image_url: string;
   include_specifications: boolean;
   demo_link: string;
-  quantity: number;
-  unit_price: number;
+  quantity: number | "";
+  unit_price: number | "";
   suggested_price: number;
+  catalog_tax_rate?: number | null;
   price_confirmed: boolean;
-  unit_discount: number;
-  tax_rate: number;
+  unit_discount: number | "";
+  discount_percent?: number | "";
+  tax_rate: number | "";
 }
 
 export interface CrmQuotationItemRead {
   id: string;
+  quotation_id?: string;
   position: number;
   product_id: string;
   product_name: string;
@@ -395,6 +398,57 @@ interface CrmSalespersonOption {
   ineligibility_reasons?: string[];
 }
 
+/**
+ * Normalizes a phone number to standard international format (digits only, e.g. 919876543210 or 14155552671)
+ * for use in WhatsApp click-to-chat URLs (https://wa.me/<number>).
+ * 
+ * Rules:
+ * - If null/empty or non-usable: returns null.
+ * - Handles leading "+" (e.g. "+1 (415) 555-2671" -> "14155552671", "+44 7911 123456" -> "447911123456").
+ * - Handles leading "00" international prefix (e.g. "00447911123456" -> "447911123456").
+ * - Preserves existing country code if present: does NOT blindly prepend India's code ("91") if an international code already exists.
+ * - If 10 digits without country code (e.g. "9876543210"): prepends default ERP Indian country code "91" -> "919876543210".
+ * - If 11 digits starting with "0" trunk prefix (e.g. "09876543210"): strips leading "0" -> 10 digits -> "919876543210".
+ * - If already 11-15 digits with existing country code (e.g. "14155552671", "447911123456", "919876543210"): keeps as-is.
+ * - Returns null if usable phone digits are fewer than 10 (or fewer than 7 with explicit country code).
+ */
+export function normalizeWhatsAppPhone(rawPhone: string | null | undefined): string | null {
+  if (!rawPhone) return null;
+  const trimmed = rawPhone.trim();
+  if (!trimmed) return null;
+
+  // Check if explicitly prefixed with "+" or "00"
+  if (trimmed.startsWith("+")) {
+    const digits = trimmed.slice(1).replace(/\D/g, "");
+    return digits.length >= 7 ? digits : null;
+  }
+  if (trimmed.startsWith("00")) {
+    const digits = trimmed.slice(2).replace(/\D/g, "");
+    return digits.length >= 7 ? digits : null;
+  }
+
+  const allDigits = trimmed.replace(/\D/g, "");
+  if (!allDigits) return null;
+
+  // If 11 digits starting with 0 trunk prefix (e.g. 09876543210 in India)
+  if (allDigits.length === 11 && allDigits.startsWith("0")) {
+    const tenDigits = allDigits.slice(1);
+    return `91${tenDigits}`;
+  }
+
+  // If 10 digits (standard Indian mobile without country prefix)
+  if (allDigits.length === 10) {
+    return `91${allDigits}`;
+  }
+
+  // If already 11 to 15 digits (contains country code, e.g. 14155552671, 919876543210, 447911123456)
+  if (allDigits.length >= 11 && allDigits.length <= 15) {
+    return allDigits;
+  }
+
+  return null;
+}
+
 export function CrmLeadsPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -472,7 +526,7 @@ export function CrmLeadsPage() {
   // Lead detail drawer & lifecycle state
   const [selectedLead, setSelectedLead] = useState<CrmLeadListItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerTab, setDrawerTab] = useState<"overview" | "activities" | "followups" | "products" | "quotations" | "history">("overview");
+  const [drawerTab, setDrawerTab] = useState<"overview" | "activities" | "followups" | "quotations" | "history">("overview");
   const [drawerAction, setDrawerAction] = useState<null | "log_activity" | "schedule_followup">(null);
 
   // Activities State
@@ -532,17 +586,6 @@ export function CrmLeadsPage() {
   const [stageSubmitting, setStageSubmitting] = useState(false);
   const [stageError, setStageError] = useState<string | null>(null);
 
-  // Tab 4: Lead Products State
-  const [leadProducts, setLeadProducts] = useState<CrmLeadProductItem[]>([]);
-  const [loadingLeadProducts, setLoadingLeadProducts] = useState(false);
-  const [productLookupQuery, setProductLookupQuery] = useState("");
-  const [productSearchResults, setProductSearchResults] = useState<CrmProductLookupItem[]>([]);
-  const [searchingProducts, setSearchingProducts] = useState(false);
-  const [selectedProductToAssociate, setSelectedProductToAssociate] = useState<CrmProductLookupItem | null>(null);
-  const [associateProductNotes, setAssociateProductNotes] = useState("");
-  const [associatingProduct, setAssociatingProduct] = useState(false);
-  const [disassociatingProductId, setDisassociatingProductId] = useState<string | null>(null);
-  const [showAddProductPanel, setShowAddProductPanel] = useState(false);
 
   // Tab 5: Quotations State
   const [leadQuotations, setLeadQuotations] = useState<CrmSalesQuotationRead[]>([]);
@@ -557,18 +600,65 @@ export function CrmLeadsPage() {
   const [revisionNotes, setRevisionNotes] = useState("");
   const [quoteSaving, setQuoteSaving] = useState(false);
   const [downloadingPdfKey, setDownloadingPdfKey] = useState<string | null>(null);
+  const [sharingQuotationKey, setSharingQuotationKey] = useState<string | null>(null);
+  const [pdfRetryQuotation, setPdfRetryQuotation] = useState<{
+    id: string;
+    quotationNumber: string;
+    version: number;
+  } | null>(null);
+  const [emailClientModalQuote, setEmailClientModalQuote] = useState<CrmSalesQuotationRead | null>(null);
+  const [selectedEmailClient, setSelectedEmailClient] = useState<"gmail" | "default">(() => {
+    try {
+      return (localStorage.getItem("crm_preferred_email_client") as "gmail" | "default") || "gmail";
+    } catch {
+      return "gmail";
+    }
+  });
 
   // Quotation Form Fields
   const [quoteCurrency, setQuoteCurrency] = useState("INR");
-  const [quoteValidUntil, setQuoteValidUntil] = useState("");
-  const [quotePaymentTerms, setQuotePaymentTerms] = useState("30% advance with PO, 70% against proforma invoice before dispatch.");
-  const [quoteDeliveryTerms, setQuoteDeliveryTerms] = useState("Ex-Works dispatch within 3-4 weeks from advance confirmation.");
+  const [quoteDate, setQuoteDate] = useState(new Date().toISOString().slice(0, 10));
   const [quoteNotes, setQuoteNotes] = useState("");
-  const [quoteTerms, setQuoteTerms] = useState("1. Validity 30 days from quote date.\n2. Taxes extra as applicable at current statutory rates.\n3. Standard manufacturer 12-month warranty included.");
+  const [quoteTerms, setQuoteTerms] = useState("");
   const [quoteLineItems, setQuoteLineItems] = useState<CrmQuotationItemDraft[]>([]);
   const [quoteLineSearch, setQuoteLineSearch] = useState("");
-  const [quoteLineSearchResults, setQuoteLineSearchResults] = useState<CrmProductLookupItem[]>([]);
+  const [quoteLineSearchResults, setQuoteLineSearchResults] = useState<any[]>([]);
   const [searchingQuoteProducts, setSearchingQuoteProducts] = useState(false);
+  const [productSearchError, setProductSearchError] = useState<string | null>(null);
+  const [uomLookup, setUomLookup] = useState<Record<string, string>>({
+    "uom-nos": "NOS",
+    "uom-set": "SET",
+    "uom-kgs": "KGS",
+    "uom-pcs": "PCS",
+    "uom-mtr": "MTR",
+    "uom-ltr": "LTR",
+    "uom-box": "BOX",
+    "uom-roll": "ROLL",
+  });
+
+  useEffect(() => {
+    apiGet<any[]>("/masters/uom?limit=250")
+      .then((res) => {
+        const items = Array.isArray(res?.data) ? res.data : [];
+        if (items.length > 0) {
+          const map: Record<string, string> = {
+            "uom-nos": "NOS",
+            "uom-set": "SET",
+            "uom-kgs": "KGS",
+            "uom-pcs": "PCS",
+            "uom-mtr": "MTR",
+            "uom-ltr": "LTR",
+            "uom-box": "BOX",
+            "uom-roll": "ROLL",
+          };
+          items.forEach((u: any) => {
+            if (u.id) map[u.id] = u.code || u.name;
+          });
+          setUomLookup(map);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Global Assignment History Tab State
   const [historyItems, setHistoryItems] = useState<CrmAssignmentHistoryItem[]>([]);
@@ -1169,25 +1259,14 @@ export function CrmLeadsPage() {
     }
   }, [fetchPipelineStages]);
 
-  const fetchLeadProducts = useCallback(async (leadId: string) => {
-    setLoadingLeadProducts(true);
-    try {
-      const res = await apiGet<any>(`/api/v1/crm/leads/${leadId}/products`);
-      const data = res?.data || res;
-      setLeadProducts(data?.items || []);
-    } catch {
-      setLeadProducts([]);
-    } finally {
-      setLoadingLeadProducts(false);
-    }
-  }, []);
 
   const fetchLeadQuotations = useCallback(async (leadId: string) => {
     setLoadingLeadQuotations(true);
     try {
       const res = await apiGet<any>(`/api/v1/crm/leads/${leadId}/quotations`);
-      const data = res?.data || res;
-      setLeadQuotations(data?.items || []);
+      const raw = res?.data !== undefined ? res.data : res;
+      const items = Array.isArray(raw) ? raw : (raw?.items || []);
+      setLeadQuotations(items);
     } catch {
       setLeadQuotations([]);
     } finally {
@@ -1202,8 +1281,8 @@ export function CrmLeadsPage() {
         apiGet<any>(`/api/v1/crm/quotations/${quotationId}`),
         apiGet<any>(`/api/v1/crm/quotations/${quotationId}/versions`),
       ]);
-      const qData = qRes?.data || qRes;
-      const vData = vRes?.data || vRes;
+      const qData = qRes?.data !== undefined ? qRes.data : qRes;
+      const vData = vRes?.data !== undefined ? vRes.data : vRes;
       setSelectedQuotationDetail(qData);
       setQuotationVersions(Array.isArray(vData) ? vData : (vData?.items || []));
       setActiveQuotationDetailTab("current");
@@ -1214,113 +1293,100 @@ export function CrmLeadsPage() {
     }
   };
 
-  const searchProductsForAssociate = async (query: string) => {
-    setProductLookupQuery(query);
-    if (!query.trim()) {
-      setProductSearchResults([]);
-      return;
-    }
-    setSearchingProducts(true);
-    try {
-      const res = await apiGet<any>(`/api/v1/crm/products/lookup?q=${encodeURIComponent(query.trim())}&limit=10`);
-      const data = res?.data || res;
-      setProductSearchResults(data?.items || []);
-    } catch {
-      setProductSearchResults([]);
-    } finally {
-      setSearchingProducts(false);
-    }
-  };
-
-  const handleAssociateProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedLead || !selectedProductToAssociate) return;
-    setAssociatingProduct(true);
-    try {
-      await apiPost(`/api/v1/crm/leads/${selectedLead.id}/products`, {
-        product_id: selectedProductToAssociate.id,
-        notes: associateProductNotes.trim() || undefined,
-      });
-      showToast(`Product "${selectedProductToAssociate.product_name}" associated with lead!`, "success");
-      setSelectedProductToAssociate(null);
-      setAssociateProductNotes("");
-      setProductLookupQuery("");
-      setProductSearchResults([]);
-      setShowAddProductPanel(false);
-      fetchLeadProducts(selectedLead.id);
-      fetchLeadActivities(selectedLead.id, 1);
-    } catch (err: any) {
-      showToast(errorMessage(err) || "Failed to associate product.", "error");
-    } finally {
-      setAssociatingProduct(false);
-    }
-  };
-
-  const handleRemoveProductAssociation = async (assocId: string, productName: string) => {
-    if (!selectedLead) return;
-    if (!window.confirm(`Remove "${productName}" from this lead's products of interest?`)) return;
-    setDisassociatingProductId(assocId);
-    try {
-      await apiDelete(`/api/v1/crm/leads/${selectedLead.id}/products/${assocId}`);
-      showToast(`Product association removed.`, "success");
-      fetchLeadProducts(selectedLead.id);
-      fetchLeadActivities(selectedLead.id, 1);
-    } catch (err: any) {
-      showToast(errorMessage(err) || "Failed to remove association.", "error");
-    } finally {
-      setDisassociatingProductId(null);
-    }
-  };
 
   const searchProductsForQuotation = async (query: string) => {
     setQuoteLineSearch(query);
+    setProductSearchError(null);
     if (!query.trim()) {
       setQuoteLineSearchResults([]);
       return;
     }
     setSearchingQuoteProducts(true);
     try {
-      const res = await apiGet<any>(`/api/v1/crm/products/lookup?q=${encodeURIComponent(query.trim())}&limit=10`);
-      const data = res?.data || res;
-      setQuoteLineSearchResults(data?.items || []);
-    } catch {
+      // Reusing the working ERP Product Master API: /masters/products
+      const res = await apiGet<any>(`/masters/products?search=${encodeURIComponent(query.trim())}&limit=50`);
+      let items: any[] = [];
+      if (Array.isArray(res?.data)) {
+        items = res.data;
+      } else if (Array.isArray((res?.data as any)?.items)) {
+        items = (res.data as any).items;
+      } else if (Array.isArray((res as any)?.items)) {
+        items = (res as any).items;
+      }
+      setQuoteLineSearchResults(items);
+      if (items.length === 0) {
+        setProductSearchError(`No products found matching "${query.trim()}".`);
+      }
+    } catch (err: any) {
+      const msg = errorMessage(err) || "Failed to fetch products from Product Master.";
+      setProductSearchError(msg);
       setQuoteLineSearchResults([]);
     } finally {
       setSearchingQuoteProducts(false);
     }
   };
 
-  const handleAddProductToQuotation = (prod: CrmProductLookupItem) => {
+  const handleFocusProductSearch = async () => {
+    if (quoteLineSearchResults.length === 0 && !searchingQuoteProducts) {
+      setSearchingQuoteProducts(true);
+      setProductSearchError(null);
+      try {
+        const res = await apiGet<any>("/masters/products?limit=25");
+        let items: any[] = [];
+        if (Array.isArray(res?.data)) {
+          items = res.data;
+        } else if (Array.isArray((res?.data as any)?.items)) {
+          items = (res.data as any).items;
+        } else if (Array.isArray((res as any)?.items)) {
+          items = (res as any).items;
+        }
+        setQuoteLineSearchResults(items);
+      } catch {
+        // Keep calm on background prefetch
+      } finally {
+        setSearchingQuoteProducts(false);
+      }
+    }
+  };
+
+  const handleAddProductToQuotation = (prod: any) => {
     const existing = quoteLineItems.find((it) => it.product_id === prod.id);
+    const prodName = prod.product_name || prod.product_name_tally || "Product";
     if (existing) {
-      showToast(`"${prod.product_name}" is already in this quotation draft.`, "warning");
+      showToast(`"${prodName}" is already in this quotation draft.`, "warning");
       return;
     }
-    const availableImgs = prod.images || [];
-    const suggestedPrice = prod.retail_price || prod.wholesale_price || 0;
+    const availableImgs = prod.images || (prod.image_url ? [prod.image_url] : []);
+    const suggestedPrice = prod.standard_price || prod.retail_price || prod.wholesale_price || 0;
+    const catTax = prod.gst_percent ?? prod.tax_rate ?? null;
+    const uom = (prod.uom_id && uomLookup[prod.uom_id]) || prod.uom || "Unit";
+    const specs = prod.specification || "";
     const newLine: CrmQuotationItemDraft = {
       product_id: prod.id,
-      product_name: prod.product_name,
-      product_code: prod.product_code,
+      product_name: prodName,
+      product_code: prod.product_code || "-",
       description: prod.description || "",
-      specification: prod.specification || "",
-      uom: prod.uom || "Unit",
+      specification: specs,
+      uom: uom,
       available_images: availableImgs,
       include_images: availableImgs.length > 0,
       selected_image_url: availableImgs.length > 0 ? availableImgs[0] : "",
-      include_specifications: Boolean(prod.specification),
+      include_specifications: Boolean(specs),
       demo_link: "",
       quantity: 1,
-      unit_price: 0,
+      unit_price: "",
       suggested_price: suggestedPrice,
+      catalog_tax_rate: catTax,
       price_confirmed: false,
       unit_discount: 0,
-      tax_rate: 18,
+      discount_percent: 0,
+      tax_rate: "",
     };
     setQuoteLineItems((prev) => [...prev, newLine]);
     setQuoteLineSearch("");
     setQuoteLineSearchResults([]);
-    showToast(`Added "${prod.product_name}". Enter unit price and confirm tax.`, "info");
+    setProductSearchError(null);
+    showToast(`Added "${prodName}". Enter unit price and tax rate.`, "info");
   };
 
   const handleOpenNewQuotationModal = () => {
@@ -1329,36 +1395,13 @@ export function CrmLeadsPage() {
     setRevisionNotes("");
     setQuoteCurrency("INR");
     const d = new Date();
-    d.setDate(d.getDate() + 30);
-    setQuoteValidUntil(d.toISOString().slice(0, 10));
-    setQuotePaymentTerms("30% advance with PO, 70% against proforma invoice before dispatch.");
-    setQuoteDeliveryTerms("Ex-Works dispatch within 3-4 weeks from advance confirmation.");
+    setQuoteDate(d.toISOString().slice(0, 10));
     setQuoteNotes("");
-    setQuoteTerms("1. Validity 30 days from quote date.\n2. Taxes extra as applicable at current statutory rates.\n3. Standard manufacturer 12-month warranty included.");
-    if (leadProducts.length > 0) {
-      const initialItems: CrmQuotationItemDraft[] = leadProducts.map((lp) => ({
-        product_id: lp.product_id,
-        product_name: lp.product_name,
-        product_code: lp.product_code,
-        description: lp.description || "",
-        specification: lp.specification || "",
-        uom: lp.uom || "Unit",
-        available_images: lp.selected_image_url ? [lp.selected_image_url] : [],
-        include_images: Boolean(lp.selected_image_url),
-        selected_image_url: lp.selected_image_url || "",
-        include_specifications: Boolean(lp.specification),
-        demo_link: "",
-        quantity: 1,
-        unit_price: 0,
-        suggested_price: 0,
-        price_confirmed: false,
-        unit_discount: 0,
-        tax_rate: 18,
-      }));
-      setQuoteLineItems(initialItems);
-    } else {
-      setQuoteLineItems([]);
-    }
+    setQuoteTerms("");
+    setQuoteLineSearch("");
+    setQuoteLineSearchResults([]);
+    setProductSearchError(null);
+    setQuoteLineItems([]);
     setShowQuotationModal(true);
   };
 
@@ -1367,11 +1410,12 @@ export function CrmLeadsPage() {
     setIsRevisionMode(isRev);
     setRevisionNotes(isRev ? `Revision ${quote.version + 1} - commercial renegotiation` : "");
     setQuoteCurrency(quote.currency || "INR");
-    setQuoteValidUntil(quote.valid_until ? quote.valid_until.slice(0, 10) : "");
-    setQuotePaymentTerms(quote.payment_terms || "");
-    setQuoteDeliveryTerms(quote.delivery_terms || "");
+    setQuoteDate(quote.quotation_date ? quote.quotation_date.slice(0, 10) : new Date().toISOString().slice(0, 10));
     setQuoteNotes(quote.notes || "");
     setQuoteTerms(quote.terms_and_conditions || "");
+    setQuoteLineSearch("");
+    setQuoteLineSearchResults([]);
+    setProductSearchError(null);
     const mappedItems: CrmQuotationItemDraft[] = quote.items.map((it) => ({
       product_id: it.product_id,
       product_name: it.product_name,
@@ -1387,8 +1431,10 @@ export function CrmLeadsPage() {
       quantity: it.quantity,
       unit_price: it.unit_price,
       suggested_price: it.unit_price,
+      catalog_tax_rate: it.tax_rate,
       price_confirmed: true,
       unit_discount: it.unit_discount || 0,
+      discount_percent: it.unit_price && it.unit_discount ? Math.round(((it.unit_discount / it.unit_price) * 100) * 10) / 10 : 0,
       tax_rate: it.tax_rate,
     }));
     setQuoteLineItems(mappedItems);
@@ -1398,34 +1444,51 @@ export function CrmLeadsPage() {
   const handleSaveQuotation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLead) return;
+    if (quoteSaving) return;
+
     if (quoteLineItems.length === 0) {
       showToast("Please add at least one product line item to the quotation.", "error");
       return;
     }
     for (let i = 0; i < quoteLineItems.length; i++) {
       const it = quoteLineItems[i];
-      if (it.quantity <= 0) {
-        showToast(`Line ${i + 1} (${it.product_name}): Quantity must be greater than 0.`, "error");
+      const lineNum = i + 1;
+      const prodName = it.product_name || `Line ${lineNum}`;
+
+      // Quantity validation
+      const qty = typeof it.quantity === "number" ? it.quantity : parseFloat(String(it.quantity));
+      if (it.quantity === "" || isNaN(qty) || qty <= 0) {
+        showToast(`Line ${lineNum} (${prodName}): Please enter a valid quantity greater than 0.`, "error");
         return;
       }
-      if (it.unit_price <= 0) {
-        showToast(`Line ${i + 1} (${it.product_name}): Unit price must be explicitly entered (> 0).`, "error");
+
+      // Unit price validation: entered manually by user and > 0
+      const uprice = typeof it.unit_price === "number" ? it.unit_price : parseFloat(String(it.unit_price));
+      if (it.unit_price === "" || isNaN(uprice) || uprice <= 0) {
+        showToast(`Line ${lineNum} (${prodName}): Unit price must be manually entered and greater than 0.`, "error");
         return;
       }
-      if (it.unit_discount < 0) {
-        showToast(`Line ${i + 1}: Unit discount cannot be negative.`, "error");
+
+      // Tax rate validation: explicitly entered, including zero when applicable
+      if (it.tax_rate === "" || it.tax_rate === null || it.tax_rate === undefined) {
+        showToast(`Line ${lineNum} (${prodName}): Please explicitly select or enter a tax rate (enter 0 for tax-exempt).`, "error");
         return;
       }
-      if (it.unit_discount > it.unit_price) {
-        showToast(`Line ${i + 1}: Unit discount cannot exceed unit price.`, "error");
+      const trate = typeof it.tax_rate === "number" ? it.tax_rate : parseFloat(String(it.tax_rate));
+      if (isNaN(trate) || trate < 0 || trate > 100) {
+        showToast(`Line ${lineNum} (${prodName}): Tax rate must be between 0% and 100%.`, "error");
         return;
       }
-      if (it.demo_link && it.demo_link.trim()) {
-        const dl = it.demo_link.trim();
-        if (!dl.startsWith("https://")) {
-          showToast(`Line ${i + 1}: Demo link must be a valid secure URL starting with https://`, "error");
-          return;
-        }
+
+      // Discount validation: backend rules (>= 0 and <= unit_price)
+      const udisc = it.unit_discount === "" ? 0 : (typeof it.unit_discount === "number" ? it.unit_discount : parseFloat(String(it.unit_discount)));
+      if (isNaN(udisc) || udisc < 0) {
+        showToast(`Line ${lineNum} (${prodName}): Unit discount cannot be negative.`, "error");
+        return;
+      }
+      if (udisc > uprice) {
+        showToast(`Line ${lineNum} (${prodName}): Unit discount (₹${udisc}) cannot exceed unit price (₹${uprice}).`, "error");
+        return;
       }
     }
 
@@ -1441,36 +1504,62 @@ export function CrmLeadsPage() {
         unit_price: Number(it.unit_price),
         unit_discount: Number(it.unit_discount || 0),
         tax_rate: Number(it.tax_rate),
+        description: it.description ? it.description.trim() || undefined : undefined,
+        specification: it.specification ? it.specification.trim() || undefined : undefined,
+        uom: it.uom || undefined,
       }));
 
+      const finalNotes = quoteNotes ? quoteNotes.trim() || undefined : undefined;
+
+      let savedQuote: CrmSalesQuotationRead | null = null;
       if (editingQuotationId) {
-        await apiPut(`/api/v1/crm/quotations/${editingQuotationId}`, {
+        const res = await apiPut<CrmSalesQuotationRead>(`/api/v1/crm/quotations/${editingQuotationId}`, {
           create_revision: isRevisionMode,
           revision_notes: isRevisionMode ? (revisionNotes.trim() || undefined) : undefined,
-          valid_until: quoteValidUntil ? new Date(quoteValidUntil).toISOString() : undefined,
           currency: quoteCurrency,
-          payment_terms: quotePaymentTerms || undefined,
-          delivery_terms: quoteDeliveryTerms || undefined,
-          notes: quoteNotes || undefined,
-          terms_and_conditions: quoteTerms || undefined,
+          notes: finalNotes,
+          terms_and_conditions: quoteTerms ? quoteTerms.trim() || undefined : undefined,
           items: itemsPayload,
         });
-        showToast(isRevisionMode ? "New quotation revision created!" : "Quotation draft updated!", "success");
+        savedQuote = res?.data || (res as any);
       } else {
-        await apiPost(`/api/v1/crm/leads/${selectedLead.id}/quotations`, {
-          valid_until: quoteValidUntil ? new Date(quoteValidUntil).toISOString() : undefined,
+        const res = await apiPost<CrmSalesQuotationRead>(`/api/v1/crm/leads/${selectedLead.id}/quotations`, {
           currency: quoteCurrency,
-          payment_terms: quotePaymentTerms || undefined,
-          delivery_terms: quoteDeliveryTerms || undefined,
-          notes: quoteNotes || undefined,
-          terms_and_conditions: quoteTerms || undefined,
+          notes: finalNotes,
+          terms_and_conditions: quoteTerms ? quoteTerms.trim() || undefined : undefined,
           items: itemsPayload,
         });
-        showToast("Quotation draft created successfully!", "success");
+        savedQuote = res?.data || (res as any);
       }
+
       setShowQuotationModal(false);
       fetchLeadQuotations(selectedLead.id);
       fetchLeadActivities(selectedLead.id, 1);
+
+      if (savedQuote && savedQuote.id) {
+        // Automatically initiate PDF generation & browser download for the newly saved quotation
+        const downloadSuccess = await handleDownloadQuotationPdf(
+          savedQuote.id,
+          savedQuote.quotation_number,
+          savedQuote.version,
+          "download",
+          { suppressToast: true }
+        );
+
+        if (downloadSuccess) {
+          setPdfRetryQuotation(null);
+          showToast("Quotation saved successfully. PDF downloaded.", "success");
+        } else {
+          setPdfRetryQuotation({
+            id: savedQuote.id,
+            quotationNumber: savedQuote.quotation_number,
+            version: savedQuote.version,
+          });
+          showToast("Quotation saved, but PDF generation failed.", "warning");
+        }
+      } else {
+        showToast(isRevisionMode ? "New quotation revision created!" : "Quotation draft created successfully!", "success");
+      }
     } catch (err: any) {
       showToast(errorMessage(err) || "Failed to save quotation.", "error");
     } finally {
@@ -1498,25 +1587,314 @@ export function CrmLeadsPage() {
     }
   };
 
-  const handleDownloadQuotationPdf = async (quotationId: string, quotationNumber: string, version?: number) => {
-    const downloadKey = `${quotationId}-${version ?? "curr"}`;
+  const handleDownloadQuotationPdf = async (
+    quotationId: string,
+    quotationNumber: string,
+    version?: number,
+    action: "download" | "view" = "download",
+    options: { suppressToast?: boolean; successMessage?: string } = {}
+  ): Promise<boolean> => {
+    const downloadKey = `${quotationId}-${version ?? "curr"}-${action}`;
     setDownloadingPdfKey(downloadKey);
     try {
       const versionParam = version !== undefined ? `?version=${version}` : "";
       const { blob, filename } = await apiDownloadBlob(`/api/v1/crm/quotations/${quotationId}/pdf${versionParam}`);
+      if (!blob || blob.size === 0) {
+        throw new Error("Generated PDF is empty or invalid. Please check quotation details.");
+      }
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename || `Quotation-${quotationNumber}-v${version ?? 1}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-      showToast(`Quotation ${quotationNumber} (v${version ?? 1}) downloaded successfully.`, "success");
+      const downloadName = filename || `${quotationNumber}_v${version ?? 1}.pdf`;
+
+      if (action === "view") {
+        const opened = window.open(url, "_blank", "noopener,noreferrer");
+        if (!opened) {
+          // Fallback if popup blocker intercepted the new tab: trigger direct file download
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = downloadName;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          showToast(`Popup was blocked by your browser. Quotation ${quotationNumber} (v${version ?? 1}) was downloaded instead.`, "warning");
+        } else {
+          if (!options.suppressToast) {
+            showToast(options.successMessage || `Quotation ${quotationNumber} (v${version ?? 1}) opened in new tab.`, "success");
+          }
+        }
+        setTimeout(() => {
+          try {
+            window.URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        }, 60000);
+      } else {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = downloadName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => {
+          try {
+            window.URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        }, 5000);
+        if (!options.suppressToast) {
+          showToast(options.successMessage || `Quotation ${quotationNumber} (v${version ?? 1}) downloaded successfully.`, "success");
+        }
+      }
+      return true;
     } catch (err: any) {
-      showToast(errorMessage(err) || "Failed to download quotation PDF.", "error");
+      if (!options.suppressToast) {
+        showToast(errorMessage(err) || "Failed to generate quotation PDF.", "error");
+      }
+      return false;
     } finally {
       setDownloadingPdfKey(null);
+    }
+  };
+
+  const executeShareQuotationEmail = async (quote: CrmSalesQuotationRead, clientType: "gmail" | "default") => {
+    const key = `email-${quote.id}`;
+    if (sharingQuotationKey) return;
+    setSharingQuotationKey(key);
+
+    try {
+      localStorage.setItem("crm_preferred_email_client", clientType);
+      setSelectedEmailClient(clientType);
+    } catch {
+      // ignore storage error
+    }
+
+    const recipient = (quote.customer_email_snapshot || selectedLead?.email || "").trim();
+    const contactName = (
+      quote.customer_name_snapshot && quote.customer_name_snapshot !== "—"
+        ? quote.customer_name_snapshot
+        : selectedLead?.name || ""
+    ).trim();
+    const compName = (
+      quote.company_name_snapshot ||
+      selectedLead?.company_name ||
+      ""
+    ).trim();
+
+    const currencyStr = quote.currency || "INR";
+    const formattedAmount = quote.total_amount != null
+      ? `${currencyStr} ${Number(quote.total_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : `${currencyStr} 0.00`;
+
+    const subject = `Sales Quotation ${quote.quotation_number} (v${quote.version}) — Inhyma Solutions LLP`;
+
+    const bodyLines = [
+      contactName ? `Dear ${contactName},` : "Dear Customer,",
+      "",
+      `Please find below the quotation details for ${quote.quotation_number}${compName ? ` (${compName})` : ""}:`,
+      "",
+      `Quotation No: ${quote.quotation_number} (v${quote.version})`,
+      `Amount: ${formattedAmount}`,
+      "",
+      "The official quotation PDF has been downloaded to your device. Please review and let us know if you have any questions.",
+      "",
+      "Regards,",
+      "Inhyma Solutions LLP",
+    ];
+    const body = bodyLines.join("\n");
+
+    try {
+      // 1. Download official PDF from backend before opening composer
+      const { blob, filename } = await apiDownloadBlob(`/api/v1/crm/quotations/${quote.id}/pdf?version=${quote.version}`);
+      if (!blob || blob.size === 0) {
+        throw new Error("Generated PDF is empty or invalid. Please check quotation details.");
+      }
+      const pdfFileName = filename || `${quote.quotation_number}_v${quote.version}.pdf`;
+
+      // 2. Download PDF to device
+      if (typeof window !== "undefined" && typeof window.URL?.createObjectURL === "function") {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = pdfFileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => {
+          try {
+            window.URL?.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        }, 5000);
+      }
+
+      // 3. Open selected composer (Gmail web in new browser tab vs Default Desktop App)
+      if (clientType === "gmail") {
+        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(recipient)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        const opened = window.open(gmailUrl, "_blank", "noopener,noreferrer");
+        if (!opened) {
+          showToast(
+            "Popup was blocked by your browser. Quotation PDF was downloaded, but Gmail could not be opened automatically. Please allow popups or use the Default Email App.",
+            "warning"
+          );
+        } else {
+          showToast(
+            recipient
+              ? `Quotation PDF downloaded. Gmail composer opened for ${recipient} — please attach the downloaded PDF before sending.`
+              : "Quotation PDF downloaded. Gmail composer opened — please specify recipient and attach the downloaded PDF before sending.",
+            "info"
+          );
+        }
+      } else {
+        const mailtoUrl = `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.location.href = mailtoUrl;
+
+        showToast(
+          recipient
+            ? `Quotation PDF downloaded. Email composer opened for ${recipient} — please attach the downloaded PDF before sending.`
+            : "Quotation PDF downloaded. Email composer opened — please specify recipient and attach the downloaded PDF before sending.",
+          "info"
+        );
+      }
+
+      // 4. Record sharing activity without claiming sent/delivered
+      await apiPost(`/api/v1/crm/quotations/${quote.id}/share-activity`, {
+        channel: "email",
+        outcome: "opened",
+        recipient: recipient || undefined,
+        version: quote.version,
+        details: clientType === "gmail"
+          ? "Gmail web composer opened; PDF downloaded for manual attachment"
+          : "Default desktop email client opened; PDF downloaded for manual attachment",
+      });
+
+      if (selectedLead) {
+        fetchLeadActivities(selectedLead.id, 1);
+      }
+    } catch (err: any) {
+      showToast(errorMessage(err) || "Failed to generate quotation PDF.", "error");
+      try {
+        await apiPost(`/api/v1/crm/quotations/${quote.id}/share-activity`, {
+          channel: "email",
+          outcome: "failed",
+          recipient: recipient || undefined,
+          version: quote.version,
+          details: errorMessage(err) || "Error occurred during share initiation",
+        });
+      } catch {
+        // ignore logging failure
+      }
+    } finally {
+      setSharingQuotationKey(null);
+    }
+  };
+
+  const handleShareQuotationEmail = (quote: CrmSalesQuotationRead, clientType?: "gmail" | "default") => {
+    if (clientType) {
+      executeShareQuotationEmail(quote, clientType);
+    } else {
+      setEmailClientModalQuote(quote);
+    }
+  };
+
+  const handleShareQuotationWhatsApp = async (quote: CrmSalesQuotationRead) => {
+    const key = `wa-${quote.id}`;
+    if (sharingQuotationKey) return;
+
+    const rawPhone = (quote.customer_phone_snapshot || selectedLead?.normalized_phone || selectedLead?.original_phone || "").trim();
+    const cleanPhone = normalizeWhatsAppPhone(rawPhone);
+
+    if (!cleanPhone) {
+      showToast("Missing or invalid customer phone number. Please update lead contact details to share via WhatsApp.", "warning");
+      return;
+    }
+
+    setSharingQuotationKey(key);
+
+    const contactName = (
+      quote.customer_name_snapshot && quote.customer_name_snapshot !== "—"
+        ? quote.customer_name_snapshot
+        : selectedLead?.name || ""
+    ).trim();
+    const currencyStr = quote.currency || "INR";
+    const formattedAmount = quote.total_amount != null
+      ? Number(quote.total_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : "0.00";
+
+    const messageLines = [
+      contactName ? `Dear ${contactName},` : "Dear Customer,",
+      "Please find the quotation details below.",
+      `Quotation No: ${quote.quotation_number}`,
+      `Amount: ${currencyStr} ${formattedAmount}`,
+      "Please review and let us know if you have any questions.",
+      "Regards,",
+      "Inhyma Solutions LLP",
+    ];
+    const waMessage = messageLines.join("\n");
+
+    try {
+      // 1. Download official PDF from backend
+      const { blob, filename } = await apiDownloadBlob(`/api/v1/crm/quotations/${quote.id}/pdf?version=${quote.version}`);
+      if (!blob || blob.size === 0) {
+        throw new Error("Generated PDF is empty or invalid. Please check quotation details.");
+      }
+      const pdfFileName = filename || `${quote.quotation_number}_v${quote.version}.pdf`;
+
+      // 2. Download PDF to device
+      if (typeof window !== "undefined" && typeof window.URL?.createObjectURL === "function") {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = pdfFileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => {
+          try {
+            window.URL?.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        }, 5000);
+      }
+
+      // 3. Open WhatsApp directly via click-to-chat URL (no navigator.share or native dialog)
+      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waMessage)}`;
+      const opened = window.open(waUrl, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        showToast("Popup was blocked by your browser. Quotation PDF was downloaded, but WhatsApp could not be opened automatically. Please allow popups or open WhatsApp manually.", "warning");
+      } else {
+        showToast("Quotation PDF downloaded. Attach it in WhatsApp before sending.", "info");
+      }
+
+      // 4. Record sharing activity without claiming sent/delivered
+      await apiPost(`/api/v1/crm/quotations/${quote.id}/share-activity`, {
+        channel: "whatsapp",
+        outcome: "opened",
+        recipient: `+${cleanPhone}`,
+        version: quote.version,
+        details: "WhatsApp chat opened; PDF downloaded for manual attachment",
+      });
+
+      if (selectedLead) {
+        fetchLeadActivities(selectedLead.id, 1);
+      }
+    } catch (err: any) {
+      showToast(errorMessage(err) || "Failed to generate quotation PDF.", "error");
+      try {
+        await apiPost(`/api/v1/crm/quotations/${quote.id}/share-activity`, {
+          channel: "whatsapp",
+          outcome: "failed",
+          recipient: `+${cleanPhone}`,
+          version: quote.version,
+          details: errorMessage(err) || "Error occurred during share initiation",
+        });
+      } catch {
+        // ignore logging failure
+      }
+    } finally {
+      setSharingQuotationKey(null);
     }
   };
 
@@ -1530,8 +1908,6 @@ export function CrmLeadsPage() {
     setCompletionNotes("");
     setActError(null);
     setFuError(null);
-    setShowAddProductPanel(false);
-    setSelectedProductToAssociate(null);
     setSelectedQuotationDetail(null);
 
     setActTime(getLocalDateTimeString());
@@ -1543,7 +1919,6 @@ export function CrmLeadsPage() {
     fetchAllFollowUps(lead.id);
     fetchLeadStageHistory(lead.id);
     fetchTimeline(lead.id);
-    fetchLeadProducts(lead.id);
     fetchLeadQuotations(lead.id);
     if (lead.pipeline_id) {
       fetchPipelineStages(lead.pipeline_id);
@@ -4310,7 +4685,6 @@ export function CrmLeadsPage() {
                       { key: "overview", label: "Overview" },
                       { key: "activities", label: `Activities (${activityTotal || leadActivities.length})` },
                       { key: "followups", label: `Follow-ups (${pendingFollowUps.length})` },
-                      { key: "products", label: `Products (${leadProducts.length})` },
                       { key: "quotations", label: `Quotations (${leadQuotations.length})` },
                       { key: "history", label: "History" },
                     ].map((tab) => (
@@ -4320,7 +4694,6 @@ export function CrmLeadsPage() {
                         onClick={() => {
                           setDrawerTab(tab.key as any);
                           if (selectedLead) {
-                            if (tab.key === "products") fetchLeadProducts(selectedLead.id);
                             if (tab.key === "quotations") fetchLeadQuotations(selectedLead.id);
                           }
                         }}
@@ -5179,384 +5552,7 @@ export function CrmLeadsPage() {
                     </div>
                   )}
 
-                  {/* TAB 4: PRODUCTS */}
-                  {drawerTab === "products" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                      {/* Top Action Bar */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
-                          <h4 style={{ fontSize: "0.875rem", fontWeight: 700, color: "#0f172a", margin: 0 }}>
-                            Products of Interest ({leadProducts.length})
-                          </h4>
-                          <p style={{ fontSize: "0.75rem", color: "#64748b", margin: "0.15rem 0 0 0" }}>
-                            Associated items from Product Master catalog for this lead.
-                          </p>
-                        </div>
-                        {canManageLeads && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowAddProductPanel(!showAddProductPanel);
-                              setSelectedProductToAssociate(null);
-                              setProductLookupQuery("");
-                              setProductSearchResults([]);
-                            }}
-                            style={{
-                              padding: "0.35rem 0.75rem",
-                              fontSize: "0.75rem",
-                              fontWeight: 600,
-                              borderRadius: "0.375rem",
-                              border: "1px solid #2563eb",
-                              backgroundColor: showAddProductPanel ? "#eff6ff" : "#2563eb",
-                              color: showAddProductPanel ? "#2563eb" : "#fff",
-                              cursor: "pointer",
-                            }}
-                          >
-                            {showAddProductPanel ? "✕ Close Panel" : "+ Link Product"}
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Add Product Panel */}
-                      {showAddProductPanel && (
-                        <div
-                          style={{
-                            background: "#f8fafc",
-                            border: "1px solid #cbd5e1",
-                            borderRadius: "0.5rem",
-                            padding: "1rem",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "0.75rem",
-                          }}
-                        >
-                          <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "#1e293b" }}>
-                            Link Product from Master Catalog
-                          </div>
-
-                          {!selectedProductToAssociate ? (
-                            <div>
-                              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-                                Search Product Master (by Name or Code)
-                              </label>
-                              <input
-                                type="text"
-                                placeholder="e.g. Filling Machine, PRD-MCH-001..."
-                                value={productLookupQuery}
-                                onChange={(e) => searchProductsForAssociate(e.target.value)}
-                                style={{
-                                  width: "100%",
-                                  padding: "0.45rem 0.65rem",
-                                  fontSize: "0.8125rem",
-                                  borderRadius: "0.375rem",
-                                  border: "1px solid #cbd5e1",
-                                  backgroundColor: "#fff",
-                                  boxSizing: "border-box",
-                                }}
-                              />
-                              {searchingProducts && (
-                                <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.35rem" }}>
-                                  Searching active products...
-                                </div>
-                              )}
-                              {productSearchResults.length > 0 && (
-                                <div
-                                  style={{
-                                    marginTop: "0.5rem",
-                                    maxHeight: "220px",
-                                    overflowY: "auto",
-                                    border: "1px solid #e2e8f0",
-                                    borderRadius: "0.375rem",
-                                    backgroundColor: "#fff",
-                                  }}
-                                >
-                                  {productSearchResults.map((prod) => (
-                                    <div
-                                      key={prod.id}
-                                      onClick={() => setSelectedProductToAssociate(prod)}
-                                      style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                        padding: "0.5rem 0.75rem",
-                                        borderBottom: "1px solid #f1f5f9",
-                                        cursor: "pointer",
-                                      }}
-                                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#fff")}
-                                    >
-                                      <div>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                          <span style={{ fontSize: "0.75rem", fontFamily: "monospace", backgroundColor: "#f1f5f9", padding: "0.1rem 0.35rem", borderRadius: "0.25rem", color: "#0f172a" }}>
-                                            {prod.product_code}
-                                          </span>
-                                          <strong style={{ fontSize: "0.8125rem", color: "#0f172a" }}>
-                                            {prod.product_name}
-                                          </strong>
-                                        </div>
-                                        {prod.specification && (
-                                          <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.15rem" }}>
-                                            {prod.specification}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <button
-                                        type="button"
-                                        style={{
-                                          fontSize: "0.75rem",
-                                          padding: "0.25rem 0.5rem",
-                                          borderRadius: "0.25rem",
-                                          border: "1px solid #cbd5e1",
-                                          backgroundColor: "#fff",
-                                          color: "#2563eb",
-                                          cursor: "pointer",
-                                          fontWeight: 600,
-                                        }}
-                                      >
-                                        Select
-                                      </button>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {!searchingProducts && productLookupQuery.trim() && productSearchResults.length === 0 && (
-                                <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.35rem", fontStyle: "italic" }}>
-                                  No active products found matching "{productLookupQuery}".
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <form onSubmit={handleAssociateProduct} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                  padding: "0.6rem 0.75rem",
-                                  backgroundColor: "#fff",
-                                  border: "1px solid #bbf7d0",
-                                  borderRadius: "0.375rem",
-                                }}
-                              >
-                                <div>
-                                  <span style={{ fontSize: "0.75rem", fontFamily: "monospace", color: "#166534", fontWeight: 700 }}>
-                                    {selectedProductToAssociate.product_code}
-                                  </span>
-                                  <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "0.875rem" }}>
-                                    {selectedProductToAssociate.product_name}
-                                  </div>
-                                  {selectedProductToAssociate.specification && (
-                                    <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                                      {selectedProductToAssociate.specification}
-                                    </div>
-                                  )}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedProductToAssociate(null)}
-                                  style={{
-                                    fontSize: "0.75rem",
-                                    color: "#64748b",
-                                    background: "none",
-                                    border: "none",
-                                    cursor: "pointer",
-                                    textDecoration: "underline",
-                                  }}
-                                >
-                                  Change
-                                </button>
-                              </div>
-
-                              <div>
-                                <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-                                  Lead Interest Notes (Optional)
-                                </label>
-                                <textarea
-                                  rows={2}
-                                  placeholder="e.g. Inquired about 500ml liquid configuration; target timeline next month."
-                                  value={associateProductNotes}
-                                  onChange={(e) => setAssociateProductNotes(e.target.value)}
-                                  style={{
-                                    width: "100%",
-                                    padding: "0.45rem 0.65rem",
-                                    fontSize: "0.8125rem",
-                                    borderRadius: "0.375rem",
-                                    border: "1px solid #cbd5e1",
-                                    backgroundColor: "#fff",
-                                    boxSizing: "border-box",
-                                  }}
-                                />
-                              </div>
-
-                              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedProductToAssociate(null)}
-                                  disabled={associatingProduct}
-                                  style={{
-                                    padding: "0.4rem 0.75rem",
-                                    fontSize: "0.75rem",
-                                    borderRadius: "0.375rem",
-                                    border: "1px solid #cbd5e1",
-                                    backgroundColor: "#fff",
-                                    cursor: associatingProduct ? "not-allowed" : "pointer",
-                                  }}
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  type="submit"
-                                  disabled={associatingProduct}
-                                  style={{
-                                    padding: "0.4rem 0.9rem",
-                                    fontSize: "0.75rem",
-                                    fontWeight: 600,
-                                    borderRadius: "0.375rem",
-                                    border: "none",
-                                    backgroundColor: associatingProduct ? "#94a3b8" : "#2563eb",
-                                    color: "#fff",
-                                    cursor: associatingProduct ? "not-allowed" : "pointer",
-                                  }}
-                                >
-                                  {associatingProduct ? "Linking..." : "Confirm Product Association"}
-                                </button>
-                              </div>
-                            </form>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Associated Products List */}
-                      {loadingLeadProducts ? (
-                        <div style={{ fontSize: "0.8125rem", color: "#64748b", padding: "1rem", textAlign: "center" }}>
-                          Loading associated products...
-                        </div>
-                      ) : leadProducts.length === 0 ? (
-                        <div
-                          style={{
-                            padding: "2rem 1.5rem",
-                            textAlign: "center",
-                            backgroundColor: "#f8fafc",
-                            border: "1px dashed #cbd5e1",
-                            borderRadius: "0.5rem",
-                          }}
-                        >
-                          <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>📦</div>
-                          <h4 style={{ fontSize: "0.9375rem", fontWeight: 700, color: "#0f172a", margin: "0 0 0.25rem 0" }}>
-                            No Products Linked Yet
-                          </h4>
-                          <p style={{ fontSize: "0.8125rem", color: "#64748b", margin: 0, maxWidth: "380px", marginLeft: "auto", marginRight: "auto" }}>
-                            Attach products of interest from the Product Master to track client requirements and fast-track sales quotes.
-                          </p>
-                          {canManageLeads && (
-                            <button
-                              type="button"
-                              onClick={() => setShowAddProductPanel(true)}
-                              style={{
-                                marginTop: "0.75rem",
-                                padding: "0.4rem 0.85rem",
-                                fontSize: "0.75rem",
-                                fontWeight: 600,
-                                borderRadius: "0.375rem",
-                                border: "none",
-                                backgroundColor: "#2563eb",
-                                color: "#fff",
-                                cursor: "pointer",
-                              }}
-                            >
-                              + Link First Product
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                          {leadProducts.map((p) => (
-                            <div
-                              key={p.id}
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "flex-start",
-                                padding: "0.75rem 1rem",
-                                backgroundColor: "#fff",
-                                border: "1px solid #e2e8f0",
-                                borderRadius: "0.5rem",
-                              }}
-                            >
-                              <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
-                                {p.selected_image_url ? (
-                                  <img
-                                    src={p.selected_image_url}
-                                    alt={p.product_name}
-                                    style={{ width: "48px", height: "48px", objectFit: "cover", borderRadius: "0.375rem", border: "1px solid #e2e8f0" }}
-                                  />
-                                ) : (
-                                  <div
-                                    style={{
-                                      width: "48px",
-                                      height: "48px",
-                                      backgroundColor: "#f1f5f9",
-                                      borderRadius: "0.375rem",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: "1.25rem",
-                                    }}
-                                  >
-                                    ⚙️
-                                  </div>
-                                )}
-                                <div>
-                                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                                    <span style={{ fontSize: "0.75rem", fontFamily: "monospace", backgroundColor: "#f1f5f9", padding: "0.1rem 0.35rem", borderRadius: "0.25rem", color: "#334155", fontWeight: 600 }}>
-                                      {p.product_code}
-                                    </span>
-                                    <strong style={{ fontSize: "0.875rem", color: "#0f172a" }}>
-                                      {p.product_name}
-                                    </strong>
-                                  </div>
-                                  {p.specification && (
-                                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.2rem" }}>
-                                      {p.specification}
-                                    </div>
-                                  )}
-                                  {p.notes && (
-                                    <div style={{ fontSize: "0.75rem", color: "#059669", marginTop: "0.25rem" }}>
-                                      <strong>Notes:</strong> {p.notes}
-                                    </div>
-                                  )}
-                                  <div style={{ fontSize: "0.7rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-                                    Linked on {formatDateTime(p.created_at)}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {canManageLeads && (
-                                <button
-                                  type="button"
-                                  disabled={disassociatingProductId === p.id}
-                                  onClick={() => handleRemoveProductAssociation(p.id, p.product_name)}
-                                  style={{
-                                    fontSize: "0.75rem",
-                                    color: disassociatingProductId === p.id ? "#94a3b8" : "#ef4444",
-                                    backgroundColor: "transparent",
-                                    border: "1px solid #fee2e2",
-                                    padding: "0.25rem 0.5rem",
-                                    borderRadius: "0.25rem",
-                                    cursor: disassociatingProductId === p.id ? "not-allowed" : "pointer",
-                                  }}
-                                >
-                                  {disassociatingProductId === p.id ? "Removing..." : "Remove"}
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* TAB 5: QUOTATIONS */}
+                  {/* TAB 4: QUOTATIONS */}
                   {drawerTab === "quotations" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                       {/* Top Action Bar */}
@@ -5591,6 +5587,86 @@ export function CrmLeadsPage() {
                           </button>
                         )}
                       </div>
+
+                      {/* PDF Retry Banner if generation failed after save */}
+                      {pdfRetryQuotation && (
+                        <div
+                          data-testid="pdf-retry-banner"
+                          style={{
+                            marginBottom: "1rem",
+                            padding: "0.75rem 1rem",
+                            borderRadius: "0.5rem",
+                            backgroundColor: "#fffbeb",
+                            border: "1px solid #fde68a",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "0.75rem",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <span style={{ fontSize: "1.1rem" }}>⚠️</span>
+                            <div>
+                              <strong style={{ fontSize: "0.8125rem", color: "#92400e", display: "block" }}>
+                                Quotation saved, but PDF generation failed.
+                              </strong>
+                              <span style={{ fontSize: "0.75rem", color: "#b45309" }}>
+                                Quotation {pdfRetryQuotation.quotationNumber} (v{pdfRetryQuotation.version}) was saved to database. Click Retry to download the PDF without recreating the quotation.
+                              </span>
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <button
+                              type="button"
+                              data-testid="retry-pdf-download-btn"
+                              disabled={downloadingPdfKey !== null}
+                              onClick={async () => {
+                                const ok = await handleDownloadQuotationPdf(
+                                  pdfRetryQuotation.id,
+                                  pdfRetryQuotation.quotationNumber,
+                                  pdfRetryQuotation.version,
+                                  "download"
+                                );
+                                if (ok) {
+                                  setPdfRetryQuotation(null);
+                                }
+                              }}
+                              style={{
+                                padding: "0.35rem 0.75rem",
+                                fontSize: "0.75rem",
+                                fontWeight: 700,
+                                borderRadius: "0.375rem",
+                                border: "1px solid #d97706",
+                                backgroundColor: "#f59e0b",
+                                color: "#fff",
+                                cursor: downloadingPdfKey !== null ? "not-allowed" : "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.3rem",
+                              }}
+                            >
+                              <span>📥</span> Retry PDF Download
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPdfRetryQuotation(null)}
+                              title="Dismiss notification"
+                              style={{
+                                padding: "0.35rem 0.5rem",
+                                fontSize: "0.75rem",
+                                borderRadius: "0.375rem",
+                                border: "1px solid #cbd5e1",
+                                backgroundColor: "#fff",
+                                color: "#64748b",
+                                cursor: "pointer",
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Quotations List */}
                       {loadingLeadQuotations ? (
@@ -5737,9 +5813,33 @@ export function CrmLeadsPage() {
 
                                     <button
                                       type="button"
+                                      data-testid={`view-quote-pdf-${quote.id}`}
+                                      disabled={downloadingPdfKey === `${quote.id}-${quote.version}-view`}
+                                      onClick={() => handleDownloadQuotationPdf(quote.id, quote.quotation_number, quote.version, "view")}
+                                      style={{
+                                        fontSize: "0.75rem",
+                                        fontWeight: 600,
+                                        padding: "0.3rem 0.6rem",
+                                        borderRadius: "0.25rem",
+                                        border: "1px solid #cbd5e1",
+                                        backgroundColor: "#f8fafc",
+                                        color: "#334155",
+                                        cursor: downloadingPdfKey === `${quote.id}-${quote.version}-view` ? "not-allowed" : "pointer",
+                                        opacity: downloadingPdfKey === `${quote.id}-${quote.version}-view` ? 0.7 : 1,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "0.25rem",
+                                      }}
+                                      title="View quotation PDF in new browser tab"
+                                    >
+                                      👁️ {downloadingPdfKey === `${quote.id}-${quote.version}-view` ? "Opening..." : "View PDF"}
+                                    </button>
+
+                                    <button
+                                      type="button"
                                       data-testid={`download-quote-pdf-${quote.id}`}
-                                      disabled={downloadingPdfKey === `${quote.id}-${quote.version}`}
-                                      onClick={() => handleDownloadQuotationPdf(quote.id, quote.quotation_number, quote.version)}
+                                      disabled={downloadingPdfKey === `${quote.id}-${quote.version}-download`}
+                                      onClick={() => handleDownloadQuotationPdf(quote.id, quote.quotation_number, quote.version, "download")}
                                       style={{
                                         fontSize: "0.75rem",
                                         fontWeight: 600,
@@ -5748,14 +5848,58 @@ export function CrmLeadsPage() {
                                         border: "1px solid #bfdbfe",
                                         backgroundColor: "#eff6ff",
                                         color: "#1d4ed8",
-                                        cursor: downloadingPdfKey === `${quote.id}-${quote.version}` ? "not-allowed" : "pointer",
-                                        opacity: downloadingPdfKey === `${quote.id}-${quote.version}` ? 0.7 : 1,
+                                        cursor: downloadingPdfKey === `${quote.id}-${quote.version}-download` ? "not-allowed" : "pointer",
+                                        opacity: downloadingPdfKey === `${quote.id}-${quote.version}-download` ? 0.7 : 1,
                                         display: "inline-flex",
                                         alignItems: "center",
                                         gap: "0.25rem",
                                       }}
                                     >
-                                      📄 {downloadingPdfKey === `${quote.id}-${quote.version}` ? "Downloading..." : "PDF"}
+                                      📄 {downloadingPdfKey === `${quote.id}-${quote.version}-download` ? "Downloading..." : "PDF"}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      data-testid={`email-quote-btn-${quote.id}`}
+                                      disabled={sharingQuotationKey === `email-${quote.id}`}
+                                      onClick={() => handleShareQuotationEmail(quote)}
+                                      style={{
+                                        fontSize: "0.75rem",
+                                        fontWeight: 600,
+                                        padding: "0.3rem 0.6rem",
+                                        borderRadius: "0.25rem",
+                                        border: "1px solid #cbd5e1",
+                                        backgroundColor: "#fff",
+                                        color: "#0369a1",
+                                        cursor: sharingQuotationKey === `email-${quote.id}` ? "not-allowed" : "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "0.25rem",
+                                      }}
+                                    >
+                                      ✉️ {sharingQuotationKey === `email-${quote.id}` ? "Opening..." : "Email"}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      data-testid={`wa-quote-btn-${quote.id}`}
+                                      disabled={sharingQuotationKey === `wa-${quote.id}`}
+                                      onClick={() => handleShareQuotationWhatsApp(quote)}
+                                      style={{
+                                        fontSize: "0.75rem",
+                                        fontWeight: 600,
+                                        padding: "0.3rem 0.6rem",
+                                        borderRadius: "0.25rem",
+                                        border: "1px solid #bbf7d0",
+                                        backgroundColor: "#f0fdf4",
+                                        color: "#15803d",
+                                        cursor: sharingQuotationKey === `wa-${quote.id}` ? "not-allowed" : "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "0.25rem",
+                                      }}
+                                    >
+                                      💬 {sharingQuotationKey === `wa-${quote.id}` ? "Opening..." : "WhatsApp"}
                                     </button>
 
                                     {canManageLeads && (
@@ -7083,6 +7227,7 @@ export function CrmLeadsPage() {
         )}
 
         {/* CREATE / EDIT / REVISE SALES QUOTATION MODAL */}
+        {/* CREATE / EDIT / REVISE SALES QUOTATION MODAL (REBUILT REFERENCE DESIGN) */}
         {showQuotationModal && selectedLead && (
           <div
             role="dialog"
@@ -7094,7 +7239,7 @@ export function CrmLeadsPage() {
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.6)",
+              backgroundColor: "rgba(15, 23, 42, 0.65)",
               backdropFilter: "blur(4px)",
               zIndex: 10001,
               display: "flex",
@@ -7111,14 +7256,15 @@ export function CrmLeadsPage() {
             <div
               style={{
                 width: "100%",
-                maxWidth: "1040px",
-                maxHeight: "92vh",
+                maxWidth: "1180px",
+                maxHeight: "94vh",
                 backgroundColor: "#fff",
                 borderRadius: "0.75rem",
                 boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
+                border: "1px solid #e2e8f0",
               }}
             >
               {/* Modal Header */}
@@ -7126,60 +7272,175 @@ export function CrmLeadsPage() {
                 style={{
                   padding: "1.25rem 1.5rem",
                   borderBottom: "1px solid #e2e8f0",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
                   backgroundColor: "#f8fafc",
                 }}
               >
-                <div>
-                  <h3 id="quotation-modal-title" style={{ fontSize: "1.125rem", fontWeight: 700, color: "#0f172a", margin: 0 }}>
-                    {editingQuotationId
-                      ? isRevisionMode
-                        ? `Create Quotation Revision (v${(leadQuotations.find((q) => q.id === editingQuotationId)?.version || 1) + 1})`
-                        : "Edit Quotation Draft"
-                      : "Create Sales Quotation"}
-                  </h3>
-                  <div style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.2rem" }}>
-                    Lead: <strong>{selectedLead.name || selectedLead.lead_code}</strong>
-                    {selectedLead.company_name && <span> • Company: <strong>{selectedLead.company_name}</strong></span>}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1rem" }}>
+                  <div>
+                    <h3 id="quotation-modal-title" style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                      {editingQuotationId
+                        ? isRevisionMode
+                          ? `Create Quotation Revision (v${(leadQuotations.find((q) => q.id === editingQuotationId)?.version || 1) + 1})`
+                          : "Edit Quotation"
+                        : "Create Quotation"}
+                    </h3>
+                    <div style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.25rem" }}>
+                      Authorized CRM Quotation Editor • Linked to Lead & Product Master
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    disabled={quoteSaving}
+                    onClick={() => setShowQuotationModal(false)}
+                    style={{
+                      fontSize: "1.25rem",
+                      border: "none",
+                      background: "none",
+                      cursor: quoteSaving ? "not-allowed" : "pointer",
+                      color: "#64748b",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "0.25rem",
+                    }}
+                  >
+                    ✕
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  disabled={quoteSaving}
-                  onClick={() => setShowQuotationModal(false)}
+
+                {/* Warning when customer or company details are genuinely missing */}
+                {(!selectedLead.company_name && !selectedLead.company_id && !selectedLead.email && !selectedLead.original_phone && !selectedLead.normalized_phone) && (
+                  <div
+                    data-testid="quotation-missing-details-warning"
+                    style={{
+                      backgroundColor: "#fffbeb",
+                      border: "1px solid #fde68a",
+                      color: "#92400e",
+                      padding: "0.625rem 0.875rem",
+                      borderRadius: "0.375rem",
+                      fontSize: "0.8125rem",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      marginBottom: "0.75rem",
+                    }}
+                  >
+                    <span>⚠️</span>
+                    <div>
+                      <strong>Missing Customer Details:</strong> This lead has neither a registered Company Master record nor contact information. The quotation PDF will omit missing company/contact fields cleanly without fabricating placeholders.
+                    </div>
+                  </div>
+                )}
+
+                {/* Section A: Header Fields (Customer, Quotation Number, Version, Currency, Date) */}
+                <div
                   style={{
-                    fontSize: "1.25rem",
-                    border: "none",
-                    background: "none",
-                    cursor: quoteSaving ? "not-allowed" : "pointer",
-                    color: "#64748b",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "1rem",
+                    backgroundColor: "#fff",
+                    padding: "0.875rem 1rem",
+                    borderRadius: "0.5rem",
+                    border: "1px solid #e2e8f0",
                   }}
                 >
-                  ✕
-                </button>
+                  {/* Customer / Company */}
+                  <div>
+                    <span style={{ display: "block", fontSize: "0.7rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
+                      Customer / Company
+                    </span>
+                    <div style={{ fontSize: "0.875rem", fontWeight: 700, color: "#0f172a", marginTop: "0.15rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {selectedLead.company_name || selectedLead.name || "Customer"}
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "#2563eb", fontWeight: 600 }}>
+                      {selectedLead.lead_code} {selectedLead.name ? `(${selectedLead.name})` : ""}
+                    </div>
+                  </div>
+
+                  {/* Quotation Number */}
+                  <div>
+                    <span style={{ display: "block", fontSize: "0.7rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
+                      Quotation Number
+                    </span>
+                    <div style={{ fontSize: "0.875rem", fontWeight: 700, color: "#0f172a", marginTop: "0.15rem", fontFamily: "monospace" }}>
+                      {editingQuotationId
+                        ? leadQuotations.find((q) => q.id === editingQuotationId)?.quotation_number || "Draft"
+                        : "QTN-PREVIEW (Auto)"}
+                    </div>
+                    <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                      {editingQuotationId ? "Existing Record" : "Assigned on save"}
+                    </span>
+                  </div>
+
+                  {/* Version */}
+                  <div>
+                    <span style={{ display: "block", fontSize: "0.7rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
+                      Version
+                    </span>
+                    <div style={{ marginTop: "0.15rem" }}>
+                      <span style={{ display: "inline-block", padding: "0.15rem 0.5rem", backgroundColor: "#eff6ff", color: "#1d4ed8", fontWeight: 700, borderRadius: "0.25rem", fontSize: "0.8125rem" }}>
+                        v{isRevisionMode
+                          ? (leadQuotations.find((q) => q.id === editingQuotationId)?.version || 1) + 1
+                          : editingQuotationId
+                          ? leadQuotations.find((q) => q.id === editingQuotationId)?.version || 1
+                          : 1}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Currency */}
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: "0.15rem" }}>
+                      Currency
+                    </label>
+                    <select
+                      value={quoteCurrency}
+                      onChange={(e) => setQuoteCurrency(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "0.35rem 0.5rem",
+                        fontSize: "0.8125rem",
+                        borderRadius: "0.25rem",
+                        border: "1px solid #cbd5e1",
+                        backgroundColor: "#fff",
+                        fontWeight: 600,
+                        color: "#0f172a",
+                      }}
+                    >
+                      <option value="INR">INR (₹ Indian Rupee)</option>
+                      <option value="USD">USD ($ US Dollar)</option>
+                      <option value="EUR">EUR (€ Euro)</option>
+                      <option value="GBP">GBP (£ British Pound)</option>
+                      <option value="AED">AED (د.إ UAE Dirham)</option>
+                    </select>
+                  </div>
+
+                  {/* Quotation Date */}
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: "0.15rem" }}>
+                      Quotation Date
+                    </label>
+                    <input
+                      type="date"
+                      value={quoteDate}
+                      onChange={(e) => setQuoteDate(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "0.35rem 0.5rem",
+                        fontSize: "0.8125rem",
+                        borderRadius: "0.25rem",
+                        border: "1px solid #cbd5e1",
+                        backgroundColor: "#fff",
+                        boxSizing: "border-box",
+                        color: "#0f172a",
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Scrollable Form Body */}
               <form onSubmit={handleSaveQuotation} style={{ display: "flex", flexDirection: "column", overflow: "hidden", flex: 1 }}>
                 <div style={{ padding: "1.25rem 1.5rem", overflowY: "auto", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                  {/* Commercial Notice */}
-                  <div
-                    style={{
-                      padding: "0.75rem 1rem",
-                      backgroundColor: "#fffbeb",
-                      border: "1px solid #fde68a",
-                      borderRadius: "0.375rem",
-                      fontSize: "0.8125rem",
-                      color: "#92400e",
-                      lineHeight: 1.45,
-                    }}
-                  >
-                    <strong>Commercial Inputs Notice:</strong> Unit prices, discounts, and GST tax rates must be explicitly entered or confirmed. Catalog prices and rates are suggestions and are not silently applied. Backend calculations using Decimal arithmetic are authoritative.
-                  </div>
-
-                  {/* Revision notes if in revision mode */}
+                  {/* Revision justification note if in revision mode */}
                   {isRevisionMode && (
                     <div
                       style={{
@@ -7194,7 +7455,7 @@ export function CrmLeadsPage() {
                       </label>
                       <input
                         type="text"
-                        placeholder="e.g. Revised after client negotiation; updated discount tier"
+                        placeholder="e.g. Revised pricing after customer negotiation; updated quantities"
                         value={revisionNotes}
                         onChange={(e) => setRevisionNotes(e.target.value)}
                         required
@@ -7211,116 +7472,46 @@ export function CrmLeadsPage() {
                     </div>
                   )}
 
-                  {/* Header Meta: Currency, Validity, Terms */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.75rem" }}>
-                    <div>
-                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-                        Currency
-                      </label>
-                      <select
-                        value={quoteCurrency}
-                        onChange={(e) => setQuoteCurrency(e.target.value)}
-                        style={{
-                          width: "100%",
-                          padding: "0.45rem 0.65rem",
-                          fontSize: "0.8125rem",
-                          borderRadius: "0.375rem",
-                          border: "1px solid #cbd5e1",
-                          backgroundColor: "#fff",
-                        }}
-                      >
-                        <option value="INR">INR (₹ Indian Rupee)</option>
-                        <option value="USD">USD ($ US Dollar)</option>
-                        <option value="EUR">EUR (€ Euro)</option>
-                        <option value="GBP">GBP (£ British Pound)</option>
-                        <option value="AED">AED (د.إ UAE Dirham)</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-                        Quotation Validity Date
-                      </label>
-                      <input
-                        type="date"
-                        value={quoteValidUntil}
-                        onChange={(e) => setQuoteValidUntil(e.target.value)}
-                        style={{
-                          width: "100%",
-                          padding: "0.45rem 0.65rem",
-                          fontSize: "0.8125rem",
-                          borderRadius: "0.375rem",
-                          border: "1px solid #cbd5e1",
-                          backgroundColor: "#fff",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-                        Payment Terms
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. 30% advance, 70% before dispatch"
-                        value={quotePaymentTerms}
-                        onChange={(e) => setQuotePaymentTerms(e.target.value)}
-                        style={{
-                          width: "100%",
-                          padding: "0.45rem 0.65rem",
-                          fontSize: "0.8125rem",
-                          borderRadius: "0.375rem",
-                          border: "1px solid #cbd5e1",
-                          backgroundColor: "#fff",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-                        Delivery Terms
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Ex-Works dispatch in 3-4 weeks"
-                        value={quoteDeliveryTerms}
-                        onChange={(e) => setQuoteDeliveryTerms(e.target.value)}
-                        style={{
-                          width: "100%",
-                          padding: "0.45rem 0.65rem",
-                          fontSize: "0.8125rem",
-                          borderRadius: "0.375rem",
-                          border: "1px solid #cbd5e1",
-                          backgroundColor: "#fff",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Product Search & Line Items Builder */}
+                  {/* Section C: Product Master Search & Line-Item Table */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <label style={{ fontSize: "0.875rem", fontWeight: 700, color: "#0f172a" }}>
-                        Quotation Line Items ({quoteLineItems.length})
-                      </label>
-                      <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                        Search Product Master to add items
-                      </span>
+                      <div>
+                        <h4 style={{ fontSize: "0.9375rem", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                          Product Line Items ({quoteLineItems.length})
+                        </h4>
+                        <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                          Select products from Product Master catalog. Commercial values (Price, Discount %, Tax %) are entered manually.
+                        </span>
+                      </div>
+                      {quoteLineItems.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setQuoteLineItems([])}
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "#ef4444",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                          }}
+                        >
+                          Clear all items
+                        </button>
+                      )}
                     </div>
 
-                    {/* Product Master Search Box */}
+                    {/* Product Master Search Bar */}
                     <div style={{ position: "relative" }}>
                       <input
                         type="text"
-                        placeholder="🔍 Type product name or code to add item to quote..."
+                        placeholder="🔍 Search Product Master by product name or code (e.g. DAR-01849, INH-00758, Ink Cup, Pump...)"
                         value={quoteLineSearch}
+                        onFocus={handleFocusProductSearch}
                         onChange={(e) => searchProductsForQuotation(e.target.value)}
                         style={{
                           width: "100%",
-                          padding: "0.55rem 0.75rem",
+                          padding: "0.6rem 0.85rem",
                           fontSize: "0.8125rem",
                           borderRadius: "0.375rem",
                           border: "1px solid #2563eb",
@@ -7328,11 +7519,31 @@ export function CrmLeadsPage() {
                           boxSizing: "border-box",
                         }}
                       />
+
                       {searchingQuoteProducts && (
-                        <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.25rem" }}>
-                          Searching active sellable products...
+                        <div style={{ fontSize: "0.75rem", color: "#2563eb", marginTop: "0.25rem", fontWeight: 500 }}>
+                          Searching Product Master catalog...
                         </div>
                       )}
+
+                      {/* Error banner if search failed */}
+                      {productSearchError && (
+                        <div
+                          style={{
+                            padding: "0.5rem 0.75rem",
+                            backgroundColor: "#fef2f2",
+                            border: "1px solid #fecaca",
+                            borderRadius: "0.375rem",
+                            color: "#b91c1c",
+                            fontSize: "0.8125rem",
+                            marginTop: "0.35rem",
+                          }}
+                        >
+                          ⚠️ {productSearchError}
+                        </div>
+                      )}
+
+                      {/* Search Results Dropdown */}
                       {quoteLineSearchResults.length > 0 && (
                         <div
                           style={{
@@ -7342,12 +7553,12 @@ export function CrmLeadsPage() {
                             right: 0,
                             zIndex: 100,
                             marginTop: "0.25rem",
-                            maxHeight: "220px",
+                            maxHeight: "260px",
                             overflowY: "auto",
                             backgroundColor: "#fff",
                             border: "1px solid #cbd5e1",
                             borderRadius: "0.375rem",
-                            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
+                            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
                           }}
                         >
                           {quoteLineSearchResults.map((prod) => (
@@ -7358,34 +7569,66 @@ export function CrmLeadsPage() {
                                 display: "flex",
                                 justifyContent: "space-between",
                                 alignItems: "center",
-                                padding: "0.5rem 0.75rem",
+                                padding: "0.6rem 0.85rem",
                                 borderBottom: "1px solid #f1f5f9",
                                 cursor: "pointer",
+                                transition: "background-color 0.15s ease",
                               }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f0fdf4")}
+                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#eff6ff")}
                               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#fff")}
                             >
-                              <div>
-                                <span style={{ fontSize: "0.75rem", fontFamily: "monospace", color: "#334155", backgroundColor: "#f1f5f9", padding: "0.1rem 0.35rem", borderRadius: "0.25rem" }}>
-                                  {prod.product_code}
-                                </span>{" "}
-                                <strong style={{ fontSize: "0.8125rem", color: "#0f172a" }}>
-                                  {prod.product_name}
-                                </strong>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      fontFamily: "monospace",
+                                      fontWeight: 700,
+                                      color: "#1d4ed8",
+                                      backgroundColor: "#eff6ff",
+                                      padding: "0.15rem 0.4rem",
+                                      borderRadius: "0.25rem",
+                                    }}
+                                  >
+                                    {prod.product_code}
+                                  </span>
+                                  <strong style={{ fontSize: "0.875rem", color: "#0f172a" }}>
+                                    {prod.product_name}
+                                  </strong>
+                                  {prod.brand && (
+                                    <span style={{ fontSize: "0.75rem", color: "#64748b", backgroundColor: "#f1f5f9", padding: "0.1rem 0.35rem", borderRadius: "0.25rem" }}>
+                                      {prod.brand}
+                                    </span>
+                                  )}
+                                  {prod.category && (
+                                    <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                                      • {prod.category}
+                                    </span>
+                                  )}
+                                </div>
                                 {prod.specification && (
-                                  <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                                  <div style={{ fontSize: "0.75rem", color: "#475569" }}>
                                     {prod.specification}
                                   </div>
                                 )}
                               </div>
-                              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "0.85rem", flexShrink: 0 }}>
                                 {prod.retail_price && (
                                   <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                                    Retail: ₹{prod.retail_price}
+                                    Catalog Ref: ₹{Number(prod.retail_price).toLocaleString("en-IN")}
                                   </span>
                                 )}
-                                <span style={{ fontSize: "0.75rem", color: "#16a34a", fontWeight: 600 }}>
-                                  + Add to Quote
+                                <span
+                                  style={{
+                                    fontSize: "0.75rem",
+                                    fontWeight: 700,
+                                    color: "#2563eb",
+                                    backgroundColor: "#dbeafe",
+                                    padding: "0.25rem 0.6rem",
+                                    borderRadius: "0.25rem",
+                                  }}
+                                >
+                                  + Select
                                 </span>
                               </div>
                             </div>
@@ -7394,307 +7637,303 @@ export function CrmLeadsPage() {
                       )}
                     </div>
 
-                    {/* Lines List */}
-                    {quoteLineItems.length === 0 ? (
-                      <div
-                        style={{
-                          padding: "1.5rem",
-                          textAlign: "center",
-                          backgroundColor: "#f8fafc",
-                          border: "1px dashed #cbd5e1",
-                          borderRadius: "0.375rem",
-                          fontSize: "0.8125rem",
-                          color: "#64748b",
-                        }}
-                      >
-                        No product line items added. Use the search input above to add items from the Product Master.
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                        {quoteLineItems.map((item, idx) => {
-                          const qty = Number(item.quantity) || 0;
-                          const uprice = Number(item.unit_price) || 0;
-                          const udisc = Number(item.unit_discount) || 0;
-                          const trate = Number(item.tax_rate) || 0;
-                          const lineSub = qty * uprice;
-                          const lineDisc = qty * udisc;
-                          const lineTaxable = Math.max(0, lineSub - lineDisc);
-                          const lineTax = (lineTaxable * trate) / 100;
-                          const lineTotal = lineTaxable + lineTax;
-
-                          return (
-                            <div
-                              key={item.product_id}
-                              style={{
-                                border: "1px solid #cbd5e1",
-                                borderRadius: "0.5rem",
-                                padding: "0.85rem 1rem",
-                                backgroundColor: "#fff",
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: "0.6rem",
-                              }}
-                            >
-                              {/* Product Info Header */}
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                <div>
-                                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                                    <span style={{ fontSize: "0.7rem", fontWeight: 700, backgroundColor: "#e2e8f0", padding: "0.1rem 0.35rem", borderRadius: "0.25rem", color: "#334155" }}>
-                                      #{idx + 1}
-                                    </span>
-                                    <span style={{ fontSize: "0.75rem", fontFamily: "monospace", color: "#2563eb", fontWeight: 600 }}>
-                                      {item.product_code}
-                                    </span>
-                                    <strong style={{ fontSize: "0.875rem", color: "#0f172a" }}>
-                                      {item.product_name}
-                                    </strong>
-                                    <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                                      ({item.uom})
-                                    </span>
-                                  </div>
-                                  {item.specification && (
-                                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.15rem" }}>
-                                      {item.specification}
-                                    </div>
-                                  )}
+                    {/* Table Structure: | # | Product Details | Qty | Price | UOM | Discount % | Tax % | Total | Action | */}
+                    <div style={{ border: "1px solid #cbd5e1", borderRadius: "0.5rem", overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.8125rem" }}>
+                        <thead>
+                          <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #cbd5e1", color: "#475569" }}>
+                            <th style={{ padding: "0.6rem 0.5rem", width: "35px", textAlign: "center", fontWeight: 700 }}>#</th>
+                            <th style={{ padding: "0.6rem 0.75rem", minWidth: "260px", fontWeight: 700 }}>Product Details</th>
+                            <th style={{ padding: "0.6rem 0.5rem", width: "80px", fontWeight: 700 }}>Qty *</th>
+                            <th style={{ padding: "0.6rem 0.5rem", width: "120px", fontWeight: 700 }}>Price (₹) *</th>
+                            <th style={{ padding: "0.6rem 0.5rem", width: "70px", fontWeight: 700 }}>UOM</th>
+                            <th style={{ padding: "0.6rem 0.5rem", width: "95px", fontWeight: 700 }}>Discount %</th>
+                            <th style={{ padding: "0.6rem 0.5rem", width: "125px", fontWeight: 700 }}>Tax % *</th>
+                            <th style={{ padding: "0.6rem 0.75rem", width: "110px", textAlign: "right", fontWeight: 700 }}>Total (₹)</th>
+                            <th style={{ padding: "0.6rem 0.5rem", width: "45px", textAlign: "center", fontWeight: 700 }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {quoteLineItems.length === 0 ? (
+                            <tr>
+                              <td colSpan={9} style={{ padding: "2rem", textAlign: "center", backgroundColor: "#f8fafc", color: "#64748b" }}>
+                                <div style={{ fontSize: "1.25rem", marginBottom: "0.35rem" }}>📦</div>
+                                <strong>No product line items added.</strong>
+                                <div style={{ fontSize: "0.8125rem", marginTop: "0.25rem" }}>
+                                  Type in the search box above to find and select products from Product Master.
                                 </div>
+                              </td>
+                            </tr>
+                          ) : (
+                            quoteLineItems.map((item, idx) => {
+                              const q = typeof item.quantity === "number" ? item.quantity : parseFloat(String(item.quantity)) || 0;
+                              const p = typeof item.unit_price === "number" ? item.unit_price : parseFloat(String(item.unit_price)) || 0;
+                              const discPct = item.discount_percent === "" || item.discount_percent === undefined ? 0 : Number(item.discount_percent) || 0;
+                              const discAmt = (p * discPct) / 100;
+                              const lineSub = q * p;
+                              const lineDisc = q * discAmt;
+                              const lineTaxable = Math.max(0, lineSub - lineDisc);
+                              const tr = item.tax_rate === "" || item.tax_rate === undefined ? 0 : Number(item.tax_rate) || 0;
+                              const lineTax = (lineTaxable * tr) / 100;
+                              const lineTotal = lineTaxable + lineTax;
 
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setQuoteLineItems((prev) => prev.filter((_, i) => i !== idx));
-                                  }}
-                                  style={{
-                                    fontSize: "0.75rem",
-                                    color: "#ef4444",
-                                    background: "none",
-                                    border: "none",
-                                    cursor: "pointer",
-                                    textDecoration: "underline",
-                                  }}
-                                >
-                                  ✕ Remove Line
-                                </button>
-                              </div>
+                              return (
+                                <tr key={item.product_id} style={{ borderBottom: idx < quoteLineItems.length - 1 ? "1px solid #e2e8f0" : "none", backgroundColor: idx % 2 === 0 ? "#fff" : "#fafafa" }}>
+                                  {/* # */}
+                                  <td style={{ padding: "0.6rem 0.5rem", textAlign: "center", color: "#64748b", fontWeight: 600 }}>
+                                    {idx + 1}
+                                  </td>
 
-                              {/* Optional Content Toggles */}
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", alignItems: "center", backgroundColor: "#f8fafc", padding: "0.4rem 0.6rem", borderRadius: "0.25rem", fontSize: "0.75rem" }}>
-                                {item.available_images.length > 0 && (
-                                  <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", cursor: "pointer", color: "#334155" }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={item.include_images}
-                                      onChange={(e) => {
-                                        const checked = e.target.checked;
-                                        setQuoteLineItems((prev) =>
-                                          prev.map((it, i) => (i === idx ? { ...it, include_images: checked } : it))
-                                        );
-                                      }}
-                                    />
-                                    Include Image in Quote Snapshot
-                                  </label>
-                                )}
-                                <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", cursor: "pointer", color: "#334155" }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={item.include_specifications}
-                                    onChange={(e) => {
-                                      const checked = e.target.checked;
-                                      setQuoteLineItems((prev) =>
-                                        prev.map((it, i) => (i === idx ? { ...it, include_specifications: checked } : it))
-                                      );
-                                    }}
-                                  />
-                                  Include Specifications
-                                </label>
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", flex: 1, minWidth: "220px" }}>
-                                  <span style={{ color: "#64748b" }}>Demo URL:</span>
-                                  <input
-                                    type="url"
-                                    placeholder="https://..."
-                                    value={item.demo_link}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setQuoteLineItems((prev) =>
-                                        prev.map((it, i) => (i === idx ? { ...it, demo_link: val } : it))
-                                      );
-                                    }}
-                                    style={{
-                                      flex: 1,
-                                      padding: "0.25rem 0.4rem",
-                                      fontSize: "0.75rem",
-                                      borderRadius: "0.25rem",
-                                      border: "1px solid #cbd5e1",
-                                    }}
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Commercial Inputs Row */}
-                              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "0.6rem", alignItems: "flex-end" }}>
-                                <div>
-                                  <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 600, color: "#475569", marginBottom: "0.2rem" }}>
-                                    Quantity *
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    step="1"
-                                    value={item.quantity}
-                                    onChange={(e) => {
-                                      const val = Math.max(1, parseInt(e.target.value) || 1);
-                                      setQuoteLineItems((prev) =>
-                                        prev.map((it, i) => (i === idx ? { ...it, quantity: val } : it))
-                                      );
-                                    }}
-                                    style={{
-                                      width: "100%",
-                                      padding: "0.4rem 0.5rem",
-                                      fontSize: "0.8125rem",
-                                      borderRadius: "0.25rem",
-                                      border: "1px solid #cbd5e1",
-                                      boxSizing: "border-box",
-                                    }}
-                                  />
-                                </div>
-
-                                <div>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.2rem" }}>
-                                    <label style={{ fontSize: "0.7rem", fontWeight: 600, color: item.unit_price <= 0 ? "#b91c1c" : "#475569" }}>
-                                      Unit Price (₹) *
-                                    </label>
-                                    {item.suggested_price > 0 && !item.price_confirmed && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setQuoteLineItems((prev) =>
-                                            prev.map((it, i) =>
-                                              i === idx ? { ...it, unit_price: it.suggested_price, price_confirmed: true } : it
-                                            )
-                                          );
-                                        }}
+                                  {/* Product Details */}
+                                  <td style={{ padding: "0.6rem 0.75rem", verticalAlign: "top" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                                      <span
                                         style={{
-                                          fontSize: "0.65rem",
-                                          color: "#2563eb",
-                                          background: "none",
-                                          border: "none",
-                                          cursor: "pointer",
-                                          textDecoration: "underline",
-                                          padding: 0,
+                                          fontSize: "0.75rem",
+                                          fontFamily: "monospace",
+                                          fontWeight: 700,
+                                          color: "#1d4ed8",
+                                          backgroundColor: "#eff6ff",
+                                          padding: "0.1rem 0.35rem",
+                                          borderRadius: "0.25rem",
                                         }}
                                       >
-                                        Use ₹{item.suggested_price}
-                                      </button>
+                                        {item.product_code}
+                                      </span>
+                                      <strong style={{ fontSize: "0.8125rem", color: "#0f172a" }}>
+                                        {item.product_name}
+                                      </strong>
+                                    </div>
+                                    {item.specification && (
+                                      <div style={{ fontSize: "0.75rem", color: "#64748b", fontStyle: "italic", marginTop: "0.2rem" }}>
+                                        {item.specification}
+                                      </div>
                                     )}
-                                  </div>
-                                  <input
-                                    type="number"
-                                    min="0.01"
-                                    step="0.01"
-                                    value={item.unit_price || ""}
-                                    placeholder="Enter price"
-                                    onChange={(e) => {
-                                      const val = parseFloat(e.target.value) || 0;
-                                      setQuoteLineItems((prev) =>
-                                        prev.map((it, i) => (i === idx ? { ...it, unit_price: val, price_confirmed: true } : it))
-                                      );
-                                    }}
-                                    style={{
-                                      width: "100%",
-                                      padding: "0.4rem 0.5rem",
-                                      fontSize: "0.8125rem",
-                                      borderRadius: "0.25rem",
-                                      border: item.unit_price <= 0 ? "1px solid #ef4444" : "1px solid #cbd5e1",
-                                      boxSizing: "border-box",
-                                      backgroundColor: item.unit_price <= 0 ? "#fff5f5" : "#fff",
-                                    }}
-                                  />
-                                </div>
+                                    <input
+                                      type="text"
+                                      placeholder="Optional quotation-specific description / notes..."
+                                      value={item.description || ""}
+                                      onChange={(e) => {
+                                        const desc = e.target.value;
+                                        setQuoteLineItems((prev) =>
+                                          prev.map((it, i) => (i === idx ? { ...it, description: desc } : it))
+                                        );
+                                      }}
+                                      style={{
+                                        width: "100%",
+                                        marginTop: "0.35rem",
+                                        padding: "0.3rem 0.5rem",
+                                        fontSize: "0.75rem",
+                                        borderRadius: "0.25rem",
+                                        border: "1px solid #cbd5e1",
+                                        backgroundColor: "#fff",
+                                        boxSizing: "border-box",
+                                      }}
+                                    />
+                                  </td>
 
-                                <div>
-                                  <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 600, color: "#475569", marginBottom: "0.2rem" }}>
-                                    Unit Discount (₹)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={item.unit_discount || ""}
-                                    placeholder="0.00"
-                                    onChange={(e) => {
-                                      const val = Math.max(0, parseFloat(e.target.value) || 0);
-                                      setQuoteLineItems((prev) =>
-                                        prev.map((it, i) => (i === idx ? { ...it, unit_discount: val } : it))
-                                      );
-                                    }}
-                                    style={{
-                                      width: "100%",
-                                      padding: "0.4rem 0.5rem",
-                                      fontSize: "0.8125rem",
-                                      borderRadius: "0.25rem",
-                                      border: "1px solid #cbd5e1",
-                                      boxSizing: "border-box",
-                                    }}
-                                  />
-                                </div>
+                                  {/* Qty */}
+                                  <td style={{ padding: "0.6rem 0.5rem", verticalAlign: "top" }}>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      step="1"
+                                      value={item.quantity}
+                                      placeholder="1"
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const val = raw === "" ? "" : Math.max(1, parseInt(raw) || 1);
+                                        setQuoteLineItems((prev) =>
+                                          prev.map((it, i) => (i === idx ? { ...it, quantity: val } : it))
+                                        );
+                                      }}
+                                      style={{
+                                        width: "100%",
+                                        padding: "0.35rem 0.4rem",
+                                        fontSize: "0.8125rem",
+                                        borderRadius: "0.25rem",
+                                        border: "1px solid #cbd5e1",
+                                        textAlign: "center",
+                                        boxSizing: "border-box",
+                                      }}
+                                    />
+                                  </td>
 
-                                <div>
-                                  <label style={{ display: "block", fontSize: "0.7rem", fontWeight: 600, color: "#475569", marginBottom: "0.2rem" }}>
-                                    GST Tax Rate (%)
-                                  </label>
-                                  <select
-                                    value={item.tax_rate}
-                                    onChange={(e) => {
-                                      const val = parseFloat(e.target.value) || 0;
-                                      setQuoteLineItems((prev) =>
-                                        prev.map((it, i) => (i === idx ? { ...it, tax_rate: val } : it))
-                                      );
-                                    }}
-                                    style={{
-                                      width: "100%",
-                                      padding: "0.4rem 0.5rem",
-                                      fontSize: "0.8125rem",
-                                      borderRadius: "0.25rem",
-                                      border: "1px solid #cbd5e1",
-                                      backgroundColor: "#fff",
-                                    }}
-                                  >
-                                    <option value="18">18% (Standard GST)</option>
-                                    <option value="12">12% GST</option>
-                                    <option value="5">5% GST (Concessional)</option>
-                                    <option value="28">28% GST</option>
-                                    <option value="0">0% (Tax Exempt)</option>
-                                  </select>
-                                </div>
+                                  {/* Price */}
+                                  <td style={{ padding: "0.6rem 0.5rem", verticalAlign: "top" }}>
+                                    <input
+                                      type="number"
+                                      min="0.01"
+                                      step="0.01"
+                                      value={item.unit_price}
+                                      placeholder="Enter price *"
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const val = raw === "" ? "" : Math.max(0, parseFloat(raw) || 0);
+                                        const pVal = val === "" ? 0 : val;
+                                        const dPct = item.discount_percent === "" || item.discount_percent === undefined ? 0 : Number(item.discount_percent) || 0;
+                                        const uDisc = Math.round((pVal * (dPct / 100)) * 100) / 100;
+                                        setQuoteLineItems((prev) =>
+                                          prev.map((it, i) => (i === idx ? { ...it, unit_price: val, unit_discount: uDisc, price_confirmed: true } : it))
+                                        );
+                                      }}
+                                      style={{
+                                        width: "100%",
+                                        padding: "0.35rem 0.4rem",
+                                        fontSize: "0.8125rem",
+                                        borderRadius: "0.25rem",
+                                        border: (item.unit_price === "" || Number(item.unit_price) <= 0) ? "1px solid #ef4444" : "1px solid #cbd5e1",
+                                        backgroundColor: (item.unit_price === "" || Number(item.unit_price) <= 0) ? "#fff5f5" : "#fff",
+                                        boxSizing: "border-box",
+                                      }}
+                                    />
+                                    {item.suggested_price > 0 && (
+                                      <div style={{ fontSize: "0.65rem", color: "#64748b", marginTop: "0.15rem" }}>
+                                        Ref: ₹{item.suggested_price.toLocaleString("en-IN")}
+                                      </div>
+                                    )}
+                                  </td>
 
-                                <div style={{ textAlign: "right", backgroundColor: "#f8fafc", padding: "0.4rem 0.5rem", borderRadius: "0.25rem" }}>
-                                  <span style={{ fontSize: "0.65rem", color: "#64748b", display: "block" }}>Line Total</span>
-                                  <strong style={{ fontSize: "0.875rem", color: "#0f172a" }}>
-                                    ₹{lineTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </strong>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                                  {/* UOM */}
+                                  <td style={{ padding: "0.6rem 0.5rem", verticalAlign: "top" }}>
+                                    <span
+                                      style={{
+                                        display: "inline-block",
+                                        padding: "0.25rem 0.4rem",
+                                        backgroundColor: "#f1f5f9",
+                                        borderRadius: "0.25rem",
+                                        fontSize: "0.75rem",
+                                        fontWeight: 600,
+                                        color: "#475569",
+                                        textAlign: "center",
+                                        width: "100%",
+                                        boxSizing: "border-box",
+                                      }}
+                                    >
+                                      {item.uom || "NOS"}
+                                    </span>
+                                  </td>
+
+                                  {/* Discount % */}
+                                  <td style={{ padding: "0.6rem 0.5rem", verticalAlign: "top" }}>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="100"
+                                      step="0.1"
+                                      value={item.discount_percent ?? ""}
+                                      placeholder="0"
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const val = raw === "" ? "" : Math.max(0, Math.min(100, parseFloat(raw) || 0));
+                                        const numPct = val === "" ? 0 : val;
+                                        const pVal = typeof item.unit_price === "number" ? item.unit_price : parseFloat(String(item.unit_price)) || 0;
+                                        const uDisc = Math.round((pVal * (numPct / 100)) * 100) / 100;
+                                        setQuoteLineItems((prev) =>
+                                          prev.map((it, i) => (i === idx ? { ...it, discount_percent: val, unit_discount: uDisc } : it))
+                                        );
+                                      }}
+                                      style={{
+                                        width: "100%",
+                                        padding: "0.35rem 0.4rem",
+                                        fontSize: "0.8125rem",
+                                        borderRadius: "0.25rem",
+                                        border: "1px solid #cbd5e1",
+                                        textAlign: "center",
+                                        boxSizing: "border-box",
+                                      }}
+                                    />
+                                    {Number(item.unit_discount) > 0 && (
+                                      <div style={{ fontSize: "0.65rem", color: "#16a34a", marginTop: "0.15rem", textAlign: "center" }}>
+                                        -₹{Number(item.unit_discount).toFixed(2)}
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Tax % */}
+                                  <td style={{ padding: "0.6rem 0.5rem", verticalAlign: "top" }}>
+                                    <select
+                                      value={item.tax_rate !== "" ? String(item.tax_rate) : ""}
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const val = raw === "" ? "" : parseFloat(raw);
+                                        setQuoteLineItems((prev) =>
+                                          prev.map((it, i) => (i === idx ? { ...it, tax_rate: val } : it))
+                                        );
+                                      }}
+                                      style={{
+                                        width: "100%",
+                                        padding: "0.35rem 0.35rem",
+                                        fontSize: "0.8125rem",
+                                        borderRadius: "0.25rem",
+                                        border: item.tax_rate === "" ? "1px solid #ef4444" : "1px solid #cbd5e1",
+                                        backgroundColor: item.tax_rate === "" ? "#fff5f5" : "#fff",
+                                        boxSizing: "border-box",
+                                      }}
+                                    >
+                                      <option value="">-- Tax * --</option>
+                                      <option value="18">18% GST</option>
+                                      <option value="12">12% GST</option>
+                                      <option value="5">5% GST</option>
+                                      <option value="28">28% GST</option>
+                                      <option value="0">0% (Exempt)</option>
+                                    </select>
+                                    {item.catalog_tax_rate !== null && item.catalog_tax_rate !== undefined && (
+                                      <div style={{ fontSize: "0.65rem", color: "#64748b", marginTop: "0.15rem" }}>
+                                        Ref: {item.catalog_tax_rate}%
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Total */}
+                                  <td style={{ padding: "0.6rem 0.75rem", verticalAlign: "top", textAlign: "right" }}>
+                                    <strong style={{ fontSize: "0.875rem", color: "#0f172a" }}>
+                                      ₹{lineTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </strong>
+                                  </td>
+
+                                  {/* Action */}
+                                  <td style={{ padding: "0.6rem 0.5rem", verticalAlign: "top", textAlign: "center" }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setQuoteLineItems((prev) => prev.filter((_, i) => i !== idx))}
+                                      title="Remove item"
+                                      style={{
+                                        background: "none",
+                                        border: "none",
+                                        color: "#ef4444",
+                                        cursor: "pointer",
+                                        fontSize: "0.9rem",
+                                        padding: "0.2rem 0.4rem",
+                                        borderRadius: "0.25rem",
+                                      }}
+                                    >
+                                      🗑️
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
 
-                  {/* Commercial Notes and Terms & Conditions */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                  {/* Section D: Notes and Terms & Conditions (2 columns) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "1rem" }}>
                     <div>
-                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-                        Commercial Notes (Optional)
+                      <label style={{ display: "block", fontSize: "0.8125rem", fontWeight: 700, color: "#334155", marginBottom: "0.35rem" }}>
+                        Notes (Optional)
                       </label>
                       <textarea
                         rows={3}
-                        placeholder="Internal or customer-facing commercial notes..."
                         value={quoteNotes}
                         onChange={(e) => setQuoteNotes(e.target.value)}
+                        placeholder="Add client-facing notes or remarks..."
                         style={{
                           width: "100%",
-                          padding: "0.45rem 0.65rem",
+                          padding: "0.5rem 0.65rem",
                           fontSize: "0.8125rem",
                           borderRadius: "0.375rem",
                           border: "1px solid #cbd5e1",
@@ -7705,16 +7944,17 @@ export function CrmLeadsPage() {
                     </div>
 
                     <div>
-                      <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "0.25rem" }}>
-                        Terms & Conditions
+                      <label style={{ display: "block", fontSize: "0.8125rem", fontWeight: 700, color: "#334155", marginBottom: "0.35rem" }}>
+                        Terms and Conditions (Optional)
                       </label>
                       <textarea
                         rows={3}
                         value={quoteTerms}
                         onChange={(e) => setQuoteTerms(e.target.value)}
+                        placeholder="Enter terms and conditions..."
                         style={{
                           width: "100%",
-                          padding: "0.45rem 0.65rem",
+                          padding: "0.5rem 0.65rem",
                           fontSize: "0.8125rem",
                           borderRadius: "0.375rem",
                           border: "1px solid #cbd5e1",
@@ -7725,7 +7965,7 @@ export function CrmLeadsPage() {
                     </div>
                   </div>
 
-                  {/* Live Financial Totals Summary Preview */}
+                  {/* Section E: Financial Summary */}
                   {(() => {
                     let totalSub = 0;
                     let totalDisc = 0;
@@ -7734,13 +7974,14 @@ export function CrmLeadsPage() {
                     let grandTotal = 0;
 
                     quoteLineItems.forEach((it) => {
-                      const q = Number(it.quantity) || 0;
-                      const p = Number(it.unit_price) || 0;
-                      const d = Number(it.unit_discount) || 0;
-                      const tr = Number(it.tax_rate) || 0;
+                      const q = typeof it.quantity === "number" ? it.quantity : parseFloat(String(it.quantity)) || 0;
+                      const p = typeof it.unit_price === "number" ? it.unit_price : parseFloat(String(it.unit_price)) || 0;
+                      const dPct = it.discount_percent === "" || it.discount_percent === undefined ? 0 : Number(it.discount_percent) || 0;
+                      const dAmt = (p * dPct) / 100;
                       const sub = q * p;
-                      const disc = q * d;
+                      const disc = q * dAmt;
                       const taxable = Math.max(0, sub - disc);
+                      const tr = it.tax_rate === "" || it.tax_rate === undefined ? 0 : Number(it.tax_rate) || 0;
                       const tax = (taxable * tr) / 100;
                       totalSub += sub;
                       totalDisc += disc;
@@ -7752,38 +7993,62 @@ export function CrmLeadsPage() {
                     return (
                       <div
                         style={{
-                          backgroundColor: "#f8fafc",
-                          border: "1px solid #cbd5e1",
-                          borderRadius: "0.5rem",
-                          padding: "1rem",
                           display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                          gap: "1rem",
+                          justifyContent: "flex-end",
+                          marginTop: "0.5rem",
                         }}
                       >
-                        <div>
-                          <div style={{ fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", color: "#475569" }}>
-                            Financial Breakdown Preview
+                        <div
+                          style={{
+                            width: "100%",
+                            maxWidth: "380px",
+                            backgroundColor: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            borderRadius: "0.5rem",
+                            padding: "0.875rem 1rem",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.45rem",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", color: "#475569" }}>
+                            <span>Subtotal</span>
+                            <span>₹{totalSub.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                           </div>
-                          <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.2rem" }}>
-                            Subtotal: ₹{totalSub.toLocaleString("en-IN", { minimumFractionDigits: 2 })} • Discount: ₹{totalDisc.toLocaleString("en-IN", { minimumFractionDigits: 2 })} • Taxable: ₹{totalTaxable.toLocaleString("en-IN", { minimumFractionDigits: 2 })} • Tax: ₹{totalTax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", color: "#16a34a" }}>
+                            <span>Discount</span>
+                            <span>-₹{totalDisc.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                           </div>
-                        </div>
-
-                        <div style={{ textAlign: "right" }}>
-                          <span style={{ fontSize: "0.75rem", color: "#64748b", display: "block" }}>Grand Total ({quoteCurrency})</span>
-                          <span style={{ fontSize: "1.25rem", fontWeight: 800, color: "#0f172a" }}>
-                            ₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", color: "#475569", borderTop: "1px dashed #cbd5e1", paddingTop: "0.35rem" }}>
+                            <span>Taxable Amount</span>
+                            <span>₹{totalTaxable.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", color: "#475569" }}>
+                            <span>Tax</span>
+                            <span>₹{totalTax.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              fontSize: "1rem",
+                              fontWeight: 800,
+                              color: "#0f172a",
+                              borderTop: "2px solid #cbd5e1",
+                              paddingTop: "0.45rem",
+                              marginTop: "0.15rem",
+                            }}
+                          >
+                            <span>Grand Total ({quoteCurrency})</span>
+                            <span>₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
                         </div>
                       </div>
                     );
                   })()}
                 </div>
 
-                {/* Modal Footer */}
+                {/* Section F: Modal Footer & Save Button */}
                 <div
                   style={{
                     padding: "1rem 1.5rem",
@@ -7805,6 +8070,7 @@ export function CrmLeadsPage() {
                       border: "1px solid #cbd5e1",
                       backgroundColor: "#fff",
                       cursor: quoteSaving ? "not-allowed" : "pointer",
+                      color: "#475569",
                     }}
                   >
                     Cancel
@@ -7825,11 +8091,11 @@ export function CrmLeadsPage() {
                     }}
                   >
                     {quoteSaving
-                      ? "Saving Quotation..."
+                      ? "Saving Draft Quotation..."
                       : editingQuotationId
                       ? isRevisionMode
                         ? "Save New Revision"
-                        : "Update Draft"
+                        : "Update Quotation"
                       : "Save Draft Quotation"}
                   </button>
                 </div>
@@ -7911,9 +8177,32 @@ export function CrmLeadsPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                   <button
                     type="button"
+                    data-testid="modal-view-quote-pdf"
+                    disabled={downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}-view`}
+                    onClick={() => handleDownloadQuotationPdf(selectedQuotationDetail.id, selectedQuotationDetail.quotation_number, selectedQuotationDetail.version, "view")}
+                    style={{
+                      fontSize: "0.8125rem",
+                      fontWeight: 600,
+                      padding: "0.4rem 0.8rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #cbd5e1",
+                      backgroundColor: "#f8fafc",
+                      color: "#334155",
+                      cursor: downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}-view` ? "not-allowed" : "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                    }}
+                    title="View quotation PDF in new browser tab"
+                  >
+                    👁️ {downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}-view` ? "Opening..." : "View PDF"}
+                  </button>
+
+                  <button
+                    type="button"
                     data-testid="modal-download-quote-pdf"
-                    disabled={downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}`}
-                    onClick={() => handleDownloadQuotationPdf(selectedQuotationDetail.id, selectedQuotationDetail.quotation_number, selectedQuotationDetail.version)}
+                    disabled={downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}-download`}
+                    onClick={() => handleDownloadQuotationPdf(selectedQuotationDetail.id, selectedQuotationDetail.quotation_number, selectedQuotationDetail.version, "download")}
                     style={{
                       fontSize: "0.8125rem",
                       fontWeight: 600,
@@ -7922,13 +8211,57 @@ export function CrmLeadsPage() {
                       border: "1px solid #bfdbfe",
                       backgroundColor: "#eff6ff",
                       color: "#1d4ed8",
-                      cursor: downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}` ? "not-allowed" : "pointer",
+                      cursor: downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}-download` ? "not-allowed" : "pointer",
                       display: "inline-flex",
                       alignItems: "center",
                       gap: "0.35rem",
                     }}
                   >
-                    📄 {downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}` ? "Downloading..." : `Download PDF (v${selectedQuotationDetail.version})`}
+                    📄 {downloadingPdfKey === `${selectedQuotationDetail.id}-${selectedQuotationDetail.version}-download` ? "Downloading..." : `Download PDF (v${selectedQuotationDetail.version})`}
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="modal-email-quote-btn"
+                    disabled={sharingQuotationKey === `email-${selectedQuotationDetail.id}`}
+                    onClick={() => handleShareQuotationEmail(selectedQuotationDetail)}
+                    style={{
+                      fontSize: "0.8125rem",
+                      fontWeight: 600,
+                      padding: "0.4rem 0.85rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #cbd5e1",
+                      backgroundColor: "#fff",
+                      color: "#0369a1",
+                      cursor: sharingQuotationKey === `email-${selectedQuotationDetail.id}` ? "not-allowed" : "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                    }}
+                  >
+                    ✉️ {sharingQuotationKey === `email-${selectedQuotationDetail.id}` ? "Opening..." : "Email"}
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="modal-wa-quote-btn"
+                    disabled={sharingQuotationKey === `wa-${selectedQuotationDetail.id}`}
+                    onClick={() => handleShareQuotationWhatsApp(selectedQuotationDetail)}
+                    style={{
+                      fontSize: "0.8125rem",
+                      fontWeight: 600,
+                      padding: "0.4rem 0.85rem",
+                      borderRadius: "0.375rem",
+                      border: "1px solid #bbf7d0",
+                      backgroundColor: "#f0fdf4",
+                      color: "#15803d",
+                      cursor: sharingQuotationKey === `wa-${selectedQuotationDetail.id}` ? "not-allowed" : "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                    }}
+                  >
+                    💬 {sharingQuotationKey === `wa-${selectedQuotationDetail.id}` ? "Opening..." : "WhatsApp"}
                   </button>
 
                   <button
@@ -8172,9 +8505,32 @@ export function CrmLeadsPage() {
                                   </div>
                                   <button
                                     type="button"
+                                    data-testid={`view-rev-pdf-${rev.id}`}
+                                    disabled={downloadingPdfKey === `${selectedQuotationDetail.id}-${rev.version}-view`}
+                                    onClick={() => handleDownloadQuotationPdf(selectedQuotationDetail.id, selectedQuotationDetail.quotation_number, rev.version, "view")}
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      fontWeight: 600,
+                                      padding: "0.25rem 0.5rem",
+                                      borderRadius: "0.25rem",
+                                      border: "1px solid #cbd5e1",
+                                      backgroundColor: "#f8fafc",
+                                      color: "#334155",
+                                      cursor: downloadingPdfKey === `${selectedQuotationDetail.id}-${rev.version}-view` ? "not-allowed" : "pointer",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "0.25rem",
+                                    }}
+                                    title="View revision PDF in new tab"
+                                  >
+                                    👁️ View
+                                  </button>
+
+                                  <button
+                                    type="button"
                                     data-testid={`download-rev-pdf-${rev.id}`}
-                                    disabled={downloadingPdfKey === `${selectedQuotationDetail.id}-${rev.version}`}
-                                    onClick={() => handleDownloadQuotationPdf(selectedQuotationDetail.id, selectedQuotationDetail.quotation_number, rev.version)}
+                                    disabled={downloadingPdfKey === `${selectedQuotationDetail.id}-${rev.version}-download`}
+                                    onClick={() => handleDownloadQuotationPdf(selectedQuotationDetail.id, selectedQuotationDetail.quotation_number, rev.version, "download")}
                                     style={{
                                       fontSize: "0.75rem",
                                       fontWeight: 600,
@@ -8183,13 +8539,13 @@ export function CrmLeadsPage() {
                                       border: "1px solid #bfdbfe",
                                       backgroundColor: "#eff6ff",
                                       color: "#1d4ed8",
-                                      cursor: downloadingPdfKey === `${selectedQuotationDetail.id}-${rev.version}` ? "not-allowed" : "pointer",
+                                      cursor: downloadingPdfKey === `${selectedQuotationDetail.id}-${rev.version}-download` ? "not-allowed" : "pointer",
                                       display: "inline-flex",
                                       alignItems: "center",
                                       gap: "0.25rem",
                                     }}
                                   >
-                                    📄 {downloadingPdfKey === `${selectedQuotationDetail.id}-${rev.version}` ? "..." : `PDF v${rev.version}`}
+                                    📄 {downloadingPdfKey === `${selectedQuotationDetail.id}-${rev.version}-download` ? "..." : `PDF v${rev.version}`}
                                   </button>
                                 </div>
                               </div>
@@ -8236,6 +8592,161 @@ export function CrmLeadsPage() {
                   }}
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Email Client Selection Modal */}
+        {emailClientModalQuote && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 10000,
+              padding: "1rem",
+            }}
+            onClick={() => setEmailClientModalQuote(null)}
+          >
+            <div
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "0.75rem",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                maxWidth: "460px",
+                width: "100%",
+                padding: "1.5rem",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+                <h3 style={{ margin: 0, fontSize: "1.125rem", fontWeight: 700, color: "#0f172a" }}>
+                  Choose Email Client
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setEmailClientModalQuote(null)}
+                  data-testid="cancel-email-client-modal"
+                  style={{
+                    border: "none",
+                    background: "none",
+                    cursor: "pointer",
+                    fontSize: "1.25rem",
+                    color: "#64748b",
+                    padding: "0.25rem",
+                  }}
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p style={{ margin: "0 0 1.25rem 0", fontSize: "0.875rem", color: "#64748b" }}>
+                Select how you would like to compose the email for quotation{" "}
+                <strong style={{ color: "#0f172a" }}>{emailClientModalQuote.quotation_number}</strong>.
+                The quotation PDF will be automatically downloaded so you can attach it.
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1.5rem" }}>
+                <button
+                  type="button"
+                  data-testid="choose-gmail-btn"
+                  onClick={() => {
+                    const q = emailClientModalQuote;
+                    setEmailClientModalQuote(null);
+                    executeShareQuotationEmail(q, "gmail");
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.85rem",
+                    padding: "0.85rem 1rem",
+                    borderRadius: "0.5rem",
+                    border: selectedEmailClient === "gmail" ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                    backgroundColor: selectedEmailClient === "gmail" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <div style={{ fontSize: "1.5rem" }}>🌐</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: "#0f172a" }}>Gmail (Browser)</span>
+                      {selectedEmailClient === "gmail" && (
+                        <span style={{ fontSize: "0.6875rem", fontWeight: 700, backgroundColor: "#dbeafe", color: "#1d4ed8", padding: "0.1rem 0.4rem", borderRadius: "9999px" }}>
+                          Preferred
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.15rem" }}>
+                      Open Gmail compose directly in a new browser tab
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="choose-default-email-btn"
+                  onClick={() => {
+                    const q = emailClientModalQuote;
+                    setEmailClientModalQuote(null);
+                    executeShareQuotationEmail(q, "default");
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.85rem",
+                    padding: "0.85rem 1rem",
+                    borderRadius: "0.5rem",
+                    border: selectedEmailClient === "default" ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                    backgroundColor: selectedEmailClient === "default" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <div style={{ fontSize: "1.5rem" }}>💻</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: "#0f172a" }}>Default Email App</span>
+                      {selectedEmailClient === "default" && (
+                        <span style={{ fontSize: "0.6875rem", fontWeight: 700, backgroundColor: "#dbeafe", color: "#1d4ed8", padding: "0.1rem 0.4rem", borderRadius: "9999px" }}>
+                          Preferred
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.15rem" }}>
+                      Open system mail client (Outlook, Apple Mail, Thunderbird, etc.)
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => setEmailClientModalQuote(null)}
+                  style={{
+                    padding: "0.5rem 1rem",
+                    fontSize: "0.875rem",
+                    fontWeight: 600,
+                    borderRadius: "0.375rem",
+                    border: "1px solid #cbd5e1",
+                    backgroundColor: "#ffffff",
+                    color: "#475569",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
                 </button>
               </div>
             </div>
