@@ -13,6 +13,7 @@ import { AppShell } from "@/components/AppShell";
 import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import type { LocalPurchaseSummary } from "@/types/localPurchase";
 import { LocalPurchaseDetailModal } from "./LocalPurchaseDetailModal";
 import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
@@ -22,6 +23,7 @@ export function LocalPurchasesPage() {
   const [searchParams] = useSearchParams();
   const { hasPermission } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [purchases, setPurchases] = useState<LocalPurchaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,9 +120,14 @@ export function LocalPurchasesPage() {
 
   // Delete Purchase
   const handleDelete = async (id: string, invoiceNo: string) => {
-    if (!window.confirm(`Are you sure you want to delete purchase invoice "${invoiceNo}"?`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Delete Purchase Invoice",
+      message: `Are you sure you want to delete purchase invoice "${invoiceNo}"? This action cannot be undone.`,
+      itemName: invoiceNo,
+      confirmLabel: "Delete Invoice",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       await apiDelete(`/purchases/local/${id}`);
       toast(`Purchase invoice "${invoiceNo}" deleted successfully.`, "success");
@@ -194,74 +201,74 @@ export function LocalPurchasesPage() {
 
           {/* Action Buttons */}
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            {/* Filter Toggle Button */}
+            {/* Filter Toggle Button (Matching Products Master) */}
             <button
               type="button"
-              className="btn"
+              className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
               onClick={() => setFilterOpen((prev) => !prev)}
               style={{
-                background: filterOpen || activeFiltersCount > 0 ? "#0061f2" : "#ffffff",
-                color: filterOpen || activeFiltersCount > 0 ? "#ffffff" : "#334155",
-                border: "1px solid #cbd5e1",
-                padding: "8px 14px",
+                background: filterOpen ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 12px",
                 borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
+                border: "none",
                 display: "inline-flex",
                 alignItems: "center",
+                justifyContent: "center",
                 gap: "6px",
                 cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
               title="Toggle Filter Options"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
               </svg>
-              <span>Filters</span>
               {activeFiltersCount > 0 && (
-                <span style={{
-                  background: filterOpen ? "#ffffff" : "#0061f2",
-                  color: filterOpen ? "#0061f2" : "#ffffff",
-                  fontSize: "10px",
-                  fontWeight: 800,
-                  borderRadius: "10px",
-                  padding: "1px 6px",
-                  marginLeft: "2px",
-                }}>
+                <span
+                  style={{
+                    background: "#ef4444",
+                    color: "#ffffff",
+                    fontSize: "10px",
+                    fontWeight: 800,
+                    borderRadius: "10px",
+                    padding: "1px 5px",
+                    lineHeight: 1,
+                  }}
+                >
                   {activeFiltersCount}
                 </span>
               )}
             </button>
 
-            {/* Export Dropdown */}
+            {/* Export Dropdown (Matching Products Master Orange Imp/Exp Style) */}
             {hasPermission("local_purchase.export") && (
             <div style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
+                className="btn btn-imp-exp"
                 onClick={(e) => {
                   e.stopPropagation();
                   setExportOpen((prev) => !prev);
                 }}
                 disabled={exporting}
                 style={{
-                  background: "#ffffff",
-                  color: "#1e293b",
-                  border: "1px solid #cbd5e1",
-                  padding: "8px 14px",
+                  background: "#f59e0b",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 16px",
                   borderRadius: "6px",
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontSize: "13px",
                   cursor: exporting ? "wait" : "pointer",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                  boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
                 }}
+                title="Export Local Purchases"
               >
-                <span style={{ fontSize: "14px" }}>📥</span>
-                <span>{exporting ? "Exporting..." : "Export"}</span>
-                <span style={{ fontSize: "10px", color: "#64748b" }}>▼</span>
+                <span>{exporting ? "Exporting..." : "Export ▾"}</span>
               </button>
 
               {exportOpen && (

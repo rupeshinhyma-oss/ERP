@@ -11,6 +11,7 @@ import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
 import { usePendingGuard } from "@/lib/hooks";
+import { useConfirm } from "@/lib/confirm";
 
 interface TrashItem {
   id: string;
@@ -62,6 +63,7 @@ function TrashTableSkeletonRows({ count = 6 }: { count?: number }) {
 
 export function TrashPage() {
   const [searchParams] = useSearchParams();
+  const confirm = useConfirm();
   const deepLinkQ = searchParams.get("q");
 
   const [items, setItems] = useState<TrashItem[]>([]);
@@ -159,9 +161,14 @@ export function TrashPage() {
   }
 
   async function handlePermanentDeleteSingle(entityType: string, id: string, name: string) {
-    if (!confirm(`Permanently delete '${name}' from database?\n\nWARNING: This cannot be undone!`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Permanently Delete Record",
+      message: `Permanently delete '${name}' from the database? This cannot be undone.`,
+      itemName: name,
+      confirmLabel: "Permanently Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction(`delete:${entityType}:${id}`, async () => {
       setError(null);
       setSuccessMsg(null);
@@ -202,13 +209,13 @@ export function TrashPage() {
 
   async function handleBulkPermanentDelete() {
     if (selectedIds.size === 0) return;
-    if (
-      !confirm(
-        `Permanently delete ${selectedIds.size} selected item(s) from database?\n\nWARNING: This action is irreversible!`
-      )
-    ) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Permanently Delete Selected Records",
+      message: `Permanently delete ${selectedIds.size} selected item(s) from the database? This action is irreversible.`,
+      confirmLabel: "Permanently Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction("bulk-delete", async () => {
       setError(null);
       setSuccessMsg(null);
@@ -232,13 +239,13 @@ export function TrashPage() {
 
   async function handleEmptyTrash() {
     if (items.length === 0) return;
-    if (
-      !confirm(
-        "Are you sure you want to EMPTY THE TRASH?\n\nALL soft-deleted items without active transaction dependencies will be PERMANENTLY DELETED from the database!"
-      )
-    ) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Empty Entire Trash",
+      message: "Are you sure you want to EMPTY THE TRASH? ALL soft-deleted items without active transaction dependencies will be PERMANENTLY DELETED from the database!",
+      confirmLabel: "Empty Trash",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction("empty-trash", async () => {
       setError(null);
       setSuccessMsg(null);

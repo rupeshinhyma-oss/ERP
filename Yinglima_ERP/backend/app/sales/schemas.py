@@ -85,7 +85,7 @@ class SaleOrderItemResponse(BaseModel):
 class SaleOrderCreate(BaseModel):
     organization_id: uuid.UUID
     organization_name: str = "Yinglima"
-    buyer_id: uuid.UUID
+    buyer_id: uuid.UUID | None = None
     buyer_name: str
     buyer_branch_id: str | None = None
     buyer_branch_name: str | None = None
@@ -166,7 +166,7 @@ class SaleOrderResponse(BaseModel):
     order_no: str
     organization_id: uuid.UUID
     organization_name: str
-    buyer_id: uuid.UUID
+    buyer_id: uuid.UUID | None = None
     buyer_name: str
     buyer_branch_id: str | None = None
     buyer_branch_name: str | None = None

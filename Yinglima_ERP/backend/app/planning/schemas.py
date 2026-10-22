@@ -68,6 +68,7 @@ class PlanningSheetRead(BaseModel):
     item_description: str | None = None
     item_auto_populate_enabled: bool = False
     item_auto_populate_limit: int | None = None
+    item_width_px: int | None = None
     mum_group_label: str = Field(
         default="Mum",
         description="The word this sheet's group columns use, e.g. 'Mum' in 'Mum 1' / "
@@ -204,6 +205,16 @@ class PlanningColumnWidthUpdate(BaseModel):
     the frontend's auto-computed width based on its header label length
     (see computeHeaderWidth in Planning.tsx) -- lets a user "reset" a
     column back to automatic sizing without deleting/recreating it.
+    """
+
+    width_px: int | None = Field(default=None, ge=40, le=800)
+
+
+class PlanningItemWidthUpdate(BaseModel):
+    """
+    Set the sheet's built-in first (ITEM) column display width (drag-to-resize).
+
+    ``width_px: null`` clears a manual override, reverting to the default 240px.
     """
 
     width_px: int | None = Field(default=None, ge=40, le=800)

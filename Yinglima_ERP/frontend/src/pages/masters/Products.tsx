@@ -13,7 +13,7 @@
  *    `product_name`, exactly as before.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLiveModule } from "@/lib/live/useLive";
 import { useModalHistorySync } from "@/lib/hooks";
@@ -21,13 +21,14 @@ import { MasterPage, type FormState, type MasterPageHandle } from "@/components/
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
 import { ItemPopoverCell } from "@/components/ItemPopoverCell";
-import { SearchableDropdown, SearchableFilterDropdown, type DropdownOption } from "@/components/SearchableDropdown";
+import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import {
   MultiSelectField,
   SelectField,
   StatusSelectField,
   TextAreaField,
   TextField,
+  autoTitleCase,
   nullIfBlank,
   numOrNull,
 } from "@/components/fields";
@@ -148,6 +149,8 @@ function ProductIdentityFields({
   setExactCodeDuplicate,
   catalogProducts,
 }: ProductIdentityFieldsProps) {
+  const [isNameInputFocused, setIsNameInputFocused] = useState(false);
+  const [lookupMatches, setLookupMatches] = useState<Array<{ id: string; name: string; code?: string; status?: string }>>([]);
   const nameCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const codeCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -176,7 +179,8 @@ function ProductIdentityFields({
       });
       if (localMatch) {
         setExactNameDuplicate(localMatch.product_name_tally || localMatch.product_name || trimmed);
-        return;
+      } else {
+        setExactNameDuplicate(null);
       }
 
       nameCheckTimer.current = setTimeout(async () => {
@@ -185,6 +189,7 @@ function ProductIdentityFields({
             `/masters/products/names-lookup?search=${encodeURIComponent(trimmed)}&limit=25`
           );
           const list = data || [];
+          setLookupMatches(list);
           const exact = list.find((p) => {
             if (editingId && String(p.id).toLowerCase() === editingId) return false;
             const pName = (p.name || "").toLowerCase().replace(/[\s-]/g, "");
@@ -266,79 +271,259 @@ function ProductIdentityFields({
     };
   }, []);
 
-  const fetchProductNameOptions = useCallback(
-    async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
-      const q = term.trim().toLowerCase();
-      const seen = new Set<string>();
-      const results: DropdownOption[] = [];
+  const typed = (f.product_name_tally || "").trim();
+  const cleanTyped = typed.toLowerCase().replace(/[\s-]/g, "");
+  const editingId = (f._editing_id || "").trim().toLowerCase();
 
-      // 1. Instant Tally-like local search from catalogProducts (any part of the name matches)
-      if (catalogProducts && catalogProducts.length > 0) {
-        for (const p of catalogProducts) {
-          const name = (p.product_name_tally || p.product_name || "").trim();
-          if (!name) continue;
-          if (!q || name.toLowerCase().includes(q)) {
-            if (!seen.has(name.toLowerCase())) {
-              seen.add(name.toLowerCase());
-              results.push({ value: name, label: name });
-            }
-          }
-        }
+interface KnownProductSummary {
+  id: string;
+  name: string;
+  code?: string;
+  status?: string;
+}
+
+  // Combine catalogProducts and lookupMatches for complete reference view
+  const allKnownProducts: KnownProductSummary[] = useMemo(() => {
+    const map = new Map<string, KnownProductSummary>();
+    for (const p of catalogProducts) {
+      const name = (p.product_name_tally || p.product_name || "").trim();
+      if (!name) continue;
+      map.set(name.toLowerCase(), {
+        id: String(p.id),
+        name,
+        code: p.product_code,
+        status: p.status,
+      });
+    }
+    for (const item of lookupMatches) {
+      const name = (item.name || "").trim();
+      if (!name) continue;
+      if (!map.has(name.toLowerCase())) {
+        map.set(name.toLowerCase(), {
+          id: String(item.id),
+          name,
+          code: item.code,
+        });
       }
+    }
+    return Array.from(map.values());
+  }, [catalogProducts, lookupMatches]);
 
-      if (!q) {
-        return results.slice(0, 20);
-      }
+  const exact = useMemo<KnownProductSummary | null>(() => {
+    if (!cleanTyped) return null;
+    return allKnownProducts.find((p: KnownProductSummary) => {
+      if (editingId && p.id.toLowerCase() === editingId) return false;
+      const pClean = p.name.toLowerCase().replace(/[\s-]/g, "");
+      return pClean === cleanTyped;
+    }) || null;
+  }, [cleanTyped, allKnownProducts, editingId]);
 
-      // 2. Query ultra-fast names-lookup endpoint for substring search in full database
-      try {
-        const { data } = await apiGet<Array<{ id: string; name: string; code: string }>>(
-          `/masters/products/names-lookup?search=${encodeURIComponent(term.trim())}&limit=25`,
-          { signal }
-        );
-        const list = data || [];
-        for (const item of list) {
-          const name = (item.name || "").trim();
-          if (!name) continue;
-          if (!seen.has(name.toLowerCase())) {
-            seen.add(name.toLowerCase());
-            results.push({ value: name, label: name });
-          }
-        }
-      } catch {
-        // Return local matches if network request is aborted/fails
-      }
+  const matches = useMemo<KnownProductSummary[]>(() => {
+    return allKnownProducts
+      .filter((p: KnownProductSummary) => {
+        if (editingId && p.id.toLowerCase() === editingId) return false;
+        if (!cleanTyped) return true;
+        const pClean = p.name.toLowerCase().replace(/[\s-]/g, "");
+        const cClean = (p.code || "").toLowerCase().replace(/[\s-]/g, "");
+        return pClean.includes(cleanTyped) || cClean.includes(cleanTyped);
+      })
+      .sort((a: KnownProductSummary, b: KnownProductSummary) => {
+        if (!cleanTyped) return 0;
+        const aClean = a.name.toLowerCase().replace(/[\s-]/g, "");
+        const bClean = b.name.toLowerCase().replace(/[\s-]/g, "");
+        const aStarts = aClean.startsWith(cleanTyped);
+        const bStarts = bClean.startsWith(cleanTyped);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, 8);
+  }, [allKnownProducts, cleanTyped, editingId]);
 
-      return results;
-    },
-    [catalogProducts]
-  );
+  const hasNameError = Boolean(errors.product_name_tally || exactNameDuplicate);
 
   return (
     <>
       <div className="section-title">Identity</div>
       <div className="form-grid">
         <div className="field" style={{ position: "relative" }}>
-          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+          <label
+            htmlFor="product_name_tally"
+            style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}
+          >
             Product Name (As per Tally) <span style={{ color: "#ef4444" }}>*</span>
           </label>
-          <SearchableDropdown
+          <input
             id="product_name_tally"
-            hasError={Boolean(errors.product_name_tally || exactNameDuplicate)}
-            value={f.product_name_tally}
-            onChange={(_, label) => {
-              set("product_name_tally", label);
-              checkDuplicateName(label);
+            type="text"
+            value={f.product_name_tally || ""}
+            onChange={(e) => {
+              const val = autoTitleCase(e.target.value, "product_name_tally");
+              set("product_name_tally", val);
+              checkDuplicateName(val);
             }}
-            allowCustomText={true}
-            onTextChange={(v) => {
-              set("product_name_tally", v);
-              checkDuplicateName(v);
+            onFocus={(e) => {
+              setIsNameInputFocused(true);
+              if (!hasNameError) {
+                e.target.style.borderColor = "#2563eb";
+                e.target.style.boxShadow = "0 0 0 3px rgba(37, 99, 235, 0.15)";
+              }
+            }}
+            onBlur={(e) => {
+              setTimeout(() => setIsNameInputFocused(false), 200);
+              if (!hasNameError) {
+                e.target.style.borderColor = "#cbd5e1";
+                e.target.style.boxShadow = "none";
+              }
             }}
             placeholder="Search existing or type product name..."
-            fetchOptions={fetchProductNameOptions}
-            fetchLabelForValue={async (v) => v}
+            autoComplete="off"
+            style={{
+              width: "100%",
+              height: "38px",
+              padding: "0 12px",
+              fontSize: "13px",
+              borderRadius: "6px",
+              border: hasNameError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
+              backgroundColor: hasNameError ? "#fff5f5" : "#ffffff",
+              boxShadow: hasNameError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : "none",
+              color: "#0f172a",
+              outline: "none",
+              boxSizing: "border-box",
+              transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+            }}
           />
+
+          {/* Floating Suggestion Dropdown (Untouchable / Non-selectable suggestions) */}
+          {isNameInputFocused && matches.length > 0 && (
+            <div
+              onMouseDown={(e) => e.preventDefault()}
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                left: 0,
+                right: 0,
+                backgroundColor: "#ffffff",
+                borderRadius: "8px",
+                border: "1px solid #cbd5e1",
+                boxShadow: "0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08)",
+                zIndex: 100,
+                maxHeight: "280px",
+                overflowY: "auto",
+                padding: 0,
+              }}
+            >
+              {exact && (
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    background: "#fef2f2",
+                    borderBottom: "1px solid #fee2e2",
+                    color: "#dc2626",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <span>⛔</span>
+                  <span>Product "{exact.name}" already exists in Master! Cannot save duplicate.</span>
+                </div>
+              )}
+              <div
+                style={{
+                  padding: "7px 12px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  color: "#64748b",
+                  borderBottom: "1px solid #f1f5f9",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "#f8fafc",
+                }}
+              >
+                <span>Existing in Master ({matches.length})</span>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 600,
+                    background: "#f1f5f9",
+                    color: "#64748b",
+                    padding: "1px 6px",
+                    borderRadius: "4px",
+                    textTransform: "none",
+                  }}
+                >
+                  Reference Only (Non-selectable)
+                </span>
+              </div>
+              <div style={{ padding: "4px 0" }}>
+                {matches.map((p: KnownProductSummary) => {
+                  const isThisExact = (p.name || "").trim().toLowerCase() === typed.toLowerCase();
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        padding: "8px 12px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        fontSize: "12.5px",
+                        color: isThisExact ? "#dc2626" : "#334155",
+                        backgroundColor: isThisExact ? "#fff5f5" : "transparent",
+                        borderLeft: isThisExact ? "3px solid #ef4444" : "3px solid transparent",
+                        userSelect: "none",
+                        pointerEvents: "none",
+                        cursor: "default",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden" }}>
+                        <span style={{ color: "#94a3b8", fontSize: "13px" }}>📦</span>
+                        <span style={{ fontWeight: isThisExact ? 700 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {p.name}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                        {p.code && (
+                          <span
+                            style={{
+                              fontSize: "10.5px",
+                              padding: "1px 6px",
+                              borderRadius: "4px",
+                              background: "#f1f5f9",
+                              color: "#475569",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {p.code}
+                          </span>
+                        )}
+                        {p.status && (
+                          <span
+                            style={{
+                              fontSize: "10.5px",
+                              padding: "1px 6px",
+                              borderRadius: "4px",
+                              background: p.status === "active" ? "#ecfdf5" : "#f1f5f9",
+                              color: p.status === "active" ? "#059669" : "#64748b",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {p.status}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {errors.product_name_tally && !exactNameDuplicate && (
             <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
               <span>⚠️</span> {errors.product_name_tally}

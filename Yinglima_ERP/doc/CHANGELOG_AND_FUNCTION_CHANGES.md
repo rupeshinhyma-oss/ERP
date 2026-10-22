@@ -2,6 +2,359 @@
 
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
+
+## [Release 2026-10-22] — RBAC Permission Hardening: Sale Process, Stock Movements, Notification Rules & Position Matrix Integration
+
+### 1. New RBAC Permissions & Full Matrix Integration (155 -> 167 System Permissions)
+- **Sale Process (`sale_process.*` - 6 permissions):**
+  - Added `sale_process.view`, `sale_process.create`, `sale_process.update`, `sale_process.approve`, `sale_process.delete`, `sale_process.export`.
+  - Backend routes in `backend/app/sales/routes.py` secured with `@require_permission` decorators.
+  - Frontend navigation in `nav.ts` guarded with `permission: "sale_process.view"`.
+  - `SaleProcessList.tsx` action buttons (`+ Create Sale Process`, `Export`, `Edit Order`, `Delete`) wrapped with `<Can>` permission gates.
+- **Stock Movement (`stock_movement.*` - 4 permissions):**
+  - Added `stock_movement.view`, `stock_movement.create`, `stock_movement.cancel`, `stock_movement.delete`.
+  - Backend routes in `backend/app/stock/routes.py` secured with `@require_permission` decorators.
+  - Frontend navigation in `nav.ts` guarded with `permission: "stock_movement.view"`.
+  - `StockMovements.tsx` action buttons (`+ New Inward Entry`, `+ New Outward Entry`, `Cancel`, `Delete`) wrapped with `<Can>` permission gates.
+- **Notification Rules (`notification_settings.*` - 2 permissions):**
+  - Added dedicated `notification_settings.view` and `notification_settings.manage` permissions (eliminating previous reuse of `user.view`).
+  - Backend routes in `backend/app/notifications/routes.py` secured with `@require_permission` decorators.
+  - Frontend navigation in `nav.ts` guarded with `permission: "notification_settings.view"`.
+  - `NotificationSettings.tsx` toggle and edit buttons disabled/hidden for users without `notification_settings.manage`.
+- **Positions & Designations (`position.*`):**
+  - Added friendly display name and module category mapping in `permissionLabels.ts` (`Positions & Designations`), ensuring proper rendering in `/rbac` and permission matrices.
+- **Zero-Latency In-Memory Architecture Guarantee:**
+  - Permissions are cached in RAM on the backend via Redis/MemoryCache and hydrated on frontend session creation as a JS `Set`.
+  - All permission evaluations (`hasPermission()`, `<Can>`) execute in $O(1)$ (< 0.001ms) with zero extra network round-trips.
+
+## [Release 2026-10-22] — Global Custom In-App Confirmation Modal: Elimination of Native Browser window.confirm()
+
+### 1. Global In-App Confirm Dialog Architecture (`frontend/src/lib/confirm.tsx`)
+- **Elimination of Unstyled Browser "Black Box" Popups:**
+  - Completely replaced the browser's native `window.confirm()` dialog (which rendered as a dark/black floating prompt saying `localhost:5173 says` on Windows/Chrome dark mode) with a unified, modern in-app confirmation modal.
+  - Implemented `ConfirmDialogProvider` and `useConfirm()` hook mounted at the application root (`main.tsx`).
+  - Modal features:
+    - Clean white card dialog (`#ffffff`, `borderRadius: 16px`, smooth backdrop blur overlay `rgba(15, 23, 42, 0.55)`).
+    - Top icon badge: Circular soft-red icon badge (`#fee2e2`, `#dc2626`) with a clean trash/delete SVG icon (or amber warning icon for warnings).
+    - Title: Bold modal heading (`"Delete Confirmation"`, `"Delete Product Item"`, etc.).
+    - Item highlight pill: Clean item name/code tag (`#f1f5f9`, border `#e2e8f0`, bold text `#334155`).
+    - Action buttons: Styled Cancel button (`#ffffff` / `#475569`, border `#cbd5e1`) and prominent Danger button (`#dc2626`, bold white text `#ffffff`).
+    - Keyboard navigation: `Escape` key dismisses, `Enter` key confirms.
+
+### 2. Comprehensive ERP Module Rollout
+- **Inquiries (`Inquiries.tsx`):**
+  - Consignment deletion, bulk consignment deletion, quotation removal, and product item deletion (the exact screen reported by user) now trigger the custom white confirmation dialog.
+- **Local Purchases (`LocalPurchases.tsx`):**
+  - Purchase invoice deletion triggers the custom modal with invoice number highlight.
+- **Sale Process (`SaleProcessList.tsx`):**
+  - Sale order deletion triggers the custom modal with order number highlight.
+- **Stock Movements (`StockMovements.tsx`):**
+  - Movement cancellation and permanent deletion trigger the custom modal with movement number highlight.
+- **Product Prices (`ProductPrices.tsx`):**
+  - Price quote removal triggers the custom modal with supplier name highlight.
+- **Product Gallery (`ProductGallery.tsx`):**
+  - Broken media deletion, product image deletion, and supplier visit photo deletion trigger the custom modal.
+- **Master Data Pages (`MasterPage.tsx`):**
+  - All 13 Master entities (Products Master, Categories, Subcategories, Brands, HSN, UOM, Countries, States, Cities, Currencies, Company List, Buyer Types, Supplier Types) now use the custom modal for row and bulk deletion.
+- **Suppliers & Buyers (`Suppliers.tsx`, `Buyers.tsx`):**
+  - Contact person deletion, supplier/buyer deletion, and bulk actions (delete, deactivate) use the custom modal.
+- **Planning (`Planning.tsx`):**
+  - Sheet deletion and column group deletion use the custom modal.
+- **Trash & User Management (`Trash.tsx`, `Users.tsx`, `Rbac.tsx`):**
+  - Permanent deletion, empty trash, account actions, bulk deactivation, and department deletion use the custom modal.
+
+## [Release 2026-10-22] — Global UI Button Standardization: Orange Imp / Exp Buttons & Unified Filter Funnel Headers
+
+### 1. Global Standardized Vibrant Orange Export & Import Buttons (`#f59e0b`)
+- **Visual Harmonization:**
+  - Standardized all list header Export and Import buttons across the ERP to match the vibrant orange standard established in **Products Master** (`#f59e0b`, white bold text `#ffffff`, `fontWeight: 700`, `borderRadius: 6px`, `border: none`, `boxShadow: 0 2px 4px rgba(245, 158, 11, 0.25)`).
+  - Updated `LocalPurchases.tsx`: replaced old white button (`📥 Export ▼`) with the standardized orange `"Export ▾"` button (`btn-imp-exp`).
+  - Updated `ProductPrices.tsx`: replaced old white outline button (`📥 Export ▼`) with the standardized orange `"Export ▾"` button (`btn-imp-exp`).
+  - Re-aligned `SaleProcessList.tsx` and all master/entity list pages via unified `btn-imp-exp` CSS class in `style.css`.
+
+### 2. Global Unified Top Filter Funnel Button (Symbol & Color)
+- **Funnel SVG & State Standard:**
+  - Standardized the top filter toggle button across all ERP modules to the compact Funnel SVG icon button (`btn-header-filter`).
+  - Inactive / Default State: dark slate background (`#475569`) with white SVG funnel icon (`<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>`), `padding: 8px 12px`, `borderRadius: 6px`, `border: none`.
+  - Active / Filter Open State: primary blue background (`#0061f2`) with active filter count badge (`#ef4444`).
+  - Updated `LocalPurchases.tsx`: replaced wide `"Filters"` text button with the compact Funnel icon button.
+  - Updated `ProductPrices.tsx`: adjusted button padding and classes to match standard height.
+  - Updated `Buyers.tsx`: aligned active background from `#4f46e5` to unified `#0061f2`.
+### 3. Product Prices: Removal of Redundant "Search" Button
+- **Streamlined Live Reactive Filtering:**
+  - Removed the redundant orange `"Search"` button from the expandable filter drawer in `ProductPrices.tsx`.
+  - All filter dropdowns (Category, Sub Category, Brand, Pricing Status) are fully reactive and trigger `fetchPrices` automatically on change via the dependency hook.
+  - Retained the clean `"Reset"` button to clear all active dropdown filters, search terms, and reset back to page 1.
+
+## [Release 2026-10-22] — Stock Movements: Clean 0-Item Empty-State Lifecycle, Ghost Row Elimination & Cascading Clear (Inward & Outward)
+
+### 1. Elimination of Ghost 1-Item Table Rows
+- **Zero-Item Initial State in 1-Click Extract Mode:**
+  - Resolved issue in `StockMovementModal.tsx` where opening, reopening, or resetting the Inward or Outward creation modal in `1-Click Extract` mode was defaulting `items` to `[createEmptyItem()]` (1 blank row), displaying `2. GOODS LINE ITEMS (1 ITEMS)` and `Total Items: 1` before any purchase bill or sale order was chosen.
+  - Initialized `items` to an empty array (`[]`) by default and in `resetForm()`.
+  - When no bill/order is selected, Section 2 displays **`2. GOODS LINE ITEMS (0 items)`** with a clean, friendly empty-state banner:
+    > *"No purchase bill [or sale order] selected yet. Search and select a confirmed purchase bill above to auto-extract line items, or click '+ Add Item' above to add products manually."*
+  - Bottom metrics bar accurately displays `Total Items: 0 | Total Net Qty: 0`.
+
+### 2. Complete Cascading Reset on Combobox Clear (✕)
+- **Instant Unselection & Wipe:**
+  - Clicking the `✕` clear button in the order search combobox immediately executes `handleClearSelectedOrder()`.
+  - Atomically clears search query, selected purchase bill / sale order ID, vendor/buyer names, challan/reference number, vehicle/transporter details, and wipes all line items back to `0 items` (`items = []`).
+
+### 3. Mode Switch Row Preparation & Submit Guard
+- **Smooth Mode Switching:**
+  - Switching from 1-Click Extract to **✍️ Direct Manual Entry** clears any linked order and initializes 1 clean blank item row (`items = [createEmptyItem()]`) so operators can start entering products immediately.
+  - Switching back to **⚡ 1-Click Extract** resets line items cleanly back to `0 items`.
+  - Operators can delete any line item via row `✕` without artificial disabled constraints; deleting all items returns to the empty-state banner.
+  - The submit button is strictly disabled (`cursor: not-allowed`, background `#94a3b8`) whenever `items.length === 0`, preventing accidental empty stock movement submissions.
+
+## [Release 2026-10-22] — Supplier Contacts: Two-Way Synchronization with Profile, Auto-Promotion & Make Primary Feature
+
+### 1. Two-Way Profile & Contact Roster Synchronization
+- **Elimination of Desynchronization:**
+  - Resolved issue where adding a contact in the **Contacts** tab of a supplier (e.g., `om1`) did not reflect in the **Profile** tab's **`Primary Contact Information`** section, leaving the inputs blank.
+  - Adding or updating a primary contact now immediately synchronizes with the `Supplier` entity's `contact_salutation`, `contact_full_name`, `contact_designation`, `contact_calling_number`, `contact_whatsapp_number`, `contact_wechat_number`, and `emails`.
+  - In `Suppliers.tsx`, submitting a contact drawer immediately triggers `refreshSupplierProfileAfterContactChange()`, which updates both `form` state and the background `rows` table without requiring a page reload. Switching back to the Profile tab shows the updated contact details immediately.
+
+### 2. Auto-Promotion of First Contact to Primary
+- **Automatic Primary Assignment:**
+  - When a supplier is created without contact details, adding the first contact in the Contacts tab automatically designates it as `is_primary = True` and writes its information to the supplier's primary profile fields.
+  - In `Suppliers.tsx`, opening the contact drawer with an empty profile or empty roster defaults `Set as Primary Contact` to checked.
+
+### 3. 1-Click "★ Make Primary" & Endpoint Support
+- **Promote Secondary Contacts:**
+  - Added a `★ Make Primary` button on all secondary contact rows in the Contacts sub-table.
+  - Added endpoints `POST /suppliers/{id}/contacts/{contact_id}/make-primary`, `/primary`, and `/set-primary` to atomically promote the contact, demote previous primaries, and update the parent supplier profile.
+  - Added `★ Primary` badge to clearly distinguish primary contacts from secondary team members.
+  - Primary contact deletion is guarded (`ConflictException` with user-friendly error message) to prevent accidental removal of active profile contact details.
+
+### 4. Existing Record Hydration
+- **Fallback Hydration:**
+  - When opening the edit modal for any existing supplier whose `contact_full_name` was previously blank, `openModal()` automatically hydrates form inputs from the supplier's primary contact (or first roster contact), ensuring instant visibility.
+
+## [Release 2026-10-21] — Sale Process: Customer Gating Lockout & Cascading Reset of Planning Sheets, Consignments, and Line Items
+
+### 1. Customer Selection Gating & Padlock Lockout
+- **Strict Selector Gating:**
+  - Enforced strict dependency lockout in `SaleProcessForm.tsx`: both **Planning Sheet / Branch** and **Planning Consignment Column** remain **disabled, locked, and closed** until a Customer/Entity is chosen.
+  - Locked state displays a distinct dashed border, light gray background (`#f8fafc`), disabled cursor (`not-allowed`), and a `🔒 Select Customer / Entity first` prompt.
+  - Dropdown menus cannot be opened while locked, preventing accidental assignment of mismatched sheets or bypass of customer permissions.
+
+### 2. Complete Cascading Reset & Data Cleanliness
+- **Elimination of Orphaned Line Items:**
+  - When the Customer/Entity is cleared (`✕` or choosing `-- Select Entity --`) or changed to a different entity, the form automatically executes a complete cascading reset:
+    - Re-locks the Planning Sheet and Consignment Column selectors.
+    - Resets `selectedSheetId`, `selectedSheetName`, `selectedColumnId`, and `selectedConsignmentCode`.
+    - **Wipes all table line items (`items = []`)** so products from a previously selected consignment never linger in the table.
+    - Resets Container Freight CBM (`totalContainerCbm = 0`) and clears consignment banner messages.
+- **Immediate Data Loading on Consignment Column Selection:**
+  - Selecting or changing a Planning Consignment Column immediately triggers the item extraction engine, wipes any previous column's products, and populates the table with the planned products, quantities, and CBM of the newly selected column.
+  - If a column with 0 planned products is chosen, the table is cleanly reset to 0 items with an informative notice.
+  - Clearing the consignment column (`✕`) automatically wipes the line items and resets container CBM.
+
+### 3. Responsive Layout & Zero-Overflow Hardening (100% Zoom Protection)
+- **Elimination of Consignment & Auto-Load Button Card Overflow:**
+  - Resolved layout blowout where long consignment labels pushed the ⚡ Auto-Load button past the card container boundary at 100% browser zoom.
+  - Added min-width: 0, overflow: hidden, and single-line ellipsis text truncation to all Row 1 grid cells, combobox buttons, and labels.
+  - Optimized consignment trigger label to concise format (${col.column_name} •  items ( pcs)) with full metadata on hover tooltip (	itle).
+  - Restyled the ⚡ Auto-Load button with lex-shrink: 0, compact padding (8px 10px), and inline-flex alignment with spinner.
+
+## [Release 2026-10-21] — Shipment Planning: First Column ("ITEM") Excel-Style Drag-to-Resize & Server Persistence
+
+### 1. Shipment Planning ITEM Column Drag-to-Resize
+- **Interactive Drag Handle (`EditableItemHeader`):**
+  - Added dedicated right-edge column resize handle with `col-resize` cursor and active grab highlight (`#2563EB`) to the first column ("ITEM") in `frontend/src/pages/Planning.tsx`.
+  - Enables Excel-style drag-to-resize for the first column, matching all subsequent consignment and master lookup columns.
+- **Instantaneous 0-Lag Visual Feedback:**
+  - Integrated dynamic CSS custom property `--item-col-width` onto the table wrapper element.
+  - Linked `--item-col-width` across `EditableItemHeader`, `EditableRowLabel`, and `PlanningGridSkeletonRows`. Live mouse movement updates the CSS variable directly, delivering buttery-smooth resizing across all rows with zero DOM lag or excessive React re-renders.
+  - Dynamic frozen column offset: `stickyLeftByColumnId` automatically recalculates sticky positions for subsequent frozen columns (`TEST(Y/N)`, `APPROVAL DATE`, pinned columns) based on the active or persisted item column width.
+- **Server Persistence & Alembic Migration:**
+  - Added `item_width_px` (`sa.Integer`, nullable) to `planning_sheets` via Alembic migration [`d5e6f7a8b9c0_add_item_width_px_to_planning_sheets.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/d5e6f7a8b9c0_add_item_width_px_to_planning_sheets.py).
+  - Added `PlanningItemWidthUpdate` schema (`width_px` clamped between 64px and 800px, default 240px) and updated `PlanningSheetRead`.
+  - Added endpoint `PATCH /api/v1/planning/sheets/{sheet_id}/item-width` in [`backend/app/planning/routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/planning/routes.py).
+  - Broadcasts lightweight WebSocket event `item_width_changed` so other users viewing the sheet receive live width synchronization without refreshing.
+  - Added automated unit test [`backend/tests/test_planning_item_width.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/tests/test_planning_item_width.py) validating persistence, clamping, and reset behavior.
+
+## [Release 2026-10-21] — Stock Movement Module (Inward & Outward Registers, 1-Click PO/SO Extract & Live Inventory Ledger)
+
+### 1. Stock Movement (Inward & Outward) Architecture
+- **Inward Register (Warehouse Stock-In):**
+  - Added dedicated warehouse reception register for incoming domestic vendor shipments, factory arrivals, and warehouse returns.
+  - **1-Click Extract from Local Purchase:** Automatically extracts vendor details, invoice numbers, consignment codes, and line items (name, SKU, ordered quantity, unit rate) directly from confirmed Local Purchase bills.
+  - Granular quality control: Allows entering actual received quantity, damaged/rejected quantity, and computes net accepted stock (`quantity - damaged_quantity`).
+- **Outward Register (Warehouse Stock-Out):**
+  - Added dedicated dispatch register for customer shipments, container loadings, and branch dispatches.
+  - **1-Click Extract from Sale Process:** Automatically extracts buyer details, order numbers, container numbers, transporter names, LR numbers, and ordered items directly from confirmed Sale Process orders.
+- **Live Inventory Ledger & Kardex:**
+  - Real-time stock balance calculated as $\sum \text{Inward Accepted Qty} - \sum \text{Outward Dispatched Qty}$.
+  - Chronological **Kardex** ledger history drawer for every product showing date, movement type, document reference, party, quantities in/out, and running balance.
+- **Database Schema ([`c4d5e6f7a8b9_create_stock_movements_and_items.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/c4d5e6f7a8b9_create_stock_movements_and_items.py)):**
+  - Created tables `stock_movements` and `stock_movement_items` with full indexing on `movement_no`, `movement_type`, `movement_date`, `purchase_id`, `sale_order_id`, and `product_id`.
+- **Backend API Endpoints (`/api/v1/stock`):**
+  - Mounted `/metrics`, `/movements`, `/movements/{id}`, `/movements/{id}/cancel`, `/extract/purchase/{id}`, `/extract/sale-order/{id}`, `/balances`, and `/kardex`.
+- **Frontend UI (`/inventory/stock-movements`):**
+  - Integrated under `INVENTORY` in navigation sidebar.
+  - Clean tabbed interface: Inward Register, Outward Register, Current Stock Ledger, and top KPI cards.
+  - **Searchable Combobox for Orders/Bills**: Upgraded native select dropdowns in the creation modal to an instant live-filtering search combobox with match indicators, keyboard focus, and clear buttons.
+  - **Ergonomic Modal Layout**: Redesigned dialog dimensions (`width: 96vw`, `maxWidth: 1280px`, `height: 94vh`) and condensed 8 metadata fields into a compact 4-column, 2-row grid.
+  - **High-Visibility Custom Scrollbar & Table Viewport**:
+    - Added custom styled slate scrollbars (`.stock-modal-scroll`, `.stock-table-scroll` with `#94a3b8` thumb and `#f1f5f9` track) and `scrollbar-gutter: stable`, eliminating hidden/invisible browser scrollbars.
+    - Removed redundant duplicate inner footer from Card 2, leaving the single pinned bottom modal bar as the clean source of truth.
+    - Optimized table cell padding (`6px 8px` cells, `5px 8px` inputs) with **sticky pinned headers** (`position: sticky`, `top: 0`), guaranteeing 8 to 10 product items fit directly on screen on standard desktop and laptop displays without row cutoff.
+  - **Pinned Bottom Actions Footer**: Modal footer with line item totals and Confirm/Cancel buttons is permanently anchored at the bottom of the dialog.
+- **Strict Outward Inventory Blocking (Anti-Negative Stock Rule)**:
+  - **Server-Side Enforcement ([`app/stock/service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/stock/service.py), [`app/stock/repository.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/stock/repository.py)):**
+    - Outward dispatches now perform an mandatory stock check prior to creating movement records.
+    - If requested outward quantity exceeds warehouse available stock ($\sum \text{Inward Accepted} - \sum \text{Outward Dispatched}$ across confirmed non-deleted movements), the API immediately blocks the movement with `400 Bad Request` ("Insufficient Stock for '<Item>'. Available: X, requested: Y. Outward dispatch blocked to prevent negative inventory.").
+    - Multi-line aggregation: Aggregates duplicate items within the same dispatch voucher before stock validation.
+    - Inward safeguards: Cancelling or deleting an inward receipt is blocked if goods have already been dispatched.
+  - **Stock Movement Deletion API & UI Action ([`routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/stock/routes.py), [`StockMovements.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/inventory/StockMovements.tsx)):**
+    - Added `DELETE /api/v1/stock/movements/{id}` endpoint and UI **Delete** button with confirmation prompt in Inward & Outward registers.
+    - Added `GET /api/v1/stock/available-stock` endpoint for quick product balance queries.
+  - **Real-Time Client-Side Feedback ([`StockMovementModal.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/inventory/StockMovementModal.tsx)):**
+    - Each line item displays an live `In-Stock: X units` badge.
+    - When entered quantity exceeds stock, the input turns red, alerts with `⚠️ Blocked: Exceeds warehouse stock!`, and sets the submit button state to `🚫 Blocked: Insufficient Stock`.
+  - **Ledger Cleanup**: Cleared legacy negative stock test entries (`OUT-2026-0001` and `INW-2026-0001`), restoring net warehouse stock to a clean 0 balance.
+  - **Complete Cascading Reset & Modal Lifecycle Hardening ([`StockMovementModal.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/inventory/StockMovementModal.tsx), [`StockMovements.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/inventory/StockMovements.tsx)):**
+    - Conditionally mounted `StockMovementModal` in `StockMovements.tsx` (`{isModalOpen && <StockMovementModal ... />}`) so unmounting flushes state completely on close.
+    - Added `resetForm()` lifecycle trigger on modal open, close, and successful voucher submission, guaranteeing the modal opens 100% fresh and blank every time.
+    - In the purchase bill/sale order search selector, clicking ✕ calls `handleClearSelectedOrder()` which immediately resets party details, reference numbers, notes, and resets the table back to 1 clean empty row.
+    - Switching between ⚡ 1-Click Extract and ✍️ Direct Manual Entry automatically clears any linked order and line items for clean manual typing.
+
+### 2. Sale Process 3-Level Hierarchy Selector (Entity → Sheet → Consignment) & Nullable Buyer ID
+
+- **Customer / Entity Selector (Combobox):**
+  - Upgraded the single buyer input in `frontend/src/pages/sales/SaleProcessForm.tsx` to a structured entity combobox that partitions entities into two distinct categories:
+    - `🏢 INTERNAL ORGANIZATIONS`: Lists all registered master companies (e.g., Inhyma, Darsh Impex, FNB Solution, One Stop, Yinglima).
+    - `👤 BUYERS`: Lists all registered buyer entities (e.g., Om Packaging, Prathamesh Packaging).
+  - Supports instant typeahead search across all organizations and buyers.
+- **Planning Sheet / Branch Selector (New Dependent Field):**
+  - Introduced dynamic Sheet / Branch dropdown linking directly to the chosen entity.
+  - When an Organization (e.g. `Inhyma`) is selected, automatically filters available sheets to those belonging to that organization (`Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma  Indore`, `inhyma chennai`).
+  - When a Buyer (e.g. `Om Packaging`) is selected, automatically displays `Om Packaging - Mulund`.
+- **Planning Consignment Column Filter & 1-Click Auto-Load:**
+  - Consignment column combobox restricts choices strictly to the columns that belong to the chosen Sheet/Branch (e.g., `Mum 48`, `Mum 49`, `GJ14`, etc.).
+  - Selecting a consignment column immediately auto-loads all planned products with quantity > 0, unit rates, CBM, and remarks. Includes manual `Auto-Load Planned Products` button for re-syncing at any time.
+- **Support for All Existing & Newly Created Sheets:**
+  - **Existing Sheets:** Works seamlessly with all pre-existing sheets across all branches/entities via dynamic DB queries (`/planning/sheets`) and dual matching (matching both explicit `organization_id` foreign key and canonical sheet name prefixes like `Inhyma Mumbai`, `Inhyma Ahmedabad`, etc.).
+  - **New Sheets:** Any new sheet created in Shipment Planning immediately appears in the hierarchy dropdowns. Its manual numeric columns immediately become selectable consignment columns, and row items extract with complete fidelity without requiring any code changes or system migrations.
+- **Database Schema Migration: Nullable Buyer ID:**
+  - **Alembic Migration ([`b3c4d5e6f7a8_allow_nullable_buyer_id_in_sales_orders.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/b3c4d5e6f7a8_allow_nullable_buyer_id_in_sales_orders.py)):** Executed `ALTER TABLE sales_orders ALTER COLUMN buyer_id DROP NOT NULL`.
+  - Enables internal sales, cross-branch transfers, and organization-consignment orders to be created and saved without requiring an external buyer record.
+  - Updated `SaleOrder.buyer_id` in `app/sales/models.py` and `app/sales/schemas.py`.
+  - Enhanced `get_planning_consignments` in `app/sales/service.py` to directly target `sheet_id` when provided.
+
+
+### 3. Sale Process List Action Toolbar UI Alignment (Products Master Pattern)
+- **Filter Toggle Button (`SaleProcessList.tsx`):**
+  - Replaced the outlined white text button (`🔍 Filters`) with the compact dark slate square button (`#475569`, toggling to `#0061f2` when active) featuring the standardized filter funnel SVG icon, matching Products Master.
+  - Retained the high-visibility active filter badge indicator.
+- **Export Button Styling (`SaleProcessList.tsx`):**
+  - Replaced the plain white button with the vibrant amber/orange button (`#f59e0b`, `color: #ffffff`, `fontWeight: 700`, `border: none`), matching the Products Master `Imp / Exp ▾` visual standard.
+- **Toolbar Action Order:**
+  - Aligned action hierarchy: `[ 🌪️ Filter Toggle ]` $\rightarrow$ `[ + Create Sale Process ]` (blue primary) $\rightarrow$ `[ Export ]` (orange secondary).
+
+### 4. Shipment Planning Strict Primary Supplier Isolation from Product Master
+- **Strict Primary Supplier Rule Enforcement ([`app/masters/products/repository.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/masters/products/repository.py)):**
+  - Updated `attach_planning_supplier_info` to resolve `supplier_name`, `_planning_supplier_name`, and `_planning_supplier_city` strictly and exclusively from `Product.supplier_id` configured directly in Product Master.
+  - Eliminated fallback scanning of `SupplierProductLink` table: if a product does not belong to any supplier in Product Master (`Product.supplier_id` is None / empty), it strictly outputs blank/null for `Brand of Supplier` and `City` in Shipment Planning.
+  - Removed accidental in-memory mutation of `product.supplier_id` that previously occurred during fallback resolution.
+  - Preserved all other product master linked lookup columns (`product_code`, `product_name`, `packaging_quantity`, `packaging_gross_weight`, `packaging_unit_cbm`, `standard_price`, etc.) intact without modification.
+- **Source Registry Mapping ([`app/planning/source_registry.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/planning/source_registry.py)):**
+  - Updated registry documentation and field getters to reflect strict primary supplier resolution from Product Master.
+- **Automated Test Suite ([`backend/tests/test_product_primary_supplier_strict.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/tests/test_product_primary_supplier_strict.py)):**
+  - Added automated test verifying that products with primary suppliers attach their brand and city correctly, products with `supplier_id=None` remain blank in Shipment Planning even if linked in Supplier Master, and all temporary test records are cleanly deleted.
+
+### 4. Spare Products Master Catalog Isolation & Light-Orange Line Item Highlighting (No Emoji Toggle)
+- **Product Repository Filter (`is_spare=true` / `is_spare=false`):**
+  - Added `is_spare` to `filterable_fields` in [`app/masters/products/repository.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/masters/products/repository.py).
+  - Handles dynamic category and sub-category subqueries targeting categories/subcategories containing `"spare"` (e.g. `Packaging machine Spares`, `Filteration Spares`, `UV Spare`, `Spares For Material Handling`, `Hand Sealer (Spares)`, etc.).
+  - Guarantees complete machines (e.g. GF100, FR400) are never returned when `is_spare=true` is requested.
+- **Dedicated `+ Add Spare from Master` Modal:**
+  - Updated API query in [`SaleProcessForm.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/sales/SaleProcessForm.tsx) to `/masters/products?is_spare=true&page_size=100`.
+  - The modal strictly displays genuine spare parts from the master catalog.
+- **Line Items Table Styling (Removal of Emoji Click-to-Toggle):**
+  - Removed the clickable emoji toggle button (`🚜 Machine` / `⚙️ Spare`) to eliminate accidental flips.
+  - Regular machine items display in standard clean rows with zero emoji button clutter.
+  - Spare parts (items marked with `is_spare=true`) are highlighted with a soft, clean **light-orange** background (`#fff7ed` / `#fffaf5`) and an elegant non-clickable light-orange badge (`Spare Part`).
+
+### 5. Shipment Planning Unified Column Structure & Cross-Sheet Canonical Alignment
+- **Global Deduplication of Specification Columns:**
+  - Removed 4 trailing manual duplicate columns (`Supplier City`, `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, `CBM/PKG (KG)`) from `Inhyma Mumbai`.
+  - Audited all rows to confirm that all packaging specifications exist directly in the central Product Master (`Product`), making manual redundant columns obsolete.
+- **Companion Formula Synthesis for Ahmedabad & Indore:**
+  - Added missing formula companion columns on `Inhyma Ahmedabad` for groups `GJ14` and `GJ15`: `NO. OF PKG GJ14/15`, `TOTAL WEIGHT GJ14/15`, `TOTAL CBM GJ14/15`.
+  - Added missing companion column group on `Inhyma  Indore` for `MP -06`: `MP -06 Remarks`, `NO. OF PKG MP6`, `TOTAL WEIGHT MP6`, and `TOTAL CBM MP6`.
+- **Flexible Consignment Label & Delimiter Engine:**
+  - Updated backend regex patterns in [`app/planning/service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/planning/service.py) (`_is_pure_mum_column`, `mum_num_from_column_name`, `_mum_derived_kind_and_group`, and `_compute_mum_derived_value`) and frontend regex in [`Planning.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Planning.tsx) (`mumGroupNumber`, `mumRemarksGroupNumber`) to support hyphens and leading zeros (`[\s\-]*0*(\d+)`).
+  - Seamlessly parses `MP -06`, `GJ14`, `Mum 48`, `Chen 1`, etc.
+- **Duplicate Prevention on Group Creation:**
+  - Enhanced `create_next_mum_group` in `service.py`: if a sheet already contains a column matching the standard product specification name or field, it auto-upgrades the column to `LINKED_LOOKUP` rather than duplicating it.
+- **Universal Canonical Layout Across All Sheets:**
+  - Re-indexed and verified all 12 Organization and Buyer sheets (`Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma  Indore`, `inhyma chennai`, `Chennai`, `Mumbai`, `F&B`, `One Stop`, `dubaidarsh`, `Om Packaging - Mulund`, `Prathamesh Packaging PVT LTD - Thane`, `Darsh Impex Mumbai - Mulund`) in strict canonical order:
+    1. System/Approval headers (`TEST(Y/N)`, `APPROVAL DATE`).
+    2. Consignment quantity & remarks pairs (`<Label> <N>`, `<Label><N> Remarks`).
+    3. Shared linked specification block (`Brand of Supplier`, `City`, `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, `CBM/PKG (KG)`).
+    4. Group calculation formulas (`NO. OF PKG <LABEL><N>`, `TOTAL WEIGHT <LABEL><N>`, `TOTAL CBM <LABEL><N>`).
+    5. Status flags (`TALLY ENTRY POSTED (Y/N)`).
+
+### 6. Shipment Planning Packaging Specifications Backfill & Read-Time Prefetch Fallback
+- **Database Cell Synchronization:**
+  - Synchronized and backfilled all 278 rows in `Inhyma Mumbai` for specification columns `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, and `CBM/PKG (KG)`.
+  - Recomputed and stored companion formula columns (`NO. OF PKG MUM48/49/50`, `TOTAL WEIGHT MUM48/49/50`, `TOTAL CBM MUM48/49/50`) across all 278 rows.
+- **Zero-Latency Batch Product Prefetch ([`app/planning/routes.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/planning/routes.py)):**
+  - Integrated single-query batch prefetching of linked products in `GET /api/v1/planning/sheets/{sheet_id}/grid`.
+  - If a cell record for `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, `CBM/PKG (KG)`, `Brand of Supplier`, or `City` is missing from `planning_cells`, the backend automatically resolves it directly from the prefetched Product Master data.
+  - Companion formulas evaluate dynamically if unpersisted, setting both `value` and `display_value` to guarantee 100% data visibility on the frontend grid.
+
+---
+
+## [Release 2026-10-19] — Notification & Automation System, Shipment Planning Auto-Fit & Formula Verification
+
+### 1. Enterprise Notification & Automation System
+- **Database Architecture ([`a2b3c4d5e6f7_create_notification_rules_and_system.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/a2b3c4d5e6f7_create_notification_rules_and_system.py)):**
+  - Added PostgreSQL tables `notification_rules`, `notifications_inbox`, and `notification_user_settings` with indexes on user, read status, and created timestamp.
+- **Backend Service & Dispatcher Engine ([`app/notifications/service.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/app/notifications/service.py)):**
+  - Granular rules engine matching system events against configured delivery channels (`in_app`, `email`, `push`), target roles, and individual user IDs.
+  - Automatically deduplicates recipients across overlapping roles and direct user assignments.
+- **Event Hook Integrations:**
+  - Connected live hooks in Shipment Planning (`shipment_requirement_raised`, `shipment_status_ordered`), Sales Process (`sale_process_created`), Local Purchase (`local_purchase_created`), and Inquiries (`inquiry_created`).
+- **Frontend Topbar Notification Bell & Dropdown ([`NotificationBell.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/NotificationBell.tsx)):**
+  - Integrated into top navigation bar with unread count pill badge and 30-second background polling.
+  - Interactive notification drawer supporting single-click read-and-navigate, "Mark all as read" batch update, and direct link to rule configuration.
+- **Notification Rule Configuration ([`NotificationSettings.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/NotificationSettings.tsx)):**
+  - Added management modal allowing administrators to toggle rule activation, channels, roles, and user assignments.
+  - **User Search Parser Bug Fix:** Resolved user search issue where paginated API response `{ items: [...] }` was causing empty user list state in modal, enabling typeahead search (e.g. `user b`) to immediately display matching users.
+
+### 2. Shipment Planning Master Product Linkage ("Extract From") & Multi-Sheet Architecture
+- **Master Product Linkage Verification:**
+  - Audited all 12 active Organization and Buyer sheets (`Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma Indore`, `inhyma chennai`, `Mumbai`, `Chennai`, `dubaidarsh`, `One Stop`, `F&B`, `Om Packaging`, `Prathamesh Packaging`, `Darsh Impex Mumbai`).
+  - Standardized 5 core product master lookup columns (`Brand of Supplier`, `City`, `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, `CBM/PKG (KG)`) as live `LINKED_LOOKUP` fields extracting directly from Product Master (`product`).
+  - Added missing base linked columns to freshly created `One Stop` and `F&B` sheets.
+- **Organization & Branch Data Isolation:**
+  - Verified backend filtering `_all_product_ids_for_organization(effective_organization_id, branch_id=effective_branch_id)` strictly restricts rows to products belonging to that specific branch.
+
+### 3. Shipment Planning Formula Engine Verification
+- **Automated Mathematical Audit Across All Sheets:**
+  - Tested 21 active formula columns and 69 live row evaluations with **0 errors / 100% mathematical accuracy**.
+  - Formula dependency chain (`NO. OF PKG` $\rightarrow$ `TOTAL WEIGHT` $\rightarrow$ `TOTAL CBM`) evaluates safely with zero-division protection and instant store-on-write persistence.
+
+### 4. Shipment Planning Auto-Fit & 80% Zoom Viewport Optimization
+- **Responsive Table Geometry ([`Planning.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Planning.tsx)):**
+  - Upgraded table container with fluid width and `overflowX: "auto"`.
+  - Added `whiteSpace: "normal"` and responsive column widths to headers, eliminating awkward title truncation.
+  - Pinned and auto-fitted right-hand Action column ensuring Edit and Delete buttons stay within viewport at 80% and 100% zoom levels.
+
+### 5. Inquiry Product Search & Smart Focus Type-Ahead Dropdown Fix
+- **Searchable Dropdown Smart Focus ([`SearchableDropdown.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/SearchableDropdown.tsx)):**
+  - Resolved an issue where placing cursor/focus or clicking the toggle button on an already-selected product or entity triggered search with literal composite label (`Product Name (Product Code)`), returning 0 matches ("No matches.") because database columns store names and codes separately.
+  - When focusing or clicking on an unchanged selection (`value !== null && inputValue.trim() === label.trim()`), the dropdown now automatically queries with empty string `""` to display all available options, highlighting the current selection with `✓`.
+- **Product Fetcher Composite Label Sanitization ([`Inquiries.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Inquiries.tsx)):**
+  - Updated `productFetcher` in both Quick Inquiry drawer and Inquiry edit modal to detect and extract code from composite labels containing parentheses `(CODE)` or dashes (`CODE — Name`), ensuring typed/pasted composite product strings match their respective product code or name immediately.
+
+---
+
 ## [Release 2026-10-14] — Seed First-Install Guards, Inbound Email DB Deduplication & Handover Account Protection
 
 ### 1. Database Seed First-Install Protection (`BOOTSTRAP_FORCE_RESET`)

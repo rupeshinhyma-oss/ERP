@@ -50,6 +50,20 @@ The **Local Purchase** module allows China operations to record domestic procure
 3. **Bill Extraction Auto-Fill Integration:**
    - When the user clicks **⚡ Extract Bill Data**, any supplier identified by the AI extractor automatically matches against the supplier directory and pre-populates the type-ahead search bar.
 
+### Release 2026-10-19: Automated Event Notifications
+1. **Purchase Order Notification Hook (`local_purchase_created`):**
+   - Automatically fires the `local_purchase_created` event when a domestic purchase order is successfully saved.
+   - Dispatches in-app notifications and email alerts to configured procurement roles and managers.
+   - Topbar alert includes PO number, supplier name, and total amount with direct link to the purchase order.
+
+### Release 2026-10-22: Global UI Button Standardization (Filter & Export)
+1. **Unified Orange Export Button (`#f59e0b`):**
+   - Standardized the list header Export dropdown button to match Products Master's vibrant orange styling (`btn-imp-exp` / `#f59e0b`, white text `#ffffff`, `fontWeight: 700`, `borderRadius: 6px`, `border: none`).
+   - Replaced old white outline button (`📥 Export ▼`) with clean `"Export ▾"` button with orange shadow.
+2. **Standardized Funnel Filter Toggle Button:**
+   - Replaced wide `"Filters"` text button with the standard compact Funnel SVG icon button (`btn-header-filter`).
+   - State colors: dark slate background (`#475569`) when closed, primary blue (`#0061f2`) when open or active filters applied, with red numeric count badge (`#ef4444`).
+
 ---
 
 ## 4. What Needs to Be Verified (Testing Checklist)

@@ -18,6 +18,7 @@
 6. [INVENTORY: Product Master Module](#6-inventory-product-master-module)
 7. [INVENTORY: Product Gallery Module](#7-inventory-product-gallery-module)
 7.1. [INVENTORY: Product Price Directory Module](#71-inventory-product-price-directory-module)
+7.2. [INVENTORY: Stock Movement (Inward & Outward Register & Live Inventory Ledger)](#72-inventory-stock-movement-inward--outward-register--live-inventory-ledger)
 8. [INVENTORY: Categories Master Module](#8-inventory-categories-master-module)
 9. [INVENTORY: Sub Categories Master Module](#9-inventory-sub-categories-master-module)
 10. [INVENTORY: Brands Master Module](#10-inventory-brands-master-module)
@@ -55,6 +56,7 @@
 3. **Data Integrity**: Soft-deletion must always move records to Trash (`/trash`) and never physically purge rows from active tables.
 4. **Optimistic Locking & Concurrency**: Modifying entities must send and check `version` increments to avoid dirty concurrent overwrites.
 5. **Universal Fluid Responsive Auto-Fit**: All top-level page views, tables, cards, and drawers must use 100% fluid auto-fit layouts (`width: 100%`, `max-width: 100%`, `box-sizing: border-box`). When browser zoom is zoomed out (50%, 67%, 80%) or zoomed in (110%, 125%, 150%), the entire screen width is utilized edge-to-edge with zero dead white space on the sides and seamless responsive column expansion.
+6. **Unified In-App Confirmation Modal Standard**: All destructive actions (delete product items, quotations, invoices, sales orders, master records, media, sheets, columns, or permanent trash purge) must use the application's unified in-app confirmation modal (`frontend/src/lib/confirm.tsx`). Native browser `window.confirm()` or unstyled popup dialogs are strictly prohibited across all modules.
 
 ---
 
@@ -68,6 +70,7 @@
 | **INVENTORY** | Product Master | Direct | `/masters/products` | `masters-products` | `box` | `product.view` |
 | **INVENTORY** | Product Prices | Direct | `/inventory/product-prices` | `product-prices` | `coins` | `product.view` |
 | **INVENTORY** | Product Gallery | Direct | `/product-gallery` | `product-gallery` | `image` | `productgallery.view` |
+| **INVENTORY** | Stock Movement | Direct | `/inventory/stock-movements` | `stock-movement` | `truck` | Public Authenticated |
 | **PURCHASE** | Local Purchase | Direct | `/purchase/local` | `local-purchases` | `shoppingCart` | `purchase.view` |
 | **SALE** | Inquiries | Direct | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
 | **PLANNING** | Shipment Planning | Direct | `/planning` | `planning` | `truck` | `planning.view` |
@@ -242,6 +245,7 @@ Manage complete vendor team directory:
 - **`+ Add New` Button**: Opens portal-mounted right-side drawer modal (`createPortal` to `document.body` with `backdropFadeIn` and `slideInRight` smooth animations, `useBodyScrollLock`, and `Esc` key listener) with:
   - **Salutation**: `Mr`, `Mr.`, `Mrs.`, `Ms.`
   - **Person Name** (*Required*): Full name with auto-focus and native validation.
+  - **Set as Primary Contact**: Checkbox card (`★ Set as Primary Contact (Reflects into Supplier Profile)`). Automatically checked for the supplier's first contact or when Profile contact details are unset.
   - **Designation**: Role / title.
   - **Handling Territory**: e.g., local, Export India, Export Africa, Export Global.
   - **Calling Number**: Phone input with country dial code prefix indicator.
@@ -250,7 +254,15 @@ Manage complete vendor team directory:
   - **Email Address**: Direct email.
   - **Country**: Country dropdown with automatic dial code resolution.
   - **Footer Actions**: Pinned `Cancel` and full-width `Submit` button properly bound to form ID.
-- **Contacts Table**: Lists all contacts with territory, phone, WhatsApp, WeChat, email, `Edit` button, and `Delete` button.
+- **Two-Way Profile Synchronization Engine:**
+  - Adding or editing a primary contact immediately synchronizes with the `Profile` tab's `Primary Contact Information` section (`contact_full_name`, `contact_designation`, `contact_calling_number`, `contact_whatsapp_number`, `contact_wechat_number`, and `emails`).
+  - Switching back to the Profile tab shows the updated contact details immediately with zero latency.
+  - If a supplier previously had contacts in `supplier_contacts` but empty profile fields, opening the edit modal automatically hydrates the Profile form from the primary contact.
+- **Contacts Table**:
+  - **Primary Badge**: Displays prominent blue `★ Primary` badge on the designated primary contact. Secondary contacts display `Secondary`.
+  - **★ Make Primary Action**: Secondary contacts feature a 1-click `★ Make Primary` button. Clicking promotes that contact to primary, demotes previous primary, updates the backend `Supplier` row, and syncs the Profile tab and list table in real time.
+  - **Delete Guard**: Primary contact is protected from direct deletion (`Delete` button hidden/blocked with ConflictException protection); users must designate another contact as primary first before deleting.
+  - **Actions**: `★ Make Primary` (for secondary), `✏️ Edit`, and `🗑️ Delete` (for secondary).
 
 #### Tab 3: 📦 Products & Categories
 - **Product Categories**: Multi-select panel.
@@ -573,6 +585,60 @@ Manage complete vendor team directory:
 
 ---
 
+## 7.2. INVENTORY: Stock Movement (Inward & Outward Register & Live Inventory Ledger)
+
+- **Route:** `/inventory/stock-movements` (aliases: `/stock`, `/stock-movements`)
+- **Purpose:** Full warehouse inventory tracking of physical stock receipts (Inward +), shipments to clients (Outward -), and real-time inventory ledger (Kardex).
+
+### Visual Elements & Layout
+1. **Top KPI Metrics Summary Cards:**
+   - 📥 **Total Inward Received:** Displays total confirmed incoming quantity in units across all inbound shipments.
+   - 📤 **Total Outward Dispatched:** Displays total confirmed dispatched quantity in units across all buyer dispatches.
+   - 📊 **Net Current Warehouse Stock:** Real-time calculated live stock balance (+Inward - Outward).
+2. **Navigation Tabs:**
+   - `📥 Inward Register`: Chronological incoming receipt records with supplier, reference challan, vehicle, total quantity, status, and detail view.
+   - `📤 Outward Register`: Chronological dispatch records with buyer, reference challan, container/vehicle, total quantity, status, and detail view.
+   - `📊 Current Stock Ledger`: Item-by-item live balance table (Product Name, SKU, Total Inward, Total Outward, Current Stock, Status Badge, and "View Kardex" button).
+3. **Action Buttons:**
+   - `+ New Inward Entry`: Opens inward reception modal.
+   - `+ New Outward Entry`: Opens outward dispatch modal.
+
+### Test Cases: Inward Stock-In Workflow
+- [ ] **1-Click Extract from Local Purchase:** Open `+ New Inward Entry` &rarr; select `⚡ 1-Click Extract from Local Purchase` &rarr; choose any confirmed purchase bill &rarr; verify supplier name, bill number, consignment code, and all line items (SKU, expected quantity, unit rate) are instantly auto-filled.
+- [ ] **8+ Line Items Direct Visibility & High-Contrast Scrollbar:**
+  - Extract a purchase bill or sale order containing 8 or more products (e.g. Bill `6656` with 8 items).
+  - Verify that **all 8 rows** (`GF1000FD` down through `GF5000 Granular Filler`) are visible directly in the viewport without being cut off by redundant inner footers.
+  - Verify that when scrolling is needed (e.g. 10+ items or smaller viewport), the **high-contrast custom scrollbar** (slate thumb `#94a3b8` on `#f1f5f9` track) is clearly visible on the right of the table container with `scrollbar-gutter: stable`.
+  - Verify table headers stay pinned at the top (`sticky`) while scrolling through line items.
+  - Verify single bottom modal action bar cleanly displays total item count and total net quantity without duplicate summary clutter.
+- [ ] **Damaged & Accepted Quantity Calculation:** On an inward item with 100 expected qty, enter `100` received and `5` damaged &rarr; verify accepted net quantity calculates automatically as `95` units.
+- [ ] **Direct Manual Inward:** Toggle `✍️ Direct Manual Entry` &rarr; enter supplier name, challan number, warehouse location, add custom item rows &rarr; save &rarr; verify new inward movement record is created with serial number `INW-YYYY-XXXX`.
+
+### Test Cases: Outward Stock-Out Workflow
+- [ ] **1-Click Extract from Sale Process:** Open `+ New Outward Entry` &rarr; select `⚡ 1-Click Extract from Sale Process` &rarr; choose any confirmed sale order &rarr; verify buyer name, order number, container number, transporter, and line items are instantly auto-filled.
+- [ ] **Adjust Dispatched Quantity:** On an outward item with 50 ordered qty, adjust dispatched quantity to `50` &rarr; save &rarr; verify new outward movement record is created with serial number `OUT-YYYY-XXXX`.
+- [ ] **Strict Outward Blocking on Insufficient Stock (Anti-Negative Stock):**
+  - Open `+ New Outward Entry`.
+  - For any product with 0 or 5 units in warehouse, enter a dispatched quantity greater than in-stock (e.g. `10` units).
+  - Verify line item displays `In-Stock: X units` badge and immediate red alert `⚠️ Blocked: Exceeds warehouse stock!`.
+  - Verify quantity input border highlights in red (`1.5px solid #ef4444`) with soft pink background.
+  - Verify submit button locks to `🚫 Blocked: Insufficient Stock` and form submission is disabled.
+  - Verify backend API `POST /api/v1/stock/movements` strictly rejects excess quantity with `400 Bad Request` ("Insufficient Stock for '<Item>'. Available: X, requested: Y. Outward dispatch blocked to prevent negative inventory.").
+
+### Test Cases: Live Stock Balance, Kardex History & Deletion
+- [ ] **0-Item Clean Initial State (No Ghost Rows):** Click `+ New Inward Entry` or `+ New Outward Entry` &rarr; verify modal opens in 1-Click Extract mode with **`2. GOODS LINE ITEMS (0 items)`** and displays centered empty-state banner (*"No purchase bill / sale order selected yet..."*) with **zero ghost rows**, and bottom counter shows `Total Items: 0 | Total Net Qty: 0`.
+- [ ] **Cascading Clear `✕` on Order Search Combobox:** Extract any purchase bill or sale order &rarr; click `✕` in the search input &rarr; verify search query, selected order, party names, and all line items wipe immediately, returning table to `0 items` and empty-state banner.
+- [ ] **Submit Button Locked on 0 Items:** While `items.length === 0`, verify the `Confirm & Record` button is disabled with gray styling (`#94a3b8`) and tooltip (*"Select a purchase bill / sale order or add line items first"*).
+- [ ] **Mode Switch Row Management:** Switch to `✍️ Direct Manual Entry` &rarr; verify table automatically provides 1 clean item row ready for input &rarr; switch back to `⚡ 1-Click Extract` &rarr; verify table resets cleanly to 0 items.
+- [ ] **Stock Balance Verification:** Switch to `📊 Current Stock Ledger` tab &rarr; search for the SKU received and dispatched &rarr; verify:
+  $$\text{Current In-Stock} = \text{Total Inward Qty} - \text{Total Outward Qty}$$
+- [ ] **Kardex Transaction Ledger:** Click `📊 View Kardex` on any product row &rarr; verify modal displays complete chronological transaction history with running balance after each transaction.
+- [ ] **Movement Cancellation:** In Inward or Outward register, click `Cancel` on a confirmed movement &rarr; confirm prompt &rarr; verify status updates to `CANCELLED` and stock balance recalculates immediately.
+- [ ] **Movement Deletion:** In Inward or Outward register, click `Delete` on a movement &rarr; confirm prompt *"Are you sure you want to permanently delete movement ...?"* &rarr; verify movement is removed from register, deleted via `DELETE /api/v1/stock/movements/{id}`, and stock balances update in 0ms.
+- [ ] **Inward Cancellation & Deletion Safeguard:** Attempt to cancel or delete an inward movement whose items have already been dispatched &rarr; verify operation is rejected with `BadRequestException` to prevent driving stock into deficit.
+
+---
+
 ## 8. INVENTORY: Categories Master Module
 
 - **Route:** `/masters/categories`
@@ -635,12 +701,12 @@ Manage complete vendor team directory:
      - **Total Purchases:** Total domestic purchase records count.
      - **Total Landing Value:** Sum of `(Invoice Total + Total Expenses)` displayed in RMB (`¥`).
      - **Total Expenses Disbursed:** Total domestic logistics, packing, transport & offloading expenses.
-2. **Action Bar & Global Controls:**
-   - **`+ Add Local Purchase` Button:** Blue primary button routing to `/purchase/local/new`.
-   - **`🔍 Filter` Toggle Button:** Funnel icon button toggling the collapsible filter drawer. Displays active badge count when filters are applied.
-   - **`📥 Export ▾` Dropdown:**
+2. **Action Bar & Global Controls (Standardized Layout Matching Products Master):**
+   - **`🔍 Filter` Funnel Toggle Button (`btn-header-filter`):** Compact Funnel SVG icon button matching Products Master. Dark slate background (`#475569`) when closed, primary blue (`#0061f2`) when open or active filters applied, with red numeric count badge (`#ef4444`).
+   - **`Export ▾` Dropdown (`btn-imp-exp`):** Vibrant orange button (`#f59e0b`, white text `#ffffff`, `fontWeight: 700`, `borderRadius: 6px`, `border: none`, `boxShadow: 0 2px 4px rgba(245, 158, 11, 0.25)`).
      - `📊 Export to Excel (.xlsx)`: Corporate navy `#1E3A8A` header, white bold text, auto-fit column widths, and proper currency format.
      - `📄 Export to CSV (.csv)`: UTF-8 with BOM encoding for seamless Excel import.
+   - **`+ Add Local Purchase` Button:** Blue primary button routing to `/purchase/local/new`.
 3. **Collapsible Top Filter Box:**
    - Toggled open/closed by the funnel button.
    - **Organization Dropdown:** Filter by organization from `/masters/company-list/lookup`.
@@ -1039,6 +1105,12 @@ Manage complete vendor team directory:
 - [ ] In Layer 3 Items view, click the **Export** button on the top-right toolbar. Select **Excel Spreadsheet (XLSX)** from the dropdown. Verify browser downloads `Inquiry_{Code}_{Date}.xlsx`. Open the file and verify columns (`Sr No`, `Product Code`, `Product Name`, `Quantity`, `UOM`, `Best Quote Price`, `Selected Supplier`, etc.) match active items.
 - [ ] In Layer 3 Items view, click the **Export** button and select **CSV Delimited (CSV)**. Verify browser downloads `Inquiry_{Code}_{Date}.csv` and file opens cleanly in Excel without character encoding issues.
 - [ ] Open a consignment with 0 items. Verify the **Export** button is disabled with tooltip `"No items to export"`.
+- [ ] **TC-INQ-08: Smart Focus & Product Master Search Type-Ahead Resolution:**
+  - Click `+ ADD NEW` to open `Create Quick Inquiry` drawer.
+  - In `Product Line Items`, select any product (e.g. `FR400 Band Sealer MSH (DAR-00063)`).
+  - Place cursor into the product field (or click on it) &rarr; verify the dropdown opens smoothly displaying all active products, highlighting the current selection with a green checkmark (`✓`), and **does NOT display "No matches."**.
+  - Type or paste a product name or SKU into the field &rarr; verify matching products filter accurately.
+  - Paste a composite label string with parentheses e.g. `(DAR-00063)` &rarr; verify the product is matched and selectable.
 
 ---
 
@@ -1059,10 +1131,10 @@ Manage complete vendor team directory:
      - **Total Order Value:** Sum of all sales orders in RMB (`¥`) and USD (`$`).
      - **Dispatched Orders:** Orders currently in transit with BL / Container numbers.
      - **Pending Orders:** Orders awaiting final sales confirmation or admin approval.
-2. **Action Bar & Global Controls:**
-   - **`+ Create Sale Process Order` Button:** Primary blue button routing to order creation form.
-   - **`🔍 Filter` Toggle Button:** Funnel icon button toggling the collapsible filter drawer.
-   - **`📥 Export ▾` Dropdown:** Exports full orders list to corporate styled Excel (`.xlsx`) or CSV.
+2. **Action Bar & Global Controls (Products Master Alignment):**
+   - **`🌪️ Filter Toggle` Button:** Compact dark slate square button (`#475569`, toggles to `#0061f2` when active) featuring the standardized filter funnel SVG icon, matching Products Master design, with active filter badge indicator.
+   - **`+ Create Sale Process` Button:** Primary blue action button (`#0061f2`, text `#ffffff`) routing to `/sale/process/new`.
+   - **`Export` Button:** Vibrant amber/orange button (`#f59e0b`, text `#ffffff`, `fontWeight: 700`, `border: none`) matching Products Master `Imp / Exp ▾` visual hierarchy, downloading filtered sales orders in Excel (`.xlsx`).
 3. **Table Card Toolbar:**
    - **Items/Page Selector:** `10`, `25`, `50`, `100` items per page.
    - **Search Input:** Debounced search matching Order No, Consignment Code, Buyer Name, Container No, BL No, or LR No.
@@ -1102,6 +1174,43 @@ Manage complete vendor team directory:
     - **Page 2:** Column headers repeat automatically via `<thead>`, followed cleanly by items 11 to 27, yellow totals row, ICBC bank details, and official company stamp + signature.
     - **Zero Overlap:** Complete isolation guarantees no elements are drawn on top of each other.
 
+### 13.1.3. New / Edit Order Form Architecture (`SaleProcessForm.tsx`) — 3-Level Planning Hierarchy
+- **Header & Layout:** Full fluid layout with quick back navigation, active Order ID badge (when editing), and Cancel / Save action bar.
+- **Card 1: Customer, Sheet & Planning Consignment Integration (3-Level Cascade):**
+  - **Level 1 — Customer / Entity Combobox:**
+    - Live search combobox partitioning options into:
+      - `🏢 INTERNAL ORGANIZATIONS`: Lists all registered master companies (e.g. Inhyma, Darsh Impex, FNB Solution, One Stop, Yinglima).
+      - `👤 BUYERS`: Lists all registered buyer entities (e.g. Om Packaging, Prathamesh Packaging).
+    - When selecting an organization, sets `buyer_id = null`, `organization_id = org.id`, allowing internal orders and branch consignment transfers.
+    - When selecting a buyer, sets `buyer_id = buyer.id`.
+  - **Level 2 — Planning Sheet / Branch Combobox (New Field):**
+    - Unlocks automatically upon Level 1 entity selection.
+    - Dynamically queries all active planning sheets and filters strictly to sheets matching the selected entity (by foreign key or canonical sheet name prefix, e.g., `Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma  Indore`, `inhyma chennai` for Inhyma; or `Om Packaging - Mulund` for Om Packaging).
+  - **Level 3 — Planning Consignment Column Combobox:**
+    - Unlocks automatically upon Level 2 sheet selection.
+    - Queries `/api/v1/sales/planning-consignments?sheet_id=...` and restricts options strictly to consignment columns belonging to that selected sheet (e.g. `Mum 48`, `Mum 49`, `GJ14`, etc.).
+    - Selecting a consignment column immediately auto-loads all planned items with planned quantity > 0, unit rates, CBM, and remarks.
+    - Includes manual `Auto-Load Planned Products` button with loading spinner for instant re-synchronization.
+  - **Order Metadata Grid (Row 2):**
+    - `Order Date`: ISO date picker.
+    - `Delivery Date`: Target delivery/arrival date picker.
+    - `Currency`: Currency selector (`USD`, `RMB`, `INR`).
+    - `Status`: Order lifecycle state badge and select dropdown (`Pending`, `Sales Confirmed`, `Admin Approved`, `Dispatched`, `LR Complete`, `Cancelled`).
+- **Card 2: Ordered Items & Spares Specification:**
+  - Table of products with code, name, UOM, planned quantity, rate, amount, CBM, and remarks.
+  - **Spares Highlighting:** Non-spare products render on standard clean table rows. Spare parts are automatically highlighted with light-orange background tint (`#fff7ed` / `#fffaf5`) and a non-clickable light-orange pill (`⚙️ Spare Part`).
+  - **`+ Add Spare from Master` Modal:** Dynamically queries `/masters/products?is_spare=true`, filtering strictly to categories and subcategories matching "spare". Complete machines are strictly excluded.
+- **Card 3: Logistics & Transport Details:**
+  - `Transporter Name`: Freight forwarder or logistics company.
+  - `LR / Tracking No`: Lorry receipt or tracking number.
+  - `LR Date`: Shipment dispatch / LR issue date.
+  - `Container No`: 11-character ocean container number (e.g. `MSKU1234567`).
+  - `Bill of Lading (BL) No`: Sea waybill / BL identifier.
+  - `Port of Loading (POL)`: Origin port (e.g. `Ningbo`, `Shanghai`, `Shenzhen`).
+  - `Port of Discharge (POD)`: Destination port (e.g. `Nhava Sheva (JNPT)`, `Mundra`, `Chennai`).
+- **Card 4: Financial Costing Summary:**
+  - Summary cards showing Total Quantity, Total CBM, Subtotal, Net Sourcing Cost, Estimated VAT Refund, and Net Profit Margin.
+
 ### Test Cases for Sale Process Module
 - [ ] **TC-SP-01: Order Creation from Consignment:**
   - Create a new Sale Process Order selecting an active Shipment Planning consignment & buyer. Verify all items, quantities, and rates import accurately.
@@ -1122,6 +1231,45 @@ Manage complete vendor team directory:
 - [ ] **TC-SP-06: Modal Viewport Top Bar Integrity:**
   - Open the modal on a 1366x768 resolution or zoomed display. Scroll down the items table.
   - Verify the modal header (`Sale Process Order: ...`, tabs, buttons) remains fully visible and is never pushed off the top edge of the screen.
+- [ ] **TC-SP-07: 3-Level Hierarchy Selector & Consignment Product Auto-Load (`/sale/process/new`):**
+  - Navigate to `/sale/process/new`.
+  - In **Step 1 (Customer / Entity)**, select an organization (e.g., `Inhyma`) or buyer (e.g., `Om Packaging`).
+  - Verify **Step 2 (Planning Sheet / Branch)** unlocks and only lists sheets belonging to the selected entity (e.g., `Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma  Indore`, `inhyma chennai` for Inhyma; or `Om Packaging - Mulund` for Om Packaging).
+  - Select a sheet (e.g., `Inhyma Mumbai`).
+  - Verify **Step 3 (Planning Consignment Column)** unlocks and displays strictly the consignment columns configured in that sheet (e.g., `Mum 48`, `Mum 49`, etc.).
+  - Select a consignment column. Verify all line items with planned quantity > 0 automatically populate into the Order Items table with planned unit rates, CBM, and remarks.
+- [ ] **TC-SP-08: Internal Organization Order Creation (Nullable Buyer ID):**
+  - Create and save a new Sale Process Order selecting an Internal Organization (`🏢 INTERNAL ORGANIZATIONS`) without picking any external buyer.
+  - Save the order.
+  - Verify the order is successfully persisted without foreign key constraint errors (`sales_orders.buyer_id` is nullable).
+  - Open the saved order in edit mode (`/sale/process/:id/edit`). Verify the selected entity, sheet, consignment code, and line items load accurately.
+- [ ] **TC-SP-09: Products Master Toolbar UI Alignment (Filter Funnel & Orange Export):**
+  - Navigate to `/sale/process`.
+  - Verify the filter button is a compact dark slate square button (`#475569`) with white funnel SVG icon matching Products Master.
+  - Click the funnel button &rarr; verify it turns blue (`#0061f2`) and smoothly expands the collapsible filter drawer.
+  - Apply any filter (e.g. Buyer or Consignment) &rarr; verify the red active count badge displays the number of active filters.
+  - Verify the **Export** button renders in vibrant amber/orange (`#f59e0b`, `color: #ffffff`, `fontWeight: 700`, `border: none`) matching the Products Master `Imp / Exp ▾` visual hierarchy.
+  - Click **Export** &rarr; verify it triggers Excel export with `Exporting...` loading feedback and success toast.
+- [ ] **TC-SP-10: Spares Catalog Isolation & Light-Orange Line Item Highlighting (`/sale/process/new`):**
+  - Click **`+ Add Spare from Master`** in `/sale/process/new` or edit form.
+  - Verify the modal only displays spare products (e.g. `bogal Spares`, `JN spares`, `Yujun Spares`, `Hoofeng Spares`, `Yuangkan Spares`, etc.) matching spare categories/subcategories. Verify that machines (e.g. `GF100 Granular Filler`, `FR400 Band Sealer MSH`) never appear in the list.
+  - Type a keyword into the modal search bar (e.g. `spares` or `roller`) &rarr; verify search results filter strictly within the spare catalog.
+  - Click **`+ Add Spare`** on any spare item &rarr; verify the modal closes and the item is appended to the Planned Line Items table.
+  - In the Planned Line Items table:
+    - Verify that spare rows render with a clean **light-orange background** (`#fff7ed` / `#fffaf5`) and a subtle light-orange border.
+    - Verify that next to the spare item name, a clean non-clickable badge **`Spare Part`** is displayed in light orange.
+    - Verify that clickable emoji toggle buttons (`🚜 Machine` / `⚙️ Spare`) are completely removed from all rows.
+    - Verify that non-spare machine items render with a standard clean white / alternating row with zero button clutter.
+- [ ] **TC-SP-11: Responsive Layout & Zero-Overflow Hardening (100% Zoom / Multi-Resolution):**
+  - Open /sale/process/new in Google Chrome at 100% browser zoom on a standard screen/laptop resolution.
+  - Select a Customer/Entity (e.g. Om Packaging).
+  - Select a Planning Sheet (e.g. Om Packaging - Mulund).
+  - Select a Consignment Column with a long name (e.g. Mum 1 (Om Packaging - Mulund • 1 items • 56 pcs)).
+  - **Boundary Verification:** Inspect the right edge of Card 1 ('Consignment & Buyer Identification'):
+    - Verify that the ⚡ Auto-Load button remains completely within the card container boundaries.
+    - Verify that the button does not get pushed off-screen or cut off (no ⚡ Au... overflow).
+    - Verify that the combobox text cleanly truncates with an ellipsis (...) if the column track narrows, and hover tooltip reveals the complete metadata string.
+    - Verify that zooming between 90%, 100%, 110%, and 125% retains smooth responsive wrapping without card spillover.
 
 ---
 
@@ -1218,6 +1366,39 @@ Manage complete vendor team directory:
 - [ ] Click the `Approval Date` column eye icon, verify approval history drawer/popover opens.
 - [ ] Click `Container Optimization Calculator`, verify total CBM and weight compute accurately against 20FT / 40FT / 40FT HC container capacity limits.
 - [ ] Open `History & Change Log` drawer, verify the cell edits and column additions are logged with timestamps and user names.
+- [ ] **TC-PLAN-01: Canonical Column Structure & Absence of Duplicate Manual Columns:**
+  - Open `/planning` and navigate across organization sheets (`Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma  Indore`, `inhyma chennai`) and buyer sheets (`Om Packaging - Mulund`, `Darsh Impex Mumbai - Mulund`).
+  - Verify every sheet strictly renders canonical column ordering:
+    1. Approval / System headers (`TEST(Y/N)`, `APPROVAL DATE`).
+    2. Consignment quantity & remarks pairs (`<Label> <N>`, `<Label><N> Remarks`).
+    3. Shared linked specification block (`Brand of Supplier`, `City`, `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, `CBM/PKG (KG)`).
+    4. Group calculation formulas (`NO. OF PKG <LABEL><N>`, `TOTAL WEIGHT <LABEL><N>`, `TOTAL CBM <LABEL><N>`).
+    5. Status flag (`TALLY ENTRY POSTED (Y/N)`).
+  - Verify that `Inhyma Mumbai` does NOT contain redundant manual duplicate columns for `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, `CBM/PKG (KG)`, or `Supplier City` at the end of the sheet.
+- [ ] **TC-PLAN-02: Hyphenated & Leading-Zero Consignment Group Parsing (MP -06, GJ14):**
+  - Switch to `Inhyma  Indore` (`/planning`).
+  - Verify `MP -06` correctly displays its companion formula columns: `NO. OF PKG MP6`, `TOTAL WEIGHT MP6`, and `TOTAL CBM MP6`.
+  - Enter a test quantity in `MP -06` (e.g., `100`).
+  - Verify `NO. OF PKG MP6` evaluates as $100 / [\text{PKG QTY}]$, `TOTAL WEIGHT MP6` evaluates as $[\text{NO. OF PKG}] \times [\text{UNIT WEIGHT}]$, and `TOTAL CBM MP6` evaluates as $[\text{NO. OF PKG}] \times [\text{CBM/PKG}]$ in real time.
+- [ ] **TC-PLAN-03: Next Group Atomic Creation Without Spec Duplication:**
+  - On any sheet (e.g. `Inhyma Mumbai`), click **`+ Next Mum`** (or `+ Next <Label>`).
+  - Verify the new consignment column group (e.g. `Mum 51`, `Mum51 Remarks`, `NO. OF PKG MUM51`, `TOTAL WEIGHT MUM51`, `TOTAL CBM MUM51`) is atomically created.
+  - Verify that the 5 shared specification columns (`Brand of Supplier`, `City`, `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, `CBM/PKG (KG)`) remain single, linked lookup columns and are NOT duplicated.
+- [ ] **TC-PLAN-04: Packaging Specifications Backfill & Read-Time Product Prefetch:**
+  - Navigate to `/planning` and open `Inhyma Mumbai`.
+  - Locate any product row with planned consignment quantity (e.g., Row 1 `Carton boxes for band sealer without thermocol`, with `Mum 48 = 48`).
+  - Verify that `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, and `CBM/PKG (KG)` display exact values from Product Master (`1.000`, `898.000`, `65.000000`).
+  - Verify that companion formulas calculate immediately: `NO. OF PKG MUM48 = 48.0`, `TOTAL WEIGHT MUM48 = 43104.0`, `TOTAL CBM MUM48 = 3120.0`.
+- [ ] **TC-PLAN-05: First Column ("ITEM") Excel-Style Drag-to-Resize & Server Persistence:**
+  - Navigate to `/planning` and open any branch sheet (e.g. `Inhyma Mumbai`).
+  - Hover the cursor over the right boundary line of the first column header (`ITEM`).
+  - Verify the cursor transforms into `col-resize` with a 5px interactive drag zone and active blue highlight (`#2563EB`) on mousedown.
+  - Click and drag horizontally to widen the column (e.g. from default 240px to 380px).
+  - Verify that the entire column (header `<th>`, all row cells `<td class="item-col-cell">`, and skeleton rows) expands buttery smooth in real time without lag.
+  - Verify that subsequent frozen columns (`TEST(Y/N)`, `APPROVAL DATE`, user-pinned columns) automatically push outward smoothly and recalculate their sticky left offsets without overlapping.
+  - Release the drag handle; verify network activity fires `PATCH /api/v1/planning/sheets/{sheet_id}/item-width` with `{ width_px: 380 }`.
+  - Reload the page; verify the custom 380px width remains persisted from `planning_sheets.item_width_px`.
+  - Drag the column narrower (e.g. to 160px), reload the page, and verify the 160px width is preserved.
 
 ---
 
@@ -1393,22 +1574,30 @@ Manage complete vendor team directory:
     - **Inquiries & Quotations (`inquiry.*`):** View, Create, Update, Delete, Approve Quotation, Export Line Items, Import Line Items, Send Messages (Email/WeChat).
     - **Product Prices (`product_price.*`):** View, Create, Update, Delete, Export, Import.
     - **Local Purchase (`local_purchase.*`):** View, Create, Update, Delete, Export / Print.
+    - **Sale Process (`sale_process.*`):** View, Create, Update, Approve / Status Workflow, Delete, Export (Excel & Trade Documents).
+    - **Stock Movements (`stock_movement.*`):** View, Create (Inward / Outward), Cancel / Reverse, Delete.
+    - **Notification Rules (`notification_settings.*`):** View, Manage Rules & Recipients.
+    - **Positions & Designations (`position.*`):** View, Create, Update, Delete.
   - Checkboxes for all other core platform modules (`.view`, `.create`, `.update`, `.delete`, `.export`, `.import`, `.bulk_action`, etc.).
 - **Clone Department Button:** Creates a copy of the department with all permissions pre-checked.
 - **Safe Delete with Reassignment Modal:** If users exist in a department scheduled for deletion, prompts administrator to select a replacement department to reassign those employees before deletion proceeds.
 
 ### 16.3. Test Cases for Departments & Permissions Module
-- [ ] **RBAC Module Cards Verification:** Open `/rbac`, create or open any test department (e.g. `Procurement & Quotations`). Verify that dedicated permission cards appear for:
+- [ ] **RBAC Module Cards Verification:** Open `/rbac`, create or open any test department. Verify that dedicated permission cards appear for:
+  - **Sale Process:** Displays 6 checkboxes (`View`, `Create`, `Edit`, `Update Status / Workflow`, `Delete`, `Export Excel & CI/Packing Docs`).
+  - **Stock Movements:** Displays 4 checkboxes (`View`, `Create`, `Cancel / Reverse Movement`, `Delete`).
+  - **Notification Rules:** Displays 2 checkboxes (`View`, `Manage Notification Rules`).
+  - **Positions & Designations:** Displays 4 checkboxes (`View`, `Create`, `Edit`, `Delete`).
   - **Inquiries & Quotations:** Displays 8 checkboxes (`View`, `Create`, `Update`, `Delete`, `Approve Quotation`, `Export Line Items`, `Import Line Items`, `Send Messages (Email/WeChat)`).
   - **Product Prices:** Displays 6 checkboxes (`View`, `Create`, `Update`, `Delete`, `Export`, `Import`).
   - **Local Purchase:** Displays 5 checkboxes (`View`, `Create`, `Update`, `Delete`, `Export / Print`).
 - [ ] **Restricted User Navigation & Action Gating Test:**
-  1. Assign a test user to a department possessing only `inquiry.view`, `product_price.view`, and `local_purchase.view` (read-only).
-  2. Log in as that user: verify the sidebar items for `Inquiries`, `Product Prices`, and `Local Purchases` are visible.
-  3. Navigate to `Product Prices`: verify "+ Add Price" and inline price editing are disabled/hidden, but the catalog is visible.
-  4. Navigate to `Local Purchases`: verify "+ New Purchase Order", "Edit", and "Delete" actions are hidden, and export is hidden if `local_purchase.export` is unchecked.
-  5. Navigate to `Inquiries`: verify that outbound email sending, WeChat sending, and bulk Excel import buttons are hidden or disabled without respective permissions.
-  6. Attempt to perform direct REST calls without permissions (e.g., `POST /api/v1/purchases/local`): verify backend strictly returns `403 Forbidden`.
+  1. Assign a test user to a department possessing only `sale_process.view`, `stock_movement.view`, and `notification_settings.view` (read-only).
+  2. Log in as that user: verify the sidebar items for `Sale Process`, `Stock Movement`, and `Notification Rules` are visible.
+  3. Navigate to `Sale Process`: verify "+ Create Sale Process" and "Export" buttons on the top right are hidden. In row actions, verify "Edit Order" and "Delete" are hidden.
+  4. Navigate to `Stock Movement`: verify "+ New Inward Entry" and "+ New Outward Entry" buttons are hidden. In the table, verify "Cancel" and "Delete" action buttons are hidden.
+  5. Navigate to `Notification Rules`: verify that the status toggle buttons (`ACTIVE`/`OFF`) are disabled (click has no effect) and the "Edit" button is replaced by a read-only tag (`🔒 Read Only`).
+  6. Attempt to perform direct REST calls without permissions (e.g., `POST /api/v1/sales/orders` or `POST /api/v1/stock/movements`): verify backend strictly returns `403 Forbidden`.
 - [ ] Open `/rbac`, click on a department (e.g. `Operations`), verify Left Column renders:
   1. Department Details (Name, Description, Code, Parent Departments)
   2. Managers in this Department
@@ -1801,4 +1990,164 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-SP-06** | Dual-Sheet Excel Export | Click `📥 Download Excel (.xlsx)`. | Browser downloads `Yinglima_CI_PL_{consignment_code}.xlsx`. Opening in Excel shows both `CI` and `Packing List` sheets with live formulas and embedded seal + signature. |
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP.*
+
+## 36. Notification & Automation Rules System (`/settings/notifications`)
+
+### 36.1. Module Overview & UI Layout Specifications
+- **Navigation:** Topbar -> Bell Icon -> **Configure Rules** (`/settings/notifications`).
+- **Topbar Bell Component:** [`NotificationBell.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/NotificationBell.tsx) embedded in [`AppShell.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/components/AppShell.tsx).
+- **Rule Management Grid:** [`NotificationSettings.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/NotificationSettings.tsx) displaying Event Name, Status toggle, Active Channels (`in_app`, `email`, `push`), Recipient Roles, Direct Users, and `[ ✏️ Edit ]` action.
+
+### 36.2. Event Hooks & Dispatcher Architecture
+- **Central Events Engine:** Automatically captures transactional events:
+  * `shipment_requirement_raised`: Dispatched on shipment planning requirements.
+  * `shipment_status_ordered`: Dispatched on shipment/container ordering.
+  * `sale_process_created`: Dispatched on sale process order creation.
+  * `local_purchase_created`: Dispatched on domestic purchase order saving.
+  * `inquiry_created`: Dispatched on customer RFQ/inquiry creation.
+- **Recipient Deduplication:** Users assigned through both a qualified role and direct selection receive exactly one notification.
+
+### 36.3. Test Cases & Verification Checklist
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-NT-01** | Topbar Badge & Polling | Start backend and frontend. Ensure 1 unread notification exists. | Amber/red pill badge appears over topbar bell icon showing unread count; background worker polls every 30s. |
+| **TC-NT-02** | Event Dispatch (Sale Process) | Create a new Sale Process order. | Backend dispatches `sale_process_created` event; configured recipients receive an in-app notification in topbar within 30s. |
+| **TC-NT-03** | Event Dispatch (Local Purchase)| Create and save a new Local Purchase bill. | Backend dispatches `local_purchase_created` event; in-app notification appears with PO number and supplier name. |
+| **TC-NT-04** | Event Dispatch (Inquiries) | Submit a new customer Inquiry. | Backend dispatches `inquiry_created` event; topbar notification arrives with inquiry code and buyer name. |
+| **TC-NT-05** | User Search Modal Parser | Navigate to `/settings/notifications`, click `[ ✏️ Edit ]` on any rule, and type a user search query (e.g. `user b`). | Search bar dynamically queries `/api/v1/users` and correctly parses paginated items; matching users appear in checkbox list without "No users match your search" blank-out. |
+| **TC-NT-06** | Read & Direct Navigation | Click any unread notification item in the bell dropdown. | Notification is marked read (`is_read=true`), unread badge count decrements, and user is navigated directly to the associated document. |
+| **TC-NT-07** | Mark All As Read | In bell dropdown, click `Mark all as read`. | All notifications are set to read in a single batch; unread badge immediately disappears. |
+
+---
+
+## 37. Shipment Planning Master Grid & Formula Engine (`/planning`)
+
+### 37.1. Module Overview & Multi-Sheet Specifications
+- **Navigation:** Main Sidebar -> Logistics -> **Shipment Planning** (`/planning`).
+- **Multi-Sheet Architecture:**
+  * **Organization Branch Sheets:** Dedicated tabs for `Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma Indore`, `inhyma chennai`, `Mumbai`, `Chennai`, `dubaidarsh`, `One Stop`, `F&B`.
+  * **Buyer Planning Sheets:** Dedicated tabs for `Om Packaging - Mulund`, `Prathamesh Packaging PVT LTD - Thane`, `Darsh Impex Mumbai - Mulund`.
+- **Master Linkage ("Extract From")**:
+  * Brand of Supplier, City, PKG QTY, Unit Weight/Pkg, and CBM/Pkg are linked directly to Product Master (`product`).
+
+### 37.2. Test Cases & Verification Checklist
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-PL-01** | Linked Lookup Auto-Population | Add a product row to any planning sheet. | `Brand of Supplier`, `City`, `PKG QTY`, `UNIT WEIGHT/PKG (KG)`, and `CBM/PKG (KG)` automatically populate from Product Master. |
+| **TC-PL-02** | Package Quantity Formula | Enter shipment input quantity (e.g. 56) for an item with PKG QTY = 56. | `NO. OF PKG` immediately calculates and displays `1.0`. |
+| **TC-PL-03** | Total Gross Weight Formula | With evaluated PKG = 5 and Unit Weight = 1.0 kg. | `TOTAL WEIGHT` immediately calculates and displays `5.0 kg`. |
+| **TC-PL-04** | Total Volume CBM Formula | With evaluated PKG = 6 and Unit CBM = 0.13 m³. | `TOTAL CBM` immediately calculates and displays `0.78 CBM`. |
+| **TC-PL-05** | Zero & Blank Division Safety | Leave shipment input quantity blank or set PKG QTY to 0. | Formula engine evaluates safely to empty/null with zero console errors or application crashes. |
+| **TC-PL-06** | Auto-Fit & 80% Zoom Viewport | Set browser zoom to 80% on a sheet with 20+ columns. | Table body stretches fluidly; column headers wrap text cleanly (`whiteSpace: normal`); right-hand Action column (`Edit` / `Delete`) stays fully visible within the viewport. |
+| **TC-PL-07** | Branch Data Isolation | Open `Inhyma Ahmedabad` sheet. | Products shown are strictly limited to products assigned to Inhyma Ahmedabad. Products belonging to other branches are completely excluded. |
+| **TC-PL-08** | Primary Supplier Linked Lookup | Add a product that has a primary supplier configured in Product Master to any planning sheet. | `Brand of Supplier` and `City` immediately display that primary vendor's Brand Description / Company Name and City. |
+| **TC-PL-09** | Blank Entry When Product Has No Primary Supplier | Add a product that has no primary supplier assigned in Product Master (`supplier_id = None`), even if linked to other vendors in Supplier Master (`SupplierProductLink`). | `Brand of Supplier` and `City` strictly display as blank/empty cells. All other master specifications (PKG QTY, Unit Weight, Unit CBM) auto-populate normally without interruption. |
+
+---
+
+## 38. Stock Movement (Inward & Outward Register & Live Inventory Ledger) (`/inventory/stock-movements`)
+
+### 38.1. Module Overview
+- **Navigation:** Main Sidebar -> `INVENTORY` -> **Stock Movement** (`/inventory/stock-movements`).
+- **Modes:**
+  - **Inward Register (Receipts)**: Record incoming goods with 1-Click extraction from Local Purchase bills.
+  - **Outward Register (Dispatches)**: Record dispatches with 1-Click extraction from Sale Process orders.
+  - **Live Stock Ledger**: Real-time calculated inventory per SKU with Kardex history drawer.
+- **Ergonomic Modal & Searchable Combobox:**
+  - Fast typeahead search combobox for selecting orders without manual scrolling.
+  - 4-column compact metadata layout saving ~150px of vertical height.
+  - Dedicated table viewport (`maxHeight: 420px`) with pinned sticky headers ensuring 7+ product rows are visible at all times.
+  - Anchored modal footer with item count and confirm buttons.
+
+### 38.2. Test Cases & Verification Checklist
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-SM-01** | Outward 1-Click Extract with 30+ Items | Open Outward modal (`+ New Outward Entry`), click `1-Click Extract from Sale Process`. Type in the search combobox to filter order. Select an order containing 30+ items. | Order details auto-populate. Goods line items table loads all 30+ items. At least 7 product rows are immediately visible on screen with sticky headers and a smooth internal scrollbar. |
+| **TC-SM-02** | Searchable Order Selector Combobox | In the Order selector, type a partial name, container number, or SO number (e.g. `Indore`, `msku`, `0001`). | The dropdown list instantly filters in real-time, showing only matching orders with checkmark on current selection. |
+| **TC-SM-03** | Inward Local Purchase Extraction | Open Inward modal (`+ New Inward Entry`), search and select a confirmed Local Purchase invoice. | Vendor name, bill number, and line items load. Quality inspection columns (`Received Qty`, `Damaged Qty`, `Accepted Qty`) calculate net accepted quantity in real time. |
+| **TC-SM-04** | Live Inventory Ledger & Kardex | Record an inward entry (+10) and an outward entry (-4). Open Current Stock Ledger and click `Kardex`. | Current in-stock balance displays `6`. Kardex ledger opens showing both inward (+10) and outward (-4) transactions with document links and running balance. |
+| **TC-SM-05** | Pinned Footer & Direct Confirmation | Scroll through 30+ items in the modal table. | Pinned footer with `Cancel`, item count, and `Confirm & Record Outward Stock` remains fixed and accessible without scrolling the window. |
+| **TC-SM-06** | Inward/Outward Modal Auto-Reset on Close & Reopen | In /inventory/stock-movements, click + New Inward Entry. Select a confirmed purchase bill (e.g. 122234 (stella)), verify vendor and 3 items populate. Click Cancel or header ✕. Click + New Inward Entry again. | Modal opens completely blank and fresh with 0 lingering bills, 0 pre-selected vendors, and 1 empty line item. Reopening after successful submit also opens 100% clean. |
+| **TC-SM-07** | Cascading Reset on Search Combobox Clear (✕) | Select a purchase bill or sale order in the modal. Click ✕ in the search input box. | Selected bill/order, vendor/buyer name, challan/reference number, and all table line items immediately wipe clean back to 1 empty line item. |
+| **TC-SM-08** | Reset on Mode Switch (1-Click vs Direct Entry) | Select an order in 1-Click Extract mode, then click ✍️ Direct Manual Entry. | Order link and extracted items cleanly reset, allowing executive to type opening stock or manual adjustments without linked order interference. |
+
+---
+
+## 39. Sale Process & Planning Consignment Extraction (`/sale/process`)
+
+### 39.1. Module Overview
+- **Navigation:** Main Sidebar -> `SALES` -> **Sale Process** (`/sale/process`).
+- **Create / Edit Order:** `/sale/process/new` and `/sale/process/:id/edit`.
+- **3-Level Dependent Hierarchy Architecture:**
+  - **Level 1 — Customer / Entity Selector:**
+    - Live search combobox partitioned into `🏢 INTERNAL ORGANIZATIONS` (Inhyma, Darsh Impex, FNB Solution, One Stop, Yinglima) and `👤 BUYERS` (Om Packaging, Prathamesh Packaging, etc.).
+    - Selecting an entity automatically updates buyer name and primes available sheets.
+  - **Level 2 — Planning Sheet / Branch Selector:**
+    - Dynamically limits choices to sheets belonging to the selected organization or buyer.
+    - If `Inhyma` is selected: displays `Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma  Indore`, `inhyma chennai`.
+    - If `Om Packaging` is selected: displays `Om Packaging - Mulund`.
+  - **Level 3 — Planning Consignment Column Selector:**
+    - Displays only consignment columns belonging to the selected sheet (e.g. `Mum 48`, `Mum 49`, `GJ14`, etc.).
+    - Displays total planned units badge and remarks presence indicator.
+- **1-Click Planned Products Extraction:**
+  - Selecting any consignment column immediately auto-loads all planned products with quantity > 0 from Shipment Planning.
+  - Row order is preserved from `PlanningRow.position.asc()`.
+  - Automatically fetches primary purchase rates from confirmed Local Purchase (or refund VAT rates), calculates basic RMB, USD CFR, FOB, container CBM, and remarks.
+- **Universal Compatibility (Existing & New Sheets):**
+  - **All Existing Sheets:** 100% supported via dynamic DB queries (`/planning/sheets`) and dual matching (`organization_id` foreign key + canonical name matching).
+  - **All New Sheets:** Any sheet created in Shipment Planning immediately becomes available in the hierarchy. Any manual numeric columns added to the sheet appear in the consignment dropdown, and entering quantities enables 1-click extraction immediately without configuration.
+- **Nullable Buyer ID Schema:**
+  - Internal sales and inter-organization transfers can be saved with `buyer_id = null`.
+
+### 39.2. Test Cases & Verification Checklist
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-SP-01** | Level 1: Entity Combobox Categorization | Open `/sale/process/new`. Click the `Customer / Entity` dropdown. | The dropdown displays two clearly styled category headers: `🏢 INTERNAL ORGANIZATIONS` and `👤 BUYERS`. Typeahead search immediately filters across both sections. |
+| **TC-SP-02** | Level 2: Dependent Planning Sheet Filtering | Select Organization `Inhyma` in Level 1. Click the `Planning Sheet / Branch` dropdown. | Only sheets belonging to Inhyma (`Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma  Indore`, `inhyma chennai`) appear. Unrelated sheets are excluded. |
+| **TC-SP-03** | Level 2: Buyer Sheet Association | Select Buyer `Om Packaging` in Level 1. Click the `Planning Sheet / Branch` dropdown. | Only `Om Packaging - Mulund` appears in the sheet dropdown. |
+| **TC-SP-04** | Level 3: Consignment Column Isolation & Product Auto-Load | Select sheet `Inhyma Mumbai`, then select consignment column `Mum 48`. | Consignment dropdown strictly lists columns belonging to Inhyma Mumbai. Upon selecting `Mum 48`, planned products with quantity > 0 immediately auto-load into the order items table with correct quantities, unit rates, CBM, and companion remarks. |
+| **TC-SP-05** | New Sheet Dynamic Extraction | Create a new sheet in Shipment Planning (`/planning/sheets`) named `Inhyma Test Branch` under organization `Inhyma`. Add column `TST 01` with data type Number. Add 2 products with quantities `5` and `10`. Go to `/sale/process/new`, select `Inhyma` -> `Inhyma Test Branch` -> `TST 01`. | The new sheet and new column appear dynamically in the hierarchy dropdowns. Both products extract into the order items table with quantities 5 and 10 with zero latency. |
+| **TC-SP-06** | Nullable Buyer ID for Internal Sales Order | In `/sale/process/new`, select an Organization without selecting a Buyer. Enter order date and load a consignment. Click `Create Sale Order`. | Order saves successfully with HTTP 200/201. `buyer_id` persists as `null` without validation errors or database constraints failing. |
+| **TC-SP-07** | Manual Re-Sync with Auto-Load Button | Change quantities or items in the order table manually, then click `Auto-Load Planned Products`. | System re-queries the consignment column and prompts/restores original planned products and quantities from Shipment Planning. |
+| **TC-SP-08** | Customer Lockout Gating Test | Open `/sale/process/new` without selecting Customer / Entity. Attempt to click `Planning Sheet / Branch` or `Planning Consignment Column`. | Both buttons remain strictly disabled (`not-allowed`, light gray `#f8fafc` background, dashed border) displaying `🔒 Select Customer / Entity first`. Neither dropdown opens. |
+| **TC-SP-09** | Complete Cascade Reset on Customer Deletion | Select Customer `Darsh Impex`, Sheet `Mumbai`, and Consignment `Mumdarsh 2`. Verify 1 product loads with `748.000 m³` container CBM. Click `✕` to clear Customer. | Customer is cleared; Planning Sheet and Consignment Column re-lock immediately; the table items are completely cleared (`0 products`); container CBM resets to `0.000 m³`. Zero orphaned items remain. |
+| **TC-SP-10** | Consignment Column Change Auto-Replace | Select Customer `Darsh Impex` and Sheet `Mumbai`. Select Consignment `Mumdarsh 1`, then switch to `Mumdarsh 2`. | The table immediately replaces the items from `Mumdarsh 1` with the exact items, quantities, and container CBM of `Mumdarsh 2`. Stale products from previous columns are cleanly overwritten. |
+
+---
+
+## 40. Module-by-Module RBAC & Dynamic Permission Enforcement (Part 1)
+
+### 40.1. Module Overview & Critical Gap Resolutions
+- **Module Coverage (Part 1):**
+  - **Sale Process (`sale_process.*`):** Full RBAC gating with 6 granular permissions (`view`, `create`, `update`, `approve`, `delete`, `export`).
+  - **Stock Movement (`stock_movement.*`):** Full RBAC gating with 4 granular permissions (`view`, `create`, `cancel`, `delete`).
+  - **Notification Rules (`notification_settings.*`):** Dedicated permissions (`view`, `manage`), eliminating legacy borrowing of `user.view`.
+  - **Positions & Designations (`position.*`):** Registered human-readable label in `permissionLabels.ts` and gated navigation item.
+- **Frontend Architecture:**
+  - Sidebar Navigation (`nav.ts` & `AppShell.tsx`): Dynamically filters out menu sections and items when the user lacks `.view` permissions.
+  - Action Button Gating (`<Can>` and `hasPermission`):
+    - `SaleProcessList.tsx`: `+ Create Sale Process` (<Can permission="sale_process.create">), `Export` (<Can permission="sale_process.export">), `Edit Order` (<Can permission="sale_process.update">), `Delete Order` (<Can permission="sale_process.delete">).
+    - `StockMovements.tsx`: `+ New Inward Entry` & `+ New Outward Entry` (<Can permission="stock_movement.create">), `Cancel` (<Can permission="stock_movement.cancel">), `Delete` (<Can permission="stock_movement.delete">).
+    - `NotificationSettings.tsx`: Toggles and Edit button controlled via `canManage = hasPermission("notification_settings.manage")`. Read-only badge (`🔒 Read Only`) shown if lacking manage rights.
+  - Zero-Latency Performance: In-memory O(1) set lookup and cached permission evaluation.
+- **Backend Architecture:**
+  - Route Protection: All 13 Sale Process endpoints, 11 Stock Movement endpoints, and 3 Notification Rules endpoints are secured with `@require_permission()`.
+  - Return Codes: Returns HTTP 403 Forbidden with standard error payload if permission is missing; returns HTTP 200/201 if permission is granted or if user is `super_admin`.
+
+### 40.2. Test Cases & Verification Checklist
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-RBAC1-01** | Super Admin Unrestricted Access | Log in as Super Admin (`roles: ["super_admin"]`). Navigate through Sale Process, Stock Movements, and Notification Rules. | All menu items are visible in sidebar. All actions (+ Create, Export, Edit, Delete, Inward/Outward, Rule Toggle, Edit) are fully visible, enabled, and functional. |
+| **TC-RBAC1-02** | View-Only User Navigation & Action Gating | Log in as standard user with only `.view` permissions (`sale_process.view`, `stock_movement.view`, `notification_settings.view`). | Menu items appear in sidebar. Opening the pages renders data, but all mutation buttons (+ Create Sale Process, Export, Edit, Delete, + New Inward/Outward, Cancel Movement) are completely hidden. Notification Rules shows `🔒 Read Only` and disables status toggles. |
+| **TC-RBAC1-03** | Restricted User Menu Lockout | Log in as standard user with ZERO Part 1 permissions. Inspect sidebar navigation. | Sale Process, Stock Movement, and Notification Rules are completely hidden from the sidebar navigation. Attempting direct API access returns HTTP 403 Forbidden. |
+| **TC-RBAC1-04** | Granular Sales Operator Gating | Assign `sale_process.view`, `sale_process.create`, and `sale_process.update` to a user. | User sees `+ Create Sale Process` and `Edit Order`. The `Delete Order` and `Export` buttons are strictly hidden. Backend rejects `DELETE /api/v1/sales/orders/{id}` with 403 Forbidden. |
+| **TC-RBAC1-05** | Stock Clerk Movement Isolation | Assign `stock_movement.view` and `stock_movement.create` to a user. | User can view movements and click `+ New Inward Entry` / `+ New Outward Entry`. High-risk `Cancel` and `Delete` action buttons are completely hidden. Backend rejects cancel/delete requests with 403. |
+| **TC-RBAC1-06** | Notification Rules Manager Gating | Assign only `notification_settings.view` to User A and `notification_settings.manage` to User B. | User A sees rule list with `🔒 Read Only` badge and disabled toggles. User B has toggle switches active and can edit rule conditions and templates. |
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Yinglima Enterprise ERP.*

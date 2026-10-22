@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./lib/toast";
+import { ConfirmDialogProvider } from "./lib/confirm";
 import "./styles/style.css";
 import "./styles/pages.css";
 
@@ -30,7 +31,9 @@ createRoot(document.getElementById("root") as HTMLElement).render(
     <ErrorBoundary title="The application failed to load.">
       <BrowserRouter>
         <ToastProvider>
-          <App />
+          <ConfirmDialogProvider>
+            <App />
+          </ConfirmDialogProvider>
         </ToastProvider>
       </BrowserRouter>
     </ErrorBoundary>

@@ -4,6 +4,7 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { apiGet, apiPatch, API_ORIGIN } from "@/lib/api";
 import { usePendingGuard, useAuth } from "@/lib/hooks";
+import { useConfirm } from "@/lib/confirm";
 import { useLookup } from "@/lib/lookups";
 import type {
   Product,
@@ -355,6 +356,7 @@ type GalleryTab = "all" | "products" | "suppliers" | "quotations";
 
 export function ProductGalleryPage() {
   const { hasPermission } = useAuth();
+  const confirm = useConfirm();
   const canDeleteProductMedia = hasPermission("product.update");
   const canDeleteSupplierMedia = hasPermission("supplier.update");
 
@@ -535,9 +537,15 @@ export function ProductGalleryPage() {
 
   const handleQuickRemoveProductImage = async (prod: Product, imgUrl: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`Permanently remove broken image from "${prod.product_name_tally || prod.product_name || "product"}"?`)) {
-      return;
-    }
+    const prodName = prod.product_name_tally || prod.product_name || "product";
+    const confirmed = await confirm({
+      title: "Remove Broken Image",
+      message: `Permanently remove broken image from "${prodName}"?`,
+      itemName: prodName,
+      confirmLabel: "Remove Image",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     const rawImages = Array.isArray(prod.images) && prod.images.length > 0
       ? prod.images
       : (prod.image_url ? [prod.image_url] : []);
@@ -565,9 +573,14 @@ export function ProductGalleryPage() {
 
   const handleQuickRemoveSupplierImage = async (supp: Supplier, mediaUrl: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`Permanently remove broken visit photo from "${supp.company_name}"?`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Remove Broken Visit Photo",
+      message: `Permanently remove broken visit photo from "${supp.company_name}"?`,
+      itemName: supp.company_name,
+      confirmLabel: "Remove Photo",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     const suppMedia = getSupplierMedia(supp);
     const updatedRaw = suppMedia.filter((u) => u !== mediaUrl);
     const updatedPayload = {
@@ -1409,7 +1422,14 @@ export function ProductGalleryPage() {
             const confirmMsg = count === 1
               ? "Are you sure you want to delete this media from the product?"
               : `Are you sure you want to delete ${count} selected media files from the product?`;
-            if (!window.confirm(confirmMsg)) return;
+            const confirmed = await confirm({
+              title: "Delete Product Media",
+              message: confirmMsg,
+              itemName: p.product_name_tally || p.product_name || "Product",
+              confirmLabel: "Delete Media",
+              variant: "danger",
+            });
+            if (!confirmed) return;
 
             const deleteKey = count === 1 ? `${p.id}:${indicesToDelete[0]}` : `${p.id}:bulk-delete`;
             await guardPhotoDelete(deleteKey, async () => {
@@ -1786,7 +1806,14 @@ export function ProductGalleryPage() {
             const confirmMsg = count === 1
               ? "Are you sure you want to delete this visit photo from the supplier?"
               : `Are you sure you want to delete ${count} selected visit media files from the supplier?`;
-            if (!window.confirm(confirmMsg)) return;
+            const confirmed = await confirm({
+              title: "Delete Visit Media",
+              message: confirmMsg,
+              itemName: supp.company_name,
+              confirmLabel: "Delete Media",
+              variant: "danger",
+            });
+            if (!confirmed) return;
 
             const deleteKey = count === 1 ? `supp:${supp.id}:${indicesToDelete[0]}` : `supp:${supp.id}:bulk-delete`;
             await guardPhotoDelete(deleteKey, async () => {

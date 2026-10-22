@@ -50,7 +50,7 @@ export interface SaleOrder {
   order_no: string;
   organization_id: string;
   organization_name: string;
-  buyer_id: string;
+  buyer_id?: string | null;
   buyer_name: string;
   buyer_branch_id?: string | null;
   buyer_branch_name?: string | null;

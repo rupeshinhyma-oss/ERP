@@ -667,6 +667,31 @@ async def update_supplier_contact(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.post("/{supplier_id}/contacts/{contact_id}/make-primary", summary="Promote contact to primary")
+@router.post("/{supplier_id}/contacts/{contact_id}/primary", summary="Promote contact to primary")
+@router.post("/{supplier_id}/contacts/{contact_id}/set-primary", summary="Promote contact to primary")
+async def set_primary_supplier_contact(
+    supplier_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    request: Request,
+    service: SupplierService = Depends(get_supplier_service),
+    current_user: CurrentUser = Depends(require_permission("supplier.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Promote an existing contact person to be the supplier's primary contact."""
+    contact = await service.set_primary_contact(supplier_id, contact_id)
+    data = SupplierContactRead.model_validate(contact).model_dump(mode="json")
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        entity_id=contact.id,
+        description=f"Promoted contact {contact.person_name!r} to primary for supplier.",
+    )
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
 @router.delete("/{supplier_id}/contacts/{contact_id}", summary="Delete a supplier contact")
 async def delete_supplier_contact(
     supplier_id: uuid.UUID,

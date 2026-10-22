@@ -574,13 +574,80 @@ class SupplierService:
     # Contacts
     # ------------------------------------------------------------------
 
+    async def _sync_supplier_primary_fields(
+        self,
+        supplier: Supplier,
+        *,
+        salutation: str | None,
+        full_name: str | None,
+        designation: str | None,
+        calling_number: str | None,
+        whatsapp_number: str | None,
+        wechat_number: str | None,
+        email: str | None,
+    ) -> None:
+        """Sync primary contact fields into the supplier profile row and its email roster."""
+        await self.repository.update(
+            supplier,
+            contact_salutation=salutation,
+            contact_full_name=full_name,
+            contact_designation=designation,
+            contact_calling_number=calling_number,
+            contact_whatsapp_number=whatsapp_number,
+            contact_wechat_number=wechat_number,
+        )
+        if email and email.strip():
+            clean_email = email.strip()
+            existing_emails = [e.email for e in supplier.emails] if supplier.emails else []
+            if clean_email not in existing_emails:
+                await self.repository.replace_emails(supplier.id, [clean_email] + existing_emails)
+            else:
+                reordered = [clean_email] + [e for e in existing_emails if e != clean_email]
+                await self.repository.replace_emails(supplier.id, reordered)
+            await self.repository.session.refresh(supplier, ["emails"])
+
     async def add_contact(self, supplier_id: uuid.UUID, **field_values: Any) -> SupplierContact:
         """Add a contact person to a supplier (document: "Add Contacts Form")."""
-        await self.get_by_id_or_raise(supplier_id)
+        supplier = await self.get_by_id_or_raise(supplier_id)
         if field_values.get("country_id"):
             if await self.country_repository.get_by_id(field_values["country_id"]) is None:
                 raise BadRequestException("The specified country does not exist.")
-        contact = await self.contact_repository.create(supplier_id=supplier_id, is_primary=False, **field_values)
+
+        explicit_is_primary = field_values.pop("is_primary", None)
+        existing_primary = await self.contact_repository.get_primary_contact(supplier_id)
+
+        # Auto-promote to primary if explicitly requested OR if supplier currently has no primary contact
+        # or supplier.contact_full_name is empty/blank
+        should_be_primary = False
+        if explicit_is_primary is True:
+            should_be_primary = True
+        elif explicit_is_primary is None and (
+            existing_primary is None or not (supplier.contact_full_name and supplier.contact_full_name.strip())
+        ):
+            should_be_primary = True
+
+        if should_be_primary:
+            if existing_primary is not None:
+                await self.contact_repository.update(existing_primary, is_primary=False)
+
+            await self._sync_supplier_primary_fields(
+                supplier,
+                salutation=field_values.get("salutation"),
+                full_name=field_values.get("person_name"),
+                designation=field_values.get("designation"),
+                calling_number=field_values.get("calling_number"),
+                whatsapp_number=field_values.get("whatsapp_number"),
+                wechat_number=field_values.get("wechat_number"),
+                email=field_values.get("email"),
+            )
+
+        contact = await self.contact_repository.create(
+            supplier_id=supplier_id,
+            is_primary=should_be_primary,
+            **field_values,
+        )
+        await self._invalidate_cache()
+        await notify_source_record_changed("supplier", supplier_id)
         return contact
 
     async def get_contact_or_raise(self, supplier_id: uuid.UUID, contact_id: uuid.UUID) -> SupplierContact:
@@ -592,13 +659,61 @@ class SupplierService:
 
     async def update_contact(self, supplier_id: uuid.UUID, contact_id: uuid.UUID, **field_values: Any) -> SupplierContact:
         """Update an existing contact person."""
+        supplier = await self.get_by_id_or_raise(supplier_id)
         contact = await self.get_contact_or_raise(supplier_id, contact_id)
         if field_values.get("country_id"):
             if await self.country_repository.get_by_id(field_values["country_id"]) is None:
                 raise BadRequestException("The specified country does not exist.")
+
+        explicit_is_primary = field_values.get("is_primary")
+        if explicit_is_primary is True and not contact.is_primary:
+            existing_primary = await self.contact_repository.get_primary_contact(supplier_id)
+            if existing_primary and existing_primary.id != contact.id:
+                await self.contact_repository.update(existing_primary, is_primary=False)
+
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
             await self.contact_repository.update(contact, **changes)
+
+        # If this contact is primary (or just became primary), or if supplier currently has no contact_full_name, sync to supplier profile
+        if contact.is_primary or explicit_is_primary is True or not (supplier.contact_full_name and supplier.contact_full_name.strip()):
+            await self._sync_supplier_primary_fields(
+                supplier,
+                salutation=contact.salutation,
+                full_name=contact.person_name,
+                designation=contact.designation,
+                calling_number=contact.calling_number,
+                whatsapp_number=contact.whatsapp_number,
+                wechat_number=contact.wechat_number,
+                email=contact.email,
+            )
+
+        await self._invalidate_cache()
+        await notify_source_record_changed("supplier", supplier_id)
+        return contact
+
+    async def set_primary_contact(self, supplier_id: uuid.UUID, contact_id: uuid.UUID) -> SupplierContact:
+        """Promote a contact person to be the supplier's Primary Contact and sync to the supplier profile row."""
+        supplier = await self.get_by_id_or_raise(supplier_id)
+        contact = await self.get_contact_or_raise(supplier_id, contact_id)
+
+        existing_primary = await self.contact_repository.get_primary_contact(supplier_id)
+        if existing_primary and existing_primary.id != contact.id:
+            await self.contact_repository.update(existing_primary, is_primary=False)
+
+        await self.contact_repository.update(contact, is_primary=True)
+        await self._sync_supplier_primary_fields(
+            supplier,
+            salutation=contact.salutation,
+            full_name=contact.person_name,
+            designation=contact.designation,
+            calling_number=contact.calling_number,
+            whatsapp_number=contact.whatsapp_number,
+            wechat_number=contact.wechat_number,
+            email=contact.email,
+        )
+        await self._invalidate_cache()
+        await notify_source_record_changed("supplier", supplier_id)
         return contact
 
     async def delete_contact(self, supplier_id: uuid.UUID, contact_id: uuid.UUID) -> None:
@@ -607,14 +722,14 @@ class SupplierService:
 
         Refuses to delete the auto-mirrored primary contact directly --
         that one is edited through the supplier's own First-Data-Form
-        contact fields (via ``update()``), not deleted independently,
-        since deleting it would desynchronize the supplier record itself.
+        contact fields (via ``update()``), or promoted to another contact
+        first, since deleting it would desynchronize the supplier record itself.
         """
         contact = await self.get_contact_or_raise(supplier_id, contact_id)
         if contact.is_primary:
             raise ConflictException(
-                "The primary contact (mirrored from the supplier's main profile) cannot be "
-                "deleted directly. Edit the supplier's contact fields instead."
+                "The primary contact (mirrored to the supplier's main profile) cannot be "
+                "deleted directly. Make another contact Primary first or edit the supplier profile."
             )
         await self.contact_repository.delete(contact)
 

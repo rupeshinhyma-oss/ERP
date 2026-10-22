@@ -506,3 +506,21 @@ To guarantee high system responsiveness, the Supplier module must adhere to the 
 | **Frontend Bundle & DOM Performance** | **< 3.5s Production Build** | • Vite production bundle compiles cleanly with 0 TypeScript errors.<br>• Table renders cleanly with virtualized/paginated DOM nodes preventing memory leaks. |
 
 ---
+
+### 7.8 Contact Persons Auto-Promotion, Primary Management & Two-Way Profile Sync
+
+To ensure zero discrepancy between vendor profile headers and contact roster sub-tables:
+
+1. **Auto-Promotion on Initial Contact Entry:**
+   - When a supplier is created without contact details (or has blank `contact_full_name`), the first contact added via the **Contacts** tab is automatically designated as `is_primary = True`.
+   - The backend service (`SupplierService.add_contact`) updates the parent `Supplier` row columns (`contact_salutation`, `contact_full_name`, `contact_designation`, `contact_calling_number`, `contact_whatsapp_number`, `contact_wechat_number`, and appends the email to `emails`).
+2. **Instant Frontend Profile Form Reflection:**
+   - In `frontend/src/pages/Suppliers.tsx`, submitting a contact drawer immediately triggers `refreshSupplierProfileAfterContactChange()`, which updates both `form` state and the background `rows` table without waiting for page reload.
+   - When switching back to the **Profile** tab, all inputs under **Primary Contact Information** are populated with the newly saved contact's details.
+3. **1-Click "★ Make Primary" & Demotion Handling:**
+   - Secondary contacts feature a `★ Make Primary` action button.
+   - Promoting a secondary contact via `POST /suppliers/:id/contacts/:contact_id/make-primary` atomically demotes the previous primary contact (`is_primary = False`), assigns `is_primary = True` to the selected contact, and synchronizes the supplier's main profile columns.
+4. **Primary Contact Protection:**
+   - Direct deletion of a primary contact is blocked (`ConflictException`). The user must designate another contact as primary first before removing a former primary contact, preventing orphaned profile data.
+5. **Pre-Fill Hydration for Existing Records:**
+   - Opening `openModal()` on a supplier whose `contact_full_name` was previously unpopulated automatically falls back to hydrating from the supplier's primary contact (or first contact in roster), eliminating blank inputs.

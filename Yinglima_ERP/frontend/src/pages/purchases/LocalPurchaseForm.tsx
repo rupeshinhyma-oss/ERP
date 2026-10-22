@@ -263,7 +263,7 @@ export function LocalPurchaseFormPage() {
       try {
         const [lookupRes, compRes] = await Promise.all([
           apiGet<SheetConsignmentLookup[]>("/purchases/local/consignments-lookup"),
-          apiGet<any>("/masters/company-list?page_size=100").catch(() => ({ data: [] })),
+          apiGet<any>("/masters/company-list/lookup").catch(() => ({ data: [] })),
         ]);
         const lookupList = Array.isArray(lookupRes.data) ? lookupRes.data : [];
         setConsignmentsLookup(lookupList);
@@ -325,6 +325,57 @@ export function LocalPurchaseFormPage() {
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [companies, consignmentsLookup, organizationId, branchId, branchName]);
+
+  // Searchable dropdown fetchers for Organization
+  const organizationFetcher = useCallback(
+    async (term: string) => {
+      const clean = (term || "").trim().toLowerCase();
+      const filtered = clean
+        ? availableOrganizations.filter((o) => o.name.toLowerCase().includes(clean))
+        : availableOrganizations;
+      return filtered.map((o) => ({
+        value: o.id,
+        label: o.name,
+        sublabel: "Entity",
+      }));
+    },
+    [availableOrganizations]
+  );
+
+  const organizationLabelFetcher = useCallback(
+    async (orgId: string) => {
+      if (!orgId) return "";
+      const match = availableOrganizations.find((o) => o.id === orgId);
+      return match ? match.name : organizationName || orgId;
+    },
+    [availableOrganizations, organizationName]
+  );
+
+  // Searchable dropdown fetchers for Branch
+  const branchFetcher = useCallback(
+    async (term: string) => {
+      if (!organizationId) return [];
+      const clean = (term || "").trim().toLowerCase();
+      const filtered = clean
+        ? availableBranches.filter((b) => b.name.toLowerCase().includes(clean))
+        : availableBranches;
+      return filtered.map((b) => ({
+        value: b.id,
+        label: b.name,
+        sublabel: "Branch",
+      }));
+    },
+    [organizationId, availableBranches]
+  );
+
+  const branchLabelFetcher = useCallback(
+    async (brId: string) => {
+      if (!brId) return "";
+      const match = availableBranches.find((b) => b.id === brId);
+      return match ? match.name : branchName || brId;
+    },
+    [availableBranches, branchName]
+  );
 
   // Cascading helpers: Matching Planning Sheet for selected Org & Branch
   const matchingSheet = useMemo(() => {
@@ -1428,39 +1479,32 @@ export function LocalPurchaseFormPage() {
                 marginBottom: "16px",
                 paddingBottom: "16px",
                 borderBottom: "1px dashed #e2e8f0",
+                overflow: "visible",
               }}
             >
               {/* 1. Organization */}
-              <div>
+              <div style={{ position: "relative", zIndex: 60 }}>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Organization <span style={{ color: "#ef4444" }}>*</span>
                   {loadingConsignments && <span style={{ fontSize: "11px", color: "#0284c7", marginLeft: "6px" }}>⏳ Loading...</span>}
                 </label>
-                <select
-                  value={organizationId}
-                  onChange={(e) => handleSelectOrganization(e.target.value)}
-                  required
-                  style={{
-                    width: "100%",
-                    padding: "8px 10px",
-                    borderRadius: "6px",
+                <SearchableDropdown
+                  value={organizationId || null}
+                  onChange={(val) => handleSelectOrganization(val || "")}
+                  placeholder="Type to search organization..."
+                  fetchOptions={organizationFetcher}
+                  fetchLabelForValue={organizationLabelFetcher}
+                  hasError={Boolean(errors.organization_id)}
+                  inputStyle={{
                     border: errors.organization_id ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
                     boxShadow: errors.organization_id ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-                    background: errors.organization_id ? "#fff5f5" : "#ffffff",
+                    borderRadius: "6px",
+                    padding: "8px 12px",
                     fontSize: "13px",
-                    color: "#0f172a",
-                    fontWeight: 600,
-                    boxSizing: "border-box",
-                    cursor: "pointer",
+                    background: errors.organization_id ? "#fff5f5" : "#ffffff",
+                    fontWeight: 500,
                   }}
-                >
-                  <option value="">Select Organization...</option>
-                  {availableOrganizations.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
+                />
                 {errors.organization_id ? (
                   <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
                     <span>▲</span> {errors.organization_id}
@@ -1473,38 +1517,28 @@ export function LocalPurchaseFormPage() {
               </div>
 
               {/* 2. Branch */}
-              <div>
+              <div style={{ position: "relative", zIndex: 55 }}>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Branch <span style={{ color: "#ef4444" }}>*</span>
                 </label>
-                <select
-                  value={branchId}
-                  onChange={(e) => handleSelectBranch(e.target.value)}
+                <SearchableDropdown
+                  value={branchId || null}
+                  onChange={(val) => handleSelectBranch(val || "")}
+                  placeholder={!organizationId ? "Select Organization first" : availableBranches.length === 0 ? "No branches available" : "Type to search branch..."}
+                  fetchOptions={branchFetcher}
+                  fetchLabelForValue={branchLabelFetcher}
                   disabled={!organizationId || availableBranches.length === 0}
-                  required
-                  style={{
-                    width: "100%",
-                    padding: "8px 10px",
-                    borderRadius: "6px",
+                  hasError={Boolean(errors.branch_id)}
+                  inputStyle={{
                     border: errors.branch_id ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
                     boxShadow: errors.branch_id ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-                    background: !organizationId ? "#f8fafc" : errors.branch_id ? "#fff5f5" : "#ffffff",
+                    borderRadius: "6px",
+                    padding: "8px 12px",
                     fontSize: "13px",
-                    color: !organizationId ? "#94a3b8" : "#0f172a",
-                    fontWeight: 600,
-                    boxSizing: "border-box",
-                    cursor: !organizationId ? "not-allowed" : "pointer",
+                    background: !organizationId ? "#f8fafc" : errors.branch_id ? "#fff5f5" : "#ffffff",
+                    fontWeight: 500,
                   }}
-                >
-                  <option value="">
-                    {!organizationId ? "Select Organization first" : "Select Branch..."}
-                  </option>
-                  {availableBranches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
+                />
                 {errors.branch_id ? (
                   <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
                     <span>▲</span> {errors.branch_id}
@@ -1517,7 +1551,7 @@ export function LocalPurchaseFormPage() {
               </div>
 
               {/* 3. Consignment */}
-              <div>
+              <div style={{ position: "relative", zIndex: 50 }}>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Consignment <span style={{ color: "#ef4444" }}>*</span>
                   {loadingConsignmentItems && <span style={{ fontSize: "11px", color: "#0284c7", marginLeft: "6px" }}>⏳ Loading items...</span>}

@@ -84,7 +84,9 @@ class SaleService:
 
         # Filter sheets if buyer_name is given (e.g. Inhyma Mumbai, Darsh Impex, etc.)
         matched_sheets: list[PlanningSheet] = []
-        if buyer_name and buyer_name.strip():
+        if sheet_id:
+            matched_sheets = sheets
+        elif buyer_name and buyer_name.strip():
             clean_b = buyer_name.strip().lower()
 
             # 1. Match by Organization Link (e.g. Planning sheets created under 'Darsh Impex' organization)

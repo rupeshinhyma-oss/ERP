@@ -63,7 +63,7 @@ def _is_pure_mum_column(name: str, *, label: str = "Mum") -> bool:
     cleaned = name.strip().lower()
     if "remark" in cleaned or cleaned.startswith(("no. of pkg", "total")):
         return False
-    return bool(re.match(rf"^{re.escape(label.lower())}\s*\d+$", cleaned, re.IGNORECASE))
+    return bool(re.match(rf"^{re.escape(label.lower())}[\s\-]*0*\d+$", cleaned, re.IGNORECASE))
 
 
 def mum_num_from_column_name(col_name: str, *, label: str = "Mum") -> int | None:
@@ -81,7 +81,7 @@ def mum_num_from_column_name(col_name: str, *, label: str = "Mum") -> int | None
     cleaned = col_name.strip().lower()
     if "remark" in cleaned or cleaned.startswith(("no. of pkg", "total")):
         return None
-    match = re.search(rf"^{re.escape(label.lower())}\s*(\d+)$", cleaned, re.IGNORECASE)
+    match = re.search(rf"^{re.escape(label.lower())}[\s\-]*0*(\d+)$", cleaned, re.IGNORECASE)
     return int(match.group(1)) if match else None
 
 
@@ -104,9 +104,9 @@ def mum_num_from_column_name(col_name: str, *, label: str = "Mum") -> int | None
 # packaging_unit_cbm) via the row's linked_record_id -- never typed in --
 # so editing an item in Product Master changes these totals immediately,
 # with no per-column config for an admin to get wrong.
-_MUM_PKG_COUNT_RE_TEMPLATE = r"^no\.?\s*of\s*pkg\s*{label}\s*(\d+)$"
-_MUM_TOTAL_WEIGHT_RE_TEMPLATE = r"^total\s*weight\s*{label}\s*(\d+)$"
-_MUM_TOTAL_CBM_RE_TEMPLATE = r"^total\s*cbm\s*{label}\s*(\d+)$"
+_MUM_PKG_COUNT_RE_TEMPLATE = r"^no\.?\s*of\s*pkg\s*{label}[\s\-]*0*(\d+)$"
+_MUM_TOTAL_WEIGHT_RE_TEMPLATE = r"^total\s*weight\s*{label}[\s\-]*0*(\d+)$"
+_MUM_TOTAL_CBM_RE_TEMPLATE = r"^total\s*cbm\s*{label}[\s\-]*0*(\d+)$"
 
 
 def _mum_derived_kind_and_group(name: str, *, label: str = "Mum") -> tuple[str, int] | None:
@@ -956,7 +956,7 @@ class PlanningService:
             derived = _mum_derived_kind_and_group(col.name, label=mum_label)
             if derived is not None and derived[1] > max_mum:
                 max_mum = derived[1]
-            remarks_match = re.match(rf"^{re.escape(mum_label)}\s*(\d+)\s*remarks$", col.name.strip(), re.IGNORECASE)
+            remarks_match = re.match(rf"^{re.escape(mum_label)}[\s\-]*0*(\d+)\s*remarks?$", col.name.strip(), re.IGNORECASE)
             if remarks_match and int(remarks_match.group(1)) > max_mum:
                 max_mum = int(remarks_match.group(1))
 
@@ -979,27 +979,38 @@ class PlanningService:
                 (
                     c
                     for c in all_cols_list
-                    if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP
-                    and c.source_module == "product"
-                    and c.source_field == field
+                    if (
+                        (c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == field)
+                        or (c.name.strip().upper() == label_text.upper())
+                        or (field == "supplier_city" and c.name.strip().upper() == "SUPPLIER CITY")
+                    )
                 ),
                 None,
             )
-            if not existing:
-                lookup_col = PlanningColumn(
-                    sheet_id=sheet_id,
-                    name=label_text,
-                    data_type=dtype,
-                    position=len(all_cols_list),
-                    created_by=user_id,
-                    source_type=PlanningColumnSourceType.LINKED_LOOKUP,
-                    source_module="product",
-                    source_field=field,
-                    auto_populate_enabled=True,
-                    is_locked=True,
-                )
-                new_columns_to_add.append(lookup_col)
-                all_cols_list.append(lookup_col)
+            if existing:
+                # If existing column was manual or missing proper linkage, upgrade it to LINKED_LOOKUP
+                if existing.source_type != PlanningColumnSourceType.LINKED_LOOKUP or existing.source_field != field:
+                    existing.source_type = PlanningColumnSourceType.LINKED_LOOKUP
+                    existing.source_module = "product"
+                    existing.source_field = field
+                    existing.data_type = dtype
+                    existing.is_locked = True
+                continue
+
+            lookup_col = PlanningColumn(
+                sheet_id=sheet_id,
+                name=label_text,
+                data_type=dtype,
+                position=len(all_cols_list),
+                created_by=user_id,
+                source_type=PlanningColumnSourceType.LINKED_LOOKUP,
+                source_module="product",
+                source_field=field,
+                auto_populate_enabled=True,
+                is_locked=True,
+            )
+            new_columns_to_add.append(lookup_col)
+            all_cols_list.append(lookup_col)
 
         # 3. Create the 5 companion columns for next_mum_num
         label_upper = mum_label.upper()
@@ -1137,7 +1148,7 @@ class PlanningService:
                 kind, group_num = derived
                 groups.setdefault(group_num, {})[kind] = column
                 continue
-            remarks_match = re.match(rf"^{re.escape(mum_label)}\s*(\d+)\s*remarks$", column.name.strip(), re.IGNORECASE)
+            remarks_match = re.match(rf"^{re.escape(mum_label)}[\s\-]*0*(\d+)\s*remarks?$", column.name.strip(), re.IGNORECASE)
             if remarks_match:
                 groups.setdefault(int(remarks_match.group(1)), {})["remarks"] = column
                 continue
@@ -2983,7 +2994,7 @@ class PlanningService:
             return next((c for c in sibling_columns if c.id != column.id and predicate(c)), None)
 
         mum_col = _find_sibling(
-            lambda c: re.match(rf"^{re.escape(label)}\s*{group_number}$", c.name.strip(), re.IGNORECASE)
+            lambda c: re.match(rf"^{re.escape(label)}[\s\-]*0*{group_number}$", c.name.strip(), re.IGNORECASE)
         )
         pkg_qty_col = _find_sibling(
             lambda c: c.source_type == PlanningColumnSourceType.LINKED_LOOKUP
@@ -3705,6 +3716,20 @@ class PlanningService:
                 description="Updated description on the ITEM column.",
             )
         return sheet
+
+    async def set_item_column_width(
+        self, sheet_id: uuid.UUID, *, width_px: int | None
+    ) -> PlanningSheet:
+        """
+        Set (or clear, if ``width_px`` is None) the sheet's built-in ITEM column server-persisted width.
+
+        Deliberately does NOT call ``_record_change``/broadcast a change-log
+        entry (resizing is a cosmetic preference, matching set_column_width).
+        """
+        sheet = await self.get_sheet_or_raise(sheet_id)
+        if width_px is not None:
+            width_px = max(40, min(800, width_px))
+        return await self.sheet_repository.update(sheet, item_width_px=width_px)
 
     # --- Status tags (admin-defined custom colors beyond the 3 built-ins) ---------
 

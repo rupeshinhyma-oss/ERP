@@ -89,7 +89,18 @@ The **Buyers** module tracks international importers, buying agents, and corpora
 
 ---
 
-## 6. What Needs to Be Verified (Testing Checklist)
+## 6. Added On / By User Attribution & Auto Title Case
+
+### 1. Auto Capitalization (Title Case) on Company Name:
+- **Real-Time Input Capitalization:** The **Name of Company** input utilizes `autoTitleCase` to automatically capitalize the first letter of each word in real-time (e.g., `om packaging mulund` $\rightarrow$ `Om Packaging Mulund`), matching Supplier Master conventions while preserving acronyms (e.g., `PVT LTD`, `LLP`).
+
+### 2. "Added On / By" Attribution in Main Table:
+- **Database Column:** `created_by_id UUID NULL REFERENCES users(id)` added via migration [`8b9c0d1e2f3a_add_created_by_to_buyers.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/8b9c0d1e2f3a_add_created_by_to_buyers.py).
+- **Table Column Header:** **Added On / By** displaying the formatted registration date and the creator user name (e.g. `2026-10-15 by Admin User`).
+
+---
+
+## 7. What Needs to Be Verified (Testing Checklist)
 
 - [ ] **Buyer Creation & In-Memory Category Speed:**
   - Open "Add Buyer" modal. Verify Category & Sub-Category dropdowns open instantly (<10ms) with zero lag.
@@ -118,7 +129,7 @@ The **Buyers** module tracks international importers, buying agents, and corpora
 
 ---
 
-## 7. Critical Constraints: What to KEEP / What NOT to Break
+## 8. Critical Constraints: What to KEEP / What NOT to Break
 
 > [!CAUTION]
 > **Strict rules to observe when modifying the Buyers module:**

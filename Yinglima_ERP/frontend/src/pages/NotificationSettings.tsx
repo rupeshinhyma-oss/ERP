@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Banner, Modal } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
 import { apiGet, apiPut } from "@/lib/api";
 import type { NotificationRule } from "@/types/notifications";
 
@@ -27,6 +28,9 @@ const MODULE_ICONS: Record<string, string> = {
 };
 
 export function NotificationSettings() {
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission("notification_settings.manage");
+
   const [rules, setRules] = useState<NotificationRule[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -372,7 +376,10 @@ export function NotificationSettings() {
                       {/* Active Status Toggle */}
                       <td style={{ padding: "16px 14px", textAlign: "center", verticalAlign: "middle", whiteSpace: "nowrap" }}>
                         <button
-                          onClick={() => void handleToggleActiveQuick(rule)}
+                          onClick={() => {
+                            if (canManage) void handleToggleActiveQuick(rule);
+                          }}
+                          disabled={!canManage}
                           style={{
                             border: "none",
                             background: rule.is_active ? "#10b981" : "#cbd5e1",
@@ -381,10 +388,17 @@ export function NotificationSettings() {
                             borderRadius: "12px",
                             fontSize: "11px",
                             fontWeight: 700,
-                            cursor: "pointer",
+                            cursor: canManage ? "pointer" : "default",
+                            opacity: canManage ? 1 : 0.85,
                             transition: "background 0.2s ease",
                           }}
-                          title={rule.is_active ? "Click to deactivate" : "Click to activate"}
+                          title={
+                            !canManage
+                              ? "View-only permission (manage permission required to toggle)"
+                              : rule.is_active
+                              ? "Click to deactivate"
+                              : "Click to activate"
+                          }
                         >
                           {rule.is_active ? "ACTIVE" : "OFF"}
                         </button>
@@ -392,24 +406,38 @@ export function NotificationSettings() {
 
                       {/* Action */}
                       <td style={{ padding: "16px 18px", textAlign: "center", verticalAlign: "middle", whiteSpace: "nowrap" }}>
-                        <button
-                          onClick={() => handleOpenEdit(rule)}
-                          className="btn btn-secondary"
-                          style={{
-                            fontSize: "12.5px",
-                            fontWeight: 600,
-                            padding: "6px 14px",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: "6px",
-                            cursor: "pointer",
-                            whiteSpace: "nowrap",
-                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                          }}
-                        >
-                          ✏️ Edit
-                        </button>
+                        {canManage ? (
+                          <button
+                            onClick={() => handleOpenEdit(rule)}
+                            className="btn btn-secondary"
+                            style={{
+                              fontSize: "12.5px",
+                              fontWeight: 600,
+                              padding: "6px 14px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "6px",
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                            }}
+                          >
+                            ✏️ Edit
+                          </button>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: "#94a3b8",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            🔒 Read Only
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );

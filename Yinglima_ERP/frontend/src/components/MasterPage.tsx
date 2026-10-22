@@ -46,6 +46,7 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { useAuth, useSrNoJump, useModalHistorySync } from "@/lib/hooks";
+import { useConfirm } from "@/lib/confirm";
 import { useLiveList } from "@/lib/live/useLiveList";
 import { handleFormEnterKeyNavigation } from "@/lib/formUtils";
 import { invalidateLookupCache } from "@/lib/lookups";
@@ -561,6 +562,7 @@ export function MasterPage<T extends MasterRecord>({
   canDeleteItem,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
+  const confirm = useConfirm();
 
   const canCreate = hasPermission(`${permissionPrefix}.create`);
   const canUpdate = hasPermission(`${permissionPrefix}.update`);
@@ -1348,7 +1350,16 @@ export function MasterPage<T extends MasterRecord>({
         return;
       }
     }
-    if (!confirm(`Delete this ${entityName}? This cannot be undone.`)) return;
+    const row = rows.find((r) => r.id === id);
+    const itemName = row ? String((row as any).name || (row as any).title || (row as any).code || entityName) : entityName;
+    const confirmed = await confirm({
+      title: `Delete ${entityName.charAt(0).toUpperCase() + entityName.slice(1)}`,
+      message: `Are you sure you want to delete this ${entityName}? This action cannot be undone.`,
+      itemName,
+      confirmLabel: `Delete ${entityName}`,
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       await apiDelete(`${apiBase}/${id}`);
       setRows((prev) => prev.filter((row) => row.id !== id));
@@ -1415,12 +1426,30 @@ export function MasterPage<T extends MasterRecord>({
           return;
         }
         idsToDelete = selectedIds.filter((id) => !blockedItems.some((b) => b.id === id));
-        if (!confirm(`Delete ${idsToDelete.length} deletable ${entityName}(s)? (${blockedItems.length} locked ${entityName}(s) with attached employees will be skipped). This cannot be undone.`)) return;
+        const confirmed = await confirm({
+          title: `Delete Selected ${entityName.charAt(0).toUpperCase() + entityName.slice(1)}s`,
+          message: `Delete ${idsToDelete.length} deletable ${entityName}(s)? (${blockedItems.length} locked ${entityName}(s) with attached employees will be skipped). This cannot be undone.`,
+          confirmLabel: "Delete Deletable",
+          variant: "danger",
+        });
+        if (!confirmed) return;
       } else {
-        if (!confirm(`Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`)) return;
+        const confirmed = await confirm({
+          title: `Delete Selected ${entityName.charAt(0).toUpperCase() + entityName.slice(1)}s`,
+          message: `Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`,
+          confirmLabel: "Delete Selected",
+          variant: "danger",
+        });
+        if (!confirmed) return;
       }
     } else {
-      if (!confirm(`Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`)) return;
+      const confirmed = await confirm({
+        title: `Delete Selected ${entityName.charAt(0).toUpperCase() + entityName.slice(1)}s`,
+        message: `Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`,
+        confirmLabel: "Delete Selected",
+        variant: "danger",
+      });
+      if (!confirmed) return;
     }
 
     try {
@@ -2346,14 +2375,14 @@ export function MasterPage<T extends MasterRecord>({
             {Boolean(toolbarExtras) && (
               <button
                 type="button"
-                className="btn"
+                className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
                 style={{
                   background: filterOpen ? "#0061f2" : "#475569",
                   color: "#ffffff",
-                  padding: "6px 12px",
+                  padding: "8px 12px",
                   borderRadius: "6px",
                   border: "none",
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",

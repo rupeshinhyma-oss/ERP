@@ -232,6 +232,21 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("planning.approvaldate.edit", "planning", "planning", "update", "ALL", "Edit the APPROVAL DATE column specifically, independent of planning.cell.edit."),
     ("planning.colorstatusred.edit", "planning", "planning", "update", "ALL", "Set a cell's status color to Red (Requirement), independent of planning.cell.edit."),
     ("planning.colorstatusgreen.edit", "planning", "planning", "update", "ALL", "Set a cell's status color to Green (Purchased), independent of planning.cell.edit."),
+    # Sale Process
+    ("sale_process.view", "sale_process", "sales", "view", "ALL", "View sale orders, status metrics, and document details."),
+    ("sale_process.create", "sale_process", "sales", "create", "ALL", "Create new sale orders from shipments or scratch."),
+    ("sale_process.update", "sale_process", "sales", "update", "ALL", "Edit sale orders, line items, and container details."),
+    ("sale_process.approve", "sale_process", "sales", "approve", "ALL", "Update order status workflow (Confirmed, Approved, Dispatched, LR)."),
+    ("sale_process.delete", "sale_process", "sales", "delete", "ALL", "Delete or cancel sale orders."),
+    ("sale_process.export", "sale_process", "sales", "export", "ALL", "Export sale orders to Excel and download Commercial Invoice & Packing List."),
+    # Stock Movements
+    ("stock_movement.view", "stock_movement", "stock-movement", "view", "ALL", "View stock movements, live balances, and Kardex ledgers."),
+    ("stock_movement.create", "stock_movement", "stock-movement", "create", "ALL", "Create inward receipts and outward dispatches."),
+    ("stock_movement.cancel", "stock_movement", "stock-movement", "update", "ALL", "Cancel or reverse stock movements."),
+    ("stock_movement.delete", "stock_movement", "stock-movement", "delete", "ALL", "Delete stock movement records."),
+    # Notification Rules
+    ("notification_settings.view", "notification_settings", "notification-settings", "view", "ALL", "View notification trigger rules and mapped recipients."),
+    ("notification_settings.manage", "notification_settings", "notification-settings", "manage", "ALL", "Configure and update notification rules and recipient mappings."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
@@ -259,6 +274,9 @@ USER_ROLE_PERMISSION_CODES: list[str] = [
     "supplier.view",
     "buyer.view",
     "planning.view",
+    "sale_process.view",
+    "stock_movement.view",
+    "notification_settings.view",
 ]
 
 

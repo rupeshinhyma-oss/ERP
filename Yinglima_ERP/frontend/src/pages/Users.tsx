@@ -17,6 +17,7 @@ import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
 import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import { createSsoHandoverUrl, getEcosystemErps } from "@/lib/ssoBridge";
 import { groupPermissionsByModule, PERMISSION_SECTIONS } from "@/lib/permissionLabels";
 import { PermissionMatrixEditor } from "@/components/PermissionMatrixEditor";
@@ -274,6 +275,7 @@ const EMPTY_EDIT = {
 export function UsersPage() {
   const { profile, hasPermission, isSuperAdmin } = useAuth();
   const showToast = useToast();
+  const confirm = useConfirm();
 
   const [rows, setRows] = useState<User[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
@@ -472,7 +474,15 @@ export function UsersPage() {
 
   /* --- Actions --- */
   async function runAction(path: string, confirmMessage?: string, onDone?: () => void) {
-    if (confirmMessage && !confirm(confirmMessage)) return;
+    if (confirmMessage) {
+      const confirmed = await confirm({
+        title: "Account Action",
+        message: confirmMessage,
+        confirmLabel: "Proceed",
+        variant: "warning",
+      });
+      if (!confirmed) return;
+    }
     try {
       const res = await apiPost<any>(path);
       const data = res?.data;
@@ -488,8 +498,6 @@ export function UsersPage() {
       setError(err);
     }
   }
-
-
 
   const [bulkDeactivateLoading, setBulkDeactivateLoading] = useState(false);
 
@@ -525,7 +533,13 @@ export function UsersPage() {
       warningMsg += `\n\nNote: ${skippedItems.join(" and ")} will be skipped.`;
     }
 
-    if (!confirm(warningMsg)) return;
+    const confirmed = await confirm({
+      title: "Deactivate User Accounts",
+      message: warningMsg,
+      confirmLabel: "Deactivate Accounts",
+      variant: "danger",
+    });
+    if (!confirmed) return;
 
     setBulkDeactivateLoading(true);
     try {
@@ -878,7 +892,14 @@ export function UsersPage() {
    * old duplicate "admin" role from before that role was retired.
    */
   async function removeAdminRole(userId: string, username: string) {
-    if (!confirm(`Revoke Administrator privileges from '${username}'?`)) return;
+    const confirmed = await confirm({
+      title: "Revoke Administrator Privileges",
+      message: `Revoke Administrator privileges from '${username}'?`,
+      itemName: username,
+      confirmLabel: "Revoke Privileges",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction(`admin-role:${userId}`, async () => {
       try {
         const { data: allRoles } = await apiGet<Role[]>("/rbac/roles");

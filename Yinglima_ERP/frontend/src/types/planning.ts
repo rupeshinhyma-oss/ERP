@@ -47,6 +47,8 @@ export interface PlanningSheet {
   item_auto_populate_enabled?: boolean;
   /** Persisted state of "How many records to load" for the ITEM column. null/undefined means "All". */
   item_auto_populate_limit?: number | null;
+  /** Persisted display width of the built-in ITEM column in pixels. null/undefined falls back to default 240px. */
+  item_width_px?: number | null;
   /**
    * The word this sheet's group columns use, e.g. "Mum" in "Mum 1" /
    * "NO. OF PKG MUM1", or "Chen" in "Chen 1" / "NO. OF PKG CHEN1".

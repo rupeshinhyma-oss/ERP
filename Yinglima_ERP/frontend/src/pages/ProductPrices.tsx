@@ -15,6 +15,7 @@ import { Banner, Modal } from "@/components/ui";
 import { SearchableDropdown, SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_ORIGIN, downloadExport, toQueryString } from "@/lib/api";
+import { useConfirm } from "@/lib/confirm";
 import { useLookup } from "@/lib/lookups";
 import type { Brand, Hsn, Product, ProductCategory, ProductSubCategory, Uom } from "@/types";
 
@@ -107,6 +108,7 @@ function formatCurrency(amount: number | null | undefined, currency = "CNY"): st
 
 export function ProductPricesPage() {
   const { hasPermission } = useAuth();
+  const confirm = useConfirm();
   // Query Filters & Pagination State
   const [items, setItems] = useState<ProductPriceRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -719,7 +721,14 @@ export function ProductPricesPage() {
 
   // Delete a supplier quote link with Instant Optimistic UI
   const handleDeleteQuote = async (linkId: string, productId: string, supplierName: string) => {
-    if (!confirm(`Remove price quote from ${supplierName}?`)) return;
+    const confirmed = await confirm({
+      title: "Remove Price Quote",
+      message: `Are you sure you want to remove the price quote from ${supplierName}?`,
+      itemName: supplierName,
+      confirmLabel: "Remove Quote",
+      variant: "danger",
+    });
+    if (!confirmed) return;
 
     // 1. INSTANT OPTIMISTIC SUB-TABLE REMOVAL
     const remainingQuotes = (supplierQuotes[productId] || []).filter((q) => q.link_id !== linkId);
@@ -1113,17 +1122,17 @@ export function ProductPricesPage() {
               🔄 Refresh
             </button>
 
-            {/* Filter Funnel Toggle (Moved to Right) */}
+            {/* Filter Funnel Toggle (Matching Products Master) */}
             <button
               type="button"
-              className="btn"
+              className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
               style={{
                 background: filterOpen ? "#0061f2" : "#475569",
                 color: "#ffffff",
-                padding: "6px 12px",
+                padding: "8px 12px",
                 borderRadius: "6px",
                 border: "none",
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
                 cursor: "pointer",
@@ -1137,42 +1146,31 @@ export function ProductPricesPage() {
               </svg>
             </button>
 
-            {/* Export Dropdown (Moved to Right) */}
+            {/* Export Dropdown (Matching Products Master Orange Imp/Exp Style) */}
             {hasPermission("product_price.export") && (
               <div ref={exportMenuRef} style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-imp-exp"
                 onClick={() => setExportMenuOpen((v) => !v)}
                 disabled={exporting}
                 style={{
-                  background: "#ffffff",
-                  color: "#1e293b",
-                  border: "1px solid #cbd5e1",
-                  padding: "6px 14px",
+                  background: "#f59e0b",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 16px",
                   borderRadius: "6px",
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontSize: "13px",
                   cursor: exporting ? "wait" : "pointer",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                  boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
                 }}
                 title="Export complete pricing directory"
               >
-                {exporting ? (
-                  <>
-                    <span style={{ fontSize: "12px" }}>⏳</span>
-                    <span>Exporting...</span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ fontSize: "14px" }}>📥</span>
-                    <span>Export</span>
-                    <span style={{ fontSize: "10px", color: "#64748b", marginLeft: "2px" }}>▼</span>
-                  </>
-                )}
+                <span>{exporting ? "Exporting..." : "Export ▾"}</span>
               </button>
 
               {exportMenuOpen && (
@@ -1408,7 +1406,10 @@ export function ProductPricesPage() {
                   fontWeight: 600,
                   fontSize: "13px",
                   cursor: "pointer",
+                  transition: "background-color 0.15s ease",
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#475569")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "#64748b")}
                 onClick={() => {
                   setCategoryFilter("");
                   setSubCategoryFilter("");
@@ -1420,26 +1421,6 @@ export function ProductPricesPage() {
                 }}
               >
                 Reset
-              </button>
-              <button
-                type="button"
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#f59e0b",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-                onClick={() => {
-                  setDebouncedSearch(searchTerm);
-                  setPage(1);
-                  fetchPrices();
-                }}
-              >
-                Search
               </button>
             </div>
           </div>

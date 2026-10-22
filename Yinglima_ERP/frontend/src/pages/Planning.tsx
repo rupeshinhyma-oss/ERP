@@ -28,6 +28,7 @@ import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import { useLiveList } from "@/lib/live/useLiveList";
 import { roleDisplayName } from "@/lib/permissionLabels";
 import type { Role } from "@/types";
@@ -85,12 +86,19 @@ import { BUILTIN_STATUS_COLORS } from "@/types/planning";
 // CELL_MIN_WIDTH is now only the absolute FLOOR every computed/dragged
 // width is clamped to (so even a 1-character header like "Y" stays
 // comfortably clickable/editable) -- not the width every column gets.
-// ITEM_COL_WIDTH remains fixed (the ITEM column isn't user-resizable in
-// this pass; it's derived from product names, not an admin-typed label,
-// so auto-sizing it the same way wouldn't make sense).
 const CELL_MIN_WIDTH = 64;
 const CELL_MAX_WIDTH = 320;
-const ITEM_COL_WIDTH = 240;
+const DEFAULT_ITEM_COL_WIDTH = 240;
+const ITEM_MIN_WIDTH = 64;
+const ITEM_MAX_WIDTH = 800;
+
+/** Compute the effective display width for the first (ITEM) column. */
+function effectiveItemWidth(sheet?: PlanningSheet | null): number {
+  if (sheet?.item_width_px != null) {
+    return Math.max(ITEM_MIN_WIDTH, Math.min(ITEM_MAX_WIDTH, sheet.item_width_px));
+  }
+  return DEFAULT_ITEM_COL_WIDTH;
+}
 
 /**
  * Roughly how many pixels one character of a bold ~13px header label
@@ -180,7 +188,7 @@ function mumGroupNumber(columnName: string, label?: string): number | null {
   const str = (columnName || "").trim();
   const effectiveLabel = label || "Mum";
   const escapedLabel = effectiveLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`${escapedLabel}\\s*(\\d+)`, "i");
+  const regex = new RegExp(`${escapedLabel}[\\s\\-]*0*(\\d+)`, "i");
   const match = str.match(regex);
   if (!match) return null;
   const num = parseInt(match[1], 10);
@@ -190,7 +198,7 @@ function mumGroupNumber(columnName: string, label?: string): number | null {
 function mumRemarksGroupNumber(columnName: string, label?: string): number | null {
   const str = (columnName || "").trim();
   const effectiveLabel = (label || "Mum").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`^${effectiveLabel}\\s*(\\d+)\\s*remarks$`, "i");
+  const regex = new RegExp(`^${effectiveLabel}[\\s\\-]*0*(\\d+)\\s*remarks?$`, "i");
   const match = str.match(regex);
   if (!match) return null;
   const num = parseInt(match[1], 10);
@@ -233,8 +241,9 @@ function PlanningGridSkeletonRows({
               background: "#F8FAFC",
               borderRight: "2px solid #CBD5E1",
               padding: "10px 12px",
-              minWidth: 160,
-              maxWidth: 220,
+              minWidth: `var(--item-col-width, ${DEFAULT_ITEM_COL_WIDTH}px)`,
+              width: `var(--item-col-width, ${DEFAULT_ITEM_COL_WIDTH}px)`,
+              maxWidth: `var(--item-col-width, ${DEFAULT_ITEM_COL_WIDTH}px)`,
             }}
           >
             <div
@@ -1814,6 +1823,7 @@ function SearchableEntityDropdown({
 export function PlanningPage() {
   const { hasPermission } = useAuth();
   const showToast = useToast();
+  const confirm = useConfirm();
   const canManageColumns = hasPermission("planning.column.manage");
   const canEditCells = hasPermission("planning.cell.edit");
   const canEditTestYN = hasPermission("planning.textyn.edit");
@@ -2556,7 +2566,8 @@ export function PlanningPage() {
               columns: prev.columns.map((c) => (c.id === payload.id ? payload : c)).sort((a, b) => a.position - b.position),
             };
           }
-          case "item_description_changed": {
+          case "item_description_changed":
+          case "item_width_changed": {
             return { ...prev, sheet: payload };
           }
           case "column_deleted": {
@@ -3110,7 +3121,7 @@ export function PlanningPage() {
   }, [visibleColumns, frozenColumnIds]);
   const stickyLeftByColumnId = useMemo(() => {
     const map = new Map<string, number>();
-    let left = ITEM_COL_WIDTH;
+    let left = effectiveItemWidth(grid?.sheet);
     for (const col of orderedColumns) {
       const isFrozen = isTestColumn(col.name) || isApprovalDateColumn(col.name) || frozenColumnIds.has(col.id);
       if (!isFrozen) break;
@@ -3118,7 +3129,7 @@ export function PlanningPage() {
       left += effectiveColumnWidth(col);
     }
     return map;
-  }, [orderedColumns, frozenColumnIds]);
+  }, [orderedColumns, frozenColumnIds, grid?.sheet?.item_width_px]);
   const lastFrozenColumnId = useMemo(() => {
     const frozenInOrder = orderedColumns.filter(
       (c) => isTestColumn(c.name) || isApprovalDateColumn(c.name) || frozenColumnIds.has(c.id)
@@ -3133,6 +3144,7 @@ export function PlanningPage() {
       name: itemHeaderTitle,
       data_type: "text",
       position: 0,
+      width_px: grid?.sheet.item_width_px ?? null,
       is_locked: false,
       source_type: grid?.sheet.item_source_type || "manual",
       source_module: grid?.sheet.item_source_module || null,
@@ -3229,7 +3241,14 @@ export function PlanningPage() {
   }
 
   async function handleDeleteSheet(sheetId: string, sheetName: string) {
-    if (!window.confirm(`Are you sure you want to delete sheet '${sheetName}'? This will remove the sheet and all its columns and rows.`)) return;
+    const confirmed = await confirm({
+      title: "Delete Planning Sheet",
+      message: `Are you sure you want to delete sheet '${sheetName}'? This will permanently remove the sheet and all its columns and rows.`,
+      itemName: sheetName,
+      confirmLabel: "Delete Sheet",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       await apiDelete(`/planning/sheets/${sheetId}`);
       await loadSheets();
@@ -3311,7 +3330,14 @@ export function PlanningPage() {
       groupColumns.length > 1
         ? `Delete the whole ${mumLabel} ${groupNum} group? This removes "${groupColumns.map((c) => c.name).join('", "')}" and every value stored in them.`
         : "Delete this column? This removes every value stored in it.";
-    if (!window.confirm(confirmMessage)) return;
+    const confirmed = await confirm({
+      title: "Delete Column",
+      message: confirmMessage,
+      itemName: target.name,
+      confirmLabel: "Delete Column",
+      variant: "danger",
+    });
+    if (!confirmed) return;
 
     try {
       for (const col of groupColumns) {
@@ -3367,6 +3393,24 @@ export function PlanningPage() {
     );
     try {
       await apiPatch(`/planning/sheets/${activeSheetId}/columns/${columnId}/width`, { width_px: widthPx });
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  /**
+   * Persist a drag-resized ITEM column width to the server (shared across
+   * every user viewing this sheet). Updates local state optimistically first.
+   */
+  async function handleResizeItemColumn(widthPx: number) {
+    if (!activeSheetId) return;
+    setGrid((prev) =>
+      prev
+        ? { ...prev, sheet: { ...prev.sheet, item_width_px: widthPx } }
+        : prev
+    );
+    try {
+      await apiPatch(`/planning/sheets/${activeSheetId}/item-width`, { width_px: widthPx });
     } catch (err) {
       setError(err);
     }
@@ -4290,7 +4334,16 @@ export function PlanningPage() {
             </div>
 
             <div ref={scrollContainerRef} style={{ overflow: "auto", border: "1px solid #E2E8F0", borderRadius: 8, maxHeight: "calc(100vh - 210px)" }}>
-              <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "max-content", minWidth: "100%", fontSize: 13 }}>
+              <table
+                style={{
+                  borderCollapse: "separate",
+                  borderSpacing: 0,
+                  width: "max-content",
+                  minWidth: "100%",
+                  fontSize: 13,
+                  "--item-col-width": `${effectiveItemWidth(grid?.sheet)}px`,
+                } as React.CSSProperties}
+              >
                 <thead>
                   <tr style={{ background: "#F8FAFC" }}>
                     <EditableItemHeader
@@ -4305,6 +4358,8 @@ export function PlanningPage() {
                       isSorted={sortColumnId === "item-header-col"}
                       sortDirection={sortDirection}
                       onSort={() => handleSortColumn("item-header-col")}
+                      width={effectiveItemWidth(grid?.sheet)}
+                      onResize={canManageColumns ? handleResizeItemColumn : undefined}
                     />
                     {orderedColumns.map((col) => (
                       <ColumnHeader
@@ -5184,6 +5239,8 @@ function EditableItemHeader({
   isSorted,
   sortDirection,
   onSort,
+  width = DEFAULT_ITEM_COL_WIDTH,
+  onResize,
 }: {
   column: PlanningColumn;
   canManage: boolean;
@@ -5196,12 +5253,16 @@ function EditableItemHeader({
   isSorted?: boolean;
   sortDirection?: "asc" | "desc";
   onSort?: () => void;
+  width?: number;
+  onResize?: (widthPx: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
   const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
+  const [resizing, setResizing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasDescription = !!itemDescription;
+  const colWidth = width;
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -5220,6 +5281,41 @@ function EditableItemHeader({
     }
   }
 
+  function handleResizeStart(e: React.MouseEvent<HTMLDivElement>) {
+    if (!onResize) return;
+    const resizeCallback = onResize;
+    e.preventDefault();
+    e.stopPropagation();
+    const th = e.currentTarget.closest("th") as HTMLTableCellElement | null;
+    const table = th?.closest("table");
+    const startX = e.clientX;
+    const startWidth = colWidth;
+    setResizing(true);
+
+    function handleMouseMove(moveEvent: MouseEvent) {
+      const delta = moveEvent.clientX - startX;
+      const next = Math.max(ITEM_MIN_WIDTH, Math.min(ITEM_MAX_WIDTH, startWidth + delta));
+      if (table) {
+        table.style.setProperty("--item-col-width", `${next}px`);
+      }
+      if (th) {
+        th.style.width = `${next}px`;
+        th.style.minWidth = `${next}px`;
+        th.style.maxWidth = `${next}px`;
+      }
+    }
+    function handleMouseUp(upEvent: MouseEvent) {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      setResizing(false);
+      const delta = upEvent.clientX - startX;
+      const next = Math.max(ITEM_MIN_WIDTH, Math.min(ITEM_MAX_WIDTH, startWidth + delta));
+      if (next !== startWidth) resizeCallback(next);
+    }
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }
+
   const sourceBadge =
     column.source_type === "formula"
       ? { label: "ƒx", title: `Formula: ${column.formula_expression || ""}` }
@@ -5234,9 +5330,9 @@ function EditableItemHeader({
       style={{
         padding: "5px 8px",
         textAlign: "left",
-        minWidth: ITEM_COL_WIDTH,
-        width: ITEM_COL_WIDTH,
-        maxWidth: ITEM_COL_WIDTH,
+        minWidth: `var(--item-col-width, ${colWidth}px)`,
+        width: `var(--item-col-width, ${colWidth}px)`,
+        maxWidth: `var(--item-col-width, ${colWidth}px)`,
         boxSizing: "border-box",
         borderBottom: "1px solid #E2E8F0",
         borderRight: isLastFrozen ? "2px solid #CBD5E1" : "1px solid #E2E8F0",
@@ -5408,6 +5504,22 @@ function EditableItemHeader({
           onClose={() => setDescAnchor(null)}
         />
       )}
+      {onResize && (
+        <div
+          onMouseDown={handleResizeStart}
+          title="Drag to resize column"
+          style={{
+            position: "absolute",
+            top: 0,
+            right: -2,
+            bottom: 0,
+            width: 5,
+            cursor: "col-resize",
+            zIndex: 13,
+            background: resizing ? "#2563EB" : "transparent",
+          }}
+        />
+      )}
     </th>
   );
 }
@@ -5456,9 +5568,9 @@ function EditableRowLabel({
         borderBottom: "1px solid #F1F5F9",
         borderRight: isLastFrozen ? "2px solid #CBD5E1" : "1px solid #F1F5F9",
         fontWeight: 500,
-        minWidth: ITEM_COL_WIDTH,
-        width: ITEM_COL_WIDTH,
-        maxWidth: ITEM_COL_WIDTH,
+        minWidth: `var(--item-col-width, ${DEFAULT_ITEM_COL_WIDTH}px)`,
+        width: `var(--item-col-width, ${DEFAULT_ITEM_COL_WIDTH}px)`,
+        maxWidth: `var(--item-col-width, ${DEFAULT_ITEM_COL_WIDTH}px)`,
         boxSizing: "border-box",
         position: "sticky",
         left: 0,

@@ -16,6 +16,7 @@ import { TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import type {
   BulkPermissionOverrideItem,
   DepartmentHierarchy,
@@ -103,6 +104,7 @@ function RolesTableSkeletonRows({ count = 6 }: { count?: number }) {
 export function RbacPage() {
   const { hasPermission } = useAuth();
   const showToast = useToast();
+  const confirm = useConfirm();
   const canManage = hasPermission("roles_permissions.action");
   const canCreateRole = hasPermission("roles_permissions.create");
   const canBulkDeleteRoles = hasPermission("roles_permissions.bulk_action");
@@ -626,7 +628,14 @@ export function RbacPage() {
     try {
       const { data: impact } = await apiGet<RoleDeletionImpact>(`/rbac/roles/${roleId}/deletion-impact`);
       if (!impact.affected_user_count) {
-        if (!confirm(`Are you sure you want to delete department '${roleNameStr}'?`)) return;
+        const confirmed = await confirm({
+          title: "Delete Department",
+          message: `Are you sure you want to delete department '${roleNameStr}'?`,
+          itemName: roleNameStr,
+          confirmLabel: "Delete Department",
+          variant: "danger",
+        });
+        if (!confirmed) return;
         await guardRowAction(`delete-role:${roleId}`, async () => {
           try {
             await apiDelete(`/rbac/roles/${roleId}`);
@@ -1599,7 +1608,13 @@ export function RbacPage() {
                         showToast("The selected department(s) are system departments and cannot be deleted.", "error");
                         return;
                       }
-                      if (!confirm(`Are you sure you want to delete ${targets.length} selected department(s)?`)) {
+                      const confirmed = await confirm({
+                        title: "Delete Selected Departments",
+                        message: `Are you sure you want to delete ${targets.length} selected department(s)?`,
+                        confirmLabel: "Delete Departments",
+                        variant: "danger",
+                      });
+                      if (!confirmed) {
                         return;
                       }
                       setBulkDeleting(true);

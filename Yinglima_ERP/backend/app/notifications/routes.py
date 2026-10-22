@@ -23,6 +23,7 @@ from app.notifications.schemas import (
     NotificationRuleUpdate,
 )
 from app.notifications.service import NotificationService
+from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -88,7 +89,7 @@ async def mark_all_notifications_read(
 @router.get("/rules", response_model=dict[str, Any])
 async def list_notification_rules(
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("notification_settings.view")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """List all available notification rules and their mapped roles/users."""
@@ -102,7 +103,7 @@ async def update_notification_rule(
     request: Request,
     event_key: str,
     payload: NotificationRuleUpdate,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("notification_settings.manage")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Update mapped roles/departments and users for a notification rule."""
@@ -119,7 +120,7 @@ async def update_notification_rule(
 @router.get("/users", response_model=dict[str, Any])
 async def list_notification_users(
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("notification_settings.view")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """List active users for notification recipient configuration."""
@@ -130,7 +131,7 @@ async def list_notification_users(
 @router.get("/roles", response_model=dict[str, Any])
 async def list_notification_roles(
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("notification_settings.view")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """List roles for notification department configuration."""

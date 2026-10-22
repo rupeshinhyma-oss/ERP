@@ -46,6 +46,7 @@ class SupplierContactCreate(BaseModel):
     whatsapp_number: str | None = Field(default=None, max_length=150)
     wechat_number: str | None = Field(default=None, max_length=150)
     email: EmailStr | None = None
+    is_primary: bool | None = None
 
     @field_validator("email", mode="before")
     @classmethod
@@ -70,6 +71,7 @@ class SupplierContactUpdate(BaseModel):
     whatsapp_number: str | None = Field(default=None, max_length=150)
     wechat_number: str | None = Field(default=None, max_length=150)
     email: EmailStr | None = None
+    is_primary: bool | None = None
 
     @field_validator("email", mode="before")
     @classmethod

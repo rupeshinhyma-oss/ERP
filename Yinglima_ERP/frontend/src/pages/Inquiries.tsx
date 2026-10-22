@@ -18,6 +18,7 @@ import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
+import { useConfirm } from "@/lib/confirm";
 import { useLiveModule } from "@/lib/live/useLive";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { autoTitleCase } from "@/utils/text";
@@ -680,8 +681,18 @@ function CompaniesView({
     );
   };
 
+  const confirm = useConfirm();
+
   async function handleDeleteCompanyInquiries(buyerId: string) {
-    if (!window.confirm("Are you sure you want to delete all consignments for this buyer company?")) return;
+    const buyerName = buyerNames[buyerId] || "this buyer company";
+    const confirmed = await confirm({
+      title: "Delete All Consignments",
+      message: `Are you sure you want to delete all consignments for ${buyerName}? This will safely move them to Trash.`,
+      itemName: buyerName,
+      confirmLabel: "Delete All",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       const { data: consignments } = await apiGet<InquiryListItem[]>(`/inquiries/companies/${buyerId}`);
       await Promise.all(consignments.map((c) => apiDelete(`/inquiries/${c.id}`)));
@@ -693,7 +704,13 @@ function CompaniesView({
 
   async function handleBulkDeleteCompanies() {
     if (!selectedBuyerIds.length) return;
-    if (!window.confirm(`Delete all consignments for the ${selectedBuyerIds.length} selected buyer company(ies)? This will safely move them to Trash.`)) return;
+    const confirmed = await confirm({
+      title: "Delete Selected Companies' Consignments",
+      message: `Delete all consignments for the ${selectedBuyerIds.length} selected buyer company(ies)? This will safely move them to Trash.`,
+      confirmLabel: "Delete Selected",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       setLoading(true);
       for (const buyerId of selectedBuyerIds) {
@@ -1017,8 +1034,19 @@ function ConsignmentsView({
     );
   };
 
+  const confirm = useConfirm();
+
   async function handleDelete(inquiryId: string) {
-    if (!window.confirm("Delete this consignment and all its items?")) return;
+    const row = rows.find((r) => r.id === inquiryId);
+    const code = row ? (row.consignment_code || codeNames[row.consignment_code_id] || "Consignment") : "Consignment";
+    const confirmed = await confirm({
+      title: "Delete Consignment",
+      message: `Are you sure you want to delete consignment "${code}" and all its line items? They can be restored from Trash.`,
+      itemName: code,
+      confirmLabel: "Delete Consignment",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction(`delete:${inquiryId}`, async () => {
       try {
         await apiDelete(`/inquiries/${inquiryId}`);
@@ -1032,7 +1060,13 @@ function ConsignmentsView({
 
   async function handleBulkDelete() {
     if (!selectedInquiryIds.length) return;
-    if (!window.confirm(`Delete ${selectedInquiryIds.length} selected consignment(s) and all their items? They can be restored from Trash.`)) return;
+    const confirmed = await confirm({
+      title: "Delete Selected Consignments",
+      message: `Delete ${selectedInquiryIds.length} selected consignment(s) and all their line items? They can be restored from Trash.`,
+      confirmLabel: "Delete Selected",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction("bulk-delete", async () => {
       try {
         await Promise.all(selectedInquiryIds.map((id) => apiDelete(`/inquiries/${id}`)));
@@ -1246,6 +1280,7 @@ function ItemsView({
   canDelete: boolean;
   onError: (err: unknown) => void;
 }) {
+  const confirm = useConfirm();
   const [inquiry, setInquiry] = useState<Inquiry | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -1531,9 +1566,14 @@ function ItemsView({
   }
 
   async function handleDeleteQuote(quote: Quotation) {
-    if (!window.confirm(`Are you sure you want to delete Quotation #${quote.quote_number}?`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Delete Quotation",
+      message: `Are you sure you want to delete Quotation #${quote.quote_number}?`,
+      itemName: `Quotation #${quote.quote_number}`,
+      confirmLabel: "Delete Quotation",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction(`quote_delete:${quote.id}`, async () => {
       try {
         await apiDelete(`/inquiries/quotations/${quote.id}`);
@@ -1559,7 +1599,15 @@ function ItemsView({
   }
 
   async function handleDeleteItem(item: InquiryItem) {
-    if (!window.confirm("Are you sure you want to delete this product item?")) return;
+    const itemName = item.product_name || item.product_name_tally || "Product Item";
+    const confirmed = await confirm({
+      title: "Delete Product Item",
+      message: "Are you sure you want to delete this product item? All linked quotations and specifications will be removed.",
+      itemName,
+      confirmLabel: "Delete Item",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       await apiDelete(`/inquiries/${inquiryId}/items/${item.id}`);
       if (selectedItemId === item.id) {
@@ -6854,8 +6902,15 @@ function AddItemModal({
   const productFetcher = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
       try {
+        let cleanTerm = term.trim();
+        const codeMatch = cleanTerm.match(/\(([^)]+)\)$/);
+        if (codeMatch && codeMatch[1]) {
+          cleanTerm = codeMatch[1].trim();
+        } else if (cleanTerm.includes("—")) {
+          cleanTerm = cleanTerm.split("—")[0].trim();
+        }
         const { data } = await apiGet<any>(
-          "/masters/products" + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
+          "/masters/products" + toQueryString({ search: cleanTerm, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
           { signal }
         );
         const list = Array.isArray(data) ? data : data?.data || [];
@@ -7499,11 +7554,19 @@ function QuickInquiryDrawer({
 
   const productFetcher: FetchOptions = useCallback(
     async (term, signal) => {
+      let cleanTerm = term.trim();
+      const codeMatch = cleanTerm.match(/\(([^)]+)\)$/);
+      if (codeMatch && codeMatch[1]) {
+        cleanTerm = codeMatch[1].trim();
+      } else if (cleanTerm.includes("—")) {
+        cleanTerm = cleanTerm.split("—")[0].trim();
+      }
       const { data } = await apiGet<any[]>(
-        "/masters/products" + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
+        "/masters/products" + toQueryString({ search: cleanTerm, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
         { signal }
       );
-      return data.map((d) => ({
+      const list = Array.isArray(data) ? data : (data as any)?.data || [];
+      return list.map((d: any) => ({
         value: d.id,
         label: `${d.product_name_tally || d.product_name} (${d.product_code || "NO-CODE"})`,
       }));

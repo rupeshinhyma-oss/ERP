@@ -225,6 +225,13 @@ class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
         nullable=True,
         doc="Persisted state of the ITEM column's 'How many records to load' selector. NULL means 'All'.",
     )
+    item_width_px: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None,
+        doc="Persisted display width of the sheet's built-in first (ITEM) column in pixels. "
+        "When NULL, falls back to default (240px). Mirrors PlanningColumn.width_px.",
+    )
 
     # --- Mum-group label (the "Mum" in "Mum 1" / "NO. OF PKG MUM1" / etc.) ---
     # Every sheet's Mum-series columns (main Mum<n> column, its Remarks

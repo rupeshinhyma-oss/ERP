@@ -52,7 +52,7 @@ def _product_getter(record: Any, field_key: str) -> Any:
     ``Product`` -- they're transient attributes
     (``_planning_supplier_name`` / ``_planning_supplier_city``) that
     ``ProductRepository`` attaches in bulk after fetching, by resolving
-    each product's primary linked supplier (see
+    each product's primary supplier assigned in Product Master (see
     ``ProductRepository.attach_planning_supplier_info``). Falling back to
     plain ``getattr`` for every other field keeps this a drop-in
     replacement for ``_default_getter``.
@@ -72,11 +72,10 @@ def _build_product_module() -> SourceModule:
         SourceField("product_name", "Product Name", is_numeric=False),
         SourceField("uom_id", "UOM (ID)", is_numeric=False),
         SourceField("license_certificate_required", "License/Certificate Required", is_numeric=False),
-        # --- Supplier info, resolved via the product's primary linked supplier ---
-        # "Primary" = the first SupplierProductLink created for this product
-        # (see ProductRepository.attach_planning_supplier_info) -- a product
-        # can have multiple linked suppliers, but Shipment Planning only
-        # ever needs the one exact supplier for that exact item.
+        # --- Supplier info, resolved strictly via the product's primary supplier in Product Master ---
+        # "Primary" = Product.supplier_id assigned directly in Product Master
+        # (see ProductRepository.attach_planning_supplier_info). If not assigned,
+        # it remains blank even if other suppliers have linked the product in Supplier Master.
         SourceField("supplier_name", "Brand of Supplier", is_numeric=False),
         SourceField("supplier_city", "City", is_numeric=False),
         # --- Packaging attributes, used by the fixed NO. OF PKG / TOTAL WEIGHT / TOTAL CBM formulas ---

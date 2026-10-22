@@ -54,6 +54,7 @@ const pageLoaders = {
   Products: () => import("@/pages/masters/Products").then((m) => ({ default: m.ProductsPage })),
   ProductPrices: () => import("@/pages/ProductPrices").then((m) => ({ default: m.ProductPricesPage })),
   ProductGallery: () => import("@/pages/ProductGallery").then((m) => ({ default: m.ProductGalleryPage })),
+  StockMovements: () => import("@/pages/inventory/StockMovements").then((m) => ({ default: m.StockMovementsPage })),
   LocalPurchases: () => import("@/pages/purchases/LocalPurchases").then((m) => ({ default: m.LocalPurchasesPage })),
   LocalPurchaseForm: () => import("@/pages/purchases/LocalPurchaseForm").then((m) => ({ default: m.LocalPurchaseFormPage })),
   SaleProcessList: () => import("@/pages/sales/SaleProcessList").then((m) => ({ default: m.SaleProcessListPage })),
@@ -90,6 +91,7 @@ const SubCategoriesPage = lazy(pageLoaders.SubCategories);
 const ProductsPage = lazy(pageLoaders.Products);
 const ProductPricesPage = lazy(pageLoaders.ProductPrices);
 const ProductGalleryPage = lazy(pageLoaders.ProductGallery);
+const StockMovementsPage = lazy(pageLoaders.StockMovements);
 const LocalPurchasesPage = lazy(pageLoaders.LocalPurchases);
 const LocalPurchaseFormPage = lazy(pageLoaders.LocalPurchaseForm);
 const SaleProcessListPage = lazy(pageLoaders.SaleProcessList);
@@ -199,6 +201,11 @@ export function App() {
             <Route path="/buyers" element={<BuyersPage />} />
             <Route path="/inquiries" element={<InquiriesPage />} />
             <Route path="/planning" element={<PlanningPage />} />
+
+            {/* Inventory & Stock Movement */}
+            <Route path="/inventory/stock-movements" element={<StockMovementsPage />} />
+            <Route path="/stock" element={<Navigate to="/inventory/stock-movements" replace />} />
+            <Route path="/stock-movements" element={<Navigate to="/inventory/stock-movements" replace />} />
 
             {/* Purchases */}
             <Route path="/purchase/local" element={<LocalPurchasesPage />} />
