@@ -1405,6 +1405,7 @@ export function DiscountPaymentsPage({
               border: "1px solid #e2e8f0",
               boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
               overflowX: "auto",
+              minHeight: "320px",
               marginBottom: "16px",
             }}
           >
@@ -1756,7 +1757,7 @@ export function DiscountPaymentsPage({
 
                       {/* Action Menu (⋮) */}
                       <td style={{ padding: "8px 12px", verticalAlign: "top", textAlign: "center" }}>
-                        <div style={{ position: "relative", display: "inline-block" }}>
+                        <div style={{ position: "relative", display: "inline-block", zIndex: openActionId === o.id ? 50 : 1 }}>
                           <button
                             type="button"
                             title="Action"
@@ -1798,17 +1799,20 @@ export function DiscountPaymentsPage({
                             ⋮
                           </button>
 
-                          {openActionId === o.id && (
+                          {openActionId === o.id && (() => {
+                            const openUpward = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - (paginatedOrders.length >= 4 ? 2 : 1);
+                            return (
                             <div
                               onClick={(e) => e.stopPropagation()}
                               style={{
                                 position: "absolute",
                                 right: 0,
-                                top: "calc(100% + 2px)",
+                                top: openUpward ? "auto" : "calc(100% + 2px)",
+                                bottom: openUpward ? "calc(100% + 2px)" : "auto",
                                 background: "#ffffff",
                                 border: "1px solid #cbd5e1",
                                 borderRadius: "4px",
-                                boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+                                boxShadow: openUpward ? "0 -4px 14px rgba(0,0,0,0.12)" : "0 4px 14px rgba(0,0,0,0.12)",
                                 zIndex: 200,
                                 minWidth: "155px",
                                 textAlign: "left",
@@ -1905,7 +1909,8 @@ export function DiscountPaymentsPage({
                                 <span>List Payments</span>
                               </button>
                             </div>
-                          )}
+                            );
+                          })()}
                         </div>
                       </td>
                     </tr>

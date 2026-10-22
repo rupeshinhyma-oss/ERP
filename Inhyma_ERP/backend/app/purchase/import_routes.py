@@ -7,14 +7,16 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
+from pathlib import Path
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user
-from app.auth.service import CurrentUser
+from app.auth.dependencies import get_auth_service, get_current_user
+from app.auth.service import AuthService, CurrentUser
 from app.common import workflow as wf
-from app.common.storage import save_uploaded_file
+from app.common.storage import guess_content_type, save_uploaded_file
 from app.core.exceptions import ConflictException, NotFoundException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -282,8 +284,8 @@ async def update_import_purchase(
 ) -> dict:
     record = await _get(db, purchase_id)
     rules = await wf.load_status_rules(db, GROUP)
-    # Late Expense Inward Editing allows editing expenses on received and closed consignments
-    if record.status not in ("received", "closed"):
+    # Late Expense Inward Editing allows editing expenses on received consignments, but closed consignments are locked
+    if record.status != "received":
         wf.check_editable(rules, record.status, user)
     supplier, warehouse, result = await _prepare(db, payload, record)
 
@@ -383,3 +385,47 @@ async def delete_import_bill(
     await db.flush()
     await db.refresh(record, attribute_names=["items"])
     return build_success_response(data=(await _present(db, [record]))[0], message="Invoice removed.", request_id=_rid(request))
+
+
+@router.get("/{purchase_id}/bill-file", summary="Download or view the attached invoice file")
+async def get_import_bill_file(
+    purchase_id: uuid.UUID,
+    request: Request,
+    token: Optional[str] = Query(None),
+    download: bool = Query(False),
+    db: AsyncSession = Depends(get_db_session),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    raw_token = token
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        raw_token = auth_header[7:].strip()
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Authentication credentials were not provided.")
+    try:
+        await auth_service.verify_access_token(raw_token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token.") from exc
+
+    record = await _get(db, purchase_id)
+    if not record.bill_file_url:
+        raise NotFoundException("No invoice file attached to this consignment.")
+
+    if record.bill_file_url.startswith("http://") or record.bill_file_url.startswith("https://"):
+        return RedirectResponse(url=record.bill_file_url)
+
+    clean_name = Path(record.bill_file_url).name
+    target = (Path("uploads") / "private" / "purchases" / clean_name).resolve()
+    if not target.is_file():
+        target = (Path("uploads") / "purchases" / clean_name).resolve()
+    if not target.is_file():
+        raise NotFoundException("Attached invoice file not found on disk.")
+
+    ext = target.suffix.lower().lstrip(".")
+    media_type = guess_content_type(target.name)
+    if ext == "pdf":
+        media_type = "application/pdf"
+
+    disp = "attachment" if download else "inline"
+    return FileResponse(target, media_type=media_type, filename=record.bill_file_name or target.name, content_disposition_type=disp)
+

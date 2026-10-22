@@ -48,7 +48,7 @@ const base = {
   expected_arrival_date: "30-10-2026", invoice_date: null, conversion_rate: 80, customs_conversion_rate: 82, invoice_total_usd: 1000,
   invoice_total_inr: 80000, total_cbm: 20, total_import_duty: 6000, freight: 4000, insurance: 400, stamp_duty: 100, shipping_line_charges: 1000,
   cfs_charges: 1500, clearing_transport: 2000, offloading: 500, misc_charges: 500, misc_remarks: null, total_expenses: 10000,
-  gross_total_landing: 96000, loading_percent_vb: 12.5, loading_amount_per_cbm: 500, remarks: null, bill_file_name: null, bill_file_url: null,
+  gross_total_landing: 90000, loading_percent_vb: 12.5, loading_amount_per_cbm: 500, remarks: null, bill_file_name: null, bill_file_url: null,
   stock_applied: true, created_by: "marketing", created_date: "05-10-2026", updated_date: "06-10-2026", sum_cbm: 5, sum_usd: 600, sum_duty: 4920,
   supplier_address: "No. 18, Industrial Zone, Ningbo", supplier_email: "export@supplier.test", supplier_phone: "+86 574 0000", supplier_gst: "TAX-YIN-1",
   to_name: "Inhyma Solutions LLP (M)", to_address: "4th Floor, Wagle Estate, Thane, 400604", to_email: "accounts@inhyma.test",
@@ -62,7 +62,7 @@ const INITIAL = [
 let server: any[] = [];
 
 const PREVIEW = {
-  invoice_total_inr: 80000, total_expenses: 10000, gross_total_landing: 96000, loading_percent_vb: 12.5, loading_amount_per_cbm: 500,
+  invoice_total_inr: 80000, total_expenses: 10000, gross_total_landing: 90000, loading_percent_vb: 12.5, loading_amount_per_cbm: 500,
   sum_cbm: 5, sum_usd: 600, sum_duty: 4920, items: [ITEM],
 };
 
@@ -200,7 +200,7 @@ describe("ImportPurchasePage list (data comes from the API)", () => {
     fireEvent.click(screen.getByTestId("btn-filter-toggle"));
     const panel = screen.getByTestId("filter-panel");
     expect(within(panel).getByText("Warehouse")).toBeTruthy();
-    expect(within(panel).getByText("Supplier")).toBeTruthy();
+    expect(within(panel).getByText("Expected Arrival Date Range")).toBeTruthy();
   });
 
   it("opens the details modal with the real party details from the masters, and closes on Escape", async () => {
@@ -273,6 +273,17 @@ describe("ImportPurchasePage row actions follow the database rules and the user'
     expect(screen.queryByTestId("action-delete-confirmed-ip-3")).toBeNull();    // delete is 'none' even for an admin
   });
 
+  it("closed: action menu shows only Download Purchase; Edit and Delete are removed", async () => {
+    server[0] = { ...server[0], status: "closed" };
+    auth.isSuperAdmin = true;
+    await open("ip-1");
+    expect(screen.getByTestId("action-download-ip-1")).toBeTruthy();
+    expect(screen.queryByTestId("action-edit-ip-1")).toBeNull();
+    expect(screen.queryByTestId("action-confirm-ip-1")).toBeNull();
+    expect(screen.queryByTestId("action-delete-ip-1")).toBeNull();
+    expect(screen.queryByTestId("action-delete-confirmed-ip-1")).toBeNull();
+  });
+
   it("Confirm is saved through the status API and the list is reloaded", async () => {
     await open("ip-1");
     fireEvent.click(screen.getByTestId("action-confirm-ip-1"));
@@ -308,7 +319,7 @@ describe("ImportPurchasePage Add / Edit form (Import Purchase spec)", () => {
     fireEvent.change(screen.getByLabelText("Invoice / Consignment No."), { target: { value: "EXP-86" } });
     fireEvent.change(screen.getByLabelText("Conversion Rate (USD to INR)"), { target: { value: "80" } });
     fireEvent.change(screen.getByLabelText("Customs Conversion Rate (USD to INR)"), { target: { value: "82" } });
-    fireEvent.change(screen.getByLabelText("Invoice Total Value (USD)"), { target: { value: "1000" } });
+    fireEvent.change(screen.getByLabelText("Purchase Invoice Total Value (USD)"), { target: { value: "1000" } });
     fireEvent.change(screen.getByLabelText("Freight"), { target: { value: "4000" } });
     fireEvent.change(screen.getByLabelText("Product Search"), { target: { value: "ISL" } });
     fireEvent.click(await screen.findByRole("option", { name: "ISL350XDAN Flow Wrap Machine" }));
@@ -332,11 +343,11 @@ describe("ImportPurchasePage Add / Edit form (Import Purchase spec)", () => {
   it("has the spec's eight expense lines, both conversion rates and the costing columns", async () => {
     await openAdd();
     for (const label of ["Freight", "Insurance", "Stamp Duty", "Shipping Line Charges", "CFS Charges", "Clearing & Transport", "Offloading", "Miscellaneous",
-      "Total Expenses", "Invoice Total Value (INR)", "Gross Total Landing (INR)", "% Loading Expense (Value Based)", "Loading Amount per CBM",
+      "Total Expenses", "Purchase Invoice Total Value (INR)", "Gross Total Landing (INR)", "% Loading Expense (Value Based)", "Loading Amount per CBM",
       "ETD Origin Date", "ETA Port Date", "Expected Arrival Date", "Total CBM", "Total Import Duty (INR)"]) {
       expect(screen.getByLabelText(label)).toBeTruthy();
     }
-    for (const col of ["Pkg Unit CBM", "Pkg Qty", "Total CBM", "Unit Rate (USD)", "Import Duty %", "Unit Import Duty (INR)", "Exp / Unit (VB)",
+    for (const col of ["Pkg Unit CBM", "Pkg Qty", "Total CBM", "Unit Rate (USD)", "Unit Rate (INR)", "Item Total (Basic in USD)", "Unit Import Duty (INR)", "Exp / Unit (VB)",
       "Exp / Unit (CB)", "Unit Landing (VB)", "Unit Landing (CB)", "Diff (CB - VB)"]) {
       expect(screen.getByRole("columnheader", { name: col })).toBeTruthy();
     }
@@ -345,9 +356,9 @@ describe("ImportPurchasePage Add / Edit form (Import Purchase spec)", () => {
   it("shows the landing cost calculated by the server while you type", async () => {
     await openAdd();
     await fill();
-    await waitFor(() => expect((screen.getByLabelText("Invoice Total Value (INR)") as HTMLInputElement).value).toBe("₹ 80,000.00"));
+    await waitFor(() => expect((screen.getByLabelText("Purchase Invoice Total Value (INR)") as HTMLInputElement).value).toBe("₹ 80,000.00"));
     expect((screen.getByLabelText("Total Expenses") as HTMLInputElement).value).toBe("₹ 10,000.00");
-    expect((screen.getByLabelText("Gross Total Landing (INR)") as HTMLInputElement).value).toBe("₹ 96,000.00");
+    expect((screen.getByLabelText("Gross Total Landing (INR)") as HTMLInputElement).value).toBe("₹ 90,000.00");
     expect((screen.getByLabelText("% Loading Expense (Value Based)") as HTMLInputElement).value).toBe("12.5%");
     const row = screen.getByLabelText("Quantity 1").closest("tr") as HTMLElement;
     expect(row.textContent).toContain("5,892.00");                                  // unit landing (VB)
@@ -366,6 +377,17 @@ describe("ImportPurchasePage Add / Edit form (Import Purchase spec)", () => {
     });
     fireEvent.change(screen.getByLabelText("Freight"), { target: { value: "100" } });
     expect(await screen.findByText(/not in the Product Master/)).toBeTruthy();
+  });
+
+  it("provides both written search and dropdown button to select products from Product Master", async () => {
+    await openAdd();
+    const dropdownBtn = screen.getByLabelText("Toggle Product Dropdown");
+    expect(dropdownBtn).toBeTruthy();
+    fireEvent.click(dropdownBtn);
+    const option = await screen.findByRole("option", { name: "ISL350XDAN Flow Wrap Machine" });
+    expect(option).toBeTruthy();
+    fireEvent.click(option);
+    expect(await screen.findByText("ISL350XDAN Flow Wrap Machine")).toBeTruthy();
   });
 
   it("validates the required fields before calling the API", async () => {
@@ -579,12 +601,11 @@ describe("ImportPurchasePage: date-range and master-driven filters (spec)", () =
     expect(screen.queryByText("MUM53")).toBeNull();
   });
 
-  it("builds the Warehouse and Supplier filter options from the masters (nothing hardcoded)", async () => {
+  it("builds the Warehouse filter options from the masters (nothing hardcoded)", async () => {
     const panel = await openFilters();
     const warehouse = panel.querySelectorAll("select")[0] as HTMLSelectElement;
-    const supplier = panel.querySelectorAll("select")[1] as HTMLSelectElement;
     expect(Array.from(warehouse.options).map((o) => o.textContent)).toEqual(["All Warehouses", "Mumbai", "Mumbai Ordered", "Mumbai Transit"]);
-    expect(Array.from(supplier.options).map((o) => o.textContent)).toEqual(["All Suppliers", "Yinglima", "Darsh Impex India LLP Mumbai"]);
+    expect(panel.textContent).not.toContain("All Suppliers");
     for (const old of ["Ahmedabad Ordered", "Indore Ordered"]) expect(panel.textContent).not.toContain(old);
   });
 });
@@ -611,9 +632,86 @@ describe("ImportPurchasePage: warehouses and supplier on the form (spec / Genera
     renderImportPage("/purchase-order/import-purchase/addedit");
     await screen.findByDisplayValue("Mumbai Ordered");
     const input = screen.getByLabelText("Supplier") as HTMLInputElement;
-    expect(input.getAttribute("list")).toBeTruthy();
-    const list = document.getElementById(input.getAttribute("list")!) as HTMLDataListElement;
-    expect(Array.from(list.options).map((o) => o.value)).toEqual(["Yinglima", "Darsh Impex India LLP Mumbai"]);
+    expect(input).toBeTruthy();
+    fireEvent.change(input, { target: { value: "Darsh" } });
+    expect(screen.getByText("Darsh Impex India LLP Mumbai")).toBeTruthy();
+  });
+
+  it("Ordered Date defaults to current date and rejects future dates", async () => {
+    renderImportPage("/purchase-order/import-purchase/addedit");
+    await screen.findByDisplayValue("Mumbai Ordered");
+    const todayStr = new Date().toLocaleDateString("en-GB").split("/").join("-");
+    const orderedDateInput = screen.getByLabelText("Ordered Date") as HTMLInputElement;
+    expect(orderedDateInput.value).toBe(todayStr);
+
+    // Typing a future date
+    fireEvent.change(orderedDateInput, { target: { value: "31-12-2099" } });
+    expect(screen.getByText(/Future date is not allowed for Ordered Date/)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "Yinglima" } });
+    fireEvent.change(screen.getByLabelText("Invoice / Consignment No."), { target: { value: "EXP-FUTURE" } });
+    fireEvent.change(screen.getByLabelText("Conversion Rate (USD to INR)"), { target: { value: "80" } });
+    fireEvent.change(screen.getByLabelText("Customs Conversion Rate (USD to INR)"), { target: { value: "82" } });
+    fireEvent.change(screen.getByLabelText("Product Search"), { target: { value: "ISL" } });
+    fireEvent.click(await screen.findByRole("option", { name: "ISL350XDAN Flow Wrap Machine" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit Consignment" }));
+
+    // API should NOT be called because of future date error
+    expect(calls(apiPost, "/purchase/import-orders").some((c: any[]) => c[0] === "/purchase/import-orders")).toBe(false);
+
+    // Changing back to past or today date allows submission
+    fireEvent.change(orderedDateInput, { target: { value: todayStr } });
+    expect(screen.queryByText(/Future date is not allowed for Ordered Date/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Submit Consignment" }));
+    await waitFor(() => expect(calls(apiPost, "/purchase/import-orders").some((c: any[]) => c[0] === "/purchase/import-orders")).toBe(true));
+  });
+
+  it("ETD Origin Date, ETA Port Date, and Expected Arrival Date default to blank and reject dates earlier than created date", async () => {
+    renderImportPage("/purchase-order/import-purchase/addedit");
+    await screen.findByDisplayValue("Mumbai Ordered");
+    const etdInput = screen.getByLabelText("ETD Origin Date") as HTMLInputElement;
+    const etaInput = screen.getByLabelText("ETA Port Date") as HTMLInputElement;
+    const expInput = screen.getByLabelText("Expected Arrival Date") as HTMLInputElement;
+
+    // All three must be blank by default
+    expect(etdInput.value).toBe("");
+    expect(etaInput.value).toBe("");
+    expect(expInput.value).toBe("");
+
+    // Typing a past date (e.g. 01-01-2020) should trigger validation error
+    fireEvent.change(etdInput, { target: { value: "01-01-2020" } });
+    expect(screen.getByText(/ETD Origin Date cannot be earlier than Created Date/)).toBeTruthy();
+
+    fireEvent.change(etaInput, { target: { value: "01-01-2020" } });
+    expect(screen.getByText(/ETA Port Date cannot be earlier than Created Date/)).toBeTruthy();
+
+    fireEvent.change(expInput, { target: { value: "01-01-2020" } });
+    expect(screen.getByText(/Expected Arrival Date cannot be earlier than Created Date/)).toBeTruthy();
+
+    // Fill valid required fields
+    fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "Yinglima" } });
+    fireEvent.change(screen.getByLabelText("Invoice / Consignment No."), { target: { value: "EXP-ETD-TEST" } });
+    fireEvent.change(screen.getByLabelText("Conversion Rate (USD to INR)"), { target: { value: "80" } });
+    fireEvent.change(screen.getByLabelText("Customs Conversion Rate (USD to INR)"), { target: { value: "82" } });
+    fireEvent.change(screen.getByLabelText("Product Search"), { target: { value: "ISL" } });
+    fireEvent.click(await screen.findByRole("option", { name: "ISL350XDAN Flow Wrap Machine" }));
+
+    // Submit with past date should be blocked
+    fireEvent.click(screen.getByRole("button", { name: "Submit Consignment" }));
+    expect(calls(apiPost, "/purchase/import-orders").some((c: any[]) => c[0] === "/purchase/import-orders")).toBe(false);
+
+    // Change ETD, ETA, and Expected Arrival to today or future date
+    const todayStr = new Date().toLocaleDateString("en-GB").split("/").join("-");
+    fireEvent.change(etdInput, { target: { value: todayStr } });
+    fireEvent.change(etaInput, { target: { value: "31-12-2027" } });
+    fireEvent.change(expInput, { target: { value: "31-12-2027" } });
+
+    expect(screen.queryByText(/ETD Origin Date cannot be earlier than Created Date/)).toBeNull();
+    expect(screen.queryByText(/ETA Port Date cannot be earlier than Created Date/)).toBeNull();
+    expect(screen.queryByText(/Expected Arrival Date cannot be earlier than Created Date/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Submit Consignment" }));
+    await waitFor(() => expect(calls(apiPost, "/purchase/import-orders").some((c: any[]) => c[0] === "/purchase/import-orders")).toBe(true));
   });
 
   it("only accepts a supplier that exists, and saves its exact name", async () => {

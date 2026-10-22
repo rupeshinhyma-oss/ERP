@@ -285,7 +285,7 @@ export function mapImportPurchase(p: any, rules: WorkflowRules): ImportPurchaseR
     gross_total_landing: p.gross_total_landing,
     status: statusLabel(rules, p.status),
     status_key: p.status,
-    bill_file: p.bill_file_name || undefined,
+    bill_file: p.bill_file_name || p.bill_file || (p.bill_file_url ? p.bill_file_url.split("/").pop() : undefined),
     bill_file_url: p.bill_file_url || undefined,
     created_by: p.created_by,
     added_on: p.created_date,

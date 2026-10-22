@@ -7,7 +7,7 @@ import { SortHeader } from "@/components/SortHeader";
 import type { PaginationMeta } from "@/types";
 import { useToast } from "@/lib/toast";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, apiPut, errorMessage as apiErrorText } from "@/lib/api";
-import { DatePicker } from "@/components/DatePicker";
+import { DatePicker, parseDDMMYYYY, formatDDMMYYYY } from "@/components/DatePicker";
 import { formatIndianCurrency, formatUsdCurrency } from "@/lib/importPurchasePdf";
 import { useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
@@ -69,6 +69,214 @@ function Field({ label, required, error, children }: { label: string; required?:
       </label>
       {children}
       {error && <span style={FIELD_ERROR}>{error}</span>}
+    </div>
+  );
+}
+
+interface SupplierComboboxProps {
+  value: string;
+  onChange: (val: string) => void;
+  options: string[];
+  error?: string;
+  placeholder?: string;
+  disabled?: boolean;
+}
+
+function SupplierCombobox({
+  value,
+  onChange,
+  options,
+  error,
+  placeholder = "Select or type supplier...",
+  disabled = false,
+}: SupplierComboboxProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        if (isOpen) {
+          if (search.trim()) {
+            const matched = options.find((o) => o.toLowerCase() === search.trim().toLowerCase());
+            if (matched) {
+              onChange(matched);
+            } else {
+              onChange(search.trim());
+            }
+          }
+          setIsOpen(false);
+          setSearch("");
+        }
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen, search, options, onChange]);
+
+  const filteredOptions = useMemo(() => {
+    if (!search.trim()) return options;
+    const term = search.toLowerCase();
+    return options.filter((o) => o.toLowerCase().includes(term));
+  }, [options, search]);
+
+  const displayVal = isOpen ? search : value;
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          border: error ? "1px solid #ef4444" : "1px solid #cbd5e1",
+          borderRadius: "4px",
+          height: "34px",
+          background: disabled ? "#f8fafc" : "#ffffff",
+          padding: "0 8px",
+          boxSizing: "border-box",
+          cursor: disabled ? "not-allowed" : "pointer",
+          boxShadow: isOpen ? "0 0 0 2px rgba(37, 99, 235, 0.15)" : "none",
+          transition: "border-color 0.15s, box-shadow 0.15s",
+        }}
+        onClick={() => {
+          if (!disabled && !isOpen) {
+            setIsOpen(true);
+            setSearch(value);
+            inputRef.current?.focus();
+          }
+        }}
+      >
+        <input
+          ref={inputRef}
+          aria-label="Supplier"
+          type="text"
+          autoComplete="off"
+          placeholder={placeholder}
+          disabled={disabled}
+          value={displayVal}
+          onFocus={() => {
+            if (!disabled) {
+              setIsOpen(true);
+              setSearch(value);
+            }
+          }}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            onChange(e.target.value);
+            setIsOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (filteredOptions.length > 0) {
+                onChange(filteredOptions[0]);
+              } else if (search.trim()) {
+                onChange(search.trim());
+              }
+              setIsOpen(false);
+              setSearch("");
+              inputRef.current?.blur();
+            } else if (e.key === "Escape") {
+              setIsOpen(false);
+              setSearch("");
+            }
+          }}
+          style={{
+            flex: 1,
+            border: "none",
+            outline: "none",
+            fontSize: "13px",
+            color: "#334155",
+            background: "transparent",
+            cursor: disabled ? "not-allowed" : "text",
+            padding: 0,
+            width: "100%",
+          }}
+        />
+        <svg
+          style={{
+            width: "16px",
+            height: "16px",
+            color: "#64748b",
+            transition: "transform 0.2s",
+            transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+            flexShrink: 0,
+            cursor: disabled ? "not-allowed" : "pointer",
+          }}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (disabled) return;
+            if (isOpen) {
+              setIsOpen(false);
+              setSearch("");
+            } else {
+              setIsOpen(true);
+              setSearch(value);
+              inputRef.current?.focus();
+            }
+          }}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+
+      {isOpen && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 2px)",
+            left: 0,
+            right: 0,
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "6px",
+            boxShadow: "0 6px 16px rgba(0, 0, 0, 0.12)",
+            maxHeight: "220px",
+            overflowY: "auto",
+            zIndex: 100,
+          }}
+        >
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((opt) => (
+              <div
+                key={opt}
+                style={{
+                  padding: "8px 12px",
+                  fontSize: "13px",
+                  color: opt === value ? "#2563eb" : "#334155",
+                  fontWeight: opt === value ? 600 : 400,
+                  background: opt === value ? "#eff6ff" : "transparent",
+                  cursor: "pointer",
+                  transition: "background-color 0.15s",
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(opt);
+                  setIsOpen(false);
+                  setSearch("");
+                }}
+                onMouseEnter={(e) => {
+                  if (opt !== value) e.currentTarget.style.backgroundColor = "#f8fafc";
+                }}
+                onMouseLeave={(e) => {
+                  if (opt !== value) e.currentTarget.style.backgroundColor = "transparent";
+                }}
+              >
+                {opt}
+              </div>
+            ))
+          ) : (
+            <div style={{ padding: "10px 12px", fontSize: "12.5px", color: "#94a3b8", textAlign: "center" }}>
+              No matching suppliers found
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -273,8 +481,10 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const statusKeys = Object.keys(statusRules);
   const isInitialStatus = (o: ImportPurchaseRecord) => !!statusRules[o.status_key]?.initial;
   const canEditOrder = (o: ImportPurchaseRecord) => {
-    // Section 2.8 Late Expense Inward Editing allows editing expenses on received and closed consignments
-    if (o.status_key === "received" || o.status_key === "closed") return true;
+    // When status is closed, editing is completely disabled - only Download Purchase is shown in Action
+    if (o.status_key === "closed" || o.status?.toLowerCase() === "closed") return false;
+    // Section 2.8 Late Expense Inward Editing allows editing expenses on received consignments
+    if (o.status_key === "received") return true;
     return ruleCanEdit(statusRules, o.status_key, actor);
   };
   const canDeleteOrder = (o: ImportPurchaseRecord) => ruleCanDelete(statusRules, o.status_key, actor);
@@ -295,14 +505,12 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   // Filter Drawer / Panel State
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filterWarehouse, setFilterWarehouse] = useState("ALL");
-  const [filterSupplier, setFilterSupplier] = useState("ALL");
   const [filterArrival, setFilterArrival] = useState<DateFilter>(EMPTY_DATE_FILTER);
   const [filterEtd, setFilterEtd] = useState<DateFilter>(EMPTY_DATE_FILTER);
   const [filterEta, setFilterEta] = useState<DateFilter>(EMPTY_DATE_FILTER);
 
   const handleResetFilters = () => {
     setFilterWarehouse("ALL");
-    setFilterSupplier("ALL");
     setFilterArrival(EMPTY_DATE_FILTER);
     setFilterEtd(EMPTY_DATE_FILTER);
     setFilterEta(EMPTY_DATE_FILTER);
@@ -401,10 +609,6 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       if (filterWarehouse !== "ALL" && o.warehouse !== filterWarehouse) {
         return false;
       }
-      // Supplier filter
-      if (filterSupplier !== "ALL" && o.supplier_name !== filterSupplier) {
-        return false;
-      }
       // Date-range filters (spec: Expected Arrival, ETD Origin and ETA Port)
       if (!inDateRange(o.exp_arri_date, filterArrival)) return false;
       if (!inDateRange(o.etd_origin_date, filterEtd)) return false;
@@ -422,7 +626,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       }
       return true;
     });
-  }, [orders, selectedTab, filterWarehouse, filterSupplier, filterArrival, filterEtd, filterEta, searchTerm]);
+  }, [orders, selectedTab, filterWarehouse, filterArrival, filterEtd, filterEta, searchTerm]);
 
   // Sorting
   const sortedOrders = useMemo(() => {
@@ -459,7 +663,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedTab, searchTerm, perPage, filterWarehouse, filterSupplier, filterArrival, filterEtd, filterEta]);
+  }, [selectedTab, searchTerm, perPage, filterWarehouse, filterArrival, filterEtd, filterEta]);
 
   const handleSort = (field: keyof ImportPurchaseRecord) => {
     if (sortField === field) {
@@ -513,16 +717,41 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const [formBillFileName, setFormBillFileName] = useState("");
   const [formBillFile, setFormBillFile] = useState<File | null>(null);
   const [removeBill, setRemoveBill] = useState(false);
+  const [editingCreatedDate, setEditingCreatedDate] = useState<string>("");
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
   const [productSearchQuery, setProductSearchQuery] = useState("");
   const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [isProductLoading, setIsProductLoading] = useState(false);
+  const productSearchContainerRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const billInputRef = useRef<HTMLInputElement>(null);
   const previewSeq = useRef(0);
   const productSearchSeq = useRef(0);
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        productSearchContainerRef.current &&
+        !productSearchContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsProductDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const setField = (key: keyof ImportFormValues, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
+  const effectiveCreatedDate = useMemo(() => {
+    if (editingOrderId) {
+      if (editingCreatedDate) return editingCreatedDate;
+      const found = orders.find((o) => o.id === editingOrderId);
+      if (found?.added_on || found?.created_at_time) return (found.added_on || found.created_at_time)!;
+    }
+    return todayDDMMYYYY();
+  }, [editingOrderId, editingCreatedDate, orders]);
   const values: ImportFormValues = { ...form, items: formItems };
 
   // Fill the DB-configured defaults (supplier, warehouse) into a still-blank new form once they load
@@ -583,6 +812,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     setForm(blankForm());
     setFormItems([]);
     setOriginalWarehouse("");
+    setEditingCreatedDate("");
     setFormBillFileName("");
     setFormBillFile(null);
     setRemoveBill(false);
@@ -591,17 +821,19 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     setPreviewError(null);
     setProductSearchQuery("");
     setProductSearchMatches([]);
+    setIsProductDropdownOpen(false);
   };
 
   const populateForm = (order: ImportPurchaseRecord) => {
     const s = (n: number | undefined) => (n ? String(n) : "");
     setEditingOrderId(order.id);
     setOriginalWarehouse(order.warehouse);
+    setEditingCreatedDate(order.added_on || order.created_at_time || "");
     setForm({
       consignment_no: order.consignment_no,
       supplier_name: order.supplier_name,
       warehouse: order.warehouse,
-      ordered_date: order.ordered_date,
+      ordered_date: order.ordered_date || todayDDMMYYYY(),
       invoice_date: order.invoice_date || "",
       etd_origin_date: order.etd_origin_date || "",
       eta_port_date: order.eta_port_date || "",
@@ -639,6 +871,10 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   };
 
   const handleOpenEdit = (order: ImportPurchaseRecord) => {
+    if (order.status_key === "closed" || order.status?.toLowerCase() === "closed") {
+      toast("Closed consignments cannot be edited.", "warning");
+      return;
+    }
     populateForm(order);
     navigate(`/purchase-order/import-purchase/addedit/${order.id}`);
   };
@@ -649,7 +885,15 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     let cancelled = false;
     apiGet<any>(`${IMPORT_PURCHASE_API}/${routeOrderId}`)
       .then((res) => {
-        if (!cancelled && res?.data) populateForm(mapImportPurchase(res.data, statusRules));
+        if (!cancelled && res?.data) {
+          const mapped = mapImportPurchase(res.data, statusRules);
+          if (mapped.status_key === "closed" || mapped.status?.toLowerCase() === "closed") {
+            toast("Closed consignments cannot be edited.", "warning");
+            navigate("/purchase/importpurchase");
+            return;
+          }
+          populateForm(mapped);
+        }
       })
       .catch((err) => {
         if (!cancelled) setPageError(apiErrorText(err));
@@ -704,27 +948,47 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     navigate("/purchase/importpurchase");
   };
 
-  // Product search: the Product Master
-  const handleProductSearchChange = (val: string) => {
-    setProductSearchQuery(val);
-    if (!val.trim()) {
-      setProductSearchMatches([]);
-      return;
-    }
+  // Product search: extracted from the Product Master
+  const fetchProducts = (queryText: string) => {
     const seq = ++productSearchSeq.current;
-    void apiGet<any[]>(`/masters/products?page=1&page_size=10&status=active&search=${encodeURIComponent(val.trim())}`)
+    setIsProductLoading(true);
+    const url = queryText.trim()
+      ? `/masters/products?page=1&page_size=50&status=active&search=${encodeURIComponent(queryText.trim())}`
+      : `/masters/products?page=1&page_size=50&status=active`;
+    apiGet<any[]>(url)
       .then((res) => {
-        if (seq === productSearchSeq.current) setProductSearchMatches((res?.data || []).map((p) => ({ product_name: p.product_name })));
+        if (seq === productSearchSeq.current) {
+          setProductSearchMatches((res?.data || []).map((p) => ({ product_name: p.product_name })));
+          setIsProductLoading(false);
+        }
       })
       .catch(() => {
-        if (seq === productSearchSeq.current) setProductSearchMatches([]);
+        if (seq === productSearchSeq.current) {
+          setProductSearchMatches([]);
+          setIsProductLoading(false);
+        }
       });
+  };
+
+  const handleProductSearchChange = (val: string) => {
+    setProductSearchQuery(val);
+    setIsProductDropdownOpen(true);
+    fetchProducts(val);
+  };
+
+  const toggleProductDropdown = () => {
+    if (isProductDropdownOpen) {
+      setIsProductDropdownOpen(false);
+    } else {
+      setIsProductDropdownOpen(true);
+      fetchProducts(productSearchQuery);
+    }
   };
 
   const handleSelectProductMatch = (prod: CatalogProduct) => {
     setFormItems((prev) => [...prev, { id: "row-" + Date.now() + Math.random().toString(36).slice(2, 6), product_name: prod.product_name, quantity: 1, unit_rate_usd: "" }]);
     setProductSearchQuery("");
-    setProductSearchMatches([]);
+    setIsProductDropdownOpen(false);
   };
 
   const updateItem = (id: string, field: "quantity" | "unit_rate_usd", value: string) =>
@@ -747,7 +1011,39 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     }
     if (!form.warehouse) errs.warehouse = "Warehouse is required.";
     if (!form.consignment_no.trim()) errs.consignment_no = "Invoice / Consignment No. is required.";
-    if (!form.ordered_date.trim()) errs.ordered_date = "Ordered Date is required.";
+    if (!form.ordered_date.trim()) {
+      errs.ordered_date = "Ordered Date is required.";
+    } else {
+      const parsedOrderedDate = parseDDMMYYYY(form.ordered_date.trim());
+      if (parsedOrderedDate) {
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+        if (parsedOrderedDate > todayEnd) {
+          errs.ordered_date = "Future date is not allowed for Ordered Date. Only past or current date allowed.";
+        }
+      }
+    }
+    const createdDateStart = parseDDMMYYYY(effectiveCreatedDate) || new Date();
+    createdDateStart.setHours(0, 0, 0, 0);
+
+    if (form.etd_origin_date?.trim()) {
+      const parsedEtd = parseDDMMYYYY(form.etd_origin_date.trim());
+      if (parsedEtd && parsedEtd < createdDateStart) {
+        errs.etd_origin_date = `ETD Origin Date cannot be earlier than Created Date (${effectiveCreatedDate}).`;
+      }
+    }
+    if (form.eta_port_date?.trim()) {
+      const parsedEta = parseDDMMYYYY(form.eta_port_date.trim());
+      if (parsedEta && parsedEta < createdDateStart) {
+        errs.eta_port_date = `ETA Port Date cannot be earlier than Created Date (${effectiveCreatedDate}).`;
+      }
+    }
+    if (form.expected_arrival_date?.trim()) {
+      const parsedExp = parseDDMMYYYY(form.expected_arrival_date.trim());
+      if (parsedExp && parsedExp < createdDateStart) {
+        errs.expected_arrival_date = `Expected Arrival Date cannot be earlier than Created Date (${effectiveCreatedDate}).`;
+      }
+    }
     if (!(Number(form.conversion_rate) > 0)) errs.conversion_rate = "Conversion rate is required.";
     if (!(Number(form.customs_conversion_rate) > 0)) errs.customs_conversion_rate = "Customs conversion rate is required.";
     if (namedRows.length === 0) errs.items = "Please add at least one product.";
@@ -869,13 +1165,70 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
         />
       </Field>
     );
-    const dateField = (key: keyof ImportFormValues, label: string, required = false, error?: string) => (
+    const dateField = (
+      key: keyof ImportFormValues,
+      label: string,
+      required = false,
+      error?: string,
+      maxDate?: string | Date,
+      minDate?: string | Date
+    ) => (
       <Field label={label} required={required} error={error}>
         <DatePicker
           value={form[key] as string}
-          onChange={(val) => setField(key, val)}
+          onChange={(val) => {
+            setField(key, val);
+            if (maxDate && val.trim()) {
+              const p = parseDDMMYYYY(val.trim());
+              if (p) {
+                const limit =
+                  maxDate === "today"
+                    ? new Date()
+                    : maxDate instanceof Date
+                    ? new Date(maxDate)
+                    : parseDDMMYYYY(maxDate);
+                if (limit) {
+                  limit.setHours(23, 59, 59, 999);
+                  if (p > limit) {
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      [key]: `Future date is not allowed for ${label}. Only past or current date allowed.`,
+                    }));
+                    return;
+                  }
+                }
+              }
+            }
+            if (minDate && val.trim()) {
+              const p = parseDDMMYYYY(val.trim());
+              if (p) {
+                const limit =
+                  minDate === "today"
+                    ? new Date()
+                    : minDate instanceof Date
+                    ? new Date(minDate)
+                    : parseDDMMYYYY(minDate);
+                if (limit) {
+                  limit.setHours(0, 0, 0, 0);
+                  if (p < limit) {
+                    const limitStr = typeof minDate === "string" && minDate !== "today" ? minDate : formatDDMMYYYY(limit);
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      [key]: `${label} cannot be earlier than Created Date (${limitStr}).`,
+                    }));
+                    return;
+                  }
+                }
+              }
+            }
+            if (formErrors[key]) {
+              setFormErrors((prev) => ({ ...prev, [key]: "" }));
+            }
+          }}
           ariaLabel={label}
           placeholder="DD-MM-YYYY"
+          maxDate={maxDate}
+          minDate={minDate}
           inputStyle={{ height: "34px", fontSize: "13px", color: "#334155" }}
         />
       </Field>
@@ -974,20 +1327,18 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
               <div style={CARD_TITLE}>General Details</div>
               <div style={GRID4}>
                 <Field label="Supplier" required error={formErrors.supplier}>
-                  <input
-                    aria-label="Supplier"
-                    list="import-supplier-options"
-                    autoComplete="off"
-                    placeholder="Type to search suppliers"
+                  <SupplierCombobox
                     value={form.supplier_name}
-                    onChange={(e) => setField("supplier_name", e.target.value)}
-                    style={FIELD_INPUT}
+                    onChange={(val) => {
+                      setField("supplier_name", val);
+                      if (formErrors.supplier) {
+                        setFormErrors((prev) => ({ ...prev, supplier: "" }));
+                      }
+                    }}
+                    options={supplierNames}
+                    error={formErrors.supplier}
+                    placeholder="Select or type supplier..."
                   />
-                  <datalist id="import-supplier-options">
-                    {supplierNames.map((n) => (
-                      <option key={n} value={n} />
-                    ))}
-                  </datalist>
                 </Field>
                 <Field label="Warehouse" required error={formErrors.warehouse}>
                   <select
@@ -1007,14 +1358,15 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                 <Field label="Invoice / Consignment No." required error={formErrors.consignment_no}>
                   <input aria-label="Invoice / Consignment No." value={form.consignment_no} onChange={(e) => setField("consignment_no", e.target.value)} style={FIELD_INPUT} />
                 </Field>
-                {dateField("ordered_date", "Ordered Date", true, formErrors.ordered_date)}
+                {dateField("ordered_date", "Ordered Date", true, formErrors.ordered_date, "today")}
                 {dateField("invoice_date", "Invoice Date")}
-                {dateField("etd_origin_date", "ETD Origin Date")}
-                {dateField("eta_port_date", "ETA Port Date")}
-                {dateField("expected_arrival_date", "Expected Arrival Date")}
+                {dateField("etd_origin_date", "ETD Origin Date", false, formErrors.etd_origin_date, undefined, effectiveCreatedDate)}
+                {dateField("eta_port_date", "ETA Port Date", false, formErrors.eta_port_date, undefined, effectiveCreatedDate)}
+                {dateField("expected_arrival_date", "Expected Arrival Date", false, formErrors.expected_arrival_date, undefined, effectiveCreatedDate)}
                 {numField("conversion_rate", "Conversion Rate (USD to INR)", { required: true, error: formErrors.conversion_rate })}
                 {numField("customs_conversion_rate", "Customs Conversion Rate (USD to INR)", { required: true, error: formErrors.customs_conversion_rate })}
-                {numField("invoice_total_usd", "Invoice Total Value (USD)")}
+                {numField("invoice_total_usd", "Purchase Invoice Total Value (USD)")}
+                {readOnlyField("Purchase Invoice Total Value (INR)", dash(preview?.invoice_total_inr, money))}
                 {numField("total_cbm", "Total CBM")}
                 {numField("total_import_duty", "Total Import Duty (INR)")}
                 <Field label="Attach Invoice">
@@ -1072,7 +1424,6 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
               </div>
               <div style={{ ...GRID4, marginBottom: 0 }}>
                 {readOnlyField("Total Expenses", dash(preview?.total_expenses, money))}
-                {readOnlyField("Invoice Total Value (INR)", dash(preview?.invoice_total_inr, money))}
                 {readOnlyField("Gross Total Landing (INR)", dash(preview?.gross_total_landing, money))}
                 {readOnlyField("% Loading Expense (Value Based)", dash(preview?.loading_percent_vb, (v) => `${v}%`))}
                 {readOnlyField("Loading Amount per CBM", dash(preview?.loading_amount_per_cbm, money))}
@@ -1084,26 +1435,128 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             {!isEditingInwarded && (
               <div style={CARD}>
                 <div style={CARD_TITLE}>PRODUCT SEARCH</div>
-                <div style={{ position: "relative", maxWidth: "460px" }}>
-                  <input
-                    aria-label="Product Search"
-                    placeholder="Enter Product Name / Model No"
-                    value={productSearchQuery}
-                    onChange={(e) => handleProductSearchChange(e.target.value)}
-                    style={FIELD_INPUT}
-                  />
-                  {productSearchMatches.length > 0 && (
-                    <div style={{ position: "absolute", top: "36px", left: 0, right: 0, background: "#fff", border: "1px solid #cbd5e1", borderRadius: "4px", zIndex: 20, maxHeight: "220px", overflowY: "auto" }}>
-                      {productSearchMatches.map((p) => (
-                        <div
-                          key={p.product_name}
-                          role="option"
-                          onClick={() => handleSelectProductMatch(p)}
-                          style={{ padding: "8px 12px", fontSize: "13px", cursor: "pointer", borderBottom: "1px solid #f1f5f9" }}
-                        >
-                          {p.product_name}
+                <div ref={productSearchContainerRef} style={{ position: "relative", maxWidth: "460px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "4px",
+                      height: "36px",
+                      background: "#ffffff",
+                      padding: "0 8px 0 10px",
+                      boxSizing: "border-box",
+                      boxShadow: isProductDropdownOpen ? "0 0 0 2px rgba(37, 99, 235, 0.15)" : "none",
+                      transition: "border-color 0.15s, box-shadow 0.15s",
+                    }}
+                  >
+                    <input
+                      aria-label="Product Search"
+                      placeholder="Enter Product Name / Model No"
+                      value={productSearchQuery}
+                      onFocus={() => {
+                        setIsProductDropdownOpen(true);
+                        fetchProducts(productSearchQuery);
+                      }}
+                      onChange={(e) => handleProductSearchChange(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (productSearchMatches.length > 0) {
+                            handleSelectProductMatch(productSearchMatches[0]);
+                          }
+                        } else if (e.key === "Escape") {
+                          setIsProductDropdownOpen(false);
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        border: "none",
+                        outline: "none",
+                        fontSize: "13px",
+                        color: "#334155",
+                        background: "transparent",
+                        padding: 0,
+                      }}
+                    />
+                    <button
+                      type="button"
+                      aria-label="Toggle Product Dropdown"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleProductDropdown();
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: "4px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#64748b",
+                      }}
+                    >
+                      <svg
+                        style={{
+                          width: "16px",
+                          height: "16px",
+                          transition: "transform 0.2s",
+                          transform: isProductDropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
+                        }}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                  </div>
+                  {isProductDropdownOpen && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "calc(100% + 4px)",
+                        left: 0,
+                        right: 0,
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "6px",
+                        boxShadow: "0 6px 16px rgba(0, 0, 0, 0.12)",
+                        zIndex: 100,
+                        maxHeight: "220px",
+                        overflowY: "auto",
+                      }}
+                    >
+                      {isProductLoading ? (
+                        <div style={{ padding: "10px 12px", fontSize: "12px", color: "#64748b" }}>
+                          Loading products from Product Master...
                         </div>
-                      ))}
+                      ) : productSearchMatches.length > 0 ? (
+                        productSearchMatches.map((p) => (
+                          <div
+                            key={p.product_name}
+                            role="option"
+                            onClick={() => handleSelectProductMatch(p)}
+                            style={{
+                              padding: "9px 12px",
+                              fontSize: "13px",
+                              color: "#334155",
+                              cursor: "pointer",
+                              borderBottom: "1px solid #f1f5f9",
+                              transition: "background 0.1s",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                          >
+                            {p.product_name}
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ padding: "10px 12px", fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+                          No matching products found in Product Master
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1118,8 +1571,8 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
-                      {["Sr.", "Product", "Qty", "UOM", "Pkg Unit CBM", "Pkg Qty", "Total CBM", "Unit Rate (USD)", "Total (USD)", "Unit Rate (INR)",
-                        "Import Duty %", "Unit Import Duty (INR)", "Item Total Import Duty (INR)", "Exp / Unit (VB)", "Exp / Unit (CB)", "Unit Landing (VB)", "Unit Landing (CB)", "Diff (CB - VB)", ""].map((h, i) => (
+                      {["Sr.", "Product", "Qty", "UOM", "Pkg Unit CBM", "Pkg Qty", "Total CBM", "Unit Rate (USD)", "Unit Rate (INR)", "Item Total (Basic in USD)",
+                        "Unit Import Duty (INR)", "Item Total Import Duty (INR)", "Exp / Unit (VB)", "Exp / Unit (CB)", "Unit Landing (VB)", "Unit Landing (CB)", "Diff (CB - VB)", ""].map((h, i) => (
                           <th key={i} style={{ ...th, textAlign: i === 1 ? "left" : "right" }}>{h}</th>
                         ))}
                     </tr>
@@ -1127,11 +1580,14 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                   <tbody>
                     {formItems.length === 0 && (
                       <tr>
-                        <td colSpan={19} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>Search and add products above</td>
+                        <td colSpan={18} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>Search and add products above</td>
                       </tr>
                     )}
                     {formItems.map((row, idx) => {
                       const p = previewRow(row.id);
+                      const itemBasicTotalUsd = (Number(row.quantity) > 0 && Number(row.unit_rate_usd) > 0)
+                        ? (Number(row.quantity) * Number(row.unit_rate_usd))
+                        : p?.total_usd;
                       return (
                         <tr key={row.id}>
                           <td style={td}>{idx + 1}</td>
@@ -1156,9 +1612,8 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                           <td style={td}>
                             <input type="number" min="0" step="any" aria-label={`Unit Rate USD ${idx + 1}`} value={row.unit_rate_usd} onChange={(e) => updateItem(row.id, "unit_rate_usd", e.target.value)} style={{ ...FIELD_INPUT, width: "100px", textAlign: "right" }} />
                           </td>
-                          <td style={td}>{dash(p?.total_usd, formatUsdCurrency)}</td>
                           <td style={td}>{dash(p?.unit_rate_inr, money)}</td>
-                          <td style={td}>{dash(p?.duty_percent, (v) => `${v}%`)}</td>
+                          <td style={td}>{dash(itemBasicTotalUsd, formatUsdCurrency)}</td>
                           <td style={td}>{dash(p?.unit_id_inr, money)}</td>
                           <td style={td}>{dash(p?.item_total_id_inr, money)}</td>
                           <td style={td}>{dash(p?.exp_per_unit_vb, money)}</td>
@@ -1180,9 +1635,9 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                       <tr>
                         <td colSpan={6} style={{ ...td, fontWeight: 700 }}>Total</td>
                         <td style={{ ...td, fontWeight: 700 }} data-testid="sum-cbm">{dash(preview?.sum_cbm)}</td>
-                        <td style={td} />
+                        <td colSpan={2} style={td} />
                         <td style={{ ...td, fontWeight: 700 }} data-testid="sum-usd">{dash(preview?.sum_usd, formatUsdCurrency)}</td>
-                        <td colSpan={3} style={td} />
+                        <td style={td} />
                         <td style={{ ...td, fontWeight: 700 }} data-testid="sum-duty">{dash(preview?.sum_duty, money)}</td>
                         <td colSpan={6} style={td} />
                       </tr>
@@ -1412,7 +1867,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
               boxShadow: "0 2px 4px rgba(0,0,0,0.03)",
             }}
           >
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "14px", alignItems: "flex-end" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "14px", alignItems: "flex-end" }}>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px", display: "block" }}>
                   Warehouse
@@ -1424,24 +1879,6 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                 >
                   <option value="ALL">All Warehouses</option>
                   {warehouseNames.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px", display: "block" }}>
-                  Supplier
-                </label>
-                <select
-                  value={filterSupplier}
-                  onChange={(e) => setFilterSupplier(e.target.value)}
-                  style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 8px", fontSize: "12.5px" }}
-                >
-                  <option value="ALL">All Suppliers</option>
-                  {supplierNames.map((n) => (
                     <option key={n} value={n}>
                       {n}
                     </option>
@@ -1653,7 +2090,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
           </div>
 
           {/* Table */}
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", minHeight: "320px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "12.5px" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #cbd5e1", background: "#f8fafc", whiteSpace: "nowrap" }}>
@@ -1989,7 +2426,12 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                       </td>
 
                       {/* Action Column with conditional options */}
-                      <td style={{ padding: "10px 14px", textAlign: "center", position: "relative" }}>
+                      <td style={{
+                        padding: "10px 14px",
+                        textAlign: "center",
+                        position: "relative",
+                        zIndex: activeMenuId === order.id ? 50 : 1,
+                      }}>
                         <button
                           type="button"
                           aria-label="Order actions"
@@ -2030,19 +2472,22 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                           ⋮
                         </button>
 
-                        {activeMenuId === order.id && (
+                        {activeMenuId === order.id && (() => {
+                          const openUpward = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - (paginatedOrders.length >= 4 ? 2 : 1);
+                          return (
                           <div
                             data-action-menu-container
                             data-testid={`action-menu-${order.id}`}
                             style={{
                               position: "absolute",
                               right: "14px",
-                              top: "36px",
+                              top: openUpward ? "auto" : "36px",
+                              bottom: openUpward ? "36px" : "auto",
                               background: "#ffffff",
                               border: "1px solid #cbd5e1",
                               borderRadius: "4px",
-                              boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-                              zIndex: 40,
+                              boxShadow: openUpward ? "0 -4px 14px rgba(0,0,0,0.12)" : "0 4px 14px rgba(0,0,0,0.12)",
+                              zIndex: 100,
                               minWidth: "155px",
                               textAlign: "left",
                               overflow: "hidden",
@@ -2361,7 +2806,8 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                               </>
                             )}
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))
@@ -2483,7 +2929,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                           <polyline points="7 10 12 15 17 10" />
                           <line x1="12" y1="15" x2="12" y2="3" />
                         </svg>
-                        <span>View PDF</span>
+                        <span>{selectedOrder.bill_file.toLowerCase().endsWith(".pdf") ? "View PDF" : "View Invoice"}</span>
                       </button>
                     )}
                     <button

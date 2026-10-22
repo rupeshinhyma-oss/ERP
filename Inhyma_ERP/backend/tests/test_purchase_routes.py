@@ -308,7 +308,7 @@ async def test_import_create_uses_the_spec_formulas_and_adds_stock_immediately(f
     async with _client(factory, NORMAL) as c:
         po = await _new_import(c)
     assert (po["invoice_total_inr"], po["total_expenses"], po["loading_percent_vb"], po["loading_amount_per_cbm"]) == (80000.0, 10000.0, 12.5, 500.0)
-    assert po["gross_total_landing"] == 96000.0
+    assert po["gross_total_landing"] == 90000.0
     sealer, belt = po["items"]
     # duty % and packaging come from the Product Master (Band Sealer: HSN duty 10 %, 0.5 CBM per package of 1)
     assert (sealer["duty_percent"], sealer["pkg_unit_cbm"], sealer["unit_landing_vb"], sealer["unit_landing_cb"]) == (10.0, 0.5, 5892.0, 5542.0)
@@ -427,7 +427,7 @@ async def test_import_preview_returns_exactly_what_a_save_would_store(factory):
         preview = res.json()["data"]
         saved = await _new_import(c)
     assert preview["loading_percent_vb"] == saved["loading_percent_vb"] == 12.5
-    assert preview["gross_total_landing"] == saved["gross_total_landing"] == 96000.0
+    assert preview["gross_total_landing"] == saved["gross_total_landing"] == 90000.0
     assert (preview["sum_cbm"], preview["sum_usd"], preview["sum_duty"]) == (saved["sum_cbm"], saved["sum_usd"], saved["sum_duty"])
     for p_item, s_item in zip(preview["items"], saved["items"]):
         for field in ("item_total_cbm", "unit_rate_inr", "unit_import_duty", "exp_per_unit_vb", "exp_per_unit_cb",

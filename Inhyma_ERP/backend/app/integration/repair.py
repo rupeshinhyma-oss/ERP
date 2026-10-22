@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.logging import get_logger
 from app.integration.adapters.buyer import BuyerSyncAdapter
+from app.integration.adapters.product import ProductSyncAdapter
 from app.integration.models import (
     DeliveryStatus,
     IntegrationOutboxDelivery,
@@ -40,7 +41,7 @@ class RepairService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        self._adapters = {"buyer": BuyerSyncAdapter()}
+        self._adapters = {"buyer": BuyerSyncAdapter(), "product": ProductSyncAdapter()}
 
     async def repair_missing_mapping(
         self,

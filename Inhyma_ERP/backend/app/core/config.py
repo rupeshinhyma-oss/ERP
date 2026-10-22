@@ -363,8 +363,13 @@ class Settings(BaseSettings):
         description="Previous service credential from ERP_Main to support zero-downtime rotation.",
     )
 
+    PEER_SERVICE_CREDENTIALS: str = Field(
+        default="axm17A55zQKJ.SJ8WsEwGiqk29pQoAZo1KIDpADcI5_B6Sh_VId2UTUk,hpL74aOCR2Sg.cwvX7VO_csHQi2fsNYfP2rezeUWVuYZbT8wYPqiNE2k,JfttWqhjzTjyiB6Ut6lLMPp1pV1TYAO/YPibZeM7a++a09aa/QcwOenvv397Q6Ph",
+        description="Comma-separated accepted service credentials from peer ERPs and ERP_Main.",
+    )
+
     def get_expected_erp_main_credentials(self) -> list[str]:
-        """Return list of valid incoming credentials from ERP_Main (current and previous for rotation)."""
+        """Return list of valid incoming credentials from ERP_Main and peer ERPs."""
         creds: list[str] = []
         if self.ERP_MAIN_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.ERP_MAIN_SERVICE_CREDENTIAL:
             creds.append(self.ERP_MAIN_SERVICE_CREDENTIAL)
@@ -373,6 +378,10 @@ class Settings(BaseSettings):
         # Fallback to FEDERATION_SERVICE_CREDENTIAL if ERP_MAIN_SERVICE_CREDENTIAL not set
         if not creds and self.FEDERATION_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.FEDERATION_SERVICE_CREDENTIAL:
             creds.append(self.FEDERATION_SERVICE_CREDENTIAL)
+        for p in self.PEER_SERVICE_CREDENTIALS.split(","):
+            p_clean = p.strip()
+            if p_clean and "CHANGE-ME" not in p_clean and p_clean not in creds:
+                creds.append(p_clean)
         return creds
 
     ERP_MAIN_URL: str = Field(

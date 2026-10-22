@@ -2016,7 +2016,7 @@ export function ProformaInvoicesPage({
           </div>
 
           {/* Table Container */}
-          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto", border: "none", borderRadius: 0, boxShadow: "none" }}>
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", minHeight: "320px", overflowY: "auto", overflowX: "auto", border: "none", borderRadius: 0, boxShadow: "none" }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: "13px", textAlign: "left", minWidth: "1150px" }}>
               <thead>
                 <tr>
@@ -2131,7 +2131,7 @@ export function ProformaInvoicesPage({
                         )}
                         {p.remark && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "2px" }}>{p.remark}</div>}
                       </td>
-                      <td style={{ textAlign: "center", position: "relative", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
+                      <td style={{ textAlign: "center", position: "relative", zIndex: openActionId === p.id ? 50 : 1, padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -2151,17 +2151,20 @@ export function ProformaInvoicesPage({
                         >
                           ⋮
                         </button>
-                        {openActionId === p.id && (
+                        {openActionId === p.id && (() => {
+                          const openUpward = paginatedItems.length >= 3 && idx >= paginatedItems.length - (paginatedItems.length >= 4 ? 2 : 1);
+                          return (
                           <div
                             onClick={(e) => e.stopPropagation()}
                             style={{
                               position: "absolute",
                               right: "10px",
-                              top: "34px",
+                              top: openUpward ? "auto" : "34px",
+                              bottom: openUpward ? "34px" : "auto",
                               background: "#ffffff",
                               border: "1px solid #cbd5e1",
                               borderRadius: "6px",
-                              boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                              boxShadow: openUpward ? "0 -4px 12px rgba(0,0,0,0.12)" : "0 4px 12px rgba(0,0,0,0.12)",
                               zIndex: 100,
                               minWidth: "140px",
                               textAlign: "left",
@@ -2243,7 +2246,8 @@ export function ProformaInvoicesPage({
                             })}
                             {canDelete(p) && <ActionMenuItem label="🗑️ Delete" color="#dc2626" onClick={() => void handleDeleteProforma(p)} />}
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))

@@ -1478,7 +1478,7 @@ export function SaleProcessListPage() {
             boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
           }}
         >
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", minHeight: "320px" }}>
             <table
               style={{
                 width: "100%",
@@ -1543,7 +1543,7 @@ export function SaleProcessListPage() {
                     </td>
                   </tr>
                 ) : (
-                  paginatedOrders.map((o) => (
+                  paginatedOrders.map((o, idx) => (
                     <tr
                       key={o.id}
                       style={{
@@ -1771,7 +1771,7 @@ export function SaleProcessListPage() {
                       </td>
 
                       {/* Action Menu (⋮) */}
-                      <td style={{ padding: "8px 12px", textAlign: "center", position: "relative" }}>
+                      <td style={{ padding: "8px 12px", textAlign: "center", position: "relative", zIndex: openActionId === o.id ? 50 : 1 }}>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -1793,6 +1793,7 @@ export function SaleProcessListPage() {
                         </button>
 
                         {openActionId === o.id && (() => {
+                          const openUpward = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - (paginatedOrders.length >= 4 ? 2 : 1);
                           const isAdmin = Boolean(profile?.role === "admin" || profile?.username === "admin" || (profile as any)?.is_superuser);
                           const st = (o.status || "pending").toLowerCase();
                           const hasInvoice = Boolean(o.invoice_no);
@@ -1808,11 +1809,12 @@ export function SaleProcessListPage() {
                             style={{
                               position: "absolute",
                               right: "10px",
-                              top: "32px",
+                              top: openUpward ? "auto" : "32px",
+                              bottom: openUpward ? "32px" : "auto",
                               background: "#ffffff",
                               border: "1px solid #e2e8f0",
                               borderRadius: "4px",
-                              boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                              boxShadow: openUpward ? "0 -4px 12px rgba(0,0,0,0.12)" : "0 4px 12px rgba(0,0,0,0.12)",
                               zIndex: 100,
                               minWidth: "150px",
                               textAlign: "left",

@@ -486,6 +486,14 @@
   padding: 4px 0;
 }
 
+.payment-action-dropdown.open-upward {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 4px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+}
+
 .payment-action-dropdown button {
   display: flex;
   align-items: center;
